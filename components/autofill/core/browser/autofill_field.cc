@@ -4,7 +4,9 @@
 
 #include "components/autofill/core/browser/autofill_field.h"
 
+#include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -14,6 +16,7 @@
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/phone_number.h"
 #include "components/autofill/core/browser/state_names.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "grit/components_strings.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_formatter.h"
@@ -453,8 +456,17 @@ AutofillType AutofillField::Type() const {
   if (html_type_ != HTML_TYPE_UNKNOWN)
     return AutofillType(html_type_, html_mode_);
 
-  if (server_type_ != NO_SERVER_DATA)
-    return AutofillType(server_type_);
+  if (server_type_ != NO_SERVER_DATA) {
+    // See http://crbug.com/429236 for background on why we might not always
+    // believe the server.
+    // See http://crbug.com/441488 for potential improvements to the server
+    // which may obviate the need for this logic.
+    bool believe_server =
+        !(server_type_ == NAME_FULL && heuristic_type_ == CREDIT_CARD_NAME) &&
+        !(server_type_ == CREDIT_CARD_NAME && heuristic_type_ == NAME_FULL);
+    if (believe_server)
+      return AutofillType(server_type_);
+  }
 
   return AutofillType(heuristic_type_);
 }
@@ -470,7 +482,10 @@ std::string AutofillField::FieldSignature() const {
 }
 
 bool AutofillField::IsFieldFillable() const {
-  return should_autocomplete && !Type().IsUnknown();
+  return (should_autocomplete ||
+          !base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kRespectAutocompleteOffForAutofill)) &&
+         !Type().IsUnknown();
 }
 
 // static

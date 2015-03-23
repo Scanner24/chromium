@@ -38,11 +38,6 @@ void BrowserAccessibility::Init(BrowserAccessibilityManager* manager,
   node_ = node;
 }
 
-void BrowserAccessibility::OnDataChanged() {
-  GetStringAttribute(ui::AX_ATTR_NAME, &name_);
-  GetStringAttribute(ui::AX_ATTR_VALUE, &value_);
-}
-
 bool BrowserAccessibility::PlatformIsLeaf() const {
   if (InternalChildCount() == 0)
     return true;
@@ -51,7 +46,7 @@ bool BrowserAccessibility::PlatformIsLeaf() const {
   // implementation details, but we want to expose them as leaves
   // to platform accessibility APIs.
   switch (GetRole()) {
-    case ui::AX_ROLE_EDITABLE_TEXT:
+    case ui::AX_ROLE_LINE_BREAK:
     case ui::AX_ROLE_SLIDER:
     case ui::AX_ROLE_STATIC_TEXT:
     case ui::AX_ROLE_TEXT_AREA:
@@ -96,6 +91,17 @@ BrowserAccessibility* BrowserAccessibility::PlatformGetChild(
   return result;
 }
 
+bool BrowserAccessibility::PlatformIsChildOfLeaf() const {
+  BrowserAccessibility* ancestor = GetParent();
+  while (ancestor) {
+    if (ancestor->PlatformIsLeaf())
+      return true;
+    ancestor = ancestor->GetParent();
+  }
+
+  return false;
+}
+
 BrowserAccessibility* BrowserAccessibility::GetPreviousSibling() {
   if (GetParent() && GetIndexInParent() > 0)
     return GetParent()->InternalGetChild(GetIndexInParent() - 1);
@@ -124,7 +130,7 @@ BrowserAccessibility* BrowserAccessibility::InternalGetChild(
     uint32 child_index) const {
   if (!node_ || !manager_)
     return NULL;
-  return manager_->GetFromAXNode(node_->children()[child_index]);
+  return manager_->GetFromAXNode(node_->ChildAtIndex(child_index));
 }
 
 BrowserAccessibility* BrowserAccessibility::GetParent() const {
@@ -180,43 +186,7 @@ BrowserAccessibility::GetHtmlAttributes() const {
 
 gfx::Rect BrowserAccessibility::GetLocalBoundsRect() const {
   gfx::Rect bounds = GetLocation();
-
-  // Walk up the parent chain. Every time we encounter a Web Area, offset
-  // based on the scroll bars and then offset based on the origin of that
-  // nested web area.
-  BrowserAccessibility* parent = GetParent();
-  bool need_to_offset_web_area =
-      (GetRole() == ui::AX_ROLE_WEB_AREA ||
-       GetRole() == ui::AX_ROLE_ROOT_WEB_AREA);
-  while (parent) {
-    if (need_to_offset_web_area &&
-        parent->GetLocation().width() > 0 &&
-        parent->GetLocation().height() > 0) {
-      bounds.Offset(parent->GetLocation().x(), parent->GetLocation().y());
-      need_to_offset_web_area = false;
-    }
-
-    // On some platforms, we don't want to take the root scroll offsets
-    // into account.
-    if (parent->GetRole() == ui::AX_ROLE_ROOT_WEB_AREA &&
-        !manager()->UseRootScrollOffsetsWhenComputingBounds()) {
-      break;
-    }
-
-    if (parent->GetRole() == ui::AX_ROLE_WEB_AREA ||
-        parent->GetRole() == ui::AX_ROLE_ROOT_WEB_AREA) {
-      int sx = 0;
-      int sy = 0;
-      if (parent->GetIntAttribute(ui::AX_ATTR_SCROLL_X, &sx) &&
-          parent->GetIntAttribute(ui::AX_ATTR_SCROLL_Y, &sy)) {
-        bounds.Offset(-sx, -sy);
-      }
-      need_to_offset_web_area = true;
-    }
-    parent = parent->GetParent();
-  }
-
-  return bounds;
+  return ElementBoundsToLocalBounds(bounds);
 }
 
 gfx::Rect BrowserAccessibility::GetGlobalBoundsRect() const {
@@ -246,7 +216,7 @@ gfx::Rect BrowserAccessibility::GetLocalBoundsForRange(int start, int len)
       }
       start -= child_len;
     }
-    return bounds;
+    return ElementBoundsToLocalBounds(bounds);
   }
 
   int end = start + len;
@@ -323,7 +293,7 @@ gfx::Rect BrowserAccessibility::GetLocalBoundsForRange(int start, int len)
       bounds.Union(child_overlap_rect);
   }
 
-  return bounds;
+  return ElementBoundsToLocalBounds(bounds);
 }
 
 gfx::Rect BrowserAccessibility::GetGlobalBoundsForRange(int start, int len)
@@ -384,9 +354,6 @@ BrowserAccessibility* BrowserAccessibility::BrowserAccessibilityForPoint(
 
 void BrowserAccessibility::Destroy() {
   // Allow the object to fire a TextRemoved notification.
-  name_.clear();
-  value_.clear();
-
   manager_->NotifyAccessibilityEvent(ui::AX_EVENT_HIDE, this);
   node_ = NULL;
   manager_ = NULL;
@@ -557,24 +524,6 @@ bool BrowserAccessibility::GetString16Attribute(
   return true;
 }
 
-void BrowserAccessibility::SetStringAttribute(
-    ui::AXStringAttribute attribute, const std::string& value) {
-  if (!node_)
-    return;
-  ui::AXNodeData data = GetData();
-  for (size_t i = 0; i < data.string_attributes.size(); ++i) {
-    if (data.string_attributes[i].first == attribute) {
-      data.string_attributes[i].second = value;
-      node_->SetData(data);
-      return;
-    }
-  }
-  if (!value.empty()) {
-    data.string_attributes.push_back(std::make_pair(attribute, value));
-    node_->SetData(data);
-  }
-}
-
 bool BrowserAccessibility::HasIntListAttribute(
     ui::AXIntListAttribute attribute) const {
   const ui::AXNodeData& data = GetData();
@@ -663,6 +612,12 @@ bool BrowserAccessibility::HasState(ui::AXState state_enum) const {
   return (GetState() >> state_enum) & 1;
 }
 
+bool BrowserAccessibility::IsCellOrTableHeaderRole() const {
+  return (GetRole() == ui::AX_ROLE_CELL ||
+          GetRole() == ui::AX_ROLE_COLUMN_HEADER ||
+          GetRole() == ui::AX_ROLE_ROW_HEADER);
+}
+
 bool BrowserAccessibility::IsEditableText() const {
   // These roles don't have readonly set, but they're not editable text.
   if (GetRole() == ui::AX_ROLE_SCROLL_AREA ||
@@ -679,15 +634,21 @@ bool BrowserAccessibility::IsEditableText() const {
           GetRole() == ui::AX_ROLE_TEXT_AREA);
 }
 
-std::string BrowserAccessibility::GetTextRecursive() const {
-  if (!name_.empty()) {
-    return name_;
+bool BrowserAccessibility::IsWebAreaForPresentationalIframe() const {
+  if (GetRole() != ui::AX_ROLE_WEB_AREA &&
+      GetRole() != ui::AX_ROLE_ROOT_WEB_AREA) {
+    return false;
   }
 
-  std::string result;
-  for (uint32 i = 0; i < PlatformChildCount(); ++i)
-    result += PlatformGetChild(i)->GetTextRecursive();
-  return result;
+  BrowserAccessibility* parent = GetParent();
+  if (!parent)
+    return false;
+
+  BrowserAccessibility* grandparent = parent->GetParent();
+  if (!grandparent)
+    return false;
+
+  return grandparent->GetRole() == ui::AX_ROLE_IFRAME_PRESENTATIONAL;
 }
 
 int BrowserAccessibility::GetStaticTextLenRecursive() const {
@@ -698,6 +659,60 @@ int BrowserAccessibility::GetStaticTextLenRecursive() const {
   for (size_t i = 0; i < InternalChildCount(); ++i)
     len += InternalGetChild(i)->GetStaticTextLenRecursive();
   return len;
+}
+
+BrowserAccessibility* BrowserAccessibility::GetParentForBoundsCalculation()
+    const {
+  if (!node_ || !manager_)
+    return NULL;
+  ui::AXNode* parent = node_->parent();
+  if (parent)
+    return manager_->GetFromAXNode(parent);
+
+  if (!manager_->delegate())
+    return NULL;
+
+  return manager_->delegate()->AccessibilityGetParentFrame();
+}
+
+gfx::Rect BrowserAccessibility::ElementBoundsToLocalBounds(gfx::Rect bounds)
+    const {
+  // Walk up the parent chain. Every time we encounter a Web Area, offset
+  // based on the scroll bars and then offset based on the origin of that
+  // nested web area.
+  BrowserAccessibility* parent = GetParentForBoundsCalculation();
+  bool need_to_offset_web_area =
+      (GetRole() == ui::AX_ROLE_WEB_AREA ||
+       GetRole() == ui::AX_ROLE_ROOT_WEB_AREA);
+  while (parent) {
+    if (need_to_offset_web_area &&
+        parent->GetLocation().width() > 0 &&
+        parent->GetLocation().height() > 0) {
+      bounds.Offset(parent->GetLocation().x(), parent->GetLocation().y());
+      need_to_offset_web_area = false;
+    }
+
+    // On some platforms, we don't want to take the root scroll offsets
+    // into account.
+    if (parent->GetRole() == ui::AX_ROLE_ROOT_WEB_AREA &&
+        !manager()->UseRootScrollOffsetsWhenComputingBounds()) {
+      break;
+    }
+
+    if (parent->GetRole() == ui::AX_ROLE_WEB_AREA ||
+        parent->GetRole() == ui::AX_ROLE_ROOT_WEB_AREA) {
+      int sx = 0;
+      int sy = 0;
+      if (parent->GetIntAttribute(ui::AX_ATTR_SCROLL_X, &sx) &&
+          parent->GetIntAttribute(ui::AX_ATTR_SCROLL_Y, &sy)) {
+        bounds.Offset(-sx, -sy);
+      }
+      need_to_offset_web_area = true;
+    }
+    parent = parent->GetParentForBoundsCalculation();
+  }
+
+  return bounds;
 }
 
 }  // namespace content

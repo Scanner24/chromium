@@ -252,6 +252,19 @@ void ChromotingJniInstance::SendTextEvent(const std::string& text) {
   client_->input_stub()->InjectTextEvent(event);
 }
 
+void ChromotingJniInstance::EnableVideoChannel(bool enable) {
+  if (!jni_runtime_->network_task_runner()->BelongsToCurrentThread()) {
+    jni_runtime_->network_task_runner()->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromotingJniInstance::EnableVideoChannel, this, enable));
+    return;
+  }
+
+  protocol::VideoControl video_control;
+  video_control.set_enable(enable);
+  client_->host_stub()->ControlVideo(video_control);
+}
+
 void ChromotingJniInstance::SendClientMessage(const std::string& type,
                                               const std::string& data) {
   if (!jni_runtime_->network_task_runner()->BelongsToCurrentThread()) {
@@ -400,10 +413,8 @@ void ChromotingJniInstance::ConnectToHostOnNetworkThread() {
   view_->set_frame_producer(renderer);
   video_renderer_.reset(renderer);
 
-  client_.reset(new ChromotingClient(client_context_.get(),
-                                     this,
-                                     video_renderer_.get(),
-                                     scoped_ptr<AudioPlayer>()));
+  client_.reset(new ChromotingClient(
+      client_context_.get(), this, video_renderer_.get(), nullptr));
 
   signaling_.reset(new XmppSignalStrategy(
       net::ClientSocketFactory::GetDefaultFactory(),
@@ -424,9 +435,7 @@ void ChromotingJniInstance::ConnectToHostOnNetworkThread() {
 
   scoped_ptr<protocol::TransportFactory> transport_factory(
       new protocol::LibjingleTransportFactory(
-          signaling_.get(),
-          port_allocator.PassAs<cricket::HttpPortAllocatorBase>(),
-          network_settings));
+          signaling_.get(), port_allocator.Pass(), network_settings));
 
   client_->Start(signaling_.get(), authenticator_.Pass(),
                  transport_factory.Pass(), host_jid_, capabilities_);

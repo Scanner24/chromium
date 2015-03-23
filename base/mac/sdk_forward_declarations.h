@@ -105,6 +105,7 @@ typedef NSUInteger NSWindowButton;
 - (void)setAnimationBehavior:(NSWindowAnimationBehavior)newAnimationBehavior;
 - (void)toggleFullScreen:(id)sender;
 - (void)setRestorable:(BOOL)flag;
+- (NSRect)convertRectFromScreen:(NSRect)aRect;
 @end
 
 @interface NSCursor (LionSDKDeclarations)
@@ -207,6 +208,65 @@ enum {
 @end
 
 BASE_EXPORT extern "C" NSString* const NSWindowWillEnterFullScreenNotification;
+BASE_EXPORT extern "C" NSString* const NSWindowWillExitFullScreenNotification;
+BASE_EXPORT extern "C" NSString* const NSWindowDidEnterFullScreenNotification;
+BASE_EXPORT extern "C" NSString* const NSWindowDidExitFullScreenNotification;
+BASE_EXPORT extern "C" NSString* const
+    NSWindowDidChangeBackingPropertiesNotification;
+
+@protocol NSWindowDelegateFullScreenAdditions
+- (void)windowDidFailToEnterFullScreen:(NSWindow*)window;
+- (void)windowDidFailToExitFullScreen:(NSWindow*)window;
+@end
+
+BASE_EXPORT extern "C" NSString* const CBAdvertisementDataServiceDataKey;
+
+enum {
+  CBPeripheralStateDisconnected = 0,
+  CBPeripheralStateConnecting,
+  CBPeripheralStateConnected,
+};
+typedef NSInteger CBPeripheralState;
+
+@interface CBPeripheral : NSObject
+@property(readonly, nonatomic) CFUUIDRef UUID;
+@property(retain, readonly) NSString* name;
+@property(readonly) BOOL isConnected;
+@end
+
+enum {
+  CBCentralManagerStateUnknown = 0,
+  CBCentralManagerStateResetting,
+  CBCentralManagerStateUnsupported,
+  CBCentralManagerStateUnauthorized,
+  CBCentralManagerStatePoweredOff,
+  CBCentralManagerStatePoweredOn,
+};
+typedef NSInteger CBCentralManagerState;
+
+@protocol CBCentralManagerDelegate;
+
+@interface CBCentralManager : NSObject
+@property(readonly) CBCentralManagerState state;
+- (id)initWithDelegate:(id<CBCentralManagerDelegate>)delegate
+                 queue:(dispatch_queue_t)queue;
+- (void)scanForPeripheralsWithServices:(NSArray*)serviceUUIDs
+                               options:(NSDictionary*)options;
+- (void)stopScan;
+@end
+
+@protocol CBCentralManagerDelegate<NSObject>
+- (void)centralManagerDidUpdateState:(CBCentralManager*)central;
+- (void)centralManager:(CBCentralManager*)central
+    didDiscoverPeripheral:(CBPeripheral*)peripheral
+        advertisementData:(NSDictionary*)advertisementData
+                     RSSI:(NSNumber*)RSSI;
+@end
+
+@interface CBUUID : NSObject
+@property(nonatomic, readonly) NSData* data;
++ (CBUUID*)UUIDWithString:(NSString*)theString;
+@end
 
 #endif  // MAC_OS_X_VERSION_10_7
 
@@ -219,6 +279,10 @@ enum {
 
 @interface NSColor (MountainLionSDK)
 - (CGColorRef)CGColor;
+@end
+
+@interface NSUUID : NSObject
+- (NSString*)UUIDString;
 @end
 
 #endif  // MAC_OS_X_VERSION_10_8
@@ -285,6 +349,20 @@ typedef NSUInteger NSWindowOcclusionState;
 - (NSWindowOcclusionState)occlusionState;
 @end
 
+
+BASE_EXPORT extern "C" NSString* const
+    NSWindowDidChangeOcclusionStateNotification;
+
+enum {
+  NSWorkspaceLaunchWithErrorPresentation = 0x00000040
+};
+
+@interface CBPeripheral (MavericksSDK)
+@property(readonly, nonatomic) NSUUID* identifier;
+@end
+
+BASE_EXPORT extern "C" NSString* const CBAdvertisementDataIsConnectable;
+
 #else  // !MAC_OS_X_VERSION_10_9
 
 typedef enum {
@@ -313,13 +391,22 @@ BASE_EXPORT extern "C" NSString* const kCWSSIDDidChangeNotification;
 @interface NSUserActivity : NSObject
 
 @property (readonly, copy) NSString* activityType;
-@property (copy) NSURL* webPageURL;
+@property (copy) NSDictionary* userInfo;
+@property (copy) NSURL* webpageURL;
+
+- (instancetype)initWithActivityType:(NSString*)activityType;
+- (void)becomeCurrent;
+- (void)invalidate;
 
 @end
 
 BASE_EXPORT extern "C" NSString* const NSUserActivityTypeBrowsingWeb;
 
 BASE_EXPORT extern "C" NSString* const NSAppearanceNameVibrantDark;
+
+@interface CBUUID (YosemiteSDK)
+- (NSString*)UUIDString;
+@end
 
 #endif  // MAC_OS_X_VERSION_10_10
 

@@ -12,6 +12,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/pending_task.h"
 #include "base/threading/platform_thread.h"
+#include "third_party/WebKit/public/platform/WebTraceLocation.h"
 
 namespace content {
 
@@ -24,11 +25,11 @@ class WebThreadBase::TaskObserverAdapter
   TaskObserverAdapter(WebThread::TaskObserver* observer)
       : observer_(observer) {}
 
-  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  void WillProcessTask(const base::PendingTask& pending_task) override {
     observer_->willProcessTask();
   }
 
-  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
+  void DidProcessTask(const base::PendingTask& pending_task) override {
     observer_->didProcessTask();
   }
 
@@ -60,15 +61,57 @@ WebThreadImpl::WebThreadImpl(const char* name)
   thread_->Start();
 }
 
+// RunWebThreadTask takes the ownership of |task| from base::Closure and
+// deletes it on the first invocation of the closure for thread-safety.
+// base::Closure made from RunWebThreadTask is copyable but Closure::Run
+// should be called at most only once.
+// This is because WebThread::Task can contain RefPtr to a
+// thread-unsafe-reference-counted object (e.g. WorkerThreadTask can contain
+// RefPtr to WebKit's StringImpl), and if we don't delete |task| here,
+// it causes a race condition as follows:
+// [A] In task->run(), more RefPtr's to the refcounted object can be created,
+//     and the reference counter of the object can be modified via these
+//     RefPtr's (as intended) on the thread where the task is executed.
+// [B] However, base::Closure still retains the ownership of WebThread::Task
+//     even after RunWebThreadTask is called.
+//     When base::Closure is deleted, WebThread::Task is deleted and the
+//     reference counter of the object is decreased by one, possibly from a
+//     different thread from [A], which is a race condition.
+// Taking the ownership of |task| here by using scoped_ptr and base::Passed
+// removes the reference counter modification of [B] and the race condition.
+// When the closure never runs at all, the corresponding WebThread::Task is
+// destructed when base::Closure is deleted (like [B]). In this case, there
+// are no reference counter modification like [A] (because task->run() is not
+// executed), so there are no race conditions.
+// See https://crbug.com/390851 for more details.
+static void RunWebThreadTask(scoped_ptr<blink::WebThread::Task> task) {
+    task->run();
+}
+
 void WebThreadImpl::postTask(Task* task) {
-  thread_->message_loop()->PostTask(
-      FROM_HERE, base::Bind(&blink::WebThread::Task::run, base::Owned(task)));
+  postDelayedTask(task, 0);
+}
+
+void WebThreadImpl::postTask(const blink::WebTraceLocation& location,
+                             Task* task) {
+  postDelayedTask(location, task, 0);
 }
 
 void WebThreadImpl::postDelayedTask(Task* task, long long delay_ms) {
   thread_->message_loop()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&blink::WebThread::Task::run, base::Owned(task)),
+      base::Bind(RunWebThreadTask, base::Passed(make_scoped_ptr(task))),
+      base::TimeDelta::FromMilliseconds(delay_ms));
+}
+
+void WebThreadImpl::postDelayedTask(const blink::WebTraceLocation& web_location,
+                                    Task* task,
+                                    long long delay_ms) {
+  tracked_objects::Location location(web_location.functionName(),
+                                     web_location.fileName(), -1, nullptr);
+  thread_->message_loop()->PostDelayedTask(
+      location,
+      base::Bind(RunWebThreadTask, base::Passed(make_scoped_ptr(task))),
       base::TimeDelta::FromMilliseconds(delay_ms));
 }
 
@@ -97,20 +140,38 @@ WebThreadImpl::~WebThreadImpl() {
 }
 
 WebThreadImplForMessageLoop::WebThreadImplForMessageLoop(
-    base::MessageLoopProxy* message_loop)
-    : message_loop_(message_loop),
-      thread_id_(base::PlatformThread::CurrentId()) {}
+    scoped_refptr<base::SingleThreadTaskRunner> owning_thread_task_runner)
+    : owning_thread_task_runner_(owning_thread_task_runner),
+      thread_id_(base::PlatformThread::CurrentId()) {
+}
 
 void WebThreadImplForMessageLoop::postTask(Task* task) {
-  message_loop_->PostTask(
-      FROM_HERE, base::Bind(&blink::WebThread::Task::run, base::Owned(task)));
+  postDelayedTask(task, 0);
+}
+
+void WebThreadImplForMessageLoop::postTask(
+    const blink::WebTraceLocation& location,
+    Task* task) {
+  postDelayedTask(location, task, 0);
 }
 
 void WebThreadImplForMessageLoop::postDelayedTask(Task* task,
                                                   long long delay_ms) {
-  message_loop_->PostDelayedTask(
+  owning_thread_task_runner_->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&blink::WebThread::Task::run, base::Owned(task)),
+      base::Bind(RunWebThreadTask, base::Passed(make_scoped_ptr(task))),
+      base::TimeDelta::FromMilliseconds(delay_ms));
+}
+
+void WebThreadImplForMessageLoop::postDelayedTask(
+    const blink::WebTraceLocation& web_location,
+    Task* task,
+    long long delay_ms) {
+  tracked_objects::Location location(web_location.functionName(),
+                                     web_location.fileName(), -1, nullptr);
+  owning_thread_task_runner_->PostDelayedTask(
+      location,
+      base::Bind(RunWebThreadTask, base::Passed(make_scoped_ptr(task))),
       base::TimeDelta::FromMilliseconds(delay_ms));
 }
 
@@ -128,7 +189,7 @@ void WebThreadImplForMessageLoop::exitRunLoop() {
 }
 
 bool WebThreadImplForMessageLoop::isCurrentThread() const {
-  return message_loop_->BelongsToCurrentThread();
+  return owning_thread_task_runner_->BelongsToCurrentThread();
 }
 
 blink::PlatformThreadId WebThreadImplForMessageLoop::threadId() const {

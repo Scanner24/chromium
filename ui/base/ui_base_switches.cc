@@ -9,7 +9,7 @@ namespace switches {
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 // Enable use of cross-process CALayers to display content directly from the
 // GPU process on Mac.
-const char kEnableRemoteCoreAnimation[] = "enable-remote-core-animation";
+const char kDisableRemoteCoreAnimation[] = "disable-remote-core-animation";
 #endif
 
 // Disables use of DWM composition for top level windows.
@@ -26,6 +26,9 @@ const char kDisableTouchDragDrop[] = "disable-touch-drag-drop";
 
 // Disables controls that support touch base text editing.
 const char kDisableTouchEditing[] = "disable-touch-editing";
+
+// Disables additional visual feedback to touch input.
+const char kDisableTouchFeedback[] = "disable-touch-feedback";
 
 // Enables a zoomed popup bubble that allows the user to select a link.
 const char kEnableLinkDisambiguationPopup[] =
@@ -44,12 +47,14 @@ const char kEnableTouchEditing[] = "enable-touch-editing";
 // language[-country] where language is the 2 letter code from ISO-639.
 const char kLang[] = "lang";
 
-// Disable ui::MessageBox. This is useful when running as part of scripts that
-// do not have a user interface.
-const char kNoMessageBox[] = "no-message-box";
-
 // On Windows only: requests that Chrome connect to the running Metro viewer
 // process.
 const char kViewerConnect[] = "connect-to-metro-viewer";
+
+#if defined(OS_CHROMEOS)
+// Disables Roboto as UI font (instead of Noto Sans) experiment in both
+// native and web UI.
+const char kDisableRobotoFontUI[] = "disable-roboto-font-ui";
+#endif
 
 }  // namespace switches

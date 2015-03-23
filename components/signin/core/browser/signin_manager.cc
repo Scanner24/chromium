@@ -21,6 +21,7 @@
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/escape.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
@@ -59,32 +60,44 @@ bool SigninManager::IsWebBasedSigninFlowURL(const GURL& url) {
 }
 
 SigninManager::SigninManager(SigninClient* client,
-                             ProfileOAuth2TokenService* token_service)
+                             ProfileOAuth2TokenService* token_service,
+                             AccountTrackerService* account_tracker_service)
     : SigninManagerBase(client),
       prohibit_signout_(false),
       type_(SIGNIN_TYPE_NONE),
       client_(client),
       token_service_(token_service),
+      account_tracker_service_(account_tracker_service),
+      signin_manager_signed_in_(false),
+      user_info_fetched_by_account_tracker_(false),
       weak_pointer_factory_(this) {}
 
 void SigninManager::AddMergeSessionObserver(
     MergeSessionHelper::Observer* observer) {
-  if (merge_session_helper_)
-    merge_session_helper_->AddObserver(observer);
+  merge_session_observer_list_.AddObserver(observer);
 }
 
 void SigninManager::RemoveMergeSessionObserver(
     MergeSessionHelper::Observer* observer) {
-  if (merge_session_helper_)
-    merge_session_helper_->RemoveObserver(observer);
+  merge_session_observer_list_.RemoveObserver(observer);
+}
+
+void SigninManager::MergeSessionCompleted(const std::string& account_id,
+                                          const GoogleServiceAuthError& error) {
+  FOR_EACH_OBSERVER(MergeSessionHelper::Observer, merge_session_observer_list_,
+                    MergeSessionCompleted(account_id, error));
+}
+
+void SigninManager::GetCheckConnectionInfoCompleted(bool succeeded) {
+  FOR_EACH_OBSERVER(MergeSessionHelper::Observer, merge_session_observer_list_,
+                    GetCheckConnectionInfoCompleted(succeeded));
 }
 
 SigninManager::~SigninManager() {}
 
 void SigninManager::InitTokenService() {
-  const std::string& account_id = GetAuthenticatedUsername();
-  if (token_service_ && !account_id.empty())
-    token_service_->LoadCredentials(account_id);
+  if (token_service_ && IsAuthenticated())
+    token_service_->LoadCredentials(GetAuthenticatedAccountId());
 }
 
 std::string SigninManager::SigninTypeToString(SigninManager::SigninType type) {
@@ -122,6 +135,8 @@ bool SigninManager::PrepareForSignin(SigninType type,
   type_ = type;
   possibly_invalid_username_.assign(username);
   password_.assign(password);
+  signin_manager_signed_in_ = false;
+  user_info_fetched_by_account_tracker_ = false;
   NotifyDiagnosticsObservers(SIGNIN_TYPE, SigninTypeToString(type));
   return true;
 }
@@ -170,7 +185,9 @@ void SigninManager::ClearTransientSigninData() {
 void SigninManager::HandleAuthError(const GoogleServiceAuthError& error) {
   ClearTransientSigninData();
 
-  FOR_EACH_OBSERVER(Observer, observer_list_, GoogleSigninFailed(error));
+  FOR_EACH_OBSERVER(SigninManagerBase::Observer,
+                    observer_list_,
+                    GoogleSigninFailed(error));
 }
 
 void SigninManager::SignOut(
@@ -206,10 +223,11 @@ void SigninManager::SignOut(
   const base::Time signin_time =
       base::Time::FromInternalValue(
           client_->GetPrefs()->GetInt64(prefs::kSignedInTime));
-  clear_authenticated_username();
+  ClearAuthenticatedUsername();
+  client_->GetPrefs()->ClearPref(prefs::kGoogleServicesHostedDomain);
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesUsername);
   client_->GetPrefs()->ClearPref(prefs::kSignedInTime);
-  client_->ClearSigninScopedDeviceId();
+  client_->OnSignedOut();
 
   // Erase (now) stale information from AboutSigninInternals.
   NotifyDiagnosticsObservers(USERNAME, "");
@@ -228,7 +246,7 @@ void SigninManager::SignOut(
                << "IsSigninAllowed: " << IsSigninAllowed();
   token_service_->RevokeAllCredentials();
 
-  FOR_EACH_OBSERVER(Observer,
+  FOR_EACH_OBSERVER(SigninManagerBase::Observer,
                     observer_list_,
                     GoogleSignedOut(account_id, username));
 }
@@ -260,11 +278,16 @@ void SigninManager::Initialize(PrefService* local_state) {
   InitTokenService();
   account_id_helper_.reset(
       new SigninAccountIdHelper(client_, token_service_, this));
+
+  account_tracker_service_->AddObserver(this);
 }
 
 void SigninManager::Shutdown() {
-  if (merge_session_helper_)
+  account_tracker_service_->RemoveObserver(this);
+  if (merge_session_helper_) {
     merge_session_helper_->CancelAll();
+    merge_session_helper_->RemoveObserver(this);
+  }
 
   local_state_pref_registrar_.RemoveAll();
   account_id_helper_.reset();
@@ -344,23 +367,38 @@ void SigninManager::DisableOneClickSignIn(PrefService* prefs) {
   prefs->SetBoolean(prefs::kReverseAutologinEnabled, false);
 }
 
+void SigninManager::MergeSigninCredentialIntoCookieJar() {
+  if (!client_->ShouldMergeSigninCredentialsIntoCookieJar())
+    return;
+
+  if (!IsAuthenticated())
+    return;
+
+  // Don't execute two MergeSessionHelpers. New account takes priority.
+  if (merge_session_helper_) {
+    if (merge_session_helper_->is_running())
+      merge_session_helper_->CancelAll();
+    merge_session_helper_->RemoveObserver(this);
+  }
+
+  merge_session_helper_.reset(new MergeSessionHelper(
+      token_service_, GaiaConstants::kChromeSource,
+      client_->GetURLRequestContext(), this));
+
+  merge_session_helper_->LogIn(GetAuthenticatedAccountId());
+}
+
 void SigninManager::CompletePendingSignin() {
   DCHECK(!possibly_invalid_username_.empty());
   OnSignedIn(possibly_invalid_username_);
 
-  if (client_->ShouldMergeSigninCredentialsIntoCookieJar()) {
-    merge_session_helper_.reset(new MergeSessionHelper(
-        token_service_, client_->GetURLRequestContext(), NULL));
-  }
-
   DCHECK(!temp_refresh_token_.empty());
   DCHECK(IsAuthenticated());
-  token_service_->UpdateCredentials(GetAuthenticatedUsername(),
+  token_service_->UpdateCredentials(GetAuthenticatedAccountId(),
                                     temp_refresh_token_);
   temp_refresh_token_.clear();
 
-  if (client_->ShouldMergeSigninCredentialsIntoCookieJar())
-    merge_session_helper_->LogIn(GetAuthenticatedUsername());
+  MergeSigninCredentialIntoCookieJar();
 }
 
 void SigninManager::OnExternalSigninCompleted(const std::string& username) {
@@ -372,23 +410,46 @@ void SigninManager::OnSignedIn(const std::string& username) {
                                 base::Time::Now().ToInternalValue());
   SetAuthenticatedUsername(username);
   possibly_invalid_username_.clear();
+  signin_manager_signed_in_ = true;
 
   FOR_EACH_OBSERVER(
-      Observer,
+      SigninManagerBase::Observer,
       observer_list_,
       GoogleSigninSucceeded(GetAuthenticatedAccountId(),
                             GetAuthenticatedUsername(),
                             password_));
 
-  client_->GoogleSigninSucceeded(GetAuthenticatedAccountId(),
-                                 GetAuthenticatedUsername(),
-                                 password_);
+  client_->OnSignedIn(GetAuthenticatedAccountId(),
+                      GetAuthenticatedUsername(),
+                      password_);
 
   signin_metrics::LogSigninProfile(client_->IsFirstRun(),
                                    client_->GetInstallDate());
 
-  password_.clear();                           // Don't need it anymore.
   DisableOneClickSignIn(client_->GetPrefs());  // Don't ever offer again.
+
+  PostSignedIn();
+}
+
+void SigninManager::PostSignedIn() {
+  if (!signin_manager_signed_in_ || !user_info_fetched_by_account_tracker_)
+    return;
+
+  client_->PostSignedIn(GetAuthenticatedAccountId(),
+                        GetAuthenticatedUsername(),
+                        password_);
+  password_.clear();
+}
+
+void SigninManager::OnAccountUpdated(
+    const AccountTrackerService::AccountInfo& info) {
+  user_info_fetched_by_account_tracker_ = true;
+  PostSignedIn();
+}
+
+void SigninManager::OnAccountUpdateFailed(const std::string& account_id) {
+  user_info_fetched_by_account_tracker_ = true;
+  PostSignedIn();
 }
 
 void SigninManager::ProhibitSignout(bool prohibit_signout) {

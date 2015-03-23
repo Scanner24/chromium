@@ -17,6 +17,8 @@ source_set("test_support") {
     "expectations/expectation.h",
     "expectations/parser.cc",
     "expectations/parser.h",
+    "gtest_util.cc",
+    "gtest_util.h",
     "gtest_xml_util.cc",
     "gtest_xml_util.h",
     "histogram_tester.cc",
@@ -34,13 +36,13 @@ source_set("test_support") {
     "mock_chrome_application_mac.mm",
     "mock_devices_changed_observer.cc",
     "mock_devices_changed_observer.h",
-    "mock_time_provider.cc",
-    "mock_time_provider.h",
     "multiprocess_test.cc",
     "multiprocess_test.h",
     "multiprocess_test_android.cc",
     "null_task_runner.cc",
     "null_task_runner.h",
+    "opaque_ref_counted.cc",
+    "opaque_ref_counted.h",
     "perf_log.cc",
     "perf_log.h",
     "perf_test_suite.cc",
@@ -74,6 +76,8 @@ source_set("test_support") {
     "test_io_thread.h",
     "test_listener_ios.h",
     "test_listener_ios.mm",
+    "test_mock_time_task_runner.cc",
+    "test_mock_time_task_runner.h",
     "test_pending_task.cc",
     "test_pending_task.h",
     "test_reg_util_win.cc",
@@ -111,7 +115,7 @@ source_set("test_support") {
     "//base/third_party/dynamic_annotations",
     "//testing/gmock",
     "//testing/gtest",
-    "//third_party/libxml"
+    "//third_party/libxml",
   ]
 
   if (!is_posix) {

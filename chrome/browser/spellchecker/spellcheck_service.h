@@ -10,7 +10,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "chrome/browser/spellchecker/feedback_sender.h"
 #include "chrome/browser/spellchecker/spellcheck_custom_dictionary.h"
 #include "chrome/browser/spellchecker/spellcheck_hunspell_dictionary.h"
 #include "chrome/common/spellcheck_common.h"
@@ -53,7 +52,7 @@ class SpellcheckService : public KeyedService,
   };
 
   explicit SpellcheckService(content::BrowserContext* context);
-  virtual ~SpellcheckService();
+  ~SpellcheckService() override;
 
   // This function computes a vector of strings which are to be displayed in
   // the context menu over a text area for changing spell check languages. It
@@ -94,9 +93,6 @@ class SpellcheckService : public KeyedService,
   // Returns the instance of the Hunspell dictionary.
   SpellcheckHunspellDictionary* GetHunspellDictionary();
 
-  // Returns the instance of the spelling service feedback sender.
-  spellcheck::FeedbackSender* GetFeedbackSender();
-
   // Load a dictionary from a given path. Format specifies how the dictionary
   // is stored. Return value is true if successful.
   bool LoadExternalDictionary(std::string language,
@@ -109,20 +105,20 @@ class SpellcheckService : public KeyedService,
   bool UnloadExternalDictionary(std::string path);
 
   // NotificationProfile implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // SpellcheckCustomDictionary::Observer implementation.
-  virtual void OnCustomDictionaryLoaded() OVERRIDE;
-  virtual void OnCustomDictionaryChanged(
-      const SpellcheckCustomDictionary::Change& dictionary_change) OVERRIDE;
+  void OnCustomDictionaryLoaded() override;
+  void OnCustomDictionaryChanged(
+      const SpellcheckCustomDictionary::Change& dictionary_change) override;
 
   // SpellcheckHunspellDictionary::Observer implementation.
-  virtual void OnHunspellDictionaryInitialized() OVERRIDE;
-  virtual void OnHunspellDictionaryDownloadBegin() OVERRIDE;
-  virtual void OnHunspellDictionaryDownloadSuccess() OVERRIDE;
-  virtual void OnHunspellDictionaryDownloadFailure() OVERRIDE;
+  void OnHunspellDictionaryInitialized() override;
+  void OnHunspellDictionaryDownloadBegin() override;
+  void OnHunspellDictionaryDownloadSuccess() override;
+  void OnHunspellDictionaryDownloadFailure() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SpellcheckServiceBrowserTest, DeleteCorruptedBDICT);
@@ -147,10 +143,6 @@ class SpellcheckService : public KeyedService,
   // Notification handler for changes to prefs::kSpellCheckUseSpellingService.
   void OnUseSpellingServiceChanged();
 
-  // Enables the feedback sender if spelling server is available and enabled.
-  // Otherwise disables the feedback sender.
-  void UpdateFeedbackSenderState();
-
   PrefChangeRegistrar pref_change_registrar_;
   content::NotificationRegistrar registrar_;
 
@@ -162,8 +154,6 @@ class SpellcheckService : public KeyedService,
   scoped_ptr<SpellcheckCustomDictionary> custom_dictionary_;
 
   scoped_ptr<SpellcheckHunspellDictionary> hunspell_dictionary_;
-
-  scoped_ptr<spellcheck::FeedbackSender> feedback_sender_;
 
   base::WeakPtrFactory<SpellcheckService> weak_ptr_factory_;
 

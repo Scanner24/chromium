@@ -13,6 +13,7 @@
 #include "net/quic/crypto/null_encrypter.h"
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
+#include "net/quic/quic_data_writer.h"
 #include "net/quic/quic_framer.h"
 #include "net/quic/quic_packet_creator.h"
 #include "net/quic/quic_utils.h"
@@ -37,8 +38,8 @@ class TestAlarm : public QuicAlarm {
       : QuicAlarm(delegate) {
   }
 
-  virtual void SetImpl() OVERRIDE {}
-  virtual void CancelImpl() OVERRIDE {}
+  void SetImpl() override {}
+  void CancelImpl() override {}
 };
 
 }  // namespace
@@ -60,9 +61,9 @@ QuicAckFrame MakeAckFrameWithNackRanges(
   return ack;
 }
 
-SerializedPacket BuildUnsizedDataPacket(QuicFramer* framer,
-                                        const QuicPacketHeader& header,
-                                        const QuicFrames& frames) {
+QuicPacket* BuildUnsizedDataPacket(QuicFramer* framer,
+                                   const QuicPacketHeader& header,
+                                   const QuicFrames& frames) {
   const size_t max_plaintext_size = framer->GetMaxPlaintextSize(kMaxPacketSize);
   size_t packet_size = GetPacketHeaderSize(header);
   for (size_t i = 0; i < frames.size(); ++i) {
@@ -76,7 +77,22 @@ SerializedPacket BuildUnsizedDataPacket(QuicFramer* framer,
     DCHECK(frame_size);
     packet_size += frame_size;
   }
-  return framer->BuildDataPacket(header, frames, packet_size);
+  return BuildUnsizedDataPacket(framer, header, frames, packet_size);
+}
+
+QuicPacket* BuildUnsizedDataPacket(QuicFramer* framer,
+                                   const QuicPacketHeader& header,
+                                   const QuicFrames& frames,
+                                   size_t packet_size) {
+  char* buffer = new char[packet_size];
+  scoped_ptr<QuicPacket> packet(
+      framer->BuildDataPacket(header, frames, buffer, packet_size));
+  DCHECK(packet.get() != nullptr);
+  // Now I have to re-construct the data packet with data ownership.
+  return new QuicPacket(buffer, packet->length(), true,
+                        header.public_header.connection_id_length,
+                        header.public_header.version_flag,
+                        header.public_header.sequence_number_length);
 }
 
 uint64 SimpleRandom::RandUint64() {
@@ -106,9 +122,6 @@ MockFramerVisitor::MockFramerVisitor() {
       .WillByDefault(testing::Return(true));
 
   ON_CALL(*this, OnAckFrame(_))
-      .WillByDefault(testing::Return(true));
-
-  ON_CALL(*this, OnCongestionFeedbackFrame(_))
       .WillByDefault(testing::Return(true));
 
   ON_CALL(*this, OnStopWaitingFrame(_))
@@ -153,11 +166,6 @@ bool NoOpFramerVisitor::OnStreamFrame(const QuicStreamFrame& frame) {
 }
 
 bool NoOpFramerVisitor::OnAckFrame(const QuicAckFrame& frame) {
-  return true;
-}
-
-bool NoOpFramerVisitor::OnCongestionFeedbackFrame(
-    const QuicCongestionFeedbackFrame& frame) {
   return true;
 }
 
@@ -221,22 +229,10 @@ void MockHelper::AdvanceTime(QuicTime::Delta delta) {
   clock_.AdvanceTime(delta);
 }
 
-namespace {
-class NiceMockPacketWriterFactory
-    : public QuicConnection::PacketWriterFactory {
- public:
-  NiceMockPacketWriterFactory() {}
-  virtual ~NiceMockPacketWriterFactory() {}
-
-  virtual QuicPacketWriter* Create(
-      QuicConnection* /*connection*/) const OVERRIDE {
-    return new testing::NiceMock<MockPacketWriter>();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NiceMockPacketWriterFactory);
-};
-}  // namespace
+QuicPacketWriter* NiceMockPacketWriterFactory::Create(
+    QuicConnection* /*connection*/) const {
+  return new testing::NiceMock<MockPacketWriter>();
+}
 
 MockConnection::MockConnection(bool is_server)
     : QuicConnection(kTestConnectionId,
@@ -244,7 +240,21 @@ MockConnection::MockConnection(bool is_server)
                      new testing::NiceMock<MockHelper>(),
                      NiceMockPacketWriterFactory(),
                      /* owns_writer= */ true,
-                     is_server, QuicSupportedVersions()),
+                     is_server,
+                     /* is_secure= */ false,
+                     QuicSupportedVersions()),
+      helper_(helper()) {
+}
+
+MockConnection::MockConnection(bool is_server, bool is_secure)
+    : QuicConnection(kTestConnectionId,
+                     IPEndPoint(TestPeerIPAddress(), kTestPort),
+                     new testing::NiceMock<MockHelper>(),
+                     NiceMockPacketWriterFactory(),
+                     /* owns_writer= */ true,
+                     is_server,
+                     is_secure,
+                     QuicSupportedVersions()),
       helper_(helper()) {
 }
 
@@ -254,7 +264,9 @@ MockConnection::MockConnection(IPEndPoint address,
                      new testing::NiceMock<MockHelper>(),
                      NiceMockPacketWriterFactory(),
                      /* owns_writer= */ true,
-                     is_server, QuicSupportedVersions()),
+                     is_server,
+                     /* is_secure= */ false,
+                     QuicSupportedVersions()),
       helper_(helper()) {
 }
 
@@ -265,7 +277,9 @@ MockConnection::MockConnection(QuicConnectionId connection_id,
                      new testing::NiceMock<MockHelper>(),
                      NiceMockPacketWriterFactory(),
                      /* owns_writer= */ true,
-                     is_server, QuicSupportedVersions()),
+                     is_server,
+                     /* is_secure= */ false,
+                     QuicSupportedVersions()),
       helper_(helper()) {
 }
 
@@ -276,7 +290,9 @@ MockConnection::MockConnection(bool is_server,
                      new testing::NiceMock<MockHelper>(),
                      NiceMockPacketWriterFactory(),
                      /* owns_writer= */ true,
-                     is_server, supported_versions),
+                     is_server,
+                     /* is_secure= */ false,
+                     supported_versions),
       helper_(helper()) {
 }
 
@@ -298,20 +314,16 @@ PacketSavingConnection::PacketSavingConnection(
 }
 
 PacketSavingConnection::~PacketSavingConnection() {
-  STLDeleteElements(&packets_);
   STLDeleteElements(&encrypted_packets_);
 }
 
 void PacketSavingConnection::SendOrQueuePacket(QueuedPacket packet) {
-  packets_.push_back(packet.serialized_packet.packet);
-  QuicEncryptedPacket* encrypted = QuicConnectionPeer::GetFramer(this)->
-      EncryptPacket(packet.encryption_level,
-                    packet.serialized_packet.sequence_number,
-                    *packet.serialized_packet.packet);
-  encrypted_packets_.push_back(encrypted);
+  encrypted_packets_.push_back(packet.serialized_packet.packet);
   // Transfer ownership of the packet to the SentPacketManager and the
   // ack notifier to the AckNotifierManager.
-  sent_packet_manager_.OnSerializedPacket(packet.serialized_packet);
+  sent_packet_manager_.OnPacketSent(
+      &packet.serialized_packet, 0, QuicTime::Zero(), 1000,
+      NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
 }
 
 MockSession::MockSession(QuicConnection* connection)
@@ -326,7 +338,7 @@ MockSession::~MockSession() {
 
 TestSession::TestSession(QuicConnection* connection, const QuicConfig& config)
     : QuicSession(connection, config),
-      crypto_stream_(NULL) {
+      crypto_stream_(nullptr) {
   InitializeSession();
 }
 
@@ -343,7 +355,7 @@ QuicCryptoStream* TestSession::GetCryptoStream() {
 TestClientSession::TestClientSession(QuicConnection* connection,
                                      const QuicConfig& config)
     : QuicClientSessionBase(connection, config),
-      crypto_stream_(NULL) {
+      crypto_stream_(nullptr) {
   EXPECT_CALL(*this, OnProofValid(_)).Times(AnyNumber());
   InitializeSession();
 }
@@ -479,12 +491,12 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
   frames.push_back(frame);
   QuicFramer framer(QuicSupportedVersions(), QuicTime::Zero(), false);
   scoped_ptr<QuicPacket> packet(
-      BuildUnsizedDataPacket(&framer, header, frames).packet);
-  EXPECT_TRUE(packet != NULL);
+      BuildUnsizedDataPacket(&framer, header, frames));
+  EXPECT_TRUE(packet != nullptr);
   QuicEncryptedPacket* encrypted = framer.EncryptPacket(ENCRYPTION_NONE,
                                                         sequence_number,
                                                         *packet);
-  EXPECT_TRUE(encrypted != NULL);
+  EXPECT_TRUE(encrypted != nullptr);
   return encrypted;
 }
 
@@ -556,7 +568,7 @@ static QuicPacket* ConstructPacketFromHandshakeMessage(
   QuicFrame frame(&stream_frame);
   QuicFrames frames;
   frames.push_back(frame);
-  return BuildUnsizedDataPacket(&quic_framer, header, frames).packet;
+  return BuildUnsizedDataPacket(&quic_framer, header, frames);
 }
 
 QuicPacket* ConstructHandshakePacket(QuicConnectionId connection_id,
@@ -569,6 +581,7 @@ QuicPacket* ConstructHandshakePacket(QuicConnectionId connection_id,
 size_t GetPacketLengthForOneStream(
     QuicVersion version,
     bool include_version,
+    QuicConnectionIdLength connection_id_length,
     QuicSequenceNumberLength sequence_number_length,
     InFecGroup is_in_fec_group,
     size_t* payload_length) {
@@ -581,7 +594,7 @@ size_t GetPacketLengthForOneStream(
   const size_t ack_length = NullEncrypter().GetCiphertextSize(
       QuicFramer::GetMinAckFrameSize(
           sequence_number_length, PACKET_1BYTE_SEQUENCE_NUMBER)) +
-      GetPacketHeaderSize(PACKET_8BYTE_CONNECTION_ID, include_version,
+      GetPacketHeaderSize(connection_id_length, include_version,
                           sequence_number_length, is_in_fec_group);
   if (stream_length < ack_length) {
     *payload_length = 1 + ack_length - stream_length;
@@ -589,7 +602,7 @@ size_t GetPacketLengthForOneStream(
 
   return NullEncrypter().GetCiphertextSize(*payload_length) +
       QuicPacketCreator::StreamFramePacketOverhead(
-          PACKET_8BYTE_CONNECTION_ID, include_version,
+          connection_id_length, include_version,
           sequence_number_length, 0u, is_in_fec_group);
 }
 
@@ -608,9 +621,6 @@ MockEntropyCalculator::~MockEntropyCalculator() {}
 
 QuicConfig DefaultQuicConfig() {
   QuicConfig config;
-  config.SetDefaults();
-  config.SetInitialFlowControlWindowToSend(
-      kInitialSessionFlowControlWindowForTest);
   config.SetInitialStreamFlowControlWindowToSend(
       kInitialStreamFlowControlWindowForTest);
   config.SetInitialSessionFlowControlWindowToSend(
@@ -624,7 +634,7 @@ QuicVersionVector SupportedVersions(QuicVersion version) {
   return versions;
 }
 
-TestWriterFactory::TestWriterFactory() : current_writer_(NULL) {}
+TestWriterFactory::TestWriterFactory() : current_writer_(nullptr) {}
 TestWriterFactory::~TestWriterFactory() {}
 
 QuicPacketWriter* TestWriterFactory::Create(QuicServerPacketWriter* writer,
@@ -633,15 +643,15 @@ QuicPacketWriter* TestWriterFactory::Create(QuicServerPacketWriter* writer,
 }
 
 void TestWriterFactory::OnPacketSent(WriteResult result) {
-  if (current_writer_ != NULL && result.status == WRITE_STATUS_ERROR) {
+  if (current_writer_ != nullptr && result.status == WRITE_STATUS_ERROR) {
     current_writer_->connection()->OnWriteError(result.error_code);
-    current_writer_ = NULL;
+    current_writer_ = nullptr;
   }
 }
 
 void TestWriterFactory::Unregister(PerConnectionPacketWriter* writer) {
   if (current_writer_ == writer) {
-    current_writer_ = NULL;
+    current_writer_ = nullptr;
   }
 }
 
@@ -662,9 +672,10 @@ WriteResult TestWriterFactory::PerConnectionPacketWriter::WritePacket(
     size_t buf_len,
     const IPAddressNumber& self_address,
     const IPEndPoint& peer_address) {
-  // A DCHECK(factory_current_writer_ == NULL) would be wrong here -- this class
-  // may be used in a setting where connection()->OnPacketSent() is called in a
-  // different way, so TestWriterFactory::OnPacketSent might never be called.
+  // A DCHECK(factory_current_writer_ == nullptr) would be wrong here -- this
+  // class may be used in a setting where connection()->OnPacketSent() is called
+  // in a different way, so TestWriterFactory::OnPacketSent might never be
+  // called.
   factory_->current_writer_ = this;
   return QuicPerConnectionPacketWriter::WritePacket(buffer,
                                                     buf_len,

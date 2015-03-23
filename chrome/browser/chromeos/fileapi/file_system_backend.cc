@@ -20,6 +20,7 @@
 #include "storage/browser/fileapi/file_system_operation.h"
 #include "storage/browser/fileapi/file_system_operation_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
+#include "storage/common/fileapi/file_system_mount_option.h"
 
 namespace chromeos {
 
@@ -64,9 +65,8 @@ void FileSystemBackend::AddSystemMountPoints() {
       storage::FileSystemMountOption(),
       chromeos::CrosDisksClient::GetArchiveMountPoint());
   system_mount_points_->RegisterFileSystem(
-      "removable",
-      storage::kFileSystemTypeNativeLocal,
-      storage::FileSystemMountOption(storage::COPY_SYNC_OPTION_SYNC),
+      "removable", storage::kFileSystemTypeNativeLocal,
+      storage::FileSystemMountOption(storage::FlushPolicy::FLUSH_ON_COMPLETION),
       chromeos::CrosDisksClient::GetRemovableDiskMountPoint());
   system_mount_points_->RegisterFileSystem(
       "oem",
@@ -181,12 +181,6 @@ bool FileSystemBackend::IsAccessAllowed(
     return true;
   }
 
-  // Grant access for URL having "externalfile:" scheme. The URL
-  // filesystem:externalfile:/xxx cannot be parsed directly. The URL is created
-  // only by DriveURLRequestJob.
-  if (url.origin().scheme() == chrome::kExternalFileScheme)
-    return true;
-
   // Check first to make sure this extension has fileBrowserHander permissions.
   if (!special_storage_policy_.get() ||
       !special_storage_policy_->IsFileHandler(extension_id))
@@ -273,6 +267,10 @@ storage::AsyncFileUtil* FileSystemBackend::GetAsyncFileUtil(
 
 storage::WatcherManager* FileSystemBackend::GetWatcherManager(
     storage::FileSystemType type) {
+  if (type == storage::kFileSystemTypeProvided)
+    return file_system_provider_delegate_->GetWatcherManager(type);
+
+  // TODO(mtomasz): Add support for other backends.
   return NULL;
 }
 

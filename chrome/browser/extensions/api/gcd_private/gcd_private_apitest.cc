@@ -60,14 +60,13 @@ const char kGCDResponse[] =
     "  }}]}";
 
 const char kPrivetInfoResponse[] =
-    "{"
-    "\"x-privet-token\": \"sample\""
-    "}";
-
-const char kPrivetPingResponse[] =
-    "{"
-    "\"response\": \"pong\""
-    "}";
+    "{\"version\":\"3.0\","
+    "\"endpoints\":{\"httpsPort\": 443},"
+    "\"authentication\":{"
+    "  \"mode\":[\"anonymous\",\"pairing\",\"cloud\"],"
+    "  \"pairing\":[\"embeddedCode\"],"
+    "  \"crypto\":[\"p224_spake2\"]"
+    "}}";
 
 #if defined(ENABLE_MDNS)
 
@@ -173,11 +172,11 @@ class FakeGCDApiFlowFactory
     extensions::GcdPrivateAPI::SetGCDApiFlowFactoryForTests(this);
   }
 
-  virtual ~FakeGCDApiFlowFactory() {
+  ~FakeGCDApiFlowFactory() override {
     extensions::GcdPrivateAPI::SetGCDApiFlowFactoryForTests(NULL);
   }
 
-  virtual scoped_ptr<local_discovery::GCDApiFlow> CreateGCDApiFlow() OVERRIDE {
+  scoped_ptr<local_discovery::GCDApiFlow> CreateGCDApiFlow() override {
     return scoped_ptr<local_discovery::GCDApiFlow>(new FakeGCDApiFlow(this));
   }
 
@@ -191,9 +190,9 @@ class FakeGCDApiFlowFactory
     explicit FakeGCDApiFlow(FakeGCDApiFlowFactory* factory)
         : factory_(factory) {}
 
-    virtual ~FakeGCDApiFlow() {}
+    ~FakeGCDApiFlow() override {}
 
-    virtual void Start(scoped_ptr<Request> request) OVERRIDE {
+    void Start(scoped_ptr<Request> request) override {
       std::string response_str = factory_->responses_[request->GetURL()];
 
       if (response_str == kResponseValueFailure) {
@@ -228,7 +227,7 @@ class GcdPrivateAPITest : public ExtensionApiTest {
 #endif  // ENABLE_MDNS
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         extensions::switches::kWhitelistedExtensionID,
@@ -289,12 +288,6 @@ IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, Session) {
                                        kPrivetInfoResponse,
                                        net::HTTP_OK,
                                        net::URLRequestStatus::SUCCESS);
-
-  url_fetcher_factory_.SetFakeResponse(GURL("http://1.2.3.4:9090/privet/ping"),
-                                       kPrivetPingResponse,
-                                       net::HTTP_OK,
-                                       net::URLRequestStatus::SUCCESS);
-
   EXPECT_TRUE(RunExtensionSubtest("gcd_private/api", "session.html"));
 }
 

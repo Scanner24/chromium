@@ -63,20 +63,18 @@ class CallbackRunningObserver {
 
    protected:
     // ui::LayerAnimationObserver overrides:
-    virtual void OnLayerAnimationEnded(
-        ui::LayerAnimationSequence* sequence) OVERRIDE {
+    void OnLayerAnimationEnded(ui::LayerAnimationSequence* sequence) override {
       animator_->RemoveObserver(this);
       observer_->OnSingleTaskCompleted();
     }
-    virtual void OnLayerAnimationAborted(
-        ui::LayerAnimationSequence* sequence) OVERRIDE {
+    void OnLayerAnimationAborted(
+        ui::LayerAnimationSequence* sequence) override {
       animator_->RemoveObserver(this);
       observer_->OnSingleTaskAborted();
     }
-    virtual void OnLayerAnimationScheduled(
-        ui::LayerAnimationSequence* sequence) OVERRIDE {
-    }
-    virtual bool RequiresNotificationWhenAnimatorDestroyed() const OVERRIDE {
+    void OnLayerAnimationScheduled(
+        ui::LayerAnimationSequence* sequence) override {}
+    bool RequiresNotificationWhenAnimatorDestroyed() const override {
       return true;
     }
 

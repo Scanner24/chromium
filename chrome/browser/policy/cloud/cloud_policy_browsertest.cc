@@ -43,6 +43,7 @@
 #include "policy/policy_constants.h"
 #include "policy/proto/chrome_settings.pb.h"
 #include "policy/proto/cloud_policy.pb.h"
+#include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -198,9 +199,9 @@ class CloudPolicyTest : public InProcessBrowserTest,
                         public PolicyService::Observer {
  protected:
   CloudPolicyTest() {}
-  virtual ~CloudPolicyTest() {}
+  ~CloudPolicyTest() override {}
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     ASSERT_NO_FATAL_FAILURE(SetServerPolicy(GetEmptyPolicy()));
 
@@ -209,14 +210,14 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
     std::string url = test_server_->GetServiceURL().spec();
 
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
 
     invalidation::ProfileInvalidationProviderFactory::GetInstance()->
         RegisterTestingFactory(BuildFakeProfileInvalidationProvider);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(PolicyServiceIsEmpty(g_browser_process->policy_service()))
         << "Pre-existing policies in this machine will make this test fail.";
 
@@ -266,8 +267,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
         em::DeviceRegisterRequest::BROWSER;
 #endif
     policy_manager->core()->client()->Register(
-        registration_type, "bogus", std::string(), false, std::string(),
-        std::string());
+        registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+        "bogus", std::string(), std::string(), std::string());
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager->core()->client()->RemoveObserver(&observer);
@@ -287,7 +288,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
   PolicyService* GetPolicyService() {
     ProfilePolicyConnector* profile_connector =
-        ProfilePolicyConnectorFactory::GetForProfile(browser()->profile());
+        ProfilePolicyConnectorFactory::GetForBrowserContext(
+            browser()->profile());
     return profile_connector->policy_service();
   }
 
@@ -308,16 +310,16 @@ class CloudPolicyTest : public InProcessBrowserTest,
     return temp_dir_.path().AppendASCII("policy.json");
   }
 
-  virtual void OnPolicyUpdated(const PolicyNamespace& ns,
-                               const PolicyMap& previous,
-                               const PolicyMap& current) OVERRIDE {
+  void OnPolicyUpdated(const PolicyNamespace& ns,
+                       const PolicyMap& previous,
+                       const PolicyMap& current) override {
     if (!on_policy_updated_.is_null()) {
       on_policy_updated_.Run();
       on_policy_updated_.Reset();
     }
   }
 
-  virtual void OnPolicyServiceInitialized(PolicyDomain domain) OVERRIDE {}
+  void OnPolicyServiceInitialized(PolicyDomain domain) override {}
 
   base::ScopedTempDir temp_dir_;
   scoped_ptr<LocalPolicyTestServer> test_server_;

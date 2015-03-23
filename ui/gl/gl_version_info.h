@@ -7,27 +7,30 @@
 
 #include <string>
 #include "base/basictypes.h"
+#include "ui/gl/gl_export.h"
 
 namespace gfx {
 
-struct GLVersionInfo {
+struct GL_EXPORT GLVersionInfo {
   GLVersionInfo(const char* version_str, const char* renderer_str);
 
-  // New flags, such as is_gl4_4 could be introduced as needed.
-  // For now, this level of granularity is enough.
+  bool IsAtLeastGL(unsigned major, unsigned minor) const {
+    return !is_es && (major_version > major ||
+                      (major_version == major && minor_version >= minor));
+  }
+
+  bool IsAtLeastGLES(unsigned major, unsigned minor) const {
+    return is_es && (major_version > major ||
+                     (major_version == major && minor_version >= minor));
+  }
+
   bool is_es;
-  bool is_es1;
-  bool is_es2;
+  bool is_angle;
+  unsigned major_version;
+  unsigned minor_version;
   bool is_es3;
 
-  bool is_gl1;
-  bool is_gl2;
-  bool is_gl3;
-  bool is_gl4;
-
-  bool is_angle;
-
-private:
+ private:
   DISALLOW_COPY_AND_ASSIGN(GLVersionInfo);
 };
 

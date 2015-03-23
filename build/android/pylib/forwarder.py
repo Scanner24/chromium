@@ -90,8 +90,10 @@ class Forwarder(object):
 
       device_serial = str(device)
       redirection_commands = [
-          ['--serial-id=' + device_serial, '--map', str(device_port),
-           str(host_port)] for device_port, host_port in port_pairs]
+          ['--adb=' + constants.GetAdbPath(),
+           '--serial-id=' + device_serial,
+           '--map', str(device_port), str(host_port)]
+          for device_port, host_port in port_pairs]
       logging.info('Forwarding using commands: %s', redirection_commands)
 
       for redirection_command in redirection_commands:
@@ -227,7 +229,9 @@ class Forwarder(object):
     if not serial_with_port in instance._device_to_host_port_map:
       logging.error('Trying to unmap non-forwarded port %d' % device_port)
       return
-    redirection_command = ['--serial-id=' + serial, '--unmap', str(device_port)]
+    redirection_command = ['--adb=' + constants.GetAdbPath(),
+                           '--serial-id=' + serial,
+                           '--unmap', str(device_port)]
     (exit_code, output) = cmd_helper.GetCmdStatusAndOutput(
         [instance._host_forwarder_path] + redirection_command)
     if exit_code != 0:
@@ -270,6 +274,7 @@ class Forwarder(object):
       pid_file.seek(0)
       pid_file.write(
           '%s:%s' % (pid_for_lock, str(_GetProcessStartTime(pid_for_lock))))
+      pid_file.truncate()
 
   def _InitDeviceLocked(self, device, tool):
     """Initializes the device_forwarder daemon for a specific device (once).
@@ -288,9 +293,9 @@ class Forwarder(object):
     if device_serial in self._initialized_devices:
       return
     Forwarder._KillDeviceLocked(device, tool)
-    device.PushChangedFiles(
+    device.PushChangedFiles([(
         self._device_forwarder_path_on_host,
-        Forwarder._DEVICE_FORWARDER_FOLDER)
+        Forwarder._DEVICE_FORWARDER_FOLDER)])
     cmd = '%s %s' % (tool.GetUtilWrapper(), Forwarder._DEVICE_FORWARDER_PATH)
     (exit_code, output) = device.old_interface.GetAndroidToolStatusAndOutput(
         cmd, lib_path=Forwarder._DEVICE_FORWARDER_FOLDER)

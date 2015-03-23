@@ -15,12 +15,12 @@
 
 namespace media {
 
-// This class acts as a MojoRendererService-side stub for a real
-// media::DemuxerStream that is part of a media::Pipeline in a remote
-// application. Roughly speaking, it takes a mojo::DemuxerStreamPtr and exposes
-// it as a media::DemuxerStream for use by media components.
-class MojoDemuxerStreamAdapter : public media::DemuxerStream,
-                                 public mojo::DemuxerStreamClient {
+// This class acts as a MojoRendererService-side stub for a real DemuxerStream
+// that is part of a Pipeline in a remote application. Roughly speaking, it
+// takes a mojo::DemuxerStreamPtr and exposes it as a DemuxerStream for use by
+// media components.
+class MojoDemuxerStreamAdapter : public DemuxerStream,
+                                 public mojo::DemuxerStreamObserver {
  public:
   // |demuxer_stream| is connected to the mojo::DemuxerStream that |this| will
   //     become the client of.
@@ -29,21 +29,20 @@ class MojoDemuxerStreamAdapter : public media::DemuxerStream,
   // NOTE: Illegal to call any methods until |stream_ready_cb| is invoked.
   MojoDemuxerStreamAdapter(mojo::DemuxerStreamPtr demuxer_stream,
                            const base::Closure& stream_ready_cb);
-  virtual ~MojoDemuxerStreamAdapter();
+  ~MojoDemuxerStreamAdapter() override;
 
-  // media::DemuxerStream implementation.
-  virtual void Read(const ReadCB& read_cb) OVERRIDE;
-  virtual AudioDecoderConfig audio_decoder_config() OVERRIDE;
-  virtual VideoDecoderConfig video_decoder_config() OVERRIDE;
-  virtual Type type() OVERRIDE;
-  virtual void EnableBitstreamConverter() OVERRIDE;
-  virtual bool SupportsConfigChanges() OVERRIDE;
-  virtual VideoRotation video_rotation() OVERRIDE;
+  // DemuxerStream implementation.
+  void Read(const ReadCB& read_cb) override;
+  AudioDecoderConfig audio_decoder_config() override;
+  VideoDecoderConfig video_decoder_config() override;
+  Type type() const override;
+  void EnableBitstreamConverter() override;
+  bool SupportsConfigChanges() override;
+  VideoRotation video_rotation() override;
 
   // mojo::DemuxerStreamClient implementation.
-  virtual void OnStreamReady(mojo::ScopedDataPipeConsumerHandle pipe) OVERRIDE;
-  virtual void OnAudioDecoderConfigChanged(
-      mojo::AudioDecoderConfigPtr config) OVERRIDE;
+  void OnAudioDecoderConfigChanged(mojo::AudioDecoderConfigPtr config) override;
+  void OnVideoDecoderConfigChanged(mojo::VideoDecoderConfigPtr config) override;
 
  private:
   // The callback from |demuxer_stream_| that a read operation has completed.
@@ -51,8 +50,11 @@ class MojoDemuxerStreamAdapter : public media::DemuxerStream,
   void OnBufferReady(mojo::DemuxerStream::Status status,
                      mojo::MediaDecoderBufferPtr buffer);
 
+  void OnStreamReady(mojo::ScopedDataPipeConsumerHandle pipe);
+
   // See constructor for descriptions.
   mojo::DemuxerStreamPtr demuxer_stream_;
+  mojo::Binding<DemuxerStreamObserver> binding_;
   base::Closure stream_ready_cb_;
 
   // The last ReadCB received through a call to Read().
@@ -64,7 +66,13 @@ class MojoDemuxerStreamAdapter : public media::DemuxerStream,
 
   // The front of the queue is the current config. We pop when we observe
   // DemuxerStatus::CONFIG_CHANGED.
-  std::queue<media::AudioDecoderConfig> config_queue_;
+  std::queue<AudioDecoderConfig> audio_config_queue_;
+  std::queue<VideoDecoderConfig> video_config_queue_;
+
+  DemuxerStream::Type type_;
+
+  // DataPipe for deserializing the data section of DecoderBuffers from.
+  mojo::ScopedDataPipeConsumerHandle stream_pipe_;
 
   base::WeakPtrFactory<MojoDemuxerStreamAdapter> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(MojoDemuxerStreamAdapter);

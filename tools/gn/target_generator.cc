@@ -126,7 +126,7 @@ void TargetGenerator::GenerateTarget(Scope* scope,
     *err = Err(function_call, "Can't define a target in this context.");
     return;
   }
-  collector->push_back(new scoped_ptr<Item>(target.PassAs<Item>()));
+  collector->push_back(target.release());
 }
 
 const BuildSettings* TargetGenerator::GetBuildSettings() const {
@@ -280,6 +280,16 @@ bool TargetGenerator::FillOutputs(bool allow_substitutions) {
                                          value->list_value()[i]))
       return false;
   }
+  return true;
+}
+
+bool TargetGenerator::FillCheckIncludes() {
+  const Value* value = scope_->GetValue(variables::kCheckIncludes, true);
+  if (!value)
+    return true;
+  if (!value->VerifyTypeIs(Value::BOOLEAN, err_))
+    return false;
+  target_->set_check_includes(value->boolean_value());
   return true;
 }
 

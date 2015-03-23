@@ -52,14 +52,14 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
                           QuicServerSessionVisitor* visitor,
                           EpollServer* epoll_server,
                           const QuicVersionVector& supported_versions);
-  virtual ~QuicTimeWaitListManager();
+  ~QuicTimeWaitListManager() override;
 
   // Adds the given connection_id to time wait state for kTimeWaitPeriod.
   // Henceforth, any packet bearing this connection_id should not be processed
-  // while the connection_id remains in this list. If a non-NULL |close_packet|
-  // is provided, it is sent again when packets are received for added
-  // connection_ids. If NULL, a public reset packet is sent with the specified
-  // |version|. DCHECKs that connection_id is not already on the list.
+  // while the connection_id remains in this list. If a non-nullptr
+  // |close_packet| is provided, it is sent again when packets are received for
+  // added connection_ids. If nullptr, a public reset packet is sent with the
+  // specified |version|. DCHECKs that connection_id is not already on the list.
   void AddConnectionIdToTimeWait(QuicConnectionId connection_id,
                                  QuicVersion version,
                                  QuicEncryptedPacket* close_packet);  // Owned.
@@ -83,15 +83,22 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
   // Called by the dispatcher when the underlying socket becomes writable again,
   // since we might need to send pending public reset packets which we didn't
   // send because the underlying socket was write blocked.
-  virtual void OnCanWrite() OVERRIDE;
+  void OnCanWrite() override;
 
   // Used to delete connection_id entries that have outlived their time wait
   // period.
   void CleanUpOldConnectionIds();
 
+  // If necessary, trims the oldest connections from the time-wait list until
+  // the size is under the configured maximum.
+  void TrimTimeWaitListIfNeeded();
+
   // Given a ConnectionId that exists in the time wait list, returns the
   // QuicVersion associated with it.
   QuicVersion GetQuicVersionFromConnectionId(QuicConnectionId connection_id);
+
+  // The number of connections on the time-wait list.
+  size_t num_connections() const { return connection_id_map_.size(); }
 
  protected:
   virtual QuicEncryptedPacket* BuildPublicReset(
@@ -125,6 +132,15 @@ class QuicTimeWaitListManager : public QuicBlockedWriterInterface {
 
   // Register the alarm with the epoll server to wake up at appropriate time.
   void SetConnectionIdCleanUpAlarm();
+
+  // Removes the oldest connection from the time-wait list if it was added prior
+  // to "expiration_time".  To unconditionally remove the oldest connection, use
+  // a QuicTime::Delta:Infinity().  This function modifies the
+  // connection_id_map_.  If you plan to call this function in a loop, any
+  // iterators that you hold before the call to this function may be invalid
+  // afterward.  Returns true if the oldest connection was expired.  Returns
+  // false if the map is empty or the oldest connection has not expired.
+  bool MaybeExpireOldestConnection(QuicTime expiration_time);
 
   // A map from a recently closed connection_id to the number of packets
   // received after the termination of the connection bound to the

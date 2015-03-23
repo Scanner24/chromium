@@ -16,12 +16,13 @@
 #include "base/atomicops.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -127,8 +128,14 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL() {
 
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::MaybeInitializeGL");
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "125248 WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL"));
+
   if (!CreateContext(surface_id_ != 0)) {
     Destroy();
+
     initialize_failed_ = true;
     return false;
   }
@@ -240,13 +247,16 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   DCHECK(host_.get());
 
   // Create the object exposing the OpenGL API.
-  bool bind_generates_resources = false;
+  const bool bind_generates_resources = false;
+  const bool support_client_side_arrays = false;
+
   real_gl_.reset(
       new gpu::gles2::GLES2Implementation(gles2_helper_.get(),
                                           gles2_share_group.get(),
                                           transfer_buffer_.get(),
                                           bind_generates_resources,
                                           lose_context_when_out_of_memory_,
+                                          support_client_side_arrays,
                                           command_buffer_.get()));
   setGLInterface(real_gl_.get());
 
@@ -262,8 +272,8 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   if (add_to_share_group)
     share_group_->AddContextLocked(this);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableGpuClientTracing)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableGpuClientTracing)) {
     trace_gl_.reset(new gpu::gles2::GLES2TraceImplementation(GetGLInterface()));
     setGLInterface(trace_gl_.get());
   }

@@ -64,7 +64,7 @@ class DnsConfigWatcher : public NetworkChangeNotifier::NetworkChangeObserver {
     NetworkChangeNotifier::AddNetworkChangeObserver(this);
   }
 
-  virtual ~DnsConfigWatcher() {
+  ~DnsConfigWatcher() override {
     NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
   }
 
@@ -73,8 +73,7 @@ class DnsConfigWatcher : public NetworkChangeNotifier::NetworkChangeObserver {
     return true;
   }
 
-  virtual void OnNetworkChanged(NetworkChangeNotifier::ConnectionType type)
-      OVERRIDE {
+  void OnNetworkChanged(NetworkChangeNotifier::ConnectionType type) override {
     if (!callback_.is_null() && type != NetworkChangeNotifier::CONNECTION_NONE)
       callback_.Run(true);
   }
@@ -263,7 +262,7 @@ class DnsConfigServicePosix::ConfigReader : public SerialWorker {
   explicit ConfigReader(DnsConfigServicePosix* service)
       : service_(service), success_(false) {}
 
-  virtual void DoWork() OVERRIDE {
+  void DoWork() override {
     base::TimeTicks start_time = base::TimeTicks::Now();
     ConfigParsePosixResult result = ReadDnsConfig(&dns_config_);
     switch (result) {
@@ -285,7 +284,7 @@ class DnsConfigServicePosix::ConfigReader : public SerialWorker {
                         base::TimeTicks::Now() - start_time);
   }
 
-  virtual void OnWorkFinished() OVERRIDE {
+  void OnWorkFinished() override {
     DCHECK(!IsCancelled());
     if (success_) {
       service_->OnConfigRead(dns_config_);
@@ -295,7 +294,7 @@ class DnsConfigServicePosix::ConfigReader : public SerialWorker {
   }
 
  private:
-  virtual ~ConfigReader() {}
+  ~ConfigReader() override {}
 
   DnsConfigServicePosix* service_;
   // Written in DoWork, read in OnWorkFinished, no locking necessary.
@@ -312,9 +311,9 @@ class DnsConfigServicePosix::HostsReader : public SerialWorker {
       :  service_(service), path_(kFilePathHosts), success_(false) {}
 
  private:
-  virtual ~HostsReader() {}
+  ~HostsReader() override {}
 
-  virtual void DoWork() OVERRIDE {
+  void DoWork() override {
     base::TimeTicks start_time = base::TimeTicks::Now();
     success_ = ParseHostsFile(path_, &hosts_);
     UMA_HISTOGRAM_BOOLEAN("AsyncDNS.HostParseResult", success_);
@@ -322,7 +321,7 @@ class DnsConfigServicePosix::HostsReader : public SerialWorker {
                         base::TimeTicks::Now() - start_time);
   }
 
-  virtual void OnWorkFinished() OVERRIDE {
+  void OnWorkFinished() override {
     if (success_) {
       service_->OnHostsRead(hosts_);
     } else {
@@ -411,9 +410,9 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
     dns_config->nameservers.push_back(ipe);
   }
 #elif defined(OS_LINUX)
-  COMPILE_ASSERT(arraysize(res.nsaddr_list) >= MAXNS &&
-                 arraysize(res._u._ext.nsaddrs) >= MAXNS,
-                 incompatible_libresolv_res_state);
+  static_assert(arraysize(res.nsaddr_list) >= MAXNS &&
+                    arraysize(res._u._ext.nsaddrs) >= MAXNS,
+                "incompatible libresolv res_state");
   DCHECK_LE(res.nscount, MAXNS);
   // Initially, glibc stores IPv6 in |_ext.nsaddrs| and IPv4 in |nsaddr_list|.
   // In res_send.c:res_nsend, it merges |nsaddr_list| into |nsaddrs|,
@@ -459,7 +458,14 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
 #if defined(RES_ROTATE)
   dns_config->rotate = res.options & RES_ROTATE;
 #endif
+#if defined(RES_USE_EDNS0)
   dns_config->edns0 = res.options & RES_USE_EDNS0;
+#endif
+#if !defined(RES_USE_DNSSEC)
+  // Some versions of libresolv don't have support for the DO bit. In this
+  // case, we proceed without it.
+  static const int RES_USE_DNSSEC = 0;
+#endif
 
   // The current implementation assumes these options are set. They normally
   // cannot be overwritten by /etc/resolv.conf

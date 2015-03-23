@@ -45,26 +45,25 @@ class BrowserThreadMessageLoopProxy : public base::MessageLoopProxy {
   }
 
   // MessageLoopProxy implementation.
-  virtual bool PostDelayedTask(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task, base::TimeDelta delay) OVERRIDE {
+  bool PostDelayedTask(const tracked_objects::Location& from_here,
+                       const base::Closure& task,
+                       base::TimeDelta delay) override {
     return BrowserThread::PostDelayedTask(id_, from_here, task, delay);
   }
 
-  virtual bool PostNonNestableDelayedTask(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task,
-      base::TimeDelta delay) OVERRIDE {
+  bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
+                                  const base::Closure& task,
+                                  base::TimeDelta delay) override {
     return BrowserThread::PostNonNestableDelayedTask(id_, from_here, task,
                                                      delay);
   }
 
-  virtual bool RunsTasksOnCurrentThread() const OVERRIDE {
+  bool RunsTasksOnCurrentThread() const override {
     return BrowserThread::CurrentlyOn(id_);
   }
 
  protected:
-  virtual ~BrowserThreadMessageLoopProxy() {}
+  ~BrowserThreadMessageLoopProxy() override {}
 
  private:
   BrowserThread::ID id_;
@@ -406,12 +405,11 @@ static const char* GetThreadName(BrowserThread::ID thread) {
 
 // static
 std::string BrowserThread::GetDCheckCurrentlyOnErrorMessage(ID expected) {
-  const std::string& message_loop_name =
-      base::MessageLoop::current()->thread_name();
+  const base::MessageLoop* message_loop = base::MessageLoop::current();
   ID actual_browser_thread;
   const char* actual_name = "Unknown Thread";
-  if (!message_loop_name.empty()) {
-    actual_name = message_loop_name.c_str();
+  if (message_loop && !message_loop->thread_name().empty()) {
+    actual_name = message_loop->thread_name().c_str();
   } else if (GetCurrentThreadIdentifier(&actual_browser_thread)) {
     actual_name = GetThreadName(actual_browser_thread);
   }

@@ -71,8 +71,8 @@ class VideoCaptureDeviceWin
   // VideoCaptureDevice implementation.
   virtual void AllocateAndStart(
       const VideoCaptureParams& params,
-      scoped_ptr<VideoCaptureDevice::Client> client) OVERRIDE;
-  virtual void StopAndDeAllocate() OVERRIDE;
+      scoped_ptr<VideoCaptureDevice::Client> client) override;
+  virtual void StopAndDeAllocate() override;
 
  private:
   enum InternalState {
@@ -100,10 +100,7 @@ class VideoCaptureDeviceWin
   base::win::ScopedComPtr<IMediaControl> media_control_;
   base::win::ScopedComPtr<IPin> input_sink_pin_;
   base::win::ScopedComPtr<IPin> output_capture_pin_;
-  // Used when using a MJPEG decoder.
-  base::win::ScopedComPtr<IBaseFilter> mjpg_filter_;
-  base::win::ScopedComPtr<IPin> input_mjpg_pin_;
-  base::win::ScopedComPtr<IPin> output_mjpg_pin_;
+
   // Used for WDM devices as specified by |device_name_|. These devices need a
   // WDM Crossbar Filter upstream from the Capture filter.
   base::win::ScopedComPtr<IBaseFilter> crossbar_filter_;

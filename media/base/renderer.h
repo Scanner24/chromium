@@ -6,17 +6,21 @@
 #define MEDIA_BASE_RENDERER_H_
 
 #include "base/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "media/base/buffering_state.h"
+#include "media/base/cdm_context.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
 
 namespace media {
 
-class MediaKeys;
+class DemuxerStreamProvider;
+class VideoFrame;
 
 class MEDIA_EXPORT Renderer {
  public:
+  typedef base::Callback<void(const scoped_refptr<VideoFrame>&)> PaintCB;
   typedef base::Callback<base::TimeDelta()> TimeDeltaCB;
 
   Renderer();
@@ -24,19 +28,33 @@ class MEDIA_EXPORT Renderer {
   // Stops rendering and fires any pending callbacks.
   virtual ~Renderer();
 
-  // Initializes the Renderer, executing |init_cb| upon completion.
-  // If initialization failed, fires |error_cb| before |init_cb|.
+  // Initializes the Renderer with |demuxer_stream_provider|, executing
+  // |init_cb| upon completion.  If initialization fails, only |init_cb| (not
+  // |error_cb|) should be called.  |demuxer_stream_provider| must be valid for
+  // the lifetime of the Renderer object.  |init_cb| must only be run after this
+  // method has returned.  Firing |init_cb| may result in the immediate
+  // destruction of the caller, so it must be run only prior to returning.
   //
   // Permanent callbacks:
   // - |statistics_cb|: Executed periodically with rendering statistics.
-  // - |time_cb|: Executed whenever time has advanced through rendering.
+  // - |buffering_state_cb|: Executed when buffering state is changed.
+  // - |paint_cb|: Executed when there is a VideoFrame ready to paint.  Can be
+  //               ignored if the Renderer handles the painting by itself. Can
+  //               be called from any thread.
   // - |ended_cb|: Executed when rendering has reached the end of stream.
-  // - |error_cb|: Executed if any error was encountered during rendering.
-  virtual void Initialize(const base::Closure& init_cb,
+  // - |error_cb|: Executed if any error was encountered after initialization.
+  virtual void Initialize(DemuxerStreamProvider* demuxer_stream_provider,
+                          const PipelineStatusCB& init_cb,
                           const StatisticsCB& statistics_cb,
+                          const BufferingStateCB& buffering_state_cb,
+                          const PaintCB& paint_cb,
                           const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb,
-                          const BufferingStateCB& buffering_state_cb) = 0;
+                          const PipelineStatusCB& error_cb) = 0;
+
+  // Associates the |cdm_context| with this Renderer for decryption (and
+  // decoding) of media data, then fires |cdm_attached_cb| with the result.
+  virtual void SetCdm(CdmContext* cdm_context,
+                      const CdmAttachedCB& cdm_attached_cb) = 0;
 
   // The following functions must be called after Initialize().
 
@@ -60,9 +78,6 @@ class MEDIA_EXPORT Renderer {
 
   // Returns whether |this| renders video.
   virtual bool HasVideo() = 0;
-
-  // Associates the |cdm| with this Renderer.
-  virtual void SetCdm(MediaKeys* cdm) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Renderer);

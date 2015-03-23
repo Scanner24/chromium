@@ -17,7 +17,6 @@
 #include "content/common/media/media_stream_options.h"
 #include "content/renderer/media/tagged_list.h"
 #include "media/audio/audio_input_device.h"
-#include "media/audio/audio_power_monitor.h"
 #include "media/base/audio_capturer_source.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 
@@ -106,11 +105,9 @@ class CONTENT_EXPORT WebRtcAudioCapturer
   // call Stop()
   void Stop();
 
-  // Called by the WebAudioCapturerSource to get the audio processing params.
-  // This function is triggered by provideInput() on the WebAudio audio thread,
-  // TODO(xians): Remove after moving APM from WebRtc to Chrome.
-  void GetAudioProcessingParams(base::TimeDelta* delay, int* volume,
-                                bool* key_pressed);
+  // Returns the output format.
+  // Called on the main render thread.
+  media::AudioParameters GetOutputFormat() const;
 
   // Used by the unittests to inject their own source to the capturer.
   void SetCapturerSourceForTesting(
@@ -119,7 +116,7 @@ class CONTENT_EXPORT WebRtcAudioCapturer
 
  protected:
   friend class base::RefCountedThreadSafe<WebRtcAudioCapturer>;
-  virtual ~WebRtcAudioCapturer();
+  ~WebRtcAudioCapturer() override;
 
  private:
   class TrackOwner;
@@ -133,11 +130,11 @@ class CONTENT_EXPORT WebRtcAudioCapturer
 
   // AudioCapturerSource::CaptureCallback implementation.
   // Called on the AudioInputDevice audio thread.
-  virtual void Capture(const media::AudioBus* audio_source,
-                       int audio_delay_milliseconds,
-                       double volume,
-                       bool key_pressed) OVERRIDE;
-  virtual void OnCaptureError() OVERRIDE;
+  void Capture(const media::AudioBus* audio_source,
+               int audio_delay_milliseconds,
+               double volume,
+               bool key_pressed) override;
+  void OnCaptureError() override;
 
   // Initializes the default audio capturing source using the provided render
   // view id and device information. Return true if success, otherwise false.
@@ -197,13 +194,6 @@ class CONTENT_EXPORT WebRtcAudioCapturer
   // Flag which affects the buffer size used by the capturer.
   bool peer_connection_mode_;
 
-  // Cache value for the audio processing params.
-  base::TimeDelta audio_delay_;
-  bool key_pressed_;
-
-  // Flag to help deciding if the data needs audio processing.
-  bool need_audio_processing_;
-
   // Raw pointer to the WebRtcAudioDeviceImpl, which is valid for the lifetime
   // of RenderThread.
   WebRtcAudioDeviceImpl* audio_device_;
@@ -216,12 +206,6 @@ class CONTENT_EXPORT WebRtcAudioCapturer
   // guaranteed to exist as long as a WebRtcLocalAudioTrack is connected to this
   // WebRtcAudioCapturer.
   MediaStreamAudioSource* const audio_source_;
-
-    // Audio power monitor for logging audio power level.
-  media::AudioPowerMonitor audio_power_monitor_;
-
-  // Records when the last time audio power level is logged.
-  base::TimeTicks last_audio_level_log_time_;
 
   DISALLOW_COPY_AND_ASSIGN(WebRtcAudioCapturer);
 };

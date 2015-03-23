@@ -20,8 +20,8 @@
 #define NOTIFY_ERROR(error, msg)                         \
   do {                                                   \
     SetState(kError);                                    \
-    DVLOGF(1) << msg;                                    \
-    DVLOGF(1) << "Calling NotifyError(" << error << ")"; \
+    LOG(ERROR) << msg;                                   \
+    LOG(ERROR) << "Calling NotifyError(" << error << ")";\
     NotifyError(error);                                  \
   } while (0)
 
@@ -47,9 +47,10 @@ const size_t kMaxNumReferenceFrames = 4;
 const size_t kNumSurfaces = kMaxNumReferenceFrames + kMinSurfacesToEncode +
                             kMinSurfacesToEncode * (kNumInputBuffers - 1);
 
-// An IDR every 128 frames, an I frame every 30 and no B frames.
-const int kIDRPeriod = 128;
-const int kIPeriod = 30;
+// An IDR every 2048 frames, an I frame every 256 and no B frames.
+// We choose IDR period to equal MaxFrameNum so it must be a power of 2.
+const int kIDRPeriod = 2048;
+const int kIPeriod = 256;
 const int kIPPeriod = 1;
 
 const int kDefaultFramerate = 30;
@@ -113,8 +114,7 @@ VaapiVideoEncodeAccelerator::GetSupportedProfiles() {
     return profiles;
 
   std::vector<media::VideoCodecProfile> hw_profiles =
-      VaapiWrapper::GetSupportedEncodeProfiles(
-          x_display_, base::Bind(&base::DoNothing));
+      VaapiWrapper::GetSupportedEncodeProfiles(base::Bind(&base::DoNothing));
 
   media::VideoEncodeAccelerator::SupportedProfile profile;
   profile.max_resolution.SetSize(1920, 1088);
@@ -132,22 +132,21 @@ static unsigned int Log2OfPowerOf2(unsigned int x) {
   DCHECK_EQ(x & (x - 1), 0u);
 
   int log = 0;
-  while (x) {
+  while (x > 1) {
     x >>= 1;
     ++log;
   }
   return log;
 }
 
-VaapiVideoEncodeAccelerator::VaapiVideoEncodeAccelerator(Display* x_display)
+VaapiVideoEncodeAccelerator::VaapiVideoEncodeAccelerator()
     : profile_(media::VIDEO_CODEC_PROFILE_UNKNOWN),
       mb_width_(0),
       mb_height_(0),
       output_buffer_byte_size_(0),
-      x_display_(x_display),
       state_(kUninitialized),
       frame_num_(0),
-      last_idr_frame_num_(0),
+      idr_pic_id_(0),
       bitrate_(0),
       framerate_(0),
       cpb_size_(0),
@@ -215,17 +214,16 @@ bool VaapiVideoEncodeAccelerator::Initialize(
 
   UpdateRates(initial_bitrate, kDefaultFramerate);
 
-  vaapi_wrapper_ = VaapiWrapper::Create(VaapiWrapper::kEncode,
-                                        output_profile,
-                                        x_display_,
+  vaapi_wrapper_ =
+      VaapiWrapper::CreateForVideoCodec(VaapiWrapper::kEncode, output_profile,
                                         base::Bind(&ReportToUMA, VAAPI_ERROR));
-  if (!vaapi_wrapper_) {
-    DVLOGF(1) << "Failed initializing VAAPI";
+  if (!vaapi_wrapper_.get()) {
+    LOG(ERROR) << "Failed initializing VAAPI";
     return false;
   }
 
   if (!encoder_thread_.Start()) {
-    DVLOGF(1) << "Failed to start encoder thread";
+    LOG(ERROR) << "Failed to start encoder thread";
     return false;
   }
   encoder_thread_proxy_ = encoder_thread_.message_loop_proxy();
@@ -283,19 +281,24 @@ void VaapiVideoEncodeAccelerator::RecycleVASurfaceID(
 void VaapiVideoEncodeAccelerator::BeginFrame(bool force_keyframe) {
   memset(&current_pic_, 0, sizeof(current_pic_));
 
+  // If the current picture is an IDR picture, frame_num shall be equal to 0.
+  if (force_keyframe)
+    frame_num_ = 0;
+
   current_pic_.frame_num = frame_num_++;
   frame_num_ %= idr_period_;
 
-  if (current_pic_.frame_num % i_period_ == 0 || force_keyframe)
+  if (current_pic_.frame_num == 0) {
+    current_pic_.idr = true;
+    // H264 spec mandates idr_pic_id to differ between two consecutive IDRs.
+    idr_pic_id_ ^= 1;
+    ref_pic_list0_.clear();
+  }
+
+  if (current_pic_.frame_num % i_period_ == 0)
     current_pic_.type = media::H264SliceHeader::kISlice;
   else
     current_pic_.type = media::H264SliceHeader::kPSlice;
-
-  if (current_pic_.frame_num % idr_period_ == 0) {
-    current_pic_.idr = true;
-    last_idr_frame_num_ = current_pic_.frame_num;
-    ref_pic_list0_.clear();
-  }
 
   if (current_pic_.type != media::H264SliceHeader::kBSlice)
     current_pic_.ref = true;
@@ -304,8 +307,7 @@ void VaapiVideoEncodeAccelerator::BeginFrame(bool force_keyframe) {
   current_pic_.top_field_order_cnt = current_pic_.pic_order_cnt;
   current_pic_.pic_order_cnt_lsb = current_pic_.pic_order_cnt;
 
-  current_encode_job_->keyframe =
-      (current_pic_.type == media::H264SliceHeader::kISlice);
+  current_encode_job_->keyframe = current_pic_.idr;
 
   DVLOGF(4) << "Starting a new frame, type: " << current_pic_.type
             << (force_keyframe ? " (forced keyframe)" : "")
@@ -427,7 +429,7 @@ bool VaapiVideoEncodeAccelerator::SubmitFrameParameters() {
   slice_param.macroblock_info = VA_INVALID_ID;
   slice_param.slice_type = current_pic_.type;
   slice_param.pic_parameter_set_id = current_pps_.pic_parameter_set_id;
-  slice_param.idr_pic_id = last_idr_frame_num_;
+  slice_param.idr_pic_id = idr_pic_id_;
   slice_param.pic_order_cnt_lsb = current_pic_.pic_order_cnt_lsb;
   slice_param.num_ref_idx_active_override_flag = true;
 
@@ -605,12 +607,12 @@ bool VaapiVideoEncodeAccelerator::PrepareNextJob() {
     return false;
   }
 
-  current_encode_job_->input_surface =
-      new VASurface(available_va_surface_ids_.back(), va_surface_release_cb_);
+  current_encode_job_->input_surface = new VASurface(
+      available_va_surface_ids_.back(), coded_size_, va_surface_release_cb_);
   available_va_surface_ids_.pop_back();
 
-  current_encode_job_->recon_surface =
-      new VASurface(available_va_surface_ids_.back(), va_surface_release_cb_);
+  current_encode_job_->recon_surface = new VASurface(
+      available_va_surface_ids_.back(), coded_size_, va_surface_release_cb_);
   available_va_surface_ids_.pop_back();
 
   // Reference surfaces are needed until the job is done, but they get
@@ -751,6 +753,9 @@ void VaapiVideoEncodeAccelerator::RequestEncodingParametersChangeTask(
     bitrate = 1;
   if (framerate < 1)
     framerate = 1;
+
+  if (bitrate_ == bitrate && framerate_ == framerate)
+    return;
 
   UpdateRates(bitrate, framerate);
 
@@ -967,7 +972,23 @@ void VaapiVideoEncodeAccelerator::GeneratePackedSPS() {
       packed_sps_.AppendBool(current_sps_.low_delay_hrd_flag);
 
     packed_sps_.AppendBool(false);  // pic_struct_present_flag
-    packed_sps_.AppendBool(false);  // bitstream_restriction_flag
+    packed_sps_.AppendBool(true);  // bitstream_restriction_flag
+
+    packed_sps_.AppendBool(false);  // motion_vectors_over_pic_boundaries_flag
+    packed_sps_.AppendUE(2);  // max_bytes_per_pic_denom
+    packed_sps_.AppendUE(1);  // max_bits_per_mb_denom
+    packed_sps_.AppendUE(16);  // log2_max_mv_length_horizontal
+    packed_sps_.AppendUE(16);  // log2_max_mv_length_vertical
+
+    // Explicitly set max_num_reorder_frames to 0 to allow the decoder to
+    // output pictures early.
+    packed_sps_.AppendUE(0);  // max_num_reorder_frames
+
+    // The value of max_dec_frame_buffering shall be greater than or equal to
+    // max_num_ref_frames.
+    const unsigned int max_dec_frame_buffering =
+        current_sps_.max_num_ref_frames;
+    packed_sps_.AppendUE(max_dec_frame_buffering);
   }
 
   packed_sps_.FinishNALU();

@@ -45,7 +45,6 @@
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
@@ -84,7 +83,7 @@ class ExtensionDevToolsClientHost : public content::DevToolsAgentHostClient,
                               const Debuggee& debuggee,
                               infobars::InfoBar* infobar);
 
-  virtual ~ExtensionDevToolsClientHost();
+  ~ExtensionDevToolsClientHost() override;
 
   const std::string& extension_id() { return extension_id_; }
   DevToolsAgentHost* agent_host() { return agent_host_.get(); }
@@ -97,26 +96,23 @@ class ExtensionDevToolsClientHost : public content::DevToolsAgentHostClient,
   void MarkAsDismissed();
 
   // DevToolsAgentHostClient interface.
-  virtual void AgentHostClosed(
-      DevToolsAgentHost* agent_host,
-      bool replaced_with_another_client) OVERRIDE;
-  virtual void DispatchProtocolMessage(
-      DevToolsAgentHost* agent_host,
-      const std::string& message) OVERRIDE;
+  void AgentHostClosed(DevToolsAgentHost* agent_host,
+                       bool replaced_with_another_client) override;
+  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
+                               const std::string& message) override;
 
  private:
   void SendDetachedEvent();
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
 
   Profile* profile_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
@@ -171,16 +167,15 @@ class ExtensionDevToolsInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   explicit ExtensionDevToolsInfoBarDelegate(const std::string& client_name);
-  virtual ~ExtensionDevToolsInfoBarDelegate();
+  ~ExtensionDevToolsInfoBarDelegate() override;
 
   // ConfirmInfoBarDelegate:
-  virtual void InfoBarDismissed() OVERRIDE;
-  virtual Type GetInfoBarType() const OVERRIDE;
-  virtual bool ShouldExpireInternal(
-      const NavigationDetails& details) const OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual int GetButtons() const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
+  void InfoBarDismissed() override;
+  Type GetInfoBarType() const override;
+  bool ShouldExpireInternal(const NavigationDetails& details) const override;
+  base::string16 GetMessageText() const override;
+  int GetButtons() const override;
+  bool Cancel() override;
 
   std::string client_name_;
   ExtensionDevToolsClientHost* client_host_;
@@ -200,8 +195,8 @@ infobars::InfoBar* ExtensionDevToolsInfoBarDelegate::Create(
   if (!infobar_service)
     return NULL;
 
-  return infobar_service->AddInfoBar(ConfirmInfoBarDelegate::CreateInfoBar(
-      scoped_ptr<ConfirmInfoBarDelegate>(
+  return infobar_service->AddInfoBar(
+      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
           new ExtensionDevToolsInfoBarDelegate(client_name))));
 }
 
@@ -520,8 +515,7 @@ bool DebuggerFunction::InitAgentHost() {
     }
   } else if (debuggee_.extension_id) {
     ExtensionHost* extension_host =
-        ExtensionSystem::Get(GetProfile())
-            ->process_manager()
+        ProcessManager::Get(GetProfile())
             ->GetBackgroundHostForExtension(*debuggee_.extension_id);
     if (extension_host) {
       if (PermissionsData::IsRestrictedUrl(extension_host->GetURL(),
@@ -535,6 +529,15 @@ bool DebuggerFunction::InitAgentHost() {
     }
   } else if (debuggee_.target_id) {
     agent_host_ = DevToolsAgentHost::GetForId(*debuggee_.target_id);
+    if (agent_host_.get()) {
+      if (PermissionsData::IsRestrictedUrl(agent_host_->GetURL(),
+                                           agent_host_->GetURL(),
+                                           extension(),
+                                           &error_)) {
+        agent_host_ = nullptr;
+        return false;
+      }
+    }
   } else {
     error_ = keys::kInvalidTargetError;
     return false;
@@ -592,8 +595,8 @@ bool DebuggerAttachFunction::RunAsync() {
   }
 
   infobars::InfoBar* infobar = NULL;
-  if (!CommandLine::ForCurrentProcess()->
-       HasSwitch(::switches::kSilentDebuggerExtensionAPI)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          ::switches::kSilentDebuggerExtensionAPI)) {
     // Do not attach to the target if for any reason the infobar cannot be shown
     // for this WebContents instance.
     infobar = ExtensionDevToolsInfoBarDelegate::Create(

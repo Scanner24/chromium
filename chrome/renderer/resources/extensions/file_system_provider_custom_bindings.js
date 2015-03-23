@@ -74,8 +74,8 @@ function annotateMetadata(metadata) {
 
 /**
  * Massages arguments of an event raised by the File System Provider API.
- * @param {Array.<*>} args Input arguments.
- * @param {function(Array.<*>)} dispatch Closure to be called with massaged
+ * @param {Array<*>} args Input arguments.
+ * @param {function(Array<*>)} dispatch Closure to be called with massaged
  *     arguments.
  */
 function massageArgumentsDefault(args, dispatch) {
@@ -93,74 +93,6 @@ function massageArgumentsDefault(args, dispatch) {
   dispatch([options, onSuccessCallback, onErrorCallback]);
 }
 
-
-binding.registerCustomHook(function(bindingsAPI) {
-  var apiFunctions = bindingsAPI.apiFunctions;
-
-  apiFunctions.setUpdateArgumentsPostValidate(
-    'mount',
-    function(options, successCallback, errorCallback) {
-      // Piggyback the error callback onto the success callback,
-      // so we can use the error callback later.
-      successCallback.errorCallback_ = errorCallback;
-      return [options, successCallback];
-    });
-
-  apiFunctions.setCustomCallback(
-    'mount',
-    function(name, request, response) {
-      var domError = null;
-      if (request.callback && response) {
-        // DOMError is present only if mount() failed.
-        if (response[0]) {
-          // Convert a Dictionary to a DOMError.
-          domError = GetDOMError(response[0].name, response[0].message);
-          response.length = 1;
-        }
-
-        var successCallback = request.callback;
-        var errorCallback = request.callback.errorCallback_;
-        delete request.callback;
-
-        if (domError)
-          errorCallback(domError);
-        else
-          successCallback();
-      }
-    });
-
-  apiFunctions.setUpdateArgumentsPostValidate(
-    'unmount',
-    function(options, successCallback, errorCallback) {
-      // Piggyback the error callback onto the success callback,
-      // so we can use the error callback later.
-      successCallback.errorCallback_ = errorCallback;
-      return [options, successCallback];
-    });
-
-  apiFunctions.setCustomCallback(
-    'unmount',
-    function(name, request, response) {
-      var domError = null;
-      if (request.callback) {
-        // DOMError is present only if mount() failed.
-        if (response && response[0]) {
-          // Convert a Dictionary to a DOMError.
-          domError = GetDOMError(response[0].name, response[0].message);
-          response.length = 1;
-        }
-
-        var successCallback = request.callback;
-        var errorCallback = request.callback.errorCallback_;
-        delete request.callback;
-
-        if (domError)
-          errorCallback(domError);
-        else
-          successCallback();
-      }
-    });
-});
 
 eventBindings.registerArgumentMassager(
     'fileSystemProvider.onUnmountRequested',
@@ -307,6 +239,22 @@ eventBindings.registerArgumentMassager(
 
 eventBindings.registerArgumentMassager(
     'fileSystemProvider.onAbortRequested',
+    massageArgumentsDefault);
+
+eventBindings.registerArgumentMassager(
+    'fileSystemProvider.onObserveDirectoryRequested',
+    massageArgumentsDefault);
+
+eventBindings.registerArgumentMassager(
+    'fileSystemProvider.onUnobserveEntryRequested',
+    massageArgumentsDefault);
+
+eventBindings.registerArgumentMassager(
+    'fileSystemProvider.onAddWatcherRequested',
+    massageArgumentsDefault);
+
+eventBindings.registerArgumentMassager(
+    'fileSystemProvider.onRemoveWatcherRequested',
     massageArgumentsDefault);
 
 exports.binding = binding.generate();

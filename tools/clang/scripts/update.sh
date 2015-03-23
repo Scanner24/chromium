@@ -8,7 +8,7 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=217949
+CLANG_REVISION=223108
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
@@ -22,19 +22,14 @@ LIBCXX_DIR="${LLVM_DIR}/projects/libcxx"
 LIBCXXABI_DIR="${LLVM_DIR}/projects/libcxxabi"
 ANDROID_NDK_DIR="${THIS_DIR}/../../../third_party/android_tools/ndk"
 STAMP_FILE="${LLVM_DIR}/../llvm-build/cr_build_revision"
+CHROMIUM_TOOLS_DIR="${THIS_DIR}/.."
 
+ABS_CHROMIUM_TOOLS_DIR="${PWD}/${CHROMIUM_TOOLS_DIR}"
 ABS_LIBCXX_DIR="${PWD}/${LIBCXX_DIR}"
 ABS_LIBCXXABI_DIR="${PWD}/${LIBCXXABI_DIR}"
 ABS_LLVM_DIR="${PWD}/${LLVM_DIR}"
 ABS_LLVM_BUILD_DIR="${PWD}/${LLVM_BUILD_DIR}"
 ABS_COMPILER_RT_DIR="${PWD}/${COMPILER_RT_DIR}"
-
-
-# Use both the clang revision and the plugin revisions to test for updates.
-BLINKGCPLUGIN_REVISION=\
-$(grep 'set(LIBRARYNAME' "$THIS_DIR"/../blink_gc_plugin/CMakeLists.txt \
-    | cut -d ' ' -f 2 | tr -cd '[0-9]')
-CLANG_AND_PLUGINS_REVISION="${CLANG_REVISION}-${BLINKGCPLUGIN_REVISION}"
 
 # ${A:-a} returns $A if it's set, a else.
 LLVM_REPO_URL=${LLVM_URL:-https://llvm.org/svn/llvm-project}
@@ -50,6 +45,21 @@ fi
 # Die if any command dies, error on undefined variable expansions.
 set -eu
 
+
+if [[ -n ${LLVM_FORCE_HEAD_REVISION:-''} ]]; then
+  # Use a real version number rather than HEAD to make sure that
+  # --print-revision, stamp file logic, etc. all works naturally.
+  CLANG_REVISION=$(svn info "$LLVM_REPO_URL" \
+      | grep 'Last Changed Rev' | awk '{ printf $4; }')
+fi
+
+# Use both the clang revision and the plugin revisions to test for updates.
+BLINKGCPLUGIN_REVISION=\
+$(grep 'set(LIBRARYNAME' "$THIS_DIR"/../blink_gc_plugin/CMakeLists.txt \
+    | cut -d ' ' -f 2 | tr -cd '[0-9]')
+CLANG_AND_PLUGINS_REVISION="${CLANG_REVISION}-${BLINKGCPLUGIN_REVISION}"
+
+
 OS="$(uname -s)"
 
 # Parse command line options.
@@ -60,6 +70,7 @@ bootstrap=
 with_android=yes
 chrome_tools="plugins;blink_gc_plugin"
 gcc_toolchain=
+with_patches=yes
 
 if [[ "${OS}" = "Darwin" ]]; then
   with_android=
@@ -85,6 +96,9 @@ while [[ $# > 0 ]]; do
       ;;
     --without-android)
       with_android=
+      ;;
+    --without-patches)
+      with_patches=
       ;;
     --with-chrome-tools)
       shift
@@ -123,6 +137,7 @@ while [[ $# > 0 ]]; do
       echo "--gcc-toolchain: Set the prefix for which GCC version should"
       echo "    be used for building. For example, to use gcc in"
       echo "    /opt/foo/bin/gcc, use '--gcc-toolchain '/opt/foo"
+      echo "--without-patches: Don't apply local patches."
       echo
       exit 1
       ;;
@@ -134,6 +149,20 @@ while [[ $# > 0 ]]; do
   esac
   shift
 done
+
+if [[ -n ${LLVM_FORCE_HEAD_REVISION:-''} ]]; then
+  force_local_build=yes
+
+  # Skip local patches when using HEAD: they probably don't apply anymore.
+  with_patches=
+
+  if ! [[ "$GYP_DEFINES" =~ .*OS=android.* ]]; then
+    # Only build the Android ASan rt when targetting Android.
+    with_android=
+  fi
+
+  echo "LLVM_FORCE_HEAD_REVISION was set; using r${CLANG_REVISION}"
+fi
 
 if [[ -n "$if_needed" ]]; then
   if [[ "${OS}" == "Darwin" ]]; then
@@ -233,11 +262,31 @@ for i in \
       "${CLANG_DIR}/unittests/libclang/LibclangTest.cpp" \
       "${COMPILER_RT_DIR}/lib/asan/asan_rtl.cc" \
       "${COMPILER_RT_DIR}/test/asan/TestCases/Linux/new_array_cookie_test.cc" \
+      "${LLVM_DIR}/test/DebugInfo/gmlt.ll" \
+      "${LLVM_DIR}/lib/CodeGen/SpillPlacement.cpp" \
+      "${LLVM_DIR}/lib/CodeGen/SpillPlacement.h" \
+      "${LLVM_DIR}/lib/Transforms/Instrumentation/MemorySanitizer.cpp" \
+      "${CLANG_DIR}/test/Driver/env.c" \
+      "${CLANG_DIR}/lib/Frontend/InitPreprocessor.cpp" \
+      "${CLANG_DIR}/test/Frontend/exceptions.c" \
+      "${CLANG_DIR}/test/Preprocessor/predefined-exceptions.m" \
+      "${LLVM_DIR}/test/Bindings/Go/go.test" \
+      "${CLANG_DIR}/lib/Parse/ParseExpr.cpp" \
+      "${CLANG_DIR}/lib/Parse/ParseTemplate.cpp" \
+      "${CLANG_DIR}/lib/Sema/SemaDeclCXX.cpp" \
+      "${CLANG_DIR}/lib/Sema/SemaExprCXX.cpp" \
+      "${CLANG_DIR}/test/SemaCXX/default2.cpp" \
+      "${CLANG_DIR}/test/SemaCXX/typo-correction-delayed.cpp" \
       ; do
   if [[ -e "${i}" ]]; then
+    rm -f "${i}"  # For unversioned files.
     svn revert "${i}"
   fi;
 done
+
+echo Remove the Clang tools shim dir
+CHROME_TOOLS_SHIM_DIR=${ABS_LLVM_DIR}/tools/chrometools
+rm -rfv ${CHROME_TOOLS_SHIM_DIR}
 
 echo Getting LLVM r"${CLANG_REVISION}" in "${LLVM_DIR}"
 if ! svn co --force "${LLVM_REPO_URL}/llvm/trunk@${CLANG_REVISION}" \
@@ -274,9 +323,11 @@ if [ "${OS}" = "Darwin" ]; then
                  "${LIBCXXABI_DIR}"
 fi
 
-# Apply patch for tests failing with --disable-pthreads (llvm.org/PR11974)
-pushd "${CLANG_DIR}"
-cat << 'EOF' |
+if [[ -n "$with_patches" ]]; then
+
+  # Apply patch for tests failing with --disable-pthreads (llvm.org/PR11974)
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
 --- third_party/llvm/tools/clang/test/Index/crash-recovery-modules.m	(revision 202554)
 +++ third_party/llvm/tools/clang/test/Index/crash-recovery-modules.m	(working copy)
 @@ -12,6 +12,8 @@
@@ -305,8 +356,369 @@ cat << 'EOF' |
    const char *HeaderBottom = "\n};\n#endif\n";
    const char *MFile = "#include \"HeaderFile.h\"\nint main() {"
 EOF
-patch -p0
-popd
+  patch -p0
+  popd
+
+  # Apply r223211: "Revert r222997."
+  pushd "${LLVM_DIR}"
+  cat << 'EOF' |
+--- a/lib/Transforms/Instrumentation/MemorySanitizer.cpp
++++ b/lib/Transforms/Instrumentation/MemorySanitizer.cpp
+@@ -921,8 +921,6 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
+             Value *OriginPtr =
+                 getOriginPtrForArgument(&FArg, EntryIRB, ArgOffset);
+             setOrigin(A, EntryIRB.CreateLoad(OriginPtr));
+-          } else {
+-            setOrigin(A, getCleanOrigin());
+           }
+         }
+         ArgOffset += RoundUpToAlignment(Size, kShadowTLSAlignment);
+@@ -942,13 +940,15 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
+   /// \brief Get the origin for a value.
+   Value *getOrigin(Value *V) {
+     if (!MS.TrackOrigins) return nullptr;
+-    if (!PropagateShadow) return getCleanOrigin();
+-    if (isa<Constant>(V)) return getCleanOrigin();
+-    assert((isa<Instruction>(V) || isa<Argument>(V)) &&
+-           "Unexpected value type in getOrigin()");
+-    Value *Origin = OriginMap[V];
+-    assert(Origin && "Missing origin");
+-    return Origin;
++    if (isa<Instruction>(V) || isa<Argument>(V)) {
++      Value *Origin = OriginMap[V];
++      if (!Origin) {
++        DEBUG(dbgs() << "NO ORIGIN: " << *V << "\n");
++        Origin = getCleanOrigin();
++      }
++      return Origin;
++    }
++    return getCleanOrigin();
+   }
+ 
+   /// \brief Get the origin for i-th argument of the instruction I.
+@@ -1088,7 +1088,6 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
+     IRB.CreateStore(getCleanShadow(&I), ShadowPtr);
+ 
+     setShadow(&I, getCleanShadow(&I));
+-    setOrigin(&I, getCleanOrigin());
+   }
+ 
+   void visitAtomicRMWInst(AtomicRMWInst &I) {
+EOF
+  patch -p1
+  popd
+
+  # Apply r223219: "Preserve LD_LIBRARY_PATH when using the 'env' command"
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/test/Driver/env.c
++++ b/test/Driver/env.c
+@@ -5,12 +5,14 @@
+ // REQUIRES: shell
+ //
+ // The PATH variable is heavily used when trying to find a linker.
+-// RUN: env -i LC_ALL=C %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
++// RUN: env -i LC_ALL=C LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
++// RUN:   %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
+ // RUN:     --target=i386-unknown-linux \
+ // RUN:     --sysroot=%S/Inputs/basic_linux_tree \
+ // RUN:   | FileCheck --check-prefix=CHECK-LD-32 %s
+ //
+-// RUN: env -i LC_ALL=C PATH="" %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
++// RUN: env -i LC_ALL=C PATH="" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
++// RUN:   %clang -no-canonical-prefixes %s -### -o %t.o 2>&1 \
+ // RUN:     --target=i386-unknown-linux \
+ // RUN:     --sysroot=%S/Inputs/basic_linux_tree \
+ // RUN:   | FileCheck --check-prefix=CHECK-LD-32 %s
+EOF
+  patch -p1
+  popd
+
+  # Revert r220714: "Frontend: Define __EXCEPTIONS if -fexceptions is passed"
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/lib/Frontend/InitPreprocessor.cpp
++++ b/lib/Frontend/InitPreprocessor.cpp
+@@ -566,7 +566,7 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
+     Builder.defineMacro("__BLOCKS__");
+   }
+ 
+-  if (!LangOpts.MSVCCompat && LangOpts.Exceptions)
++  if (!LangOpts.MSVCCompat && LangOpts.CXXExceptions)
+     Builder.defineMacro("__EXCEPTIONS");
+   if (!LangOpts.MSVCCompat && LangOpts.RTTI)
+     Builder.defineMacro("__GXX_RTTI");
+diff --git a/test/Frontend/exceptions.c b/test/Frontend/exceptions.c
+index 981b5b9..4bbaaa3 100644
+--- a/test/Frontend/exceptions.c
++++ b/test/Frontend/exceptions.c
+@@ -1,9 +1,6 @@
+-// RUN: %clang_cc1 -fms-compatibility -fexceptions -fcxx-exceptions -DMS_MODE -verify %s
++// RUN: %clang_cc1 -fms-compatibility -fexceptions -fcxx-exceptions -verify %s
+ // expected-no-diagnostics
+ 
+-// RUN: %clang_cc1 -fms-compatibility -fexceptions -verify %s
+-// expected-no-diagnostics
+-
+-#if defined(MS_MODE) && defined(__EXCEPTIONS)
++#if defined(__EXCEPTIONS)
+ #error __EXCEPTIONS should not be defined.
+ #endif
+diff --git a/test/Preprocessor/predefined-exceptions.m b/test/Preprocessor/predefined-exceptions.m
+index 0791075..c13f429 100644
+--- a/test/Preprocessor/predefined-exceptions.m
++++ b/test/Preprocessor/predefined-exceptions.m
+@@ -1,6 +1,6 @@
+ // RUN: %clang_cc1 -x objective-c -fobjc-exceptions -fexceptions -E -dM %s | FileCheck -check-prefix=CHECK-OBJC-NOCXX %s 
+ // CHECK-OBJC-NOCXX: #define OBJC_ZEROCOST_EXCEPTIONS 1
+-// CHECK-OBJC-NOCXX: #define __EXCEPTIONS 1
++// CHECK-OBJC-NOCXX-NOT: #define __EXCEPTIONS 1
+ 
+ // RUN: %clang_cc1 -x objective-c++ -fobjc-exceptions -fexceptions -fcxx-exceptions -E -dM %s | FileCheck -check-prefix=CHECK-OBJC-CXX %s 
+ // CHECK-OBJC-CXX: #define OBJC_ZEROCOST_EXCEPTIONS 1
+EOF
+  patch -p1
+  popd
+
+  # Apply r223177: "Ensure typos in the default values of template parameters get diagnosed."
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/lib/Parse/ParseTemplate.cpp
++++ b/lib/Parse/ParseTemplate.cpp
+@@ -676,7 +676,7 @@ Parser::ParseNonTypeTemplateParameter(unsigned Depth, unsigned Position) {
+     GreaterThanIsOperatorScope G(GreaterThanIsOperator, false);
+     EnterExpressionEvaluationContext Unevaluated(Actions, Sema::Unevaluated);
+ 
+-    DefaultArg = ParseAssignmentExpression();
++    DefaultArg = Actions.CorrectDelayedTyposInExpr(ParseAssignmentExpression());
+     if (DefaultArg.isInvalid())
+       SkipUntil(tok::comma, tok::greater, StopAtSemi | StopBeforeMatch);
+   }
+diff --git a/test/SemaCXX/default2.cpp b/test/SemaCXX/default2.cpp
+index 1626044..c4d40b4 100644
+--- a/test/SemaCXX/default2.cpp
++++ b/test/SemaCXX/default2.cpp
+@@ -122,3 +122,9 @@ class XX {
+   void A(int length = -1 ) {  } 
+   void B() { A(); }
+ };
++
++template <int I = (1 * I)> struct S {};  // expected-error-re {{use of undeclared identifier 'I'{{$}}}}
++S<1> s;
++
++template <int I1 = I2, int I2 = 1> struct T {};  // expected-error-re {{use of undeclared identifier 'I2'{{$}}}}
++T<0, 1> t;
+diff --git a/test/SemaCXX/typo-correction-delayed.cpp b/test/SemaCXX/typo-correction-delayed.cpp
+index bff1d76..7bf9258 100644
+--- a/test/SemaCXX/typo-correction-delayed.cpp
++++ b/test/SemaCXX/typo-correction-delayed.cpp
+@@ -102,3 +102,7 @@ void f(int *i) {
+   __atomic_load(i, i, something_something);  // expected-error-re {{use of undeclared identifier 'something_something'{{$}}}}
+ }
+ }
++
++const int DefaultArg = 9;  // expected-note {{'DefaultArg' declared here}}
++template <int I = defaultArg> struct S {};  // expected-error {{use of undeclared identifier 'defaultArg'; did you mean 'DefaultArg'?}}
++S<1> s;
+EOF
+  patch -p1
+  popd
+
+  # Apply r223209: "Handle delayed corrections in a couple more error paths in ParsePostfixExpressionSuffix."
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/lib/Parse/ParseExpr.cpp
++++ b/lib/Parse/ParseExpr.cpp
+@@ -1390,6 +1390,7 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
+         SourceLocation OpenLoc = ConsumeToken();
+ 
+         if (ParseSimpleExpressionList(ExecConfigExprs, ExecConfigCommaLocs)) {
++          (void)Actions.CorrectDelayedTyposInExpr(LHS);
+           LHS = ExprError();
+         }
+ 
+@@ -1440,6 +1441,7 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
+         if (Tok.isNot(tok::r_paren)) {
+           if (ParseExpressionList(ArgExprs, CommaLocs, &Sema::CodeCompleteCall,
+                                   LHS.get())) {
++            (void)Actions.CorrectDelayedTyposInExpr(LHS);
+             LHS = ExprError();
+           }
+         }
+diff --git a/test/SemaCXX/typo-correction-delayed.cpp b/test/SemaCXX/typo-correction-delayed.cpp
+index 7bf9258..f7ef015 100644
+--- a/test/SemaCXX/typo-correction-delayed.cpp
++++ b/test/SemaCXX/typo-correction-delayed.cpp
+@@ -106,3 +106,9 @@ void f(int *i) {
+ const int DefaultArg = 9;  // expected-note {{'DefaultArg' declared here}}
+ template <int I = defaultArg> struct S {};  // expected-error {{use of undeclared identifier 'defaultArg'; did you mean 'DefaultArg'?}}
+ S<1> s;
++
++namespace foo {}
++void test_paren_suffix() {
++  foo::bar({5, 6});  // expected-error-re {{no member named 'bar' in namespace 'foo'{{$}}}} \
++                     // expected-error {{expected expression}}
++}
+EOF
+  patch -p1
+  popd
+
+  # Apply r223705: "Handle possible TypoExprs in member initializers."
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/lib/Sema/SemaDeclCXX.cpp
++++ b/lib/Sema/SemaDeclCXX.cpp
+@@ -2813,6 +2813,11 @@ Sema::BuildMemInitializer(Decl *ConstructorD,
+                           SourceLocation IdLoc,
+                           Expr *Init,
+                           SourceLocation EllipsisLoc) {
++  ExprResult Res = CorrectDelayedTyposInExpr(Init);
++  if (!Res.isUsable())
++    return true;
++  Init = Res.get();
++
+   if (!ConstructorD)
+     return true;
+ 
+diff --git a/test/SemaCXX/typo-correction-delayed.cpp b/test/SemaCXX/typo-correction-delayed.cpp
+index f7ef015..d303b58 100644
+--- a/test/SemaCXX/typo-correction-delayed.cpp
++++ b/test/SemaCXX/typo-correction-delayed.cpp
+@@ -112,3 +112,10 @@ void test_paren_suffix() {
+   foo::bar({5, 6});  // expected-error-re {{no member named 'bar' in namespace 'foo'{{$}}}} \
+                      // expected-error {{expected expression}}
+ }
++
++const int kNum = 10;  // expected-note {{'kNum' declared here}}
++class SomeClass {
++  int Kind;
++public:
++  explicit SomeClass() : Kind(kSum) {}  // expected-error {{use of undeclared identifier 'kSum'; did you mean 'kNum'?}}
++};
+EOF
+  patch -p1
+  popd
+
+  # Apply r224172: "Typo correction: Ignore temporary binding exprs after overload resolution"
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/lib/Sema/SemaExprCXX.cpp
++++ b/lib/Sema/SemaExprCXX.cpp
+@@ -6105,8 +6105,13 @@ public:
+     auto Result = BaseTransform::RebuildCallExpr(Callee, LParenLoc, Args,
+                                                  RParenLoc, ExecConfig);
+     if (auto *OE = dyn_cast<OverloadExpr>(Callee)) {
+-      if (!Result.isInvalid() && Result.get())
+-        OverloadResolution[OE] = cast<CallExpr>(Result.get())->getCallee();
++      if (!Result.isInvalid() && Result.get()) {
++        Expr *ResultCall = Result.get();
++        if (auto *BE = dyn_cast<CXXBindTemporaryExpr>(ResultCall))
++          ResultCall = BE->getSubExpr();
++        if (auto *CE = dyn_cast<CallExpr>(ResultCall))
++          OverloadResolution[OE] = CE->getCallee();
++      }
+     }
+     return Result;
+   }
+diff --git a/test/SemaCXX/typo-correction-delayed.cpp b/test/SemaCXX/typo-correction-delayed.cpp
+index d303b58..d42888f 100644
+--- a/test/SemaCXX/typo-correction-delayed.cpp
++++ b/test/SemaCXX/typo-correction-delayed.cpp
+@@ -119,3 +119,23 @@ class SomeClass {
+ public:
+   explicit SomeClass() : Kind(kSum) {}  // expected-error {{use of undeclared identifier 'kSum'; did you mean 'kNum'?}}
+ };
++
++extern "C" int printf(const char *, ...);
++
++// There used to be an issue with typo resolution inside overloads.
++struct AssertionResult {
++  ~AssertionResult();
++  operator bool();
++  int val;
++};
++AssertionResult Compare(const char *a, const char *b);
++AssertionResult Compare(int a, int b);
++int main() {
++  // expected-note@+1 {{'result' declared here}}
++  const char *result;
++  // expected-error@+1 {{use of undeclared identifier 'resulta'; did you mean 'result'?}}
++  if (AssertionResult ar = (Compare("value1", resulta)))
++    ;
++  else
++    printf("ar: %d\n", ar.val);
++}
+EOF
+  patch -p1
+  popd
+
+  # Apply r224173: "Implement feedback on r224172 in PR21899"
+  pushd "${CLANG_DIR}"
+  cat << 'EOF' |
+--- a/lib/Sema/SemaExprCXX.cpp
++++ b/lib/Sema/SemaExprCXX.cpp
+@@ -6105,7 +6105,7 @@ public:
+     auto Result = BaseTransform::RebuildCallExpr(Callee, LParenLoc, Args,
+                                                  RParenLoc, ExecConfig);
+     if (auto *OE = dyn_cast<OverloadExpr>(Callee)) {
+-      if (!Result.isInvalid() && Result.get()) {
++      if (Result.isUsable()) {
+         Expr *ResultCall = Result.get();
+         if (auto *BE = dyn_cast<CXXBindTemporaryExpr>(ResultCall))
+           ResultCall = BE->getSubExpr();
+diff --git a/test/SemaCXX/typo-correction-delayed.cpp b/test/SemaCXX/typo-correction-delayed.cpp
+index d42888f..7879d29 100644
+--- a/test/SemaCXX/typo-correction-delayed.cpp
++++ b/test/SemaCXX/typo-correction-delayed.cpp
+@@ -120,22 +120,13 @@ public:
+   explicit SomeClass() : Kind(kSum) {}  // expected-error {{use of undeclared identifier 'kSum'; did you mean 'kNum'?}}
+ };
+ 
+-extern "C" int printf(const char *, ...);
+-
+ // There used to be an issue with typo resolution inside overloads.
+-struct AssertionResult {
+-  ~AssertionResult();
+-  operator bool();
+-  int val;
+-};
+-AssertionResult Compare(const char *a, const char *b);
+-AssertionResult Compare(int a, int b);
+-int main() {
++struct AssertionResult { ~AssertionResult(); };
++AssertionResult Overload(const char *a);
++AssertionResult Overload(int a);
++void UseOverload() {
+   // expected-note@+1 {{'result' declared here}}
+   const char *result;
+   // expected-error@+1 {{use of undeclared identifier 'resulta'; did you mean 'result'?}}
+-  if (AssertionResult ar = (Compare("value1", resulta)))
+-    ;
+-  else
+-    printf("ar: %d\n", ar.val);
++  Overload(resulta);
+ }
+EOF
+  patch -p1
+  popd
+
+  # This Go bindings test doesn't work after the bootstrap build on Linux. (PR21552)
+  pushd "${LLVM_DIR}"
+  cat << 'EOF' |
+Index: test/Bindings/Go/go.test
+===================================================================
+--- test/Bindings/Go/go.test    (revision 223109)
++++ test/Bindings/Go/go.test    (working copy)
+@@ -1,3 +1,3 @@
+-; RUN: llvm-go test llvm.org/llvm/bindings/go/llvm
++; RUN: true
+ 
+ ; REQUIRES: shell
+EOF
+  patch -p0
+  popd
+
+fi
 
 # Echo all commands.
 set -x
@@ -430,6 +842,20 @@ if [ "${OS}" = "Darwin" ]; then
   LDFLAGS+="-stdlib=libc++ -L${PWD}/libcxxbuild"
 fi
 
+# Hook the Chromium tools into the LLVM build. Several Chromium tools have
+# dependencies on LLVM/Clang libraries. The LLVM build detects implicit tools
+# in the tools subdirectory, so install a shim CMakeLists.txt that forwards to
+# the real directory for the Chromium tools.
+# Note that the shim directory name intentionally has no _ or _. The implicit
+# tool detection logic munges them in a weird way.
+mkdir -v ${CHROME_TOOLS_SHIM_DIR}
+cat > ${CHROME_TOOLS_SHIM_DIR}/CMakeLists.txt << EOF
+# Since tools/clang isn't actually a subdirectory, use the two argument version
+# to specify where build artifacts go. CMake doesn't allow reusing the same
+# binary dir for multiple source dirs, so the build artifacts have to go into a
+# subdirectory...
+add_subdirectory(\${CHROMIUM_TOOLS_SRC} \${CMAKE_CURRENT_BINARY_DIR}/a)
+EOF
 rm -fv CMakeCache.txt
 MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -442,6 +868,9 @@ MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja \
     -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
     -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
     -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_INSTALL_PREFIX="${ABS_LLVM_BUILD_DIR}" \
+    -DCHROMIUM_TOOLS_SRC="${ABS_CHROMIUM_TOOLS_DIR}" \
+    -DCHROMIUM_TOOLS="${chrome_tools}" \
     "${ABS_LLVM_DIR}"
 env
 
@@ -452,6 +881,10 @@ if [[ -n "${gcc_toolchain}" ]]; then
 fi
 
 ninja
+# If any Chromium tools were built, install those now.
+if [[ -n "${chrome_tools}" ]]; then
+  ninja cr-install
+fi
 
 STRIP_FLAGS=
 if [ "${OS}" = "Darwin" ]; then
@@ -500,7 +933,8 @@ if [[ -n "${with_android}" ]]; then
       --platform=android-14 \
       --install-dir="${LLVM_BUILD_DIR}/android-toolchain" \
       --system=linux-x86_64 \
-      --stl=stlport
+      --stl=stlport \
+      --toolchain=arm-linux-androideabi-4.9
 
   # Android NDK r9d copies a broken unwind.h into the toolchain, see
   # http://crbug.com/357890
@@ -521,41 +955,16 @@ if [[ -n "${with_android}" ]]; then
       -DCMAKE_CXX_FLAGS="--target=arm-linux-androideabi --sysroot=${PWD}/../android-toolchain/sysroot -B${PWD}/../android-toolchain" \
       -DANDROID=1 \
       "${ABS_COMPILER_RT_DIR}"
-  ninja clang_rt.asan-arm-android
+  ninja libclang_rt.asan-arm-android.so
 
   # And copy it into the main build tree.
   cp "$(find -name libclang_rt.asan-arm-android.so)" "${ABS_LLVM_CLANG_LIB_DIR}/lib/linux/"
   popd
 fi
 
-# Build Chrome-specific clang tools. Paths in this list should be relative to
-# tools/clang.
-TOOL_SRC_DIR="${PWD}/${THIS_DIR}/../"
-TOOL_BUILD_DIR="${ABS_LLVM_BUILD_DIR}/tools/clang/tools/chrome-extras"
-
-rm -rf "${TOOL_BUILD_DIR}"
-mkdir -p "${TOOL_BUILD_DIR}"
-pushd "${TOOL_BUILD_DIR}"
-rm -fv CMakeCache.txt
-MACOSX_DEPLOYMENT_TARGET=${deployment_target} cmake -GNinja  \
-    -DLLVM_BUILD_DIR="${ABS_LLVM_BUILD_DIR}" \
-    -DLLVM_SRC_DIR="${ABS_LLVM_DIR}" \
-    -DCMAKE_C_COMPILER="${CC}" \
-    -DCMAKE_CXX_COMPILER="${CXX}" \
-    -DCMAKE_C_FLAGS="${CFLAGS}" \
-    -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
-    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
-    -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
-    -DCMAKE_INSTALL_PREFIX="${ABS_LLVM_BUILD_DIR}" \
-    -DCHROMIUM_TOOLS="${chrome_tools}" \
-    "${TOOL_SRC_DIR}"
-popd
-ninja -C "${TOOL_BUILD_DIR}" install
-
 if [[ -n "$run_tests" ]]; then
   # Run Chrome tool tests.
-  ninja -C "${TOOL_BUILD_DIR}" check-all
+  ninja -C "${LLVM_BUILD_DIR}" cr-check-all
   # Run the LLVM and Clang tests.
   ninja -C "${LLVM_BUILD_DIR}" check-all
 fi

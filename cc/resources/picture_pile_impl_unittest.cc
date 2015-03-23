@@ -4,14 +4,13 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "cc/test/fake_picture_pile_impl.h"
-#include "cc/test/fake_rendering_stats_instrumentation.h"
 #include "cc/test/skia_common.h"
 #include "skia/ext/refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size_conversions.h"
 
 namespace cc {
 namespace {
@@ -20,56 +19,63 @@ TEST(PicturePileImplTest, AnalyzeIsSolidUnscaled) {
   gfx::Size tile_size(100, 100);
   gfx::Size layer_bounds(400, 400);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
 
-  SkColor solid_color = SkColorSetARGB(255, 12, 23, 34);
   SkPaint solid_paint;
+  SkColor solid_color = SkColorSetARGB(255, 12, 23, 34);
   solid_paint.setColor(solid_color);
 
   SkColor non_solid_color = SkColorSetARGB(128, 45, 56, 67);
   SkPaint non_solid_paint;
   non_solid_paint.setColor(non_solid_color);
 
-  pile->add_draw_rect_with_paint(gfx::Rect(0, 0, 400, 400), solid_paint);
-  pile->RerecordPile();
+  recording_source->add_draw_rect_with_paint(gfx::Rect(0, 0, 400, 400),
+                                             solid_paint);
+  recording_source->RerecordPile();
 
-  // Ensure everything is solid
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
+
+  // Ensure everything is solid.
   for (int y = 0; y <= 300; y += 100) {
     for (int x = 0; x <= 300; x += 100) {
-      PicturePileImpl::Analysis analysis;
+      RasterSource::SolidColorAnalysis analysis;
       gfx::Rect rect(x, y, 100, 100);
-      pile->AnalyzeInRect(rect, 1.0, &analysis);
+      pile->PerformSolidColorAnalysis(rect, 1.0, &analysis);
       EXPECT_TRUE(analysis.is_solid_color) << rect.ToString();
       EXPECT_EQ(analysis.solid_color, solid_color) << rect.ToString();
     }
   }
 
-  // One pixel non solid
-  pile->add_draw_rect_with_paint(gfx::Rect(50, 50, 1, 1), non_solid_paint);
-  pile->RerecordPile();
+  // Add one non-solid pixel and recreate the raster source.
+  recording_source->add_draw_rect_with_paint(gfx::Rect(50, 50, 1, 1),
+                                             non_solid_paint);
+  recording_source->RerecordPile();
+  pile = FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
-  PicturePileImpl::Analysis analysis;
-  pile->AnalyzeInRect(gfx::Rect(0, 0, 100, 100), 1.0, &analysis);
+  RasterSource::SolidColorAnalysis analysis;
+  pile->PerformSolidColorAnalysis(gfx::Rect(0, 0, 100, 100), 1.0, &analysis);
   EXPECT_FALSE(analysis.is_solid_color);
 
-  pile->AnalyzeInRect(gfx::Rect(100, 0, 100, 100), 1.0, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(100, 0, 100, 100), 1.0, &analysis);
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, solid_color);
 
-  // Boundaries should be clipped
+  // Boundaries should be clipped.
   analysis.is_solid_color = false;
-  pile->AnalyzeInRect(gfx::Rect(350, 0, 100, 100), 1.0, &analysis);
-  EXPECT_TRUE(analysis.is_solid_color);
-  EXPECT_EQ(analysis.solid_color, solid_color);
-
-  analysis.is_solid_color = false;
-  pile->AnalyzeInRect(gfx::Rect(0, 350, 100, 100), 1.0, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(350, 0, 100, 100), 1.0, &analysis);
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, solid_color);
 
   analysis.is_solid_color = false;
-  pile->AnalyzeInRect(gfx::Rect(350, 350, 100, 100), 1.0, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(0, 350, 100, 100), 1.0, &analysis);
+  EXPECT_TRUE(analysis.is_solid_color);
+  EXPECT_EQ(analysis.solid_color, solid_color);
+
+  analysis.is_solid_color = false;
+  pile->PerformSolidColorAnalysis(gfx::Rect(350, 350, 100, 100), 1.0,
+                                  &analysis);
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, solid_color);
 }
@@ -78,8 +84,8 @@ TEST(PicturePileImplTest, AnalyzeIsSolidScaled) {
   gfx::Size tile_size(100, 100);
   gfx::Size layer_bounds(400, 400);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
 
   SkColor solid_color = SkColorSetARGB(255, 12, 23, 34);
   SkPaint solid_paint;
@@ -89,45 +95,51 @@ TEST(PicturePileImplTest, AnalyzeIsSolidScaled) {
   SkPaint non_solid_paint;
   non_solid_paint.setColor(non_solid_color);
 
-  pile->add_draw_rect_with_paint(gfx::Rect(0, 0, 400, 400), solid_paint);
-  pile->RerecordPile();
+  recording_source->add_draw_rect_with_paint(gfx::Rect(0, 0, 400, 400),
+                                             solid_paint);
+  recording_source->RerecordPile();
 
-  // Ensure everything is solid
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
+
+  // Ensure everything is solid.
   for (int y = 0; y <= 30; y += 10) {
     for (int x = 0; x <= 30; x += 10) {
-      PicturePileImpl::Analysis analysis;
+      RasterSource::SolidColorAnalysis analysis;
       gfx::Rect rect(x, y, 10, 10);
-      pile->AnalyzeInRect(rect, 0.1f, &analysis);
+      pile->PerformSolidColorAnalysis(rect, 0.1f, &analysis);
       EXPECT_TRUE(analysis.is_solid_color) << rect.ToString();
       EXPECT_EQ(analysis.solid_color, solid_color) << rect.ToString();
     }
   }
 
-  // One pixel non solid
-  pile->add_draw_rect_with_paint(gfx::Rect(50, 50, 1, 1), non_solid_paint);
-  pile->RerecordPile();
+  // Add one non-solid pixel and recreate the raster source.
+  recording_source->add_draw_rect_with_paint(gfx::Rect(50, 50, 1, 1),
+                                             non_solid_paint);
+  recording_source->RerecordPile();
+  pile = FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
-  PicturePileImpl::Analysis analysis;
-  pile->AnalyzeInRect(gfx::Rect(0, 0, 10, 10), 0.1f, &analysis);
+  RasterSource::SolidColorAnalysis analysis;
+  pile->PerformSolidColorAnalysis(gfx::Rect(0, 0, 10, 10), 0.1f, &analysis);
   EXPECT_FALSE(analysis.is_solid_color);
 
-  pile->AnalyzeInRect(gfx::Rect(10, 0, 10, 10), 0.1f, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(10, 0, 10, 10), 0.1f, &analysis);
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, solid_color);
 
-  // Boundaries should be clipped
+  // Boundaries should be clipped.
   analysis.is_solid_color = false;
-  pile->AnalyzeInRect(gfx::Rect(35, 0, 10, 10), 0.1f, &analysis);
-  EXPECT_TRUE(analysis.is_solid_color);
-  EXPECT_EQ(analysis.solid_color, solid_color);
-
-  analysis.is_solid_color = false;
-  pile->AnalyzeInRect(gfx::Rect(0, 35, 10, 10), 0.1f, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(35, 0, 10, 10), 0.1f, &analysis);
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, solid_color);
 
   analysis.is_solid_color = false;
-  pile->AnalyzeInRect(gfx::Rect(35, 35, 10, 10), 0.1f, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(0, 35, 10, 10), 0.1f, &analysis);
+  EXPECT_TRUE(analysis.is_solid_color);
+  EXPECT_EQ(analysis.solid_color, solid_color);
+
+  analysis.is_solid_color = false;
+  pile->PerformSolidColorAnalysis(gfx::Rect(35, 35, 10, 10), 0.1f, &analysis);
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, solid_color);
 }
@@ -138,10 +150,10 @@ TEST(PicturePileImplTest, AnalyzeIsSolidEmpty) {
 
   scoped_refptr<FakePicturePileImpl> pile =
       FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
-  PicturePileImpl::Analysis analysis;
+  RasterSource::SolidColorAnalysis analysis;
   EXPECT_FALSE(analysis.is_solid_color);
 
-  pile->AnalyzeInRect(gfx::Rect(0, 0, 400, 400), 1.f, &analysis);
+  pile->PerformSolidColorAnalysis(gfx::Rect(0, 0, 400, 400), 1.f, &analysis);
 
   EXPECT_TRUE(analysis.is_solid_color);
   EXPECT_EQ(analysis.solid_color, SkColorSetARGB(0, 0, 0, 0));
@@ -209,24 +221,30 @@ TEST(PicturePileImplTest, PixelRefIteratorNoDiscardableRefs) {
   gfx::Size tile_size(128, 128);
   gfx::Size layer_bounds(256, 256);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
-
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
   SkPaint simple_paint;
   simple_paint.setColor(SkColorSetARGB(255, 12, 23, 34));
 
   SkBitmap non_discardable_bitmap;
   CreateBitmap(gfx::Size(128, 128), "notdiscardable", &non_discardable_bitmap);
 
-  pile->add_draw_rect_with_paint(gfx::Rect(0, 0, 256, 256), simple_paint);
-  pile->add_draw_rect_with_paint(gfx::Rect(128, 128, 512, 512), simple_paint);
-  pile->add_draw_rect_with_paint(gfx::Rect(512, 0, 256, 256), simple_paint);
-  pile->add_draw_rect_with_paint(gfx::Rect(0, 512, 256, 256), simple_paint);
-  pile->add_draw_bitmap(non_discardable_bitmap, gfx::Point(128, 0));
-  pile->add_draw_bitmap(non_discardable_bitmap, gfx::Point(0, 128));
-  pile->add_draw_bitmap(non_discardable_bitmap, gfx::Point(150, 150));
+  recording_source->add_draw_rect_with_paint(gfx::Rect(0, 0, 256, 256),
+                                             simple_paint);
+  recording_source->add_draw_rect_with_paint(gfx::Rect(128, 128, 512, 512),
+                                             simple_paint);
+  recording_source->add_draw_rect_with_paint(gfx::Rect(512, 0, 256, 256),
+                                             simple_paint);
+  recording_source->add_draw_rect_with_paint(gfx::Rect(0, 512, 256, 256),
+                                             simple_paint);
+  recording_source->add_draw_bitmap(non_discardable_bitmap, gfx::Point(128, 0));
+  recording_source->add_draw_bitmap(non_discardable_bitmap, gfx::Point(0, 128));
+  recording_source->add_draw_bitmap(non_discardable_bitmap,
+                                    gfx::Point(150, 150));
+  recording_source->RerecordPile();
 
-  pile->RerecordPile();
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
   // Tile sized iterators.
   {
@@ -282,8 +300,8 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefs) {
   gfx::Size tile_size(128, 128);
   gfx::Size layer_bounds(256, 256);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
 
   SkBitmap discardable_bitmap[2][2];
   CreateBitmap(gfx::Size(32, 32), "discardable", &discardable_bitmap[0][0]);
@@ -296,11 +314,15 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefs) {
   // |---|---|
   // | x | x |
   // |---|---|
-  pile->add_draw_bitmap(discardable_bitmap[0][0], gfx::Point(0, 0));
-  pile->add_draw_bitmap(discardable_bitmap[1][0], gfx::Point(0, 130));
-  pile->add_draw_bitmap(discardable_bitmap[1][1], gfx::Point(140, 140));
+  recording_source->add_draw_bitmap(discardable_bitmap[0][0], gfx::Point(0, 0));
+  recording_source->add_draw_bitmap(discardable_bitmap[1][0],
+                                    gfx::Point(0, 130));
+  recording_source->add_draw_bitmap(discardable_bitmap[1][1],
+                                    gfx::Point(140, 140));
+  recording_source->RerecordPile();
 
-  pile->RerecordPile();
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
   // Tile sized iterators. These should find only one pixel ref.
   {
@@ -392,8 +414,8 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefsOneTile) {
   gfx::Size tile_size(256, 256);
   gfx::Size layer_bounds(512, 512);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
 
   SkBitmap discardable_bitmap[2][2];
   CreateBitmap(gfx::Size(32, 32), "discardable", &discardable_bitmap[0][0]);
@@ -406,11 +428,15 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefsOneTile) {
   // |---|---|
   // |   | x |
   // |---|---|
-  pile->add_draw_bitmap(discardable_bitmap[0][0], gfx::Point(0, 0));
-  pile->add_draw_bitmap(discardable_bitmap[0][1], gfx::Point(260, 0));
-  pile->add_draw_bitmap(discardable_bitmap[1][1], gfx::Point(260, 260));
+  recording_source->add_draw_bitmap(discardable_bitmap[0][0], gfx::Point(0, 0));
+  recording_source->add_draw_bitmap(discardable_bitmap[0][1],
+                                    gfx::Point(260, 0));
+  recording_source->add_draw_bitmap(discardable_bitmap[1][1],
+                                    gfx::Point(260, 260));
+  recording_source->RerecordPile();
 
-  pile->RerecordPile();
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
   // Tile sized iterators. These should find only one pixel ref.
   {
@@ -523,8 +549,8 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefsBaseNonDiscardable) {
   gfx::Size tile_size(256, 256);
   gfx::Size layer_bounds(512, 512);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
 
   SkBitmap non_discardable_bitmap;
   CreateBitmap(gfx::Size(512, 512), "notdiscardable", &non_discardable_bitmap);
@@ -541,12 +567,16 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefsBaseNonDiscardable) {
   // |---|---|
   // |   | x |
   // |---|---|
-  pile->add_draw_bitmap(non_discardable_bitmap, gfx::Point(0, 0));
-  pile->add_draw_bitmap(discardable_bitmap[0][0], gfx::Point(0, 0));
-  pile->add_draw_bitmap(discardable_bitmap[0][1], gfx::Point(260, 0));
-  pile->add_draw_bitmap(discardable_bitmap[1][1], gfx::Point(260, 260));
+  recording_source->add_draw_bitmap(non_discardable_bitmap, gfx::Point(0, 0));
+  recording_source->add_draw_bitmap(discardable_bitmap[0][0], gfx::Point(0, 0));
+  recording_source->add_draw_bitmap(discardable_bitmap[0][1],
+                                    gfx::Point(260, 0));
+  recording_source->add_draw_bitmap(discardable_bitmap[1][1],
+                                    gfx::Point(260, 260));
+  recording_source->RerecordPile();
 
-  pile->RerecordPile();
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
   // Tile sized iterators. These should find only one pixel ref.
   {
@@ -634,32 +664,31 @@ TEST(PicturePileImplTest, PixelRefIteratorDiscardableRefsBaseNonDiscardable) {
   }
 }
 
-class FullContentsTest : public ::testing::TestWithParam<bool> {};
-
-TEST_P(FullContentsTest, RasterFullContents) {
+TEST(PicturePileImplTest, RasterFullContents) {
   gfx::Size tile_size(1000, 1000);
   gfx::Size layer_bounds(3, 5);
   float contents_scale = 1.5f;
   float raster_divisions = 2.f;
-  // Param in this case is whether the content is fully opaque
-  // or just filled completely. For this test they should behave the same.
-  bool contents_opaque = GetParam();
-  bool fills_content = !GetParam();
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
+  recording_source->SetBackgroundColor(SK_ColorBLACK);
+  recording_source->SetIsSolidColor(false);
+  recording_source->SetRequiresClear(false);
+  recording_source->SetClearCanvasWithDebugColor(false);
+
   // Because the caller sets content opaque, it also promises that it
   // has at least filled in layer_bounds opaquely.
   SkPaint white_paint;
   white_paint.setColor(SK_ColorWHITE);
-  pile->add_draw_rect_with_paint(gfx::Rect(layer_bounds), white_paint);
+  recording_source->add_draw_rect_with_paint(gfx::Rect(layer_bounds),
+                                             white_paint);
 
-  pile->SetMinContentsScale(contents_scale);
-  pile->set_background_color(SK_ColorBLACK);
-  pile->set_contents_opaque(contents_opaque);
-  pile->set_contents_fill_bounds_completely(fills_content);
-  pile->set_clear_canvas_with_debug_color(false);
-  pile->RerecordPile();
+  recording_source->SetMinContentsScale(contents_scale);
+  recording_source->RerecordPile();
+
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
   gfx::Size content_bounds(
       gfx::ToCeiledSize(gfx::ScaleSize(layer_bounds, contents_scale)));
@@ -685,12 +714,7 @@ TEST_P(FullContentsTest, RasterFullContents) {
       SkCanvas canvas(bitmap);
       canvas.clear(SK_ColorTRANSPARENT);
 
-      FakeRenderingStatsInstrumentation rendering_stats_instrumentation;
-
-      pile->RasterToBitmap(&canvas,
-                           canvas_rect,
-                           contents_scale,
-                           &rendering_stats_instrumentation);
+      pile->PlaybackToCanvas(&canvas, canvas_rect, contents_scale);
 
       SkColor* pixels = reinterpret_cast<SkColor*>(bitmap.getPixels());
       int num_pixels = bitmap.width() * bitmap.height();
@@ -710,23 +734,21 @@ TEST_P(FullContentsTest, RasterFullContents) {
   }
 }
 
-INSTANTIATE_TEST_CASE_P(PicturePileImpl,
-                        FullContentsTest,
-                        ::testing::Values(false, true));
-
 TEST(PicturePileImpl, RasterContentsTransparent) {
   gfx::Size tile_size(1000, 1000);
   gfx::Size layer_bounds(5, 3);
   float contents_scale = 0.5f;
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
-  pile->set_background_color(SK_ColorTRANSPARENT);
-  pile->set_contents_opaque(false);
-  pile->SetMinContentsScale(contents_scale);
-  pile->set_clear_canvas_with_debug_color(false);
-  pile->RerecordPile();
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
+  recording_source->SetBackgroundColor(SK_ColorTRANSPARENT);
+  recording_source->SetRequiresClear(true);
+  recording_source->SetMinContentsScale(contents_scale);
+  recording_source->SetClearCanvasWithDebugColor(false);
+  recording_source->RerecordPile();
 
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
   gfx::Size content_bounds(
       gfx::ToCeiledSize(gfx::ScaleSize(layer_bounds, contents_scale)));
 
@@ -737,9 +759,7 @@ TEST(PicturePileImpl, RasterContentsTransparent) {
   bitmap.allocN32Pixels(canvas_rect.width(), canvas_rect.height());
   SkCanvas canvas(bitmap);
 
-  FakeRenderingStatsInstrumentation rendering_stats_instrumentation;
-  pile->RasterToBitmap(
-      &canvas, canvas_rect, contents_scale, &rendering_stats_instrumentation);
+  pile->PlaybackToCanvas(&canvas, canvas_rect, contents_scale);
 
   SkColor* pixels = reinterpret_cast<SkColor*>(bitmap.getPixels());
   int num_pixels = bitmap.width() * bitmap.height();
@@ -761,21 +781,24 @@ TEST_P(OverlapTest, NoOverlap) {
   // Pick an opaque color to not have to deal with premultiplication off-by-one.
   SkColor test_color = SkColorSetARGB(255, 45, 56, 67);
 
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
-  pile->set_background_color(SK_ColorTRANSPARENT);
-  pile->set_contents_opaque(false);
-  pile->SetMinContentsScale(MinContentsScale());
-  pile->set_clear_canvas_with_debug_color(true);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
+  recording_source->SetBackgroundColor(SK_ColorTRANSPARENT);
+  recording_source->SetRequiresClear(true);
+  recording_source->SetMinContentsScale(MinContentsScale());
+  recording_source->SetClearCanvasWithDebugColor(true);
+
   SkPaint color_paint;
   color_paint.setColor(test_color);
   // Additive paint, so that if two paints overlap, the color will change.
   color_paint.setXfermodeMode(SkXfermode::kPlus_Mode);
   // Paint outside the layer to make sure that blending works.
-  pile->add_draw_rect_with_paint(gfx::RectF(bigger_than_layer_bounds),
-                                 color_paint);
-  pile->RerecordPile();
+  recording_source->add_draw_rect_with_paint(
+      gfx::RectF(bigger_than_layer_bounds), color_paint);
+  recording_source->RerecordPile();
 
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
   gfx::Size content_bounds(
       gfx::ToCeiledSize(gfx::ScaleSize(layer_bounds, contents_scale)));
 
@@ -783,11 +806,7 @@ TEST_P(OverlapTest, NoOverlap) {
   bitmap.allocN32Pixels(content_bounds.width(), content_bounds.height());
   SkCanvas canvas(bitmap);
 
-  FakeRenderingStatsInstrumentation rendering_stats_instrumentation;
-  pile->RasterToBitmap(&canvas,
-                       gfx::Rect(content_bounds),
-                       contents_scale,
-                       &rendering_stats_instrumentation);
+  pile->PlaybackToCanvas(&canvas, gfx::Rect(content_bounds), contents_scale);
 
   for (int y = 0; y < bitmap.height(); y++) {
     for (int x = 0; x < bitmap.width(); x++) {
@@ -815,24 +834,32 @@ TEST(PicturePileImplTest, PixelRefIteratorBorders) {
   gfx::Size tile_size(128, 128);
   gfx::Size layer_bounds(320, 128);
 
-  // Fake picture pile impl uses a tile grid the size of the tile.  So,
+  // Fake picture pile uses a tile grid the size of the tile.  So,
   // any iteration that intersects with a tile will return all pixel refs
   // inside of it.
-  scoped_refptr<FakePicturePileImpl> pile =
-      FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
-  pile->SetMinContentsScale(0.5f);
+  scoped_ptr<FakePicturePile> recording_source =
+      FakePicturePile::CreateFilledPile(tile_size, layer_bounds);
+  recording_source->SetMinContentsScale(0.5f);
 
   // Bitmaps 0-2 are exactly on tiles 0-2, so that they overlap the borders
   // of adjacent tiles.
-  gfx::Rect bitmap_rects[] = {pile->tiling().TileBounds(0, 0),
-                              pile->tiling().TileBounds(1, 0),
-                              pile->tiling().TileBounds(2, 0), };
+  gfx::Rect bitmap_rects[] = {
+      recording_source->tiling().TileBounds(0, 0),
+      recording_source->tiling().TileBounds(1, 0),
+      recording_source->tiling().TileBounds(2, 0),
+  };
   SkBitmap discardable_bitmap[arraysize(bitmap_rects)];
 
   for (size_t i = 0; i < arraysize(bitmap_rects); ++i) {
     CreateBitmap(bitmap_rects[i].size(), "discardable", &discardable_bitmap[i]);
-    pile->add_draw_bitmap(discardable_bitmap[i], bitmap_rects[i].origin());
+    recording_source->add_draw_bitmap(discardable_bitmap[i],
+                                      bitmap_rects[i].origin());
   }
+
+  recording_source->RerecordPile();
+
+  scoped_refptr<FakePicturePileImpl> pile =
+      FakePicturePileImpl::CreateFromPile(recording_source.get(), nullptr);
 
   // Sanity check that bitmaps 0-2 intersect the borders of their adjacent
   // tiles, but not the actual tiles.
@@ -848,8 +875,6 @@ TEST(PicturePileImplTest, PixelRefIteratorBorders) {
   EXPECT_TRUE(
       bitmap_rects[2].Intersects(pile->tiling().TileBoundsWithBorder(1, 0)));
   EXPECT_FALSE(bitmap_rects[2].Intersects(pile->tiling().TileBounds(1, 0)));
-
-  pile->RerecordPile();
 
   // Tile-sized iterators.
   {

@@ -12,7 +12,6 @@
 #include <sys/socket.h>
 
 #include "net/base/ip_endpoint.h"
-#include "net/quic/congestion_control/tcp_receiver.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/quic_random.h"
 #include "net/quic/quic_clock.h"
@@ -36,7 +35,6 @@ namespace {
 
 const int kEpollFlags = EPOLLIN | EPOLLOUT | EPOLLET;
 const char kSourceAddressTokenSecret[] = "secret";
-const uint32 kServerInitialFlowControlWindow = 100 * net::kMaxPacketSize;
 
 }  // namespace
 
@@ -48,8 +46,6 @@ QuicServer::QuicServer()
       use_recvmmsg_(false),
       crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()),
       supported_versions_(QuicSupportedVersions()) {
-  // Use hardcoded crypto parameters for now.
-  config_.SetDefaults();
   Initialize();
 }
 
@@ -70,6 +66,22 @@ void QuicServer::Initialize() {
 #if MMSG_MORE
   use_recvmmsg_ = true;
 #endif
+
+  // If an initial flow control window has not explicitly been set, then use a
+  // sensible value for a server: 1 MB for session, 64 KB for each stream.
+  const uint32 kInitialSessionFlowControlWindow = 1 * 1024 * 1024;  // 1 MB
+  const uint32 kInitialStreamFlowControlWindow = 64 * 1024;         // 64 KB
+  if (config_.GetInitialStreamFlowControlWindowToSend() ==
+      kMinimumFlowControlSendWindow) {
+    config_.SetInitialStreamFlowControlWindowToSend(
+        kInitialStreamFlowControlWindow);
+  }
+  if (config_.GetInitialSessionFlowControlWindowToSend() ==
+      kMinimumFlowControlSendWindow) {
+    config_.SetInitialSessionFlowControlWindowToSend(
+        kInitialSessionFlowControlWindow);
+  }
+
   epoll_server_.set_timeout_in_us(50 * 1000);
   // Initialize the in memory cache now.
   QuicInMemoryCache::GetInstance();
@@ -80,9 +92,6 @@ void QuicServer::Initialize() {
       crypto_config_.AddDefaultConfig(
           QuicRandom::GetInstance(), &clock,
           QuicCryptoServerConfig::ConfigOptions()));
-
-  // Set flow control options in the config.
-  config_.SetInitialCongestionWindowToSend(kServerInitialFlowControlWindow);
 }
 
 QuicServer::~QuicServer() {
@@ -120,12 +129,11 @@ bool QuicServer::Listen(const IPEndPoint& address) {
   // because the default usage of QuicServer is as a test server with one or
   // two clients.  Adjust higher for use with many clients.
   if (!QuicSocketUtils::SetReceiveBufferSize(fd_,
-                                             TcpReceiver::kReceiveWindowTCP)) {
+                                             kDefaultSocketReceiveBuffer)) {
     return false;
   }
 
-  if (!QuicSocketUtils::SetSendBufferSize(fd_,
-                                          TcpReceiver::kReceiveWindowTCP)) {
+  if (!QuicSocketUtils::SetSendBufferSize(fd_, kDefaultSocketReceiveBuffer)) {
     return false;
   }
 
@@ -193,7 +201,7 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
     while (read) {
         read = ReadAndDispatchSinglePacket(
             fd_, port_, dispatcher_.get(),
-            overflow_supported_ ? &packets_dropped_ : NULL);
+            overflow_supported_ ? &packets_dropped_ : nullptr);
     }
   }
   if (event->in_events & EPOLLOUT) {
@@ -210,7 +218,7 @@ void QuicServer::OnEvent(int fd, EpollEvent* event) {
 bool QuicServer::ReadAndDispatchSinglePacket(int fd,
                                              int port,
                                              ProcessPacketInterface* processor,
-                                             uint32* packets_dropped) {
+                                             QuicPacketCount* packets_dropped) {
   // Allocate some extra space so we can send an error if the client goes over
   // the limit.
   char buf[2 * kMaxPacketSize];

@@ -30,7 +30,8 @@ SECItem MakeSECItemForBuffer(const CryptoData& buffer) {
   SECItem item = {
       siBuffer,
       // NSS requires non-const data even though it is just for input.
-      const_cast<unsigned char*>(buffer.bytes()), buffer.byte_length()};
+      const_cast<unsigned char*>(buffer.bytes()),
+      buffer.byte_length()};
   return item;
 }
 
@@ -82,6 +83,32 @@ void PlatformInit() {
 
 AlgorithmImplementation* CreatePlatformAesCtrImplementation() {
   // TODO(eroman): http://crbug.com/399084
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformRsaPssImplementation() {
+  // TODO(eroman): http://crbug.com/399090
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformEcdsaImplementation() {
+  // TODO(eroman): http://crbug.com/399094
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformEcdhImplementation() {
+  // TODO(eroman): http://crbug.com/399093
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformHkdfImplementation() {
+  // HKDF is only being imlemented for BoringSSL.
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformPbkdf2Implementation() {
+  // PBKDF2 will only be implemented for BoringSSL, since the NSS
+  // implementation is being deprecated.
   return NULL;
 }
 

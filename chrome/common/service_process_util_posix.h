@@ -5,7 +5,7 @@
 #ifndef CHROME_COMMON_SERVICE_PROCESS_UTIL_POSIX_H_
 #define CHROME_COMMON_SERVICE_PROCESS_UTIL_POSIX_H_
 
-#include "service_process_util.h"
+#include "chrome/common/service_process_util.h"
 
 #include <signal.h>
 
@@ -46,11 +46,11 @@ class ServiceProcessTerminateMonitor : public base::MessageLoopForIO::Watcher {
   };
 
   explicit ServiceProcessTerminateMonitor(const base::Closure& terminate_task);
-  virtual ~ServiceProcessTerminateMonitor();
+  ~ServiceProcessTerminateMonitor() override;
 
   // MessageLoopForIO::Watcher overrides
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
-  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE;
+  void OnFileCanReadWithoutBlocking(int fd) override;
+  void OnFileCanWriteWithoutBlocking(int fd) override;
 
  private:
   base::Closure terminate_task_;

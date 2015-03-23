@@ -26,7 +26,7 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/screen.h"
 
 namespace ash {
@@ -38,9 +38,9 @@ using aura::Window;
 class WindowCycleControllerTest : public test::AshTestBase {
  public:
   WindowCycleControllerTest() {}
-  virtual ~WindowCycleControllerTest() {}
+  ~WindowCycleControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test::AshTestBase::SetUp();
     ASSERT_TRUE(test::TestShelfDelegate::instance());
 

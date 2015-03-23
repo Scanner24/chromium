@@ -8,11 +8,11 @@ from telemetry.page import page_set as page_set_module
 class KeyDesktopSitesPage(page_module.Page):
 
   def __init__(self, url, page_set):
-    super(KeyDesktopSitesPage, self).__init__(url=url, page_set=page_set)
-    self.credentials_path = 'data/credentials.json'
+    super(KeyDesktopSitesPage, self).__init__(
+        url=url, page_set=page_set, credentials_path = 'data/credentials.json')
     self.archive_data_file = 'data/key_desktop_sites.json'
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -44,7 +44,7 @@ class GmailPage(KeyDesktopSitesPage):
       }'''
     self.credentials = 'google'
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -81,7 +81,7 @@ class GoogleDrivePage(KeyDesktopSitesPage):
       }'''
     self.credentials = 'google'
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -104,7 +104,7 @@ class GoogleDocPage(KeyDesktopSitesPage):
       }'''
     self.credentials = 'google'
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -119,15 +119,14 @@ class KeyDesktopSitesPageSet(page_set_module.PageSet):
 
   def __init__(self):
     super(KeyDesktopSitesPageSet, self).__init__(
-      credentials_path='data/credentials.json',
       archive_data_file='data/key_desktop_sites.json',
       bucket=page_set_module.PARTNER_BUCKET)
 
-    self.AddPage(FacebookPage(self))
-    self.AddPage(GmailPage(self))
-    self.AddPage(GoogleCalendarPage(self))
-    self.AddPage(GoogleDrivePage(self))
-    self.AddPage(GoogleDocPage(self))
+    self.AddUserStory(FacebookPage(self))
+    self.AddUserStory(GmailPage(self))
+    self.AddUserStory(GoogleCalendarPage(self))
+    self.AddUserStory(GoogleDrivePage(self))
+    self.AddUserStory(GoogleDocPage(self))
 
     urls_list = [
       'http://www.google.com/nexus/5/#/',
@@ -851,4 +850,4 @@ class KeyDesktopSitesPageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddPage(KeyDesktopSitesPage(url, self))
+      self.AddUserStory(KeyDesktopSitesPage(url, self))

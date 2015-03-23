@@ -5,6 +5,9 @@
 #import "chrome/browser/ui/cocoa/tab_contents/chrome_web_contents_view_delegate_mac.h"
 
 #import "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_delegate.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac.h"
 #include "chrome/browser/ui/cocoa/tab_contents/web_drag_bookmark_handler_mac.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
@@ -19,6 +22,11 @@ ChromeWebContentsViewDelegateMac::ChromeWebContentsViewDelegateMac(
 }
 
 ChromeWebContentsViewDelegateMac::~ChromeWebContentsViewDelegateMac() {
+}
+
+gfx::NativeWindow ChromeWebContentsViewDelegateMac::GetNativeWindow() {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
+  return browser ? browser->window()->GetNativeWindow() : nullptr;
 }
 
 NSObject<RenderWidgetHostViewMacDelegate>*
@@ -42,8 +50,8 @@ void ChromeWebContentsViewDelegateMac::ShowContextMenu(
 }
 
 void ChromeWebContentsViewDelegateMac::ShowMenu(
-    scoped_ptr<RenderViewContextMenu> menu) {
-  context_menu_.reset(static_cast<RenderViewContextMenuMac*>(menu.release()));
+    scoped_ptr<RenderViewContextMenuBase> menu) {
+  context_menu_ = menu.Pass();
   if (!context_menu_.get())
     return;
 
@@ -61,10 +69,11 @@ void ChromeWebContentsViewDelegateMac::ShowMenu(
   context_menu_->Show();
 }
 
-scoped_ptr<RenderViewContextMenu> ChromeWebContentsViewDelegateMac::BuildMenu(
+scoped_ptr<RenderViewContextMenuBase>
+ChromeWebContentsViewDelegateMac::BuildMenu(
     content::WebContents* web_contents,
     const content::ContextMenuParams& params) {
-  scoped_ptr<RenderViewContextMenuMac> menu;
+  scoped_ptr<RenderViewContextMenuBase> menu;
   content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame();
   // If the frame tree does not have a focused frame at this point, do not
   // bother creating RenderViewContextMenuMac.
@@ -78,7 +87,7 @@ scoped_ptr<RenderViewContextMenu> ChromeWebContentsViewDelegateMac::BuildMenu(
     menu->Init();
   }
 
-  return menu.PassAs<RenderViewContextMenu>();
+  return menu.Pass();
 }
 
 content::RenderWidgetHostView*

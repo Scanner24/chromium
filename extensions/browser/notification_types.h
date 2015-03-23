@@ -5,7 +5,13 @@
 #ifndef EXTENSIONS_BROWSER_NOTIFICATION_TYPES_H_
 #define EXTENSIONS_BROWSER_NOTIFICATION_TYPES_H_
 
+#include <string>
+
 #include "content/public/browser/notification_types.h"
+
+#if !defined(ENABLE_EXTENSIONS)
+#error "Extensions must be enabled"
+#endif
 
 namespace extensions {
 
@@ -13,6 +19,7 @@ namespace extensions {
 // extensions module should not listen to notifications fired by the
 // embedder.
 enum NotificationType {
+  // WARNING: This need to match chrome/browser/chrome_notification_types.h.
   NOTIFICATION_EXTENSIONS_START = content::NOTIFICATION_CONTENT_END,
 
   // Sent when a CrxInstaller finishes. Source is the CrxInstaller that
@@ -127,8 +134,9 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
 
   // Sent when an extension command has been removed. The source is the
-  // BrowserContext* and the details is a std::pair of two std::string objects
-  // (an extension ID and the name of the command being removed).
+  // BrowserContext* and the details is an ExtensionCommandRemovedDetails
+  // consisting of std::strings representing an extension ID, the name of the
+  // command being removed, and the accelerator associated with the command.
   NOTIFICATION_EXTENSION_COMMAND_REMOVED,
 
   // Sent when an extension command has been added. The source is the
@@ -205,6 +213,16 @@ enum NotificationType {
   // pointer to SharedMemory containing the new scripts.
   NOTIFICATION_USER_SCRIPTS_UPDATED,
   NOTIFICATION_EXTENSIONS_END
+};
+
+struct ExtensionCommandRemovedDetails {
+  ExtensionCommandRemovedDetails(const std::string& extension_id,
+                                 const std::string& command_name,
+                                 const std::string& accelerator);
+
+  std::string extension_id;
+  std::string command_name;
+  std::string accelerator;
 };
 
 }  // namespace extensions

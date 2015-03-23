@@ -96,30 +96,30 @@ class DesktopVideoCaptureMachine
       public base::SupportsWeakPtr<DesktopVideoCaptureMachine> {
  public:
   DesktopVideoCaptureMachine(const DesktopMediaID& source);
-  virtual ~DesktopVideoCaptureMachine();
+  ~DesktopVideoCaptureMachine() override;
 
   // VideoCaptureFrameSource overrides.
-  virtual bool Start(const scoped_refptr<ThreadSafeCaptureOracle>& oracle_proxy,
-                     const media::VideoCaptureParams& params) OVERRIDE;
-  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  bool Start(const scoped_refptr<ThreadSafeCaptureOracle>& oracle_proxy,
+             const media::VideoCaptureParams& params) override;
+  void Stop(const base::Closure& callback) override;
 
   // Implements aura::WindowObserver.
-  virtual void OnWindowBoundsChanged(aura::Window* window,
-                                     const gfx::Rect& old_bounds,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
-  virtual void OnWindowAddedToRootWindow(aura::Window* window) OVERRIDE;
-  virtual void OnWindowRemovingFromRootWindow(aura::Window* window,
-                                              aura::Window* new_root) OVERRIDE;
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override;
+  void OnWindowDestroyed(aura::Window* window) override;
+  void OnWindowAddedToRootWindow(aura::Window* window) override;
+  void OnWindowRemovingFromRootWindow(aura::Window* window,
+                                      aura::Window* new_root) override;
 
   // Implements ui::CompositorObserver.
-  virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE {}
-  virtual void OnCompositingStarted(ui::Compositor* compositor,
-                                    base::TimeTicks start_time) OVERRIDE {}
-  virtual void OnCompositingEnded(ui::Compositor* compositor) OVERRIDE;
-  virtual void OnCompositingAborted(ui::Compositor* compositor) OVERRIDE {}
-  virtual void OnCompositingLockStateChanged(
-      ui::Compositor* compositor) OVERRIDE {}
+  void OnCompositingDidCommit(ui::Compositor* compositor) override {}
+  void OnCompositingStarted(ui::Compositor* compositor,
+                            base::TimeTicks start_time) override {}
+  void OnCompositingEnded(ui::Compositor* compositor) override;
+  void OnCompositingAborted(ui::Compositor* compositor) override {}
+  void OnCompositingLockStateChanged(ui::Compositor* compositor) override {}
+  void OnCompositingShuttingDown(ui::Compositor* compositor) override {}
 
  private:
   // Captures a frame.
@@ -236,8 +236,10 @@ void DesktopVideoCaptureMachine::Stop(const base::Closure& callback) {
 
   // Stop observing compositor and window events.
   if (desktop_window_) {
-    if (desktop_window_->GetHost())
-      desktop_window_->GetHost()->compositor()->RemoveObserver(this);
+    aura::WindowTreeHost* window_host = desktop_window_->GetHost();
+    // In the host destructor the compositor is destroyed before the window.
+    if (window_host && window_host->compositor())
+      window_host->compositor()->RemoveObserver(this);
     desktop_window_->RemoveObserver(this);
     desktop_window_ = NULL;
   }
@@ -360,11 +362,8 @@ bool DesktopVideoCaptureMachine::ProcessCopyOutputResponse(
                                                texture_mailbox.target(),
                                                texture_mailbox.sync_point())),
         base::Bind(&RunSingleReleaseCallback, base::Passed(&release_callback)),
-        result->size(),
-        gfx::Rect(result->size()),
-        result->size(),
-        base::TimeDelta(),
-        media::VideoFrame::ReadPixelsCB());
+        result->size(), gfx::Rect(result->size()), result->size(),
+        base::TimeDelta(), false);
     capture_frame_cb.Run(video_frame, start_time, true);
     return true;
   }

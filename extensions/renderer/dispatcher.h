@@ -33,6 +33,7 @@ class ModuleSystem;
 class URLPattern;
 struct ExtensionMsg_ExternalConnectionInfo;
 struct ExtensionMsg_Loaded_Params;
+struct ExtensionMsg_TabConnectionInfo;
 struct ExtensionMsg_UpdatePermissions_Params;
 
 namespace blink {
@@ -41,7 +42,6 @@ class WebSecurityOrigin;
 }
 
 namespace base {
-class DictionaryValue;
 class ListValue;
 }
 
@@ -66,7 +66,7 @@ class Dispatcher : public content::RenderProcessObserver,
                    public UserScriptSetManager::Observer {
  public:
   explicit Dispatcher(DispatcherDelegate* delegate);
-  virtual ~Dispatcher();
+  ~Dispatcher() override;
 
   const std::set<std::string>& function_names() const {
     return function_names_;
@@ -156,20 +156,17 @@ class Dispatcher : public content::RenderProcessObserver,
                            CannotScriptWebstore);
 
   // RenderProcessObserver implementation:
-  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void WebKitInitialized() OVERRIDE;
-  virtual void IdleNotification() OVERRIDE;
-  virtual void OnRenderProcessShutdown() OVERRIDE;
+  bool OnControlMessageReceived(const IPC::Message& message) override;
+  void WebKitInitialized() override;
+  void IdleNotification() override;
+  void OnRenderProcessShutdown() override;
 
   void OnActivateExtension(const std::string& extension_id);
   void OnCancelSuspend(const std::string& extension_id);
-  void OnClearTabSpecificPermissions(
-      int tab_id,
-      const std::vector<std::string>& extension_ids);
   void OnDeliverMessage(int target_port_id, const Message& message);
   void OnDispatchOnConnect(int target_port_id,
                            const std::string& channel_name,
-                           const base::DictionaryValue& source_tab,
+                           const ExtensionMsg_TabConnectionInfo& source,
                            const ExtensionMsg_ExternalConnectionInfo& info,
                            const std::string& tls_channel_id);
   void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
@@ -192,25 +189,29 @@ class Dispatcher : public content::RenderProcessObserver,
   void OnTransferBlobs(const std::vector<std::string>& blob_uuids);
   void OnUnloaded(const std::string& id);
   void OnUpdatePermissions(const ExtensionMsg_UpdatePermissions_Params& params);
-  void OnUpdateTabSpecificPermissions(const GURL& url,
-                                      int tab_id,
+  void OnUpdateTabSpecificPermissions(const GURL& visible_url,
                                       const std::string& extension_id,
-                                      const URLPatternSet& origin_set);
+                                      const URLPatternSet& new_hosts,
+                                      bool update_origin_whitelist,
+                                      int tab_id);
+  void OnClearTabSpecificPermissions(
+      const std::vector<std::string>& extension_ids,
+      bool update_origin_whitelist,
+      int tab_id);
   void OnUsingWebRequestAPI(bool webrequest_used);
 
   // UserScriptSetManager::Observer implementation.
-  virtual void OnUserScriptsUpdated(
-      const std::set<std::string>& changed_extensions,
-      const std::vector<UserScript*>& scripts) OVERRIDE;
+  void OnUserScriptsUpdated(const std::set<std::string>& changed_extensions,
+                            const std::vector<UserScript*>& scripts) override;
 
   void UpdateActiveExtensions();
 
   // Sets up the host permissions for |extension|.
   void InitOriginPermissions(const Extension* extension);
 
-  // Updates the host permissions for extension to include only those in
+  // Updates the host permissions for the extension url to include only those in
   // |new_patterns|, and remove from |old_patterns| that are no longer allowed.
-  void UpdateOriginPermissions(const Extension* extension,
+  void UpdateOriginPermissions(const GURL& extension_url,
                                const URLPatternSet& old_patterns,
                                const URLPatternSet& new_patterns);
 
@@ -227,6 +228,14 @@ class Dispatcher : public content::RenderProcessObserver,
 
   void RegisterNativeHandlers(ModuleSystem* module_system,
                               ScriptContext* context);
+
+  // Determines if a ScriptContext can connect to any externally_connectable-
+  // enabled extension.
+  bool IsRuntimeAvailableToContext(ScriptContext* context);
+
+  // Updates a web page context with any content capabilities granted by active
+  // extensions.
+  void UpdateContentCapabilities(ScriptContext* context);
 
   // Inserts static source code into |source_map_|.
   void PopulateSourceMap();

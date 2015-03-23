@@ -24,11 +24,11 @@
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/render_text.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/views/border.h"
@@ -74,13 +74,13 @@ class MediaIndicator : public views::View, public MediaCaptureObserver {
     set_id(VIEW_ID_USER_VIEW_MEDIA_INDICATOR);
   }
 
-  virtual ~MediaIndicator() {
+  ~MediaIndicator() override {
     Shell::GetInstance()->system_tray_notifier()->RemoveMediaCaptureObserver(
         this);
   }
 
   // MediaCaptureObserver:
-  virtual void OnMediaCaptureChanged() OVERRIDE {
+  void OnMediaCaptureChanged() override {
     Shell* shell = Shell::GetInstance();
     content::BrowserContext* context =
         shell->session_state_delegate()->GetBrowserContextByIndex(index_);
@@ -126,16 +126,16 @@ class PublicAccountUserDetails : public views::View,
                                  public views::LinkListener {
  public:
   PublicAccountUserDetails(int max_width);
-  virtual ~PublicAccountUserDetails();
+  ~PublicAccountUserDetails() override;
 
  private:
   // Overridden from views::View.
-  virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  void Layout() override;
+  gfx::Size GetPreferredSize() const override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // Overridden from views::LinkListener.
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   // Calculate a preferred size that ensures the label text and the following
   // link do not wrap over more than three lines in total for aesthetic reasons
@@ -339,28 +339,14 @@ UserCardView::UserCardView(user::LoginStatus login_status,
                            int multiprofile_index) {
   SetLayoutManager(new views::BoxLayout(
       views::BoxLayout::kHorizontal, 0, 0, kTrayPopupPaddingBetweenItems));
-  switch (login_status) {
-    case user::LOGGED_IN_RETAIL_MODE:
-      AddRetailModeUserContent();
-      break;
-    case user::LOGGED_IN_PUBLIC:
-      AddPublicModeUserContent(max_width);
-      break;
-    default:
-      AddUserContent(login_status, multiprofile_index);
-      break;
+  if (login_status == user::LOGGED_IN_PUBLIC) {
+    AddPublicModeUserContent(max_width);
+  } else {
+    AddUserContent(login_status, multiprofile_index);
   }
 }
 
 UserCardView::~UserCardView() {}
-
-void UserCardView::AddRetailModeUserContent() {
-  views::Label* details = new views::Label;
-  details->SetText(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_KIOSK_LABEL));
-  details->SetBorder(views::Border::CreateEmptyBorder(0, 4, 0, 1));
-  details->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  AddChildView(details);
-}
 
 void UserCardView::AddPublicModeUserContent(int max_width) {
   views::View* icon = CreateIcon(user::LOGGED_IN_PUBLIC, 0);

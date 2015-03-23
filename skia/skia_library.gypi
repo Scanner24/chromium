@@ -21,7 +21,6 @@
     '../third_party/skia/gyp/core.gypi',
     '../third_party/skia/gyp/effects.gypi',
     '../third_party/skia/gyp/pdf.gypi',
-    '../third_party/skia/gyp/record.gypi',
     '../third_party/skia/gyp/utils.gypi',
   ],
 
@@ -33,8 +32,6 @@
     '../third_party/skia/src/images/SkScaledBitmapSampler.cpp',
     '../third_party/skia/src/images/SkScaledBitmapSampler.h',
 
-    '../third_party/skia/src/opts/opts_check_x86.cpp',
-
     '../third_party/skia/src/ports/SkFontConfigInterface_direct.cpp',
 
     '../third_party/skia/src/fonts/SkFontMgr_fontconfig.cpp',
@@ -43,6 +40,8 @@
     '../third_party/skia/src/fonts/SkFontMgr_indirect.cpp',
     '../third_party/skia/src/fonts/SkRemotableFontMgr.cpp',
     '../third_party/skia/src/ports/SkRemotableFontMgr_win_dw.cpp',
+
+    '../third_party/skia/src/ports/SkImageGenerator_none.cpp',
 
     '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
     '../third_party/skia/src/ports/SkFontHost_FreeType_common.cpp',
@@ -89,10 +88,6 @@
 
   # Exclude all unused files in skia utils.gypi file
   'sources!': [
-  '../third_party/skia/src/utils/SkCondVar.cpp',
-  '../third_party/skia/src/utils/SkCondVar.h',
-  '../third_party/skia/src/utils/SkRunnable.h',
-
   '../third_party/skia/include/utils/SkBoundaryPatch.h',
   '../third_party/skia/include/utils/SkFrontBufferedStream.h',
   '../third_party/skia/include/utils/SkCamera.h',
@@ -110,7 +105,6 @@
   '../third_party/skia/include/utils/SkParsePaint.h',
   '../third_party/skia/include/utils/SkParsePath.h',
   '../third_party/skia/include/utils/SkRandom.h',
-  '../third_party/skia/include/utils/SkWGL.h',
 
   '../third_party/skia/src/utils/SkBitmapHasher.cpp',
   '../third_party/skia/src/utils/SkBitmapHasher.h',
@@ -122,8 +116,6 @@
   '../third_party/skia/src/utils/SkCullPoints.cpp',
   '../third_party/skia/src/utils/SkDumpCanvas.cpp',
   '../third_party/skia/src/utils/SkFloatUtils.h',
-  '../third_party/skia/src/utils/SkGatherPixelRefsAndRects.cpp',
-  '../third_party/skia/src/utils/SkGatherPixelRefsAndRects.h',
   '../third_party/skia/src/utils/SkInterpolator.cpp',
   '../third_party/skia/src/utils/SkLayer.cpp',
   '../third_party/skia/src/utils/SkMD5.cpp',
@@ -137,16 +129,12 @@
   '../third_party/skia/src/utils/SkPathUtils.cpp',
   '../third_party/skia/src/utils/SkSHA1.cpp',
   '../third_party/skia/src/utils/SkSHA1.h',
-  '../third_party/skia/src/utils/SkThreadUtils.h',
-  '../third_party/skia/src/utils/SkThreadUtils_pthread.cpp',
-  '../third_party/skia/src/utils/SkThreadUtils_pthread.h',
-  '../third_party/skia/src/utils/SkThreadUtils_pthread_linux.cpp',
-  '../third_party/skia/src/utils/SkThreadUtils_pthread_mach.cpp',
-  '../third_party/skia/src/utils/SkThreadUtils_pthread_other.cpp',
-  '../third_party/skia/src/utils/SkThreadUtils_win.cpp',
-  '../third_party/skia/src/utils/SkThreadUtils_win.h',
   '../third_party/skia/src/utils/SkTFitsIn.h',
   '../third_party/skia/src/utils/SkTLogic.h',
+
+  # We don't currently need to change thread affinity, so leave out this complexity for now.
+  "../third_party/skia/src/utils/SkThreadUtils_pthread_mach.cpp",
+  "../third_party/skia/src/utils/SkThreadUtils_pthread_linux.cpp",
 
 #windows
   '../third_party/skia/include/utils/win/SkAutoCoInitialize.h',
@@ -163,6 +151,7 @@
   ],
 
   'include_dirs': [
+    '../third_party/skia/include/c',
     '../third_party/skia/include/core',
     '../third_party/skia/include/effects',
     '../third_party/skia/include/images',
@@ -176,6 +165,7 @@
     '../third_party/skia/src/core',
     '../third_party/skia/src/opts',
     '../third_party/skia/src/image',
+    '../third_party/skia/src/pdf',
     '../third_party/skia/src/ports',
     '../third_party/skia/src/sfnt',
     '../third_party/skia/src/utils',
@@ -197,7 +187,8 @@
     }],
     ['skia_support_pdf == 0', {
       'sources/': [
-        ['exclude', '../third_party/skia/src/pdf/']
+        ['exclude', '../third_party/skia/src/doc/SkDocument_PDF.cpp'],
+        ['exclude', '../third_party/skia/src/pdf/'],
       ],
     }],
     ['skia_support_pdf == 1', {
@@ -206,14 +197,19 @@
       ],
     }],
 
-    [ 'OS != "ios"', {
-      'dependencies': [
-        '../third_party/WebKit/public/blink_skia_config.gyp:blink_skia_config',
+    [ 'OS == "win"', {
+      'sources!': [
+        # Keeping _win.cpp
+        "../third_party/skia/src/utils/SkThreadUtils_pthread.cpp",
+        "../third_party/skia/src/utils/SkThreadUtils_pthread_other.cpp",
       ],
-      'export_dependent_settings': [
-        '../third_party/WebKit/public/blink_skia_config.gyp:blink_skia_config',
+    },{
+      'sources!': [
+        # Keeping _pthread.cpp and _pthread_other.cpp
+        "../third_party/skia/src/utils/SkThreadUtils_win.cpp",
       ],
     }],
+
     [ 'OS != "mac"', {
       'sources/': [
         ['exclude', '/mac/']
@@ -227,12 +223,6 @@
         '../build/android/cpufeatures.gypi',
       ],
     }],
-    [ 'target_arch == "arm" or target_arch == "arm64" or \
-       target_arch == "mipsel" or target_arch == "mips64el"', {
-      'sources!': [
-        '../third_party/skia/src/opts/opts_check_x86.cpp'
-      ],
-    }],
     [ 'desktop_linux == 1 or chromeos == 1', {
       'dependencies': [
         '../build/linux/system.gyp:fontconfig',
@@ -244,7 +234,7 @@
         '-Wno-unused-function',
       ],
     }],
-    [ 'use_cairo == 1', {
+    [ 'use_cairo == 1 and use_pango == 1', {
       'dependencies': [
         '../build/linux/system.gyp:pangocairo',
       ],
@@ -290,9 +280,6 @@
         #  from the ios and mac conditions and moved into the main sources
         #  list.
         '../third_party/skia/src/utils/mac/SkStream_mac.cpp',
-      ],
-      'sources/': [
-        ['exclude', 'opts_check_x86\\.cpp$'],
       ],
 
       # The main skia_opts target does not currently work on iOS because the
@@ -363,6 +350,13 @@
         ['include', 'SkStream_mac\\.cpp$',],
         ['include', 'SkCreateCGImageRef\\.cpp$',],
       ],
+      'xcode_settings' : {
+        'WARNING_CFLAGS': [
+          # SkFontHost_mac.cpp uses API deprecated in iOS 7.
+          # crbug.com/408571
+          '-Wno-deprecated-declarations',
+        ],
+      },
     }],
   ],
 

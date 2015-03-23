@@ -99,6 +99,10 @@ NET_ERROR(SOCKET_IS_CONNECTED, -23)
 // The error can be emitted by code in chrome/browser/policy/policy_helpers.cc.
 NET_ERROR(BLOCKED_ENROLLMENT_CHECK_PENDING, -24)
 
+// The upload failed because the upload stream needed to be re-read, due to a
+// retry or a redirect, but the upload stream doesn't support that operation.
+NET_ERROR(UPLOAD_STREAM_REWIND_NOT_SUPPORTED, -25)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -267,9 +271,7 @@ NET_ERROR(SPDY_SESSION_ALREADY_EXISTS, -143)
 // due to a malformed frame or other protocol violation.
 NET_ERROR(WS_PROTOCOL_ERROR, -145)
 
-// Connection was aborted for switching to another ptotocol.
-// WebSocket abort SocketStream connection when alternate protocol is found.
-NET_ERROR(PROTOCOL_SWITCHED, -146)
+// Error -146 was removed (PROTOCOL_SWITCHED)
 
 // Returned when attempting to bind an address that is already in use.
 NET_ERROR(ADDRESS_IN_USE, -147)
@@ -301,9 +303,7 @@ NET_ERROR(SSL_DECRYPT_ERROR_ALERT, -153)
 // pushed to the queue.
 NET_ERROR(WS_THROTTLE_QUEUE_TOO_LARGE, -154)
 
-// There are too many active SocketStream instances, so the new connect request
-// was rejected.
-NET_ERROR(TOO_MANY_SOCKET_STREAMS, -155)
+// Error -155 was removed (TOO_MANY_SOCKET_STREAMS)
 
 // The SSL server certificate changed in a renegotiation.
 NET_ERROR(SSL_SERVER_CERT_CHANGED, -156)
@@ -440,13 +440,16 @@ NET_ERROR(CERT_WEAK_KEY, -211)
 // The certificate claimed DNS names that are in violation of name constraints.
 NET_ERROR(CERT_NAME_CONSTRAINT_VIOLATION, -212)
 
+// The certificate's validity period is too long.
+NET_ERROR(CERT_VALIDITY_TOO_LONG, -213)
+
 // Add new certificate error codes here.
 //
 // Update the value of CERT_END whenever you add a new certificate error
 // code.
 
 // The value immediately past the last certificate error code.
-NET_ERROR(CERT_END, -213)
+NET_ERROR(CERT_END, -214)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -617,6 +620,12 @@ NET_ERROR(SPDY_COMPRESSION_ERROR, -363)
 
 // Proxy Auth Requested without a valid Client Socket Handle.
 NET_ERROR(PROXY_AUTH_REQUESTED_WITH_NO_CONNECTION, -364)
+
+// HTTP_1_1_REQUIRED error code received on HTTP/2 session.
+NET_ERROR(HTTP_1_1_REQUIRED, -365)
+
+// HTTP_1_1_REQUIRED error code received on HTTP/2 session to proxy.
+NET_ERROR(PROXY_HTTP_1_1_REQUIRED, -366)
 
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)

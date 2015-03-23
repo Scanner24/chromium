@@ -14,7 +14,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/browser/extensions/webstore_startup_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
@@ -22,6 +21,7 @@
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/sandboxed_unpacker.h"
 #include "extensions/common/extension.h"
 #include "ipc/ipc_message.h"
 
@@ -94,7 +94,7 @@ void StartupHelper::OnPackFailure(const std::string& error_message,
   PrintPackExtensionMessage(error_message);
 }
 
-bool StartupHelper::PackExtension(const CommandLine& cmd_line) {
+bool StartupHelper::PackExtension(const base::CommandLine& cmd_line) {
   if (!cmd_line.HasSwitch(switches::kPackExtension))
     return false;
 
@@ -120,11 +120,14 @@ namespace {
 
 class ValidateCrxHelper : public SandboxedUnpackerClient {
  public:
-  ValidateCrxHelper(const base::FilePath& crx_file,
+  ValidateCrxHelper(const CRXFileInfo& file,
                     const base::FilePath& temp_dir,
                     base::RunLoop* run_loop)
-      : crx_file_(crx_file), temp_dir_(temp_dir), run_loop_(run_loop),
-        finished_(false), success_(false) {}
+      : crx_file_(file),
+        temp_dir_(temp_dir),
+        run_loop_(run_loop),
+        finished_(false),
+        success_(false) {}
 
   bool finished() { return finished_; }
   bool success() { return success_; }
@@ -138,13 +141,13 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
   }
 
  protected:
-  virtual ~ValidateCrxHelper() {}
+  ~ValidateCrxHelper() override {}
 
-  virtual void OnUnpackSuccess(const base::FilePath& temp_dir,
-                               const base::FilePath& extension_root,
-                               const base::DictionaryValue* original_manifest,
-                               const Extension* extension,
-                               const SkBitmap& install_icon) OVERRIDE {
+  void OnUnpackSuccess(const base::FilePath& temp_dir,
+                       const base::FilePath& extension_root,
+                       const base::DictionaryValue* original_manifest,
+                       const Extension* extension,
+                       const SkBitmap& install_icon) override {
     finished_ = true;
     success_ = true;
     BrowserThread::PostTask(BrowserThread::UI,
@@ -153,7 +156,7 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
                                        this));
   }
 
-  virtual void OnUnpackFailure(const base::string16& error) OVERRIDE {
+  void OnUnpackFailure(const base::string16& error) override {
     finished_ = true;
     success_ = false;
     error_ = error;
@@ -185,7 +188,7 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
   }
 
   // The file being validated.
-  const base::FilePath& crx_file_;
+  const CRXFileInfo& crx_file_;
 
   // The temporary directory where the sandboxed unpacker will do work.
   const base::FilePath& temp_dir_;
@@ -205,7 +208,7 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
 
 }  // namespace
 
-bool StartupHelper::ValidateCrx(const CommandLine& cmd_line,
+bool StartupHelper::ValidateCrx(const base::CommandLine& cmd_line,
                                 std::string* error) {
   CHECK(error);
   base::FilePath path = cmd_line.GetSwitchValuePath(switches::kValidateCrx);
@@ -222,8 +225,9 @@ bool StartupHelper::ValidateCrx(const CommandLine& cmd_line,
   }
 
   base::RunLoop run_loop;
+  CRXFileInfo file(path);
   scoped_refptr<ValidateCrxHelper> helper(
-      new ValidateCrxHelper(path, temp_dir.path(), &run_loop));
+      new ValidateCrxHelper(file, temp_dir.path(), &run_loop));
   helper->Start();
   if (!helper->finished())
     run_loop.Run();
@@ -298,13 +302,13 @@ void AppInstallHelper::OnAppInstallComplete(bool success,
                                             const std::string& error,
                                             webstore_install::Result result) {
   success_ = success;
-  error_= error;
+  error_ = error;
   done_callback_.Run();
 }
 
 }  // namespace
 
-bool StartupHelper::InstallEphemeralApp(const CommandLine& cmd_line,
+bool StartupHelper::InstallEphemeralApp(const base::CommandLine& cmd_line,
                                         Profile* profile) {
   std::string id =
       cmd_line.GetSwitchValueASCII(switches::kInstallEphemeralAppFromWebstore);

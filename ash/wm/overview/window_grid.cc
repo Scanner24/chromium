@@ -4,6 +4,11 @@
 
 #include "ash/wm/overview/window_grid.h"
 
+#include <algorithm>
+#include <functional>
+#include <set>
+#include <vector>
+
 #include "ash/ash_switches.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
@@ -11,8 +16,6 @@
 #include "ash/wm/overview/scoped_transform_overview_window.h"
 #include "ash/wm/overview/window_selector.h"
 #include "ash/wm/overview/window_selector_item.h"
-#include "ash/wm/overview/window_selector_panels.h"
-#include "ash/wm/overview/window_selector_window.h"
 #include "ash/wm/window_state.h"
 #include "base/command_line.h"
 #include "base/i18n/string_search.h"
@@ -22,7 +25,7 @@
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/tween.h"
-#include "ui/gfx/vector2d.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/views/background.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -31,6 +34,8 @@
 namespace ash {
 namespace {
 
+typedef std::vector<aura::Window*> Windows;
+
 // An observer which holds onto the passed widget until the animation is
 // complete.
 class CleanupWidgetAfterAnimationObserver
@@ -38,10 +43,10 @@ class CleanupWidgetAfterAnimationObserver
  public:
   explicit CleanupWidgetAfterAnimationObserver(
       scoped_ptr<views::Widget> widget);
-  virtual ~CleanupWidgetAfterAnimationObserver();
+  ~CleanupWidgetAfterAnimationObserver() override;
 
   // ui::ImplicitAnimationObserver:
-  virtual void OnImplicitAnimationsCompleted() OVERRIDE;
+  void OnImplicitAnimationsCompleted() override;
 
  private:
   scoped_ptr<views::Widget> widget_;
@@ -69,21 +74,7 @@ struct WindowSelectorItemComparator
   }
 
   bool operator()(WindowSelectorItem* window) const {
-    return window->HasSelectableWindow(target);
-  }
-
-  const aura::Window* target;
-};
-
-// A comparator for locating a WindowSelectorItem given a targeted window.
-struct WindowSelectorItemTargetComparator
-    : public std::unary_function<WindowSelectorItem*, bool> {
-  explicit WindowSelectorItemTargetComparator(const aura::Window* target_window)
-      : target(target_window) {
-  }
-
-  bool operator()(WindowSelectorItem* window) const {
-    return window->Contains(target);
+    return window->GetWindow() == target;
   }
 
   const aura::Window* target;
@@ -136,7 +127,7 @@ WindowGrid::WindowGrid(aura::Window* root_window,
                        WindowSelector* window_selector)
     : root_window_(root_window),
       window_selector_(window_selector) {
-  WindowSelectorPanels* panels_item = NULL;
+
   for (aura::Window::Windows::const_iterator iter = windows.begin();
        iter != windows.end(); ++iter) {
     if ((*iter)->GetRootWindow() != root_window)
@@ -144,21 +135,8 @@ WindowGrid::WindowGrid(aura::Window* root_window,
     (*iter)->AddObserver(this);
     observed_windows_.insert(*iter);
 
-    if ((*iter)->type() == ui::wm::WINDOW_TYPE_PANEL &&
-        wm::GetWindowState(*iter)->panel_attached()) {
-      // Attached panel windows are grouped into a single overview item per
-      // grid.
-      if (!panels_item) {
-        panels_item = new WindowSelectorPanels(root_window_);
-        window_list_.push_back(panels_item);
-      }
-      panels_item->AddWindow(*iter);
-    } else {
-      window_list_.push_back(new WindowSelectorWindow(*iter));
-    }
+    window_list_.push_back(new WindowSelectorItem(*iter));
   }
-  if (window_list_.empty())
-    return;
 }
 
 WindowGrid::~WindowGrid() {
@@ -184,16 +162,9 @@ void WindowGrid::PositionWindows(bool animate) {
       ScreenUtil::GetDisplayWorkAreaBoundsInParent(
           Shell::GetContainer(root_window_, kShellWindowId_DefaultContainer)));
 
-  // If the text filtering feature is enabled, reserve space at the top for the
-  // text filtering textbox to appear.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshDisableTextFilteringInOverviewMode)) {
-    total_bounds.Inset(
-        0,
-        WindowSelector::kTextFilterBottomEdge + kTextFilterBottomMargin,
-        0,
-        0);
-  }
+  // Reserve space at the top for the text filtering textbox to appear.
+  total_bounds.Inset(
+      0, WindowSelector::kTextFilterBottomEdge + kTextFilterBottomMargin, 0, 0);
 
   // Find the minimum number of windows per row that will fit all of the
   // windows on screen.
@@ -222,7 +193,9 @@ void WindowGrid::PositionWindows(bool animate) {
                             window_size.height() * row + y_offset,
                             window_size.width(),
                             window_size.height());
-    window_list_[i]->SetBounds(root_window_, target_bounds, animate);
+    window_list_[i]->SetBounds(target_bounds, animate ?
+        OverviewAnimationType::OVERVIEW_ANIMATION_LAY_OUT_SELECTOR_ITEMS :
+        OverviewAnimationType::OVERVIEW_ANIMATION_NONE);
   }
 
   // If we have less than |kMinCardsMajor| windows, adjust the column_ value to
@@ -306,16 +279,18 @@ WindowSelectorItem* WindowGrid::SelectedWindow() const {
 }
 
 bool WindowGrid::Contains(const aura::Window* window) const {
-  return std::find_if(window_list_.begin(), window_list_.end(),
-                      WindowSelectorItemTargetComparator(window)) !=
-                          window_list_.end();
+  for (const WindowSelectorItem* window_item : window_list_) {
+    if (window_item->Contains(window))
+      return true;
+  }
+  return false;
 }
 
 void WindowGrid::FilterItems(const base::string16& pattern) {
   base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents finder(pattern);
   for (ScopedVector<WindowSelectorItem>::iterator iter = window_list_.begin();
        iter != window_list_.end(); iter++) {
-    if (finder.Search((*iter)->SelectionWindow()->title(), NULL, NULL)) {
+    if (finder.Search((*iter)->GetWindow()->title(), nullptr, nullptr)) {
       (*iter)->SetDimmed(false);
     } else {
       (*iter)->SetDimmed(true);
@@ -333,13 +308,6 @@ void WindowGrid::OnWindowDestroying(aura::Window* window) {
                    WindowSelectorItemComparator(window));
 
   DCHECK(iter != window_list_.end());
-
-  (*iter)->RemoveWindow(window);
-
-  // If there are still windows in this selector entry then the overview is
-  // still active and the active selection remains the same.
-  if (!(*iter)->empty())
-    return;
 
   size_t removed_index = iter - window_list_.begin();
   window_list_.erase(iter);
@@ -368,7 +336,7 @@ void WindowGrid::OnWindowBoundsChanged(aura::Window* window,
                                        const gfx::Rect& new_bounds) {
   ScopedVector<WindowSelectorItem>::const_iterator iter =
       std::find_if(window_list_.begin(), window_list_.end(),
-                   WindowSelectorItemTargetComparator(window));
+                   WindowSelectorItemComparator(window));
   DCHECK(iter != window_list_.end());
 
   // Immediately finish any active bounds animation.
@@ -395,7 +363,7 @@ void WindowGrid::InitSelectionWidget(WindowSelector::Direction direction) {
   ::wm::SetWindowVisibilityAnimationTransition(
       selection_widget_->GetNativeWindow(), ::wm::ANIMATE_NONE);
   // The selection widget should not activate the shelf when passing under it.
-  ash::wm::GetWindowState(selection_widget_->GetNativeWindow())->
+  wm::GetWindowState(selection_widget_->GetNativeWindow())->
       set_ignored_by_shelf(true);
 
   views::View* content_view = new views::View;

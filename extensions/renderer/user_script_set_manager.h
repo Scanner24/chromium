@@ -51,7 +51,7 @@ class UserScriptSetManager : public content::RenderProcessObserver {
 
   UserScriptSetManager(const ExtensionSet* extensions);
 
-  virtual ~UserScriptSetManager();
+  ~UserScriptSetManager() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -65,8 +65,8 @@ class UserScriptSetManager : public content::RenderProcessObserver {
       const GURL& url,
       const Extension* extension);
 
-  // Put all injections from |static_scripts| and each of
-  // |programmatic_scripts_| into |injections|.
+  // Append all injections from |static_scripts| and each of
+  // |programmatic_scripts_| to |injections|.
   void GetAllInjections(ScopedVector<ScriptInjection>* injections,
                         blink::WebFrame* web_frame,
                         int tab_id,
@@ -83,7 +83,7 @@ class UserScriptSetManager : public content::RenderProcessObserver {
   typedef std::map<ExtensionId, linked_ptr<UserScriptSet> > UserScriptSetMap;
 
   // content::RenderProcessObserver implementation.
-  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnControlMessageReceived(const IPC::Message& message) override;
 
   UserScriptSet* GetProgrammaticScriptsByExtension(
       const ExtensionId& extensionId);

@@ -30,10 +30,10 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
         ozone_surface_(ozone_surface.Pass()),
         widget_(widget) {}
 
-  virtual bool Initialize() OVERRIDE {
+  bool Initialize() override {
     return Initialize(ozone_surface_->CreateVSyncProvider());
   }
-  virtual bool Resize(const gfx::Size& size) OVERRIDE {
+  bool Resize(const gfx::Size& size) override {
     if (!ozone_surface_->ResizeNativeWindow(size)) {
       if (!ReinitializeNativeSurface() ||
           !ozone_surface_->ResizeNativeWindow(size))
@@ -42,17 +42,17 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
 
     return NativeViewGLSurfaceEGL::Resize(size);
   }
-  virtual bool SwapBuffers() OVERRIDE {
+  bool SwapBuffers() override {
     if (!NativeViewGLSurfaceEGL::SwapBuffers())
       return false;
 
     return ozone_surface_->OnSwapBuffers();
   }
-  virtual bool ScheduleOverlayPlane(int z_order,
-                                    OverlayTransform transform,
-                                    GLImage* image,
-                                    const Rect& bounds_rect,
-                                    const RectF& crop_rect) OVERRIDE {
+  bool ScheduleOverlayPlane(int z_order,
+                            OverlayTransform transform,
+                            GLImage* image,
+                            const Rect& bounds_rect,
+                            const RectF& crop_rect) override {
     return image->ScheduleOverlayPlane(
         widget_, z_order, transform, bounds_rect, crop_rect);
   }
@@ -60,7 +60,7 @@ class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
  private:
   using NativeViewGLSurfaceEGL::Initialize;
 
-  virtual ~GLSurfaceOzoneEGL() {
+  ~GLSurfaceOzoneEGL() override {
     Destroy();  // EGL surface must be destroyed before SurfaceOzone
   }
 
@@ -105,9 +105,11 @@ class GL_EXPORT GLSurfaceOzoneSurfaceless : public SurfacelessEGL {
                             AcceleratedWidget widget)
       : SurfacelessEGL(gfx::Size()),
         ozone_surface_(ozone_surface.Pass()),
-        widget_(widget) {}
+        widget_(widget),
+        has_implicit_external_sync_(
+            HasEGLExtension("EGL_ARM_implicit_external_sync")) {}
 
-  virtual bool Initialize() OVERRIDE {
+  bool Initialize() override {
     if (!SurfacelessEGL::Initialize())
       return false;
     vsync_provider_ = ozone_surface_->CreateVSyncProvider();
@@ -115,47 +117,82 @@ class GL_EXPORT GLSurfaceOzoneSurfaceless : public SurfacelessEGL {
       return false;
     return true;
   }
-  virtual bool Resize(const gfx::Size& size) OVERRIDE {
+  bool Resize(const gfx::Size& size) override {
     if (!ozone_surface_->ResizeNativeWindow(size))
       return false;
 
     return SurfacelessEGL::Resize(size);
   }
-  virtual bool SwapBuffers() OVERRIDE {
-    // TODO: this should be replaced by a fence when supported by the driver.
-    glFinish();
+  bool SwapBuffers() override {
+    if (!Flush())
+      return false;
     return ozone_surface_->OnSwapBuffers();
   }
-  virtual bool ScheduleOverlayPlane(int z_order,
-                                    OverlayTransform transform,
-                                    GLImage* image,
-                                    const Rect& bounds_rect,
-                                    const RectF& crop_rect) OVERRIDE {
+  bool ScheduleOverlayPlane(int z_order,
+                            OverlayTransform transform,
+                            GLImage* image,
+                            const Rect& bounds_rect,
+                            const RectF& crop_rect) override {
     return image->ScheduleOverlayPlane(
         widget_, z_order, transform, bounds_rect, crop_rect);
   }
-  virtual bool IsOffscreen() OVERRIDE { return false; }
-  virtual VSyncProvider* GetVSyncProvider() OVERRIDE {
-    return vsync_provider_.get();
-  }
-  virtual bool SupportsPostSubBuffer() OVERRIDE { return true; }
-  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE {
+  bool IsOffscreen() override { return false; }
+  VSyncProvider* GetVSyncProvider() override { return vsync_provider_.get(); }
+  bool SupportsPostSubBuffer() override { return true; }
+  bool PostSubBuffer(int x, int y, int width, int height) override {
     // The actual sub buffer handling is handled at higher layers.
     SwapBuffers();
     return true;
   }
-  virtual bool IsSurfaceless() const OVERRIDE { return true; }
+  bool SwapBuffersAsync(const SwapCompletionCallback& callback) override {
+    if (!Flush())
+      return false;
+    return ozone_surface_->OnSwapBuffersAsync(callback);
+  }
+  bool PostSubBufferAsync(int x,
+                          int y,
+                          int width,
+                          int height,
+                          const SwapCompletionCallback& callback) override {
+    return SwapBuffersAsync(callback);
+  }
 
  private:
-  virtual ~GLSurfaceOzoneSurfaceless() {
+  ~GLSurfaceOzoneSurfaceless() override {
     Destroy();  // EGL surface must be destroyed before SurfaceOzone
+  }
+
+  bool Flush() {
+    glFlush();
+    // TODO: crbug.com/462360 the following should be replaced by a per surface
+    // flush as it gets implemented in GL drivers.
+    if (has_implicit_external_sync_) {
+      const EGLint attrib_list[] = {
+          EGL_SYNC_CONDITION_KHR,
+          EGL_SYNC_PRIOR_COMMANDS_IMPLICIT_EXTERNAL_ARM,
+          EGL_NONE};
+      EGLSyncKHR fence =
+          eglCreateSyncKHR(GetDisplay(), EGL_SYNC_FENCE_KHR, attrib_list);
+      if (fence) {
+        // TODO(dbehr): piman@ suggests we could improve here by moving
+        // following wait to right before drmModePageFlip crbug.com/456417.
+        eglClientWaitSyncKHR(GetDisplay(), fence,
+                             EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, EGL_FOREVER_KHR);
+        eglDestroySyncKHR(GetDisplay(), fence);
+      } else {
+        return false;
+      }
+    } else if (ozone_surface_->IsUniversalDisplayLinkDevice()) {
+      glFinish();
+    }
+    return true;
   }
 
   // The native surface. Deleting this is allowed to free the EGLNativeWindow.
   scoped_ptr<ui::SurfaceOzoneEGL> ozone_surface_;
   AcceleratedWidget widget_;
   scoped_ptr<VSyncProvider> vsync_provider_;
-
+  bool has_implicit_external_sync_;
   DISALLOW_COPY_AND_ASSIGN(GLSurfaceOzoneSurfaceless);
 };
 

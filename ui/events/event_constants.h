@@ -77,21 +77,25 @@ enum EventType {
 
 // Event flags currently supported
 enum EventFlags {
-  EF_NONE                = 0,       // Used to denote no flags explicitly
-  EF_CAPS_LOCK_DOWN      = 1 << 0,
-  EF_SHIFT_DOWN          = 1 << 1,
-  EF_CONTROL_DOWN        = 1 << 2,
-  EF_ALT_DOWN            = 1 << 3,
-  EF_LEFT_MOUSE_BUTTON   = 1 << 4,
-  EF_MIDDLE_MOUSE_BUTTON = 1 << 5,
-  EF_RIGHT_MOUSE_BUTTON  = 1 << 6,
-  EF_COMMAND_DOWN        = 1 << 7,  // GUI Key (e.g. Command on OS X keyboards,
-                                    // Search on Chromebook keyboards,
-                                    // Windows on MS-oriented keyboards)
-  EF_EXTENDED            = 1 << 8,  // Windows extended key (see WM_KEYDOWN doc)
-  EF_IS_SYNTHESIZED      = 1 << 9,
-  EF_ALTGR_DOWN          = 1 << 10,
-  EF_MOD3_DOWN           = 1 << 11,
+  EF_NONE                 = 0,       // Used to denote no flags explicitly
+  EF_CAPS_LOCK_DOWN       = 1 << 0,
+  EF_SHIFT_DOWN           = 1 << 1,
+  EF_CONTROL_DOWN         = 1 << 2,
+  EF_ALT_DOWN             = 1 << 3,
+  EF_LEFT_MOUSE_BUTTON    = 1 << 4,
+  EF_MIDDLE_MOUSE_BUTTON  = 1 << 5,
+  EF_RIGHT_MOUSE_BUTTON   = 1 << 6,
+  EF_COMMAND_DOWN         = 1 << 7,  // GUI Key (e.g. Command on OS X
+                                     // keyboards, Search on Chromebook
+                                     // keyboards, Windows on MS-oriented
+                                     // keyboards)
+  EF_EXTENDED             = 1 << 8,  // Windows extended key (see WM_KEYDOWN
+                                     // doc)
+  EF_IS_SYNTHESIZED       = 1 << 9,
+  EF_ALTGR_DOWN           = 1 << 10,
+  EF_MOD3_DOWN            = 1 << 11,
+  EF_BACK_MOUSE_BUTTON    = 1 << 12,
+  EF_FORWARD_MOUSE_BUTTON = 1 << 13,
 };
 
 // Flags specific to key events
@@ -119,12 +123,17 @@ enum MouseEventFlags {
 
 // Result of dispatching an event.
 enum EventResult {
-  ER_UNHANDLED = 0,       // The event hasn't been handled. The event can be
-                          // propagated to other handlers.
-  ER_HANDLED   = 1 << 0,  // The event has already been handled, but it can
-                          // still be propagated to other handlers.
-  ER_CONSUMED  = 1 << 1,  // The event has been handled, and it should not be
-                          // propagated to other handlers.
+  ER_UNHANDLED = 0,      // The event hasn't been handled. The event can be
+                         // propagated to other handlers.
+  ER_HANDLED = 1 << 0,   // The event has already been handled, but it can
+                         // still be propagated to other handlers.
+  ER_CONSUMED = 1 << 1,  // The event has been handled, and it should not be
+                         // propagated to other handlers.
+  ER_DISABLE_SYNC_HANDLING =
+      1 << 2,  // The event shouldn't be handled synchronously. This
+               // happens if the event is being handled
+               // asynchronously, or if the event is invalid and
+               // shouldn't be handled at all.
 };
 
 // Phase of the event dispatch.

@@ -16,6 +16,7 @@
 
 using net::test::DefaultQuicConfig;
 using net::test::SupportedVersions;
+using std::string;
 using testing::StrictMock;
 using testing::TestWithParam;
 
@@ -34,7 +35,6 @@ class QuicSpdyClientStreamTest : public TestWithParam<QuicVersion> {
     session_.InitializeSession(
         QuicServerId("example.com", 80, false, PRIVACY_MODE_DISABLED),
         &crypto_config_);
-    crypto_config_.SetDefaults();
 
     headers_.SetResponseFirstlineFromStringPieces("HTTP/1.1", "200", "Ok");
     headers_.ReplaceOrAppendHeader("content-length", "11");
@@ -43,8 +43,6 @@ class QuicSpdyClientStreamTest : public TestWithParam<QuicVersion> {
 
     // New streams rely on having the peer's flow control receive window
     // negotiated in the config.
-    session_.config()->SetInitialFlowControlWindowToSend(
-        kInitialSessionFlowControlWindowForTest);
     session_.config()->SetInitialStreamFlowControlWindowToSend(
         kInitialStreamFlowControlWindowForTest);
     session_.config()->SetInitialSessionFlowControlWindowToSend(

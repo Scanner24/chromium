@@ -81,7 +81,9 @@ class CONTENT_EXPORT BrowserThread {
     // This is the thread to handle slow HTTP cache operations.
     CACHE,
 
-    // This is the thread that processes IPC and network messages.
+    // This is the thread that processes non-blocking IO, i.e. IPC and network.
+    // Blocking IO should happen on other threads like DB, FILE,
+    // FILE_USER_BLOCKING and CACHE depending on the usage.
     IO,
 
     // NOTE: do not add new threads here that are only used by a small number of
@@ -222,7 +224,7 @@ class CONTENT_EXPORT BrowserThread {
   // Sets the delegate for the specified BrowserThread.
   //
   // Only one delegate may be registered at a time.  Delegates may be
-  // unregistered by providing a NULL pointer.
+  // unregistered by providing a nullptr pointer.
   //
   // If the caller unregisters a delegate before CleanUp has been
   // called, it must perform its own locking to ensure the delegate is

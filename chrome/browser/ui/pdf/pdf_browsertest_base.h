@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/readback_types.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 namespace base {
@@ -42,15 +43,16 @@ class PDFBrowserTest : public InProcessBrowserTest,
   bool VerifySnapshot(const std::string& expected_filename);
 
  private:
-  void CopyFromBackingStoreCallback(bool success, const SkBitmap& bitmap);
+  void CopyFromBackingStoreCallback(const SkBitmap& bitmap,
+                                    content::ReadbackResponse response);
 
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
 
   // InProcessBrowserTest
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override;
 
   // True if the snapshot differed from the expected value.
   bool snapshot_different_;

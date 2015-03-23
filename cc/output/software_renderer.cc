@@ -4,7 +4,7 @@
 
 #include "cc/output/software_renderer.h"
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/compositor_frame_ack.h"
@@ -63,7 +63,7 @@ static SkShader::TileMode WrapModeToTileMode(GLint wrap_mode) {
 
 scoped_ptr<SoftwareRenderer> SoftwareRenderer::Create(
     RendererClient* client,
-    const LayerTreeSettings* settings,
+    const RendererSettings* settings,
     OutputSurface* output_surface,
     ResourceProvider* resource_provider) {
   return make_scoped_ptr(new SoftwareRenderer(
@@ -71,7 +71,7 @@ scoped_ptr<SoftwareRenderer> SoftwareRenderer::Create(
 }
 
 SoftwareRenderer::SoftwareRenderer(RendererClient* client,
-                                   const LayerTreeSettings* settings,
+                                   const RendererSettings* settings,
                                    OutputSurface* output_surface,
                                    ResourceProvider* resource_provider)
     : DirectRenderer(client, settings, output_surface, resource_provider),
@@ -107,7 +107,8 @@ void SoftwareRenderer::BeginDrawingFrame(DrawingFrame* frame) {
 
 void SoftwareRenderer::FinishDrawingFrame(DrawingFrame* frame) {
   TRACE_EVENT0("cc", "SoftwareRenderer::FinishDrawingFrame");
-  current_framebuffer_lock_.reset();
+  current_framebuffer_lock_ = nullptr;
+  current_framebuffer_canvas_.clear();
   current_canvas_ = NULL;
   root_canvas_ = NULL;
 
@@ -127,7 +128,7 @@ void SoftwareRenderer::ReceiveSwapBuffersAck(const CompositorFrameAck& ack) {
   output_device_->ReclaimSoftwareFrame(ack.last_software_frame_id);
 }
 
-bool SoftwareRenderer::FlippedFramebuffer() const {
+bool SoftwareRenderer::FlippedFramebuffer(const DrawingFrame* frame) const {
   return false;
 }
 
@@ -150,7 +151,8 @@ void SoftwareRenderer::Finish() {}
 
 void SoftwareRenderer::BindFramebufferToOutputSurface(DrawingFrame* frame) {
   DCHECK(!output_surface_->HasExternalStencilTest());
-  current_framebuffer_lock_.reset();
+  current_framebuffer_lock_ = nullptr;
+  current_framebuffer_canvas_.clear();
   current_canvas_ = root_canvas_;
 }
 
@@ -158,11 +160,17 @@ bool SoftwareRenderer::BindFramebufferToTexture(
     DrawingFrame* frame,
     const ScopedResource* texture,
     const gfx::Rect& target_rect) {
-  current_framebuffer_lock_.reset();
+  DCHECK(texture->id());
+
+  // Explicitly release lock, otherwise we can crash when try to lock
+  // same texture again.
+  current_framebuffer_lock_ = nullptr;
   current_framebuffer_lock_ = make_scoped_ptr(
       new ResourceProvider::ScopedWriteLockSoftware(
           resource_provider_, texture->id()));
-  current_canvas_ = current_framebuffer_lock_->sk_canvas();
+  current_framebuffer_canvas_ =
+      skia::AdoptRef(new SkCanvas(current_framebuffer_lock_->sk_bitmap()));
+  current_canvas_ = current_framebuffer_canvas_.get();
   InitializeViewport(frame,
                      target_rect,
                      gfx::Rect(target_rect.size()),
@@ -215,11 +223,11 @@ void SoftwareRenderer::SetDrawViewport(
 bool SoftwareRenderer::IsSoftwareResource(
     ResourceProvider::ResourceId resource_id) const {
   switch (resource_provider_->GetResourceType(resource_id)) {
-    case ResourceProvider::GLTexture:
+    case ResourceProvider::RESOURCE_TYPE_GL_TEXTURE:
       return false;
-    case ResourceProvider::Bitmap:
+    case ResourceProvider::RESOURCE_TYPE_BITMAP:
       return true;
-    case ResourceProvider::InvalidType:
+    case ResourceProvider::RESOURCE_TYPE_INVALID:
       break;
   }
 
@@ -240,14 +248,16 @@ void SoftwareRenderer::DoDrawQuad(DrawingFrame* frame, const DrawQuad* quad) {
   current_canvas_->setMatrix(sk_device_matrix);
 
   current_paint_.reset();
-  if (!IsScaleAndIntegerTranslate(sk_device_matrix)) {
+  if (settings_->force_antialiasing ||
+      !IsScaleAndIntegerTranslate(sk_device_matrix)) {
     // TODO(danakj): Until we can enable AA only on exterior edges of the
     // layer, disable AA if any interior edges are present. crbug.com/248175
     bool all_four_edges_are_exterior = quad->IsTopEdge() &&
                                        quad->IsLeftEdge() &&
                                        quad->IsBottomEdge() &&
                                        quad->IsRightEdge();
-    if (settings_->allow_antialiasing && all_four_edges_are_exterior)
+    if (settings_->allow_antialiasing &&
+        (settings_->force_antialiasing || all_four_edges_are_exterior))
       current_paint_.setAntiAlias(true);
     current_paint_.setFilterLevel(SkPaint::kLow_FilterLevel);
   }
@@ -342,15 +352,16 @@ void SoftwareRenderer::DrawPictureQuad(const DrawingFrame* frame,
   // (http://crbug.com/280374).
   skia::RefPtr<SkDrawFilter> opacity_filter =
       skia::AdoptRef(new skia::OpacityDrawFilter(
-          quad->opacity(), frame->disable_picture_quad_image_filtering));
+          quad->opacity(), frame->disable_picture_quad_image_filtering ||
+                               quad->nearest_neighbor));
   DCHECK(!current_canvas_->getDrawFilter());
   current_canvas_->setDrawFilter(opacity_filter.get());
 
   TRACE_EVENT0("cc",
                "SoftwareRenderer::DrawPictureQuad");
 
-  quad->picture_pile->RasterDirect(
-      current_canvas_, quad->content_rect, quad->contents_scale, NULL);
+  quad->raster_source->PlaybackToSharedCanvas(
+      current_canvas_, quad->content_rect, quad->contents_scale);
 
   current_canvas_->setDrawFilter(NULL);
 }
@@ -444,7 +455,9 @@ void SoftwareRenderer::DrawTileQuad(const DrawingFrame* frame,
       QuadVertexRect(), quad->rect, quad->visible_rect);
 
   SkRect uv_rect = gfx::RectFToSkRect(visible_tex_coord_rect);
-  current_paint_.setFilterLevel(SkPaint::kLow_FilterLevel);
+  current_paint_.setFilterLevel(quad->nearest_neighbor
+                                    ? SkPaint::kNone_FilterLevel
+                                    : SkPaint::kLow_FilterLevel);
   current_canvas_->drawBitmapRectToRect(
       *lock.sk_bitmap(),
       &uv_rect,
@@ -519,11 +532,11 @@ void SoftwareRenderer::DrawRenderPassQuad(const DrawingFrame* frame,
 
     const SkBitmap* mask = mask_lock.sk_bitmap();
 
-    SkRect mask_rect = SkRect::MakeXYWH(
-        quad->mask_uv_rect.x() * mask->width(),
-        quad->mask_uv_rect.y() * mask->height(),
-        quad->mask_uv_rect.width() * mask->width(),
-        quad->mask_uv_rect.height() * mask->height());
+    // Scale normalized uv rect into absolute texel coordinates.
+    SkRect mask_rect =
+        gfx::RectFToSkRect(gfx::ScaleRect(quad->MaskUVRect(),
+                                          quad->mask_texture_size.width(),
+                                          quad->mask_texture_size.height()));
 
     SkMatrix mask_mat;
     mask_mat.setRectToRect(mask_rect, dest_rect, SkMatrix::kFill_ScaleToFit);
@@ -567,7 +580,7 @@ void SoftwareRenderer::CopyCurrentRenderPassToBitmap(
   gfx::Rect copy_rect = frame->current_render_pass->output_rect;
   if (request->has_area())
     copy_rect.Intersect(request->area());
-  gfx::Rect window_copy_rect = MoveFromDrawToWindowSpace(copy_rect);
+  gfx::Rect window_copy_rect = MoveFromDrawToWindowSpace(frame, copy_rect);
 
   scoped_ptr<SkBitmap> bitmap(new SkBitmap);
   bitmap->setInfo(SkImageInfo::MakeN32Premul(window_copy_rect.width(),

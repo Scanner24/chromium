@@ -11,13 +11,13 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate_impl.h"
 #include "chrome/browser/ui/app_list/app_list_positioner.h"
@@ -150,10 +150,7 @@ void CreateAppListShim(const base::FilePath& profile_path) {
   if (installed_version == 0)
     shortcut_locations.in_quick_launch_bar = true;
 
-  web_app::CreateShortcutsWithInfo(web_app::SHORTCUT_CREATION_AUTOMATED,
-                                   shortcut_locations,
-                                   shortcut_info,
-                                   extensions::FileHandlersInfo());
+  web_app::CreateNonAppShortcut(shortcut_locations, shortcut_info);
 
   local_state->SetInteger(prefs::kAppLauncherShortcutVersion,
                           kShortcutVersion);
@@ -341,6 +338,12 @@ void AppListServiceMac::FindAnchorPoint(const gfx::Size& window_size,
 }
 
 void AppListServiceMac::Init(Profile* initial_profile) {
+  InitWithProfilePath(initial_profile, initial_profile->GetPath());
+}
+
+void AppListServiceMac::InitWithProfilePath(
+    Profile* initial_profile,
+    const base::FilePath& profile_path) {
   // On Mac, Init() is called multiple times for a process: any time there is no
   // browser window open and a new window is opened, and during process startup
   // to handle the silent launch case (e.g. for app shims). In the startup case,
@@ -375,37 +378,24 @@ void AppListServiceMac::Init(Profile* initial_profile) {
   // OnShimLaunch(). Note that if --silent-launch is not also passed, the window
   // will instead populate via StartupBrowserCreator::Launch(). Shim-initiated
   // launches will always have --silent-launch.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kShowAppList))
-    ShowWindowNearDock();
+  if (base::CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kShowAppList)) {
+    // Do not show the launcher window when the profile is locked.
+    const ProfileInfoCache& profile_info_cache =
+        g_browser_process->profile_manager()->GetProfileInfoCache();
+    size_t profile_index = profile_info_cache.
+        GetIndexOfProfileWithPath(profile_path);
+    if (profile_index != std::string::npos &&
+        !profile_info_cache.ProfileIsSigninRequiredAtIndex(profile_index))
+      ShowWindowNearDock();
+  }
 }
 
 Profile* AppListServiceMac::GetCurrentAppListProfile() {
   return profile_;
 }
 
-void AppListServiceMac::CreateForProfile(Profile* requested_profile) {
-  if (profile_ == requested_profile)
-    return;
-
-  profile_ = requested_profile;
-
-  if (!window_controller_)
-    window_controller_.reset([[AppListWindowController alloc] init]);
-
-  [[window_controller_ appListViewController] setDelegate:nil];
-  [[window_controller_ appListViewController]
-      setDelegate:GetViewDelegate(profile_)];
-}
-
 void AppListServiceMac::ShowForProfile(Profile* requested_profile) {
-  InvalidatePendingProfileLoads();
-
-  if (requested_profile == profile_) {
-    ShowWindowNearDock();
-    return;
-  }
-
-  SetProfilePath(requested_profile->GetPath());
   CreateForProfile(requested_profile);
   ShowWindowNearDock();
 }
@@ -435,6 +425,10 @@ void AppListServiceMac::DismissAppList() {
                                closing:YES];
 }
 
+void AppListServiceMac::ShowForCustomLauncherPage(Profile* profile) {
+  NOTIMPLEMENTED();
+}
+
 bool AppListServiceMac::IsAppListVisible() const {
   return [[window_controller_ window] isVisible] &&
       ![animation_controller_ isClosing];
@@ -450,6 +444,23 @@ void AppListServiceMac::EnableAppList(Profile* initial_profile,
 void AppListServiceMac::CreateShortcut() {
   CreateAppListShim(GetProfilePath(
       g_browser_process->profile_manager()->user_data_dir()));
+}
+
+void AppListServiceMac::CreateForProfile(Profile* requested_profile) {
+  DCHECK(requested_profile);
+  InvalidatePendingProfileLoads();
+  if (profile_ && requested_profile->IsSameProfile(profile_))
+    return;
+
+  profile_ = requested_profile->GetOriginalProfile();
+  SetProfilePath(profile_->GetPath());
+
+  if (!window_controller_)
+    window_controller_.reset([[AppListWindowController alloc] init]);
+
+  [[window_controller_ appListViewController] setDelegate:nil];
+  [[window_controller_ appListViewController]
+      setDelegate:GetViewDelegate(profile_)];
 }
 
 void AppListServiceMac::DestroyAppList() {
@@ -535,8 +546,10 @@ AppListService* AppListService::Get(chrome::HostDesktopType desktop_type) {
 }
 
 // static
-void AppListService::InitAll(Profile* initial_profile) {
-  AppListServiceMac::GetInstance()->Init(initial_profile);
+void AppListService::InitAll(Profile* initial_profile,
+                             const base::FilePath& profile_path) {
+  AppListServiceMac::GetInstance()->InitWithProfilePath(initial_profile,
+                                                        profile_path);
 }
 
 @implementation AppListAnimationController
@@ -579,14 +592,12 @@ void AppListService::InitAll(Profile* initial_profile) {
     [animation_ setAnimationCurve:NSAnimationEaseOut];
     window_.reset();
   }
-  // Threaded animations are buggy on Snow Leopard. See http://crbug.com/335550.
-  // Note that in the non-threaded case, the animation won't start unless the
-  // UI runloop has spun up, so on <= Lion the animation will only animate if
-  // Chrome is already running.
-  if (base::mac::IsOSMountainLionOrLater())
-    [animation_ setAnimationBlockingMode:NSAnimationNonblockingThreaded];
-  else
-    [animation_ setAnimationBlockingMode:NSAnimationNonblocking];
+  // This once used a threaded animation, but AppKit would too often ignore
+  // -[NSView canDrawConcurrently:] and just redraw whole view hierarchies on
+  // the animation thread anyway, creating a minefield of race conditions.
+  // Non-threaded means the animation isn't as smooth and doesn't begin unless
+  // the UI runloop has spun up (after profile loading).
+  [animation_ setAnimationBlockingMode:NSAnimationNonblocking];
 
   [animation_ startAnimation];
 }

@@ -18,6 +18,7 @@ class SharedMemory;
 
 namespace cc {
 class Layer;
+class SharedBitmap;
 }  // namespace cc
 
 namespace content {
@@ -39,13 +40,13 @@ class PepperCompositorHost : public ppapi::host::ResourceHost {
   const scoped_refptr<cc::Layer> layer() { return layer_; };
 
   void ViewInitiatedPaint();
-  void ViewFlushedPaint();
 
  private:
-  virtual ~PepperCompositorHost();
+  ~PepperCompositorHost() override;
 
   void ImageReleased(int32_t id,
-                     const scoped_ptr<base::SharedMemory>& shared_memory,
+                     scoped_ptr<base::SharedMemory> shared_memory,
+                     scoped_ptr<cc::SharedBitmap> bitmap,
                      uint32_t sync_point,
                      bool is_lost);
   void ResourceReleased(int32_t id,
@@ -58,12 +59,12 @@ class PepperCompositorHost : public ppapi::host::ResourceHost {
                    scoped_ptr<base::SharedMemory> image_shm);
 
   // ResourceMessageHandler overrides:
-  virtual int32_t OnResourceMessageReceived(
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
   // ppapi::host::ResourceHost overrides:
-  virtual bool IsCompositorHost() OVERRIDE;
+  bool IsCompositorHost() override;
 
   // Message handlers:
   int32_t OnHostMsgCommitLayers(

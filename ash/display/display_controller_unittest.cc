@@ -69,6 +69,7 @@ class TestObserver : public DisplayController::Observer,
         bounds_changed_count_(0),
         rotation_changed_count_(0),
         workarea_changed_count_(0),
+        primary_changed_count_(0),
         changed_display_id_(0),
         focus_changed_count_(0),
         activation_changed_count_(0) {
@@ -80,7 +81,7 @@ class TestObserver : public DisplayController::Observer,
         AddObserver(this);
   }
 
-  virtual ~TestObserver() {
+  ~TestObserver() override {
     Shell::GetInstance()->display_controller()->RemoveObserver(this);
     Shell::GetScreen()->RemoveObserver(this);
     aura::client::GetFocusClient(Shell::GetPrimaryRootWindow())->
@@ -90,16 +91,12 @@ class TestObserver : public DisplayController::Observer,
   }
 
   // Overridden from DisplayController::Observer
-  virtual void OnDisplayConfigurationChanging() OVERRIDE {
-    ++changing_count_;
-  }
-  virtual void OnDisplayConfigurationChanged() OVERRIDE {
-    ++changed_count_;
-  }
+  void OnDisplayConfigurationChanging() override { ++changing_count_; }
+  void OnDisplayConfigurationChanged() override { ++changed_count_; }
 
   // Overrideen from gfx::DisplayObserver
-  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
-                                       uint32_t metrics) OVERRIDE {
+  void OnDisplayMetricsChanged(const gfx::Display& display,
+                               uint32_t metrics) override {
     changed_display_id_ = display.id();
     if (metrics & DISPLAY_METRIC_BOUNDS)
       ++bounds_changed_count_;
@@ -107,27 +104,25 @@ class TestObserver : public DisplayController::Observer,
       ++rotation_changed_count_;
     if (metrics & DISPLAY_METRIC_WORK_AREA)
       ++workarea_changed_count_;
+    if (metrics & DISPLAY_METRIC_PRIMARY)
+      ++primary_changed_count_;
   }
-  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE {
-  }
-  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE {
-  }
+  void OnDisplayAdded(const gfx::Display& new_display) override {}
+  void OnDisplayRemoved(const gfx::Display& old_display) override {}
 
   // Overridden from aura::client::FocusChangeObserver
-  virtual void OnWindowFocused(aura::Window* gained_focus,
-                               aura::Window* lost_focus) OVERRIDE {
+  void OnWindowFocused(aura::Window* gained_focus,
+                       aura::Window* lost_focus) override {
     focus_changed_count_++;
   }
 
   // Overridden from aura::client::ActivationChangeObserver
-  virtual void OnWindowActivated(aura::Window* gained_active,
-                                 aura::Window* lost_active) OVERRIDE {
+  void OnWindowActivated(aura::Window* gained_active,
+                         aura::Window* lost_active) override {
     activation_changed_count_++;
   }
-  virtual void OnAttemptToReactivateWindow(
-      aura::Window* request_active,
-      aura::Window* actual_active) OVERRIDE {
-  }
+  void OnAttemptToReactivateWindow(aura::Window* request_active,
+                                   aura::Window* actual_active) override {}
 
   int CountAndReset() {
     EXPECT_EQ(changing_count_, changed_count_);
@@ -145,6 +140,10 @@ class TestObserver : public DisplayController::Observer,
 
   int64 GetWorkareaChangedCountAndReset() {
     return Resetter<int>(&workarea_changed_count_).value();
+  }
+
+  int64 GetPrimaryChangedCountAndReset() {
+    return Resetter<int>(&primary_changed_count_).value();
   }
 
   int64 GetChangedDisplayIdAndReset() {
@@ -166,6 +165,7 @@ class TestObserver : public DisplayController::Observer,
   int bounds_changed_count_;
   int rotation_changed_count_;
   int workarea_changed_count_;
+  int primary_changed_count_;
   int64 changed_display_id_;
 
   int focus_changed_count_;
@@ -204,9 +204,9 @@ void SetDefaultDisplayLayout(DisplayLayout::Position position) {
 class DisplayControllerShutdownTest : public test::AshTestBase {
  public:
   DisplayControllerShutdownTest() {}
-  virtual ~DisplayControllerShutdownTest() {}
+  ~DisplayControllerShutdownTest() override {}
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     test::AshTestBase::TearDown();
     if (!SupportsMultipleDisplays())
       return;
@@ -225,15 +225,15 @@ class StartupHelper : public test::TestShellDelegate,
                       public DisplayController::Observer {
  public:
   StartupHelper() : displays_initialized_(false) {}
-  virtual ~StartupHelper() {}
+  ~StartupHelper() override {}
 
   // ash::ShellSelegate:
-  virtual void PreInit() OVERRIDE {
+  void PreInit() override {
     Shell::GetInstance()->display_controller()->AddObserver(this);
   }
 
   // ash::DisplayController::Observer:
-  virtual void OnDisplaysInitialized() OVERRIDE {
+  void OnDisplaysInitialized() override {
     DCHECK(!displays_initialized_);
     displays_initialized_ = true;
   }
@@ -251,14 +251,14 @@ class StartupHelper : public test::TestShellDelegate,
 class DisplayControllerStartupTest : public test::AshTestBase {
  public:
   DisplayControllerStartupTest() : startup_helper_(new StartupHelper) {}
-  virtual ~DisplayControllerStartupTest() {}
+  ~DisplayControllerStartupTest() override {}
 
   // ash::test::AshTestBase:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ash_test_helper()->set_test_shell_delegate(startup_helper_);
     test::AshTestBase::SetUp();
   }
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     Shell::GetInstance()->display_controller()->RemoveObserver(startup_helper_);
     test::AshTestBase::TearDown();
   }
@@ -280,9 +280,9 @@ class TestEventHandler : public ui::EventHandler {
                        scroll_y_offset_(0.0),
                        scroll_x_offset_ordinal_(0.0),
                        scroll_y_offset_ordinal_(0.0) {}
-  virtual ~TestEventHandler() {}
+  ~TestEventHandler() override {}
 
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->flags() & ui::EF_IS_SYNTHESIZED &&
         event->type() != ui::ET_MOUSE_EXITED &&
         event->type() != ui::ET_MOUSE_ENTERED) {
@@ -294,7 +294,7 @@ class TestEventHandler : public ui::EventHandler {
     event->StopPropagation();
   }
 
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE {
+  void OnTouchEvent(ui::TouchEvent* event) override {
     aura::Window* target = static_cast<aura::Window*>(event->target());
     // Only record when the target is the background which covers
     // entire root window.
@@ -305,7 +305,7 @@ class TestEventHandler : public ui::EventHandler {
     event->StopPropagation();
   }
 
-  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE {
+  void OnScrollEvent(ui::ScrollEvent* event) override {
     aura::Window* target = static_cast<aura::Window*>(event->target());
     // Only record when the target is the background which covers
     // entire root window.
@@ -539,10 +539,17 @@ TEST_F(DisplayControllerTest, SecondaryDisplayLayout) {
 namespace {
 
 DisplayInfo CreateDisplayInfo(int64 id,
-                              const gfx::Rect& bounds,
-                              float device_scale_factor) {
+                              int y,
+                              gfx::Display::Rotation rotation) {
   DisplayInfo info(id, "", false);
-  info.SetBounds(bounds);
+  info.SetBounds(gfx::Rect(0, y, 500, 500));
+  info.set_rotation(rotation);
+  return info;
+}
+
+DisplayInfo CreateMirroredDisplayInfo(int64 id,
+                                      float device_scale_factor) {
+  DisplayInfo info = CreateDisplayInfo(id, 0, gfx::Display::ROTATE_0);
   info.set_device_scale_factor(device_scale_factor);
   return info;
 }
@@ -561,9 +568,9 @@ TEST_F(DisplayControllerTest, MirrorToDockedWithFullscreen) {
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
   const DisplayInfo internal_display_info =
-      CreateDisplayInfo(1, gfx::Rect(0, 0, 500, 500), 2.0f);
+      CreateMirroredDisplayInfo(1, 2.0f);
   const DisplayInfo external_display_info =
-      CreateDisplayInfo(2, gfx::Rect(0, 0, 500, 500), 1.0f);
+      CreateMirroredDisplayInfo(2, 1.0f);
 
   std::vector<DisplayInfo> display_info_list;
   // Mirror.
@@ -589,9 +596,11 @@ TEST_F(DisplayControllerTest, MirrorToDockedWithFullscreen) {
   display_manager->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(1U, display_manager->GetNumDisplays());
   EXPECT_EQ(1U, display_manager->num_connected_displays());
-  EXPECT_EQ(0, observer.GetChangedDisplayIdAndReset());
-  EXPECT_EQ(0, observer.GetBoundsChangedCountAndReset());
-  EXPECT_EQ(0, observer.GetWorkareaChangedCountAndReset());
+  // Observers are called due to primary change.
+  EXPECT_EQ(2, observer.GetChangedDisplayIdAndReset());
+  EXPECT_EQ(1, observer.GetBoundsChangedCountAndReset());
+  EXPECT_EQ(1, observer.GetWorkareaChangedCountAndReset());
+  EXPECT_EQ(1, observer.GetPrimaryChangedCountAndReset());
   EXPECT_EQ(1, observer.CountAndReset());
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
   EXPECT_EQ(0, observer.GetActivationChangedCountAndReset());
@@ -676,7 +685,9 @@ TEST_F(DisplayControllerTest, BoundsUpdated) {
 
   // UI scale is eanbled only on internal display.
   int64 secondary_id = GetSecondaryDisplay().id();
-  gfx::Display::SetInternalDisplayId(secondary_id);
+  test::DisplayManagerTestApi(display_manager)
+      .SetInternalDisplayId(secondary_id);
+
   display_manager->SetDisplayUIScale(secondary_id, 1.125f);
   EXPECT_EQ(1, observer.CountAndReset());
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
@@ -1139,8 +1150,10 @@ TEST_F(DisplayControllerTest, ScaleRootWindow) {
 
   UpdateDisplay("600x400*2@1.5,500x300");
 
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   gfx::Display display1 = Shell::GetScreen()->GetPrimaryDisplay();
-  gfx::Display::SetInternalDisplayId(display1.id());
+  test::DisplayManagerTestApi(display_manager)
+      .SetInternalDisplayId(display1.id());
 
   gfx::Display display2 = ScreenUtil::GetSecondaryDisplay();
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
@@ -1154,7 +1167,6 @@ TEST_F(DisplayControllerTest, ScaleRootWindow) {
   generator.MoveMouseToInHost(599, 200);
   EXPECT_EQ("449,150", event_handler.GetLocationAndReset());
 
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   display_manager->SetDisplayUIScale(display1.id(), 1.25f);
   display1 = Shell::GetScreen()->GetPrimaryDisplay();
   display2 = ScreenUtil::GetSecondaryDisplay();
@@ -1259,19 +1271,6 @@ TEST_F(DisplayControllerTest, ConvertHostToRootCoords) {
   Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
-namespace {
-
-DisplayInfo CreateDisplayInfo(int64 id,
-                              int y,
-                              gfx::Display::Rotation rotation) {
-  DisplayInfo info(id, "", false);
-  info.SetBounds(gfx::Rect(0, y, 500, 500));
-  info.set_rotation(rotation);
-  return info;
-}
-
-}  // namespace
-
 // Make sure that the compositor based mirroring can switch
 // from/to dock mode.
 TEST_F(DisplayControllerTest, DockToSingle) {
@@ -1313,6 +1312,40 @@ TEST_F(DisplayControllerTest, DockToSingle) {
   display_manager->OnNativeDisplaysChanged(display_info_list);
   EXPECT_TRUE(Shell::GetPrimaryRootWindow()->GetHost()->
               GetRootTransform().IsIdentityOrIntegerTranslation());
+}
+
+// Tests if switching two displays at the same time while the primary display
+// is swapped should not cause a crash. (crbug.com/426292)
+TEST_F(DisplayControllerTest, ReplaceSwappedPrimary) {
+  if (!SupportsMultipleDisplays())
+    return;
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+
+  const DisplayInfo first_display_info =
+      CreateDisplayInfo(10, 0, gfx::Display::ROTATE_0);
+  const DisplayInfo second_display_info =
+      CreateDisplayInfo(11, 1, gfx::Display::ROTATE_0);
+
+  std::vector<DisplayInfo> display_info_list;
+  // Extended
+  display_info_list.push_back(first_display_info);
+  display_info_list.push_back(second_display_info);
+  display_manager->OnNativeDisplaysChanged(display_info_list);
+
+  Shell::GetInstance()->display_controller()->SwapPrimaryDisplay();
+
+  EXPECT_EQ(11, Shell::GetScreen()->GetPrimaryDisplay().id());
+
+  display_info_list.clear();
+  const DisplayInfo new_first_display_info =
+      CreateDisplayInfo(20, 0, gfx::Display::ROTATE_0);
+  const DisplayInfo new_second_display_info =
+      CreateDisplayInfo(21, 1, gfx::Display::ROTATE_0);
+  display_info_list.push_back(new_first_display_info);
+  display_info_list.push_back(new_second_display_info);
+  display_manager->OnNativeDisplaysChanged(display_info_list);
+
+  EXPECT_EQ(20, Shell::GetScreen()->GetPrimaryDisplay().id());
 }
 
 #if defined(USE_X11)

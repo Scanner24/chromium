@@ -13,7 +13,9 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
+#include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -54,6 +56,8 @@ void StartupUtils::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kDeviceRegistered, -1);
   registry->RegisterBooleanPref(prefs::kEnrollmentRecoveryRequired, false);
   registry->RegisterStringPref(prefs::kInitialLocale, "en-US");
+  registry->RegisterBooleanPref(prefs::kNewOobe, false);
+  registry->RegisterBooleanPref(prefs::kWebviewSigninEnabled, false);
 }
 
 // static
@@ -158,12 +162,6 @@ void StartupUtils::MarkDeviceRegistered(const base::Closure& done_callback) {
 }
 
 // static
-bool StartupUtils::IsEnrollmentRecoveryRequired() {
-  return g_browser_process->local_state()
-      ->GetBoolean(prefs::kEnrollmentRecoveryRequired);
-}
-
-// static
 void StartupUtils::MarkEnrollmentRecoveryRequired() {
   SaveBoolPreferenceForced(prefs::kEnrollmentRecoveryRequired, true);
 }
@@ -178,11 +176,44 @@ std::string StartupUtils::GetInitialLocale() {
 }
 
 // static
+bool StartupUtils::IsWebviewSigninAllowed() {
+  return extensions::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV;
+}
+
+// static
+bool StartupUtils::IsWebviewSigninEnabled() {
+  return IsWebviewSigninAllowed() &&
+      g_browser_process->local_state()->GetBoolean(
+          prefs::kWebviewSigninEnabled);
+}
+
+// static
+bool StartupUtils::EnableWebviewSignin(bool is_enabled) {
+  if (!IsWebviewSigninAllowed())
+    return false;
+
+  g_browser_process->local_state()->SetBoolean(prefs::kWebviewSigninEnabled,
+                                               is_enabled);
+  return true;
+}
+
+// static
 void StartupUtils::SetInitialLocale(const std::string& locale) {
   if (l10n_util::IsValidLocaleSyntax(locale))
     SaveStringPreferenceForced(prefs::kInitialLocale, locale);
   else
     NOTREACHED();
+}
+
+// static
+bool StartupUtils::IsNewOobeAllowed() {
+  return extensions::GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV;
+}
+
+// static
+bool StartupUtils::IsNewOobeActivated() {
+  return g_browser_process->local_state()->GetBoolean(prefs::kNewOobe) &&
+      IsNewOobeAllowed();
 }
 
 }  // namespace chromeos

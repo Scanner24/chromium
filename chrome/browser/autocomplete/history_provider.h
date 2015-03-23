@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_PROVIDER_H_
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/history/in_memory_url_index_types.h"
+#include "components/history/core/browser/in_memory_url_index_types.h"
 #include "components/omnibox/autocomplete_provider.h"
 
 class AutocompleteInput;
@@ -17,7 +17,7 @@ struct AutocompleteMatch;
 // provides functions useful to all derived classes.
 class HistoryProvider : public AutocompleteProvider {
  public:
-  virtual void DeleteMatch(const AutocompleteMatch& match) OVERRIDE;
+  void DeleteMatch(const AutocompleteMatch& match) override;
 
   // Returns true if inline autocompletion should be prevented for URL-like
   // input.  This method returns true if input.prevent_inline_autocomplete()
@@ -26,7 +26,7 @@ class HistoryProvider : public AutocompleteProvider {
 
  protected:
   HistoryProvider(Profile* profile, AutocompleteProvider::Type type);
-  virtual ~HistoryProvider();
+  ~HistoryProvider() override;
 
   // Finds and removes the match from the current collection of matches and
   // backing data.

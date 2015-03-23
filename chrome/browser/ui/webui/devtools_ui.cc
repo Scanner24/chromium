@@ -47,7 +47,7 @@ const char kHttpNotFound[] = "HTTP/1.1 404 Not Found\n\n";
 #if defined(DEBUG_DEVTOOLS)
 // Local frontend url provided by InspectUI.
 const char kFallbackFrontendURL[] =
-    "chrome-devtools://devtools/bundled/devtools.html";
+    "chrome-devtools://devtools/bundled/inspector.html";
 #else
 // URL causing the DevTools window to display a plain text warning.
 const char kFallbackFrontendURL[] =
@@ -59,47 +59,6 @@ const char kRemoteOpenPrefix[] = "remote/open";
 #if defined(DEBUG_DEVTOOLS)
 const char kLocalSerial[] = "local";
 #endif  // defined(DEBUG_DEVTOOLS)
-
-// FetchRequest ---------------------------------------------------------------
-
-class FetchRequest : public net::URLFetcherDelegate {
- public:
-  FetchRequest(net::URLRequestContextGetter* request_context,
-               const GURL& url,
-               const content::URLDataSource::GotDataCallback& callback);
-
- private:
-  virtual ~FetchRequest() {}
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
-  scoped_ptr<net::URLFetcher> fetcher_;
-  content::URLDataSource::GotDataCallback callback_;
-};
-
-FetchRequest::FetchRequest(
-    net::URLRequestContextGetter* request_context,
-    const GURL& url,
-    const content::URLDataSource::GotDataCallback& callback)
-    : callback_(callback) {
-  if (!url.is_valid()) {
-    OnURLFetchComplete(NULL);
-    return;
-  }
-
-  fetcher_.reset(net::URLFetcher::Create(url, net::URLFetcher::GET, this));
-  fetcher_->SetRequestContext(request_context);
-  fetcher_->Start();
-}
-
-void FetchRequest::OnURLFetchComplete(const net::URLFetcher* source) {
-  std::string response;
-  if (source)
-    source->GetResponseAsString(&response);
-  else
-    response = kHttpNotFound;
-
-  callback_.Run(base::RefCountedString::TakeString(&response));
-  delete this;
-}
 
 // DevToolsDataSource ---------------------------------------------------------
 
@@ -126,41 +85,49 @@ std::string GetMimeTypeForPath(const std::string& path) {
 // 1. /bundled/: bundled DevTools frontend is served.
 // 2. /remote/: remote DevTools frontend is served from App Engine.
 // 3. /remote/open/: query is URL which is opened on remote device.
-class DevToolsDataSource : public content::URLDataSource {
+class DevToolsDataSource : public content::URLDataSource,
+                           public net::URLFetcherDelegate {
  public:
+  using GotDataCallback = content::URLDataSource::GotDataCallback;
+
   explicit DevToolsDataSource(net::URLRequestContextGetter* request_context);
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
+  std::string GetSource() const override;
 
-  virtual void StartDataRequest(
-      const std::string& path,
-      int render_process_id,
-      int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
+  void StartDataRequest(const std::string& path,
+                        int render_process_id,
+                        int render_frame_id,
+                        const GotDataCallback& callback) override;
 
  private:
   // content::URLDataSource overrides.
-  virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
-  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE;
-  virtual bool ShouldServeMimeTypeAsContentTypeHeader() const OVERRIDE;
+  std::string GetMimeType(const std::string& path) const override;
+  bool ShouldAddContentSecurityPolicy() const override;
+  bool ShouldDenyXFrameOptions() const override;
+  bool ShouldServeMimeTypeAsContentTypeHeader() const override;
+
+  // net::URLFetcherDelegate overrides.
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // Serves bundled DevTools frontend from ResourceBundle.
-  void StartBundledDataRequest(
-      const std::string& path,
-      int render_process_id,
-      int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback);
+  void StartBundledDataRequest(const std::string& path,
+                               int render_process_id,
+                               int render_frame_id,
+                               const GotDataCallback& callback);
 
   // Serves remote DevTools frontend from hard-coded App Engine domain.
-  void StartRemoteDataRequest(
-      const std::string& path,
-      int render_process_id,
-      int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback);
+  void StartRemoteDataRequest(const std::string& path,
+                              int render_process_id,
+                              int render_frame_id,
+                              const GotDataCallback& callback);
 
-  virtual ~DevToolsDataSource() {}
+  ~DevToolsDataSource() override;
+
   scoped_refptr<net::URLRequestContextGetter> request_context_;
+
+  using PendingRequestsMap = std::map<const net::URLFetcher*, GotDataCallback>;
+  PendingRequestsMap pending_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsDataSource);
 };
@@ -168,6 +135,14 @@ class DevToolsDataSource : public content::URLDataSource {
 DevToolsDataSource::DevToolsDataSource(
     net::URLRequestContextGetter* request_context)
     : request_context_(request_context) {
+}
+
+DevToolsDataSource::~DevToolsDataSource() {
+  for (const auto& pair : pending_) {
+    delete pair.first;
+    pair.second.Run(
+        new base::RefCountedStaticMemory(kHttpNotFound, strlen(kHttpNotFound)));
+  }
 }
 
 std::string DevToolsDataSource::GetSource() const {
@@ -190,7 +165,7 @@ void DevToolsDataSource::StartDataRequest(
 
   // Serve static response while connecting to the remote device.
   if (StartsWithASCII(path, kRemoteOpenPrefix, false)) {
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kEnableDevToolsExperiments)) {
       callback.Run(NULL);
       return;
@@ -220,6 +195,10 @@ bool DevToolsDataSource::ShouldAddContentSecurityPolicy() const {
   return false;
 }
 
+bool DevToolsDataSource::ShouldDenyXFrameOptions() const {
+  return false;
+}
+
 bool DevToolsDataSource::ShouldServeMimeTypeAsContentTypeHeader() const {
   return true;
 }
@@ -234,9 +213,10 @@ void DevToolsDataSource::StartBundledDataRequest(
   int resource_id =
       content::DevToolsHttpHandler::GetFrontendResourceId(filename);
 
-  DLOG_IF(WARNING, -1 == resource_id) << "Unable to find dev tool resource: "
-      << filename << ". If you compiled with debug_devtools=1, try running"
-      " with --debug-devtools.";
+  DLOG_IF(WARNING, resource_id == -1)
+      << "Unable to find dev tool resource: " << filename
+      << ". If you compiled with debug_devtools=1, try running with "
+         "--debug-devtools.";
   const ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   scoped_refptr<base::RefCountedStaticMemory> bytes(rb.LoadDataResourceBytes(
       resource_id));
@@ -250,7 +230,27 @@ void DevToolsDataSource::StartRemoteDataRequest(
     const content::URLDataSource::GotDataCallback& callback) {
   GURL url = GURL(kRemoteFrontendBase + path);
   CHECK_EQ(url.host(), kRemoteFrontendDomain);
-  new FetchRequest(request_context_.get(), url, callback);
+  if (!url.is_valid()) {
+    callback.Run(
+        new base::RefCountedStaticMemory(kHttpNotFound, strlen(kHttpNotFound)));
+    return;
+  }
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(url, net::URLFetcher::GET, this);
+  pending_[fetcher] = callback;
+  fetcher->SetRequestContext(request_context_.get());
+  fetcher->Start();
+}
+
+void DevToolsDataSource::OnURLFetchComplete(const net::URLFetcher* source) {
+  DCHECK(source);
+  PendingRequestsMap::iterator it = pending_.find(source);
+  DCHECK(it != pending_.end());
+  std::string response;
+  source->GetResponseAsString(&response);
+  delete source;
+  it->second.Run(base::RefCountedString::TakeString(&response));
+  pending_.erase(it);
 }
 
 // OpenRemotePageRequest ------------------------------------------------------
@@ -261,20 +261,21 @@ class OpenRemotePageRequest : public DevToolsAndroidBridge::DeviceListListener {
       Profile* profile,
       const std::string url,
       const DevToolsAndroidBridge::RemotePageCallback& callback);
-  virtual ~OpenRemotePageRequest() {}
+  ~OpenRemotePageRequest() override {}
 
  private:
   // DevToolsAndroidBridge::Listener overrides.
-  virtual void DeviceListChanged(
-      const DevToolsAndroidBridge::RemoteDevices& devices) OVERRIDE;
+  void DeviceListChanged(
+      const DevToolsAndroidBridge::RemoteDevices& devices) override;
 
-  bool OpenInBrowser(DevToolsAndroidBridge::RemoteBrowser* browser);
-  void RemotePageOpened(DevToolsAndroidBridge::RemotePage* page);
+  bool OpenInBrowser(
+      scoped_refptr<DevToolsAndroidBridge::RemoteBrowser> browser);
+  void RemotePageOpened(scoped_refptr<DevToolsAndroidBridge::RemotePage> page);
 
   std::string url_;
   DevToolsAndroidBridge::RemotePageCallback callback_;
   bool opening_;
-  scoped_refptr<DevToolsAndroidBridge> android_bridge_;
+  DevToolsAndroidBridge* android_bridge_;
 
   DISALLOW_COPY_AND_ASSIGN(OpenRemotePageRequest);
 };
@@ -314,20 +315,23 @@ void OpenRemotePageRequest::DeviceListChanged(
 }
 
 bool OpenRemotePageRequest::OpenInBrowser(
-    DevToolsAndroidBridge::RemoteBrowser* browser) {
+    scoped_refptr<DevToolsAndroidBridge::RemoteBrowser> browser) {
   if (!browser->IsChrome())
     return false;
 #if defined(DEBUG_DEVTOOLS)
   if (browser->serial() == kLocalSerial)
     return false;
 #endif  // defined(DEBUG_DEVTOOLS)
-  browser->Open(url_, base::Bind(&OpenRemotePageRequest::RemotePageOpened,
-                base::Unretained(this)));
+  android_bridge_->OpenRemotePage(
+      browser,
+      url_,
+      base::Bind(&OpenRemotePageRequest::RemotePageOpened,
+                 base::Unretained(this)));
   return true;
 }
 
 void OpenRemotePageRequest::RemotePageOpened(
-    DevToolsAndroidBridge::RemotePage* page) {
+    scoped_refptr<DevToolsAndroidBridge::RemotePage> page) {
   callback_.Run(page);
   android_bridge_->RemoveDeviceListListener(this);
   delete this;
@@ -367,8 +371,8 @@ DevToolsUI::~DevToolsUI() {
 void DevToolsUI::NavigationEntryCommitted(
     const content::LoadCommittedDetails& load_details) {
   content::NavigationEntry* entry = load_details.entry;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableDevToolsExperiments)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableDevToolsExperiments)) {
     return;
   }
 
@@ -391,17 +395,17 @@ void DevToolsUI::NavigationEntryCommitted(
 }
 
 void DevToolsUI::RemotePageOpened(
-    const GURL& virtual_url, DevToolsAndroidBridge::RemotePage* page) {
+    const GURL& virtual_url,
+    scoped_refptr<DevToolsAndroidBridge::RemotePage> page) {
   // Already navigated away while connecting to remote device.
   if (remote_page_opening_url_ != virtual_url)
     return;
 
-  scoped_ptr<DevToolsAndroidBridge::RemotePage> my_page(page);
   remote_page_opening_url_ = GURL();
 
   Profile* profile = Profile::FromWebUI(web_ui());
   GURL url = DevToolsUIBindings::ApplyThemeToURL(profile,
-      DevToolsUI::GetProxyURL(page->GetFrontendURL()));
+      DevToolsUI::GetProxyURL(page->frontend_url()));
 
   content::NavigationController& navigation_controller =
       web_ui()->GetWebContents()->GetController();
@@ -411,5 +415,8 @@ void DevToolsUI::RemotePageOpened(
   navigation_controller.LoadURLWithParams(params);
   navigation_controller.GetPendingEntry()->SetVirtualURL(virtual_url);
 
-  bindings_.AttachTo(page->GetTarget()->GetAgentHost());
+  DevToolsAndroidBridge* bridge =
+      DevToolsAndroidBridge::Factory::GetForProfile(profile);
+  scoped_ptr<DevToolsTargetImpl> target(bridge->CreatePageTarget(page));
+  bindings_.AttachTo(target->GetAgentHost());
 }

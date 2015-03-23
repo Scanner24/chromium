@@ -193,6 +193,8 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn,
             }[cert_type])
 
     self.ssl_handshake_settings = tlslite.api.HandshakeSettings()
+    # Enable SSLv3 for testing purposes.
+    self.ssl_handshake_settings.minVersion = (3, 0)
     if ssl_bulk_ciphers is not None:
       self.ssl_handshake_settings.cipherNames = ssl_bulk_ciphers
     if ssl_key_exchanges is not None:
@@ -331,6 +333,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
       self.ContentTypeHandler,
       self.NoContentHandler,
       self.ServerRedirectHandler,
+      self.CrossSiteRedirectHandler,
       self.ClientRedirectHandler,
       self.GetSSLSessionCacheHandler,
       self.SSLManySmallRecords,
@@ -357,6 +360,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
       'gif': 'image/gif',
       'jpeg' : 'image/jpeg',
       'jpg' : 'image/jpeg',
+      'js' : 'application/javascript',
       'json': 'application/json',
       'pdf' : 'application/pdf',
       'txt' : 'text/plain',
@@ -672,7 +676,12 @@ class TestPageHandler(testserver_base.BasePageHandler):
     if not self._ShouldHandleRequest("/echo"):
       return False
 
-    self.send_response(200)
+    _, _, _, _, query, _ = urlparse.urlparse(self.path)
+    query_params = cgi.parse_qs(query, True)
+    if 'status' in query_params:
+      self.send_response(int(query_params['status'][0]))
+    else:
+      self.send_response(200)
     self.send_header('Content-Type', 'text/html')
     self.end_headers()
     self.wfile.write(self.ReadRequestBody())
@@ -1418,6 +1427,35 @@ class TestPageHandler(testserver_base.BasePageHandler):
 
     return True
 
+  def CrossSiteRedirectHandler(self):
+    """Sends a server redirect to the given site. The syntax is
+    '/cross-site/hostname/...' to redirect to //hostname/...
+    It is used to navigate between different Sites, causing
+    cross-site/cross-process navigations in the browser."""
+
+    test_name = "/cross-site"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+
+    params = urllib.unquote(self.path[(len(test_name) + 1):])
+    slash = params.find('/')
+    if slash < 0:
+      self.sendRedirectHelp(test_name)
+      return True
+
+    host = params[:slash]
+    path = params[(slash+1):]
+    dest = "//%s:%s/%s" % (host, str(self.server.server_port), path)
+
+    self.send_response(301)  # moved permanently
+    self.send_header('Location', dest)
+    self.send_header('Content-Type', 'text/html')
+    self.end_headers()
+    self.wfile.write('<html><head>')
+    self.wfile.write('</head><body>Redirecting to %s</body></html>' % dest)
+
+    return True
+
   def ClientRedirectHandler(self):
     """Sends a client redirect to the given URL. The syntax is
     '/client-redirect?http://foo.bar/asdf' to redirect to
@@ -1505,9 +1543,8 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.send_header('Content-Type', 'text/plain')
     self.end_headers()
 
-    for cipher_suite in self.server.tlsConnection.clientHello.cipher_suites:
-      self.wfile.write(str(cipher_suite))
-      self.wfile.write('\n')
+    cipher_suites = self.server.tlsConnection.clientHello.cipher_suites
+    self.wfile.write('\n'.join(str(c) for c in cipher_suites))
     return True
 
   def CloseSocketHandler(self):
@@ -1946,6 +1983,7 @@ class ServerRunner(testserver_base.TestServerRunner):
     if self.options.server_type == SERVER_HTTP:
       if self.options.https:
         pem_cert_and_key = None
+        ocsp_der = None
         if self.options.cert_and_key_file:
           if not os.path.isfile(self.options.cert_and_key_file):
             raise testserver_base.OptionError(
@@ -1958,7 +1996,6 @@ class ServerRunner(testserver_base.TestServerRunner):
           print ('OCSP server started on %s:%d...' %
               (host, self.__ocsp_server.server_port))
 
-          ocsp_der = None
           ocsp_state = None
 
           if self.options.ocsp == 'ok':
@@ -1982,7 +2019,11 @@ class ServerRunner(testserver_base.TestServerRunner):
               ocsp_state = ocsp_state,
               serial = self.options.cert_serial)
 
-          self.__ocsp_server.ocsp_response = ocsp_der
+          if self.options.ocsp_server_unavailable:
+            # SEQUENCE containing ENUMERATED with value 3 (tryLater).
+            self.__ocsp_server.ocsp_response = '30030a0103'.decode('hex')
+          else:
+            self.__ocsp_server.ocsp_response = ocsp_der
 
         for ca_cert in self.options.ssl_client_ca:
           if not os.path.isfile(ca_cert):
@@ -1991,8 +2032,8 @@ class ServerRunner(testserver_base.TestServerRunner):
                 ' exiting...')
 
         stapled_ocsp_response = None
-        if self.__ocsp_server and self.options.staple_ocsp_response:
-          stapled_ocsp_response = self.__ocsp_server.ocsp_response
+        if self.options.staple_ocsp_response:
+          stapled_ocsp_response = ocsp_der
 
         server = HTTPSServer((host, port), TestPageHandler, pem_cert_and_key,
                              self.options.ssl_client_auth,
@@ -2213,11 +2254,12 @@ class ServerRunner(testserver_base.TestServerRunner):
     self.option_parser.add_option('--ssl-bulk-cipher', action='append',
                                   help='Specify the bulk encryption '
                                   'algorithm(s) that will be accepted by the '
-                                  'SSL server. Valid values are "aes256", '
-                                  '"aes128", "3des", "rc4". If omitted, all '
-                                  'algorithms will be used. This option may '
-                                  'appear multiple times, indicating '
-                                  'multiple algorithms should be enabled.');
+                                  'SSL server. Valid values are "aes128gcm", '
+                                  '"aes256", "aes128", "3des", "rc4". If '
+                                  'omitted, all algorithms will be used. This '
+                                  'option may appear multiple times, '
+                                  'indicating multiple algorithms should be '
+                                  'enabled.');
     self.option_parser.add_option('--ssl-key-exchange', action='append',
                                   help='Specify the key exchange algorithm(s)'
                                   'that will be accepted by the SSL server. '
@@ -2239,6 +2281,12 @@ class ServerRunner(testserver_base.TestServerRunner):
     self.option_parser.add_option('--ws-basic-auth', action='store_true',
                                   dest='ws_basic_auth',
                                   help='Enable basic-auth for WebSocket')
+    self.option_parser.add_option('--ocsp-server-unavailable',
+                                  dest='ocsp_server_unavailable',
+                                  default=False, action='store_true',
+                                  help='If set, the OCSP server will return '
+                                  'a tryLater status rather than the actual '
+                                  'OCSP response.')
 
 
 if __name__ == '__main__':

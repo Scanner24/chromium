@@ -12,8 +12,8 @@
 #include "base/environment.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "courgette/courgette.h"
 #include "courgette/disassembler_elf_32_arm.h"
 #include "courgette/streams.h"
@@ -46,8 +46,6 @@ CheckBool WriteVector(const V& items, SinkStream* buffer) {
   size_t count = items.size();
   bool ok = buffer->WriteSizeVarint32(count);
   for (size_t i = 0; ok && i < count;  ++i) {
-    COMPILE_ASSERT(sizeof(items[0]) <= sizeof(uint32),  // NOLINT
-                   T_must_fit_in_uint32);
     ok = buffer->WriteSizeVarint32(items[i]);
   }
   return ok;
@@ -196,7 +194,7 @@ CheckBool EncodedProgram::AddOrigin(RVA origin) {
   return ops_.push_back(ORIGIN) && origins_.push_back(origin);
 }
 
-CheckBool EncodedProgram::AddCopy(uint32 count, const void* bytes) {
+CheckBool EncodedProgram::AddCopy(size_t count, const void* bytes) {
   const uint8* source = static_cast<const uint8*>(bytes);
 
   bool ok = true;
@@ -214,7 +212,7 @@ CheckBool EncodedProgram::AddCopy(uint32 count, const void* bytes) {
     }
     if (ok && ops_.back() == COPY) {
       copy_counts_.back() += count;
-      for (uint32 i = 0; ok && i < count; ++i) {
+      for (size_t i = 0; ok && i < count; ++i) {
         ok = copy_bytes_.push_back(source[i]);
       }
       return ok;
@@ -226,7 +224,7 @@ CheckBool EncodedProgram::AddCopy(uint32 count, const void* bytes) {
       ok = ops_.push_back(COPY1) && copy_bytes_.push_back(source[0]);
     } else {
       ok = ops_.push_back(COPY) && copy_counts_.push_back(count);
-      for (uint32 i = 0; ok && i < count; ++i) {
+      for (size_t i = 0; ok && i < count; ++i) {
         ok = copy_bytes_.push_back(source[i]);
       }
     }
@@ -294,17 +292,14 @@ enum FieldSelect {
 };
 
 static FieldSelect GetFieldSelect() {
-#if 1
   // TODO(sra): Use better configuration.
   scoped_ptr<base::Environment> env(base::Environment::Create());
   std::string s;
   env->GetVar("A_FIELDS", &s);
-  if (!s.empty()) {
-    return static_cast<FieldSelect>(
-        wcstoul(base::ASCIIToWide(s).c_str(), 0, 0));
-  }
-#endif
-  return  static_cast<FieldSelect>(~0);
+  uint64 fields;
+  if (!base::StringToUint64(s, &fields))
+    return static_cast<FieldSelect>(~0);
+  return static_cast<FieldSelect>(fields);
 }
 
 CheckBool EncodedProgram::WriteTo(SinkStreamSet* streams) {
@@ -427,7 +422,7 @@ CheckBool EncodedProgram::EvaluateRel32ARM(OP op,
                                             &decompressed_op)) {
         return false;
       }
-      uint16 op16 = decompressed_op;
+      uint16 op16 = static_cast<uint16>(decompressed_op);
       if (!output->Write(&op16, 2))
         return false;
       current_rva += 2;
@@ -447,7 +442,7 @@ CheckBool EncodedProgram::EvaluateRel32ARM(OP op,
                                             &decompressed_op)) {
         return false;
       }
-      uint16 op16 = decompressed_op;
+      uint16 op16 = static_cast<uint16>(decompressed_op);
       if (!output->Write(&op16, 2))
         return false;
       current_rva += 2;
@@ -556,11 +551,11 @@ CheckBool EncodedProgram::AssembleTo(SinkStream* final_buffer) {
       }
 
       case COPY: {
-        uint32 count;
+        size_t count;
         if (!VectorAt(copy_counts_, ix_copy_counts, &count))
           return false;
         ++ix_copy_counts;
-        for (uint32 i = 0;  i < count;  ++i) {
+        for (size_t i = 0;  i < count;  ++i) {
           uint8 b;
           if (!VectorAt(copy_bytes_, ix_copy_bytes, &b))
             return false;
@@ -568,7 +563,7 @@ CheckBool EncodedProgram::AssembleTo(SinkStream* final_buffer) {
           if (!output->Write(&b, 1))
             return false;
         }
-        current_rva += count;
+        current_rva += static_cast<RVA>(count);
         break;
       }
 
@@ -705,7 +700,7 @@ struct RelocBlockPOD {
   uint16 relocs[4096];  // Allow up to one relocation per byte of a 4k page.
 };
 
-COMPILE_ASSERT(offsetof(RelocBlockPOD, relocs) == 8, reloc_block_header_size);
+static_assert(offsetof(RelocBlockPOD, relocs) == 8, "reloc block header size");
 
 class RelocBlock {
  public:
@@ -748,7 +743,7 @@ CheckBool EncodedProgram::GeneratePeRelocations(SinkStream* buffer,
       block.pod.page_rva = page_rva;
     }
     if (ok)
-      block.Add(((static_cast<uint16>(type)) << 12 ) | (rva & 0xFFF));
+      block.Add(((static_cast<uint16>(type)) << 12) | (rva & 0xFFF));
   }
   ok &= block.Flush(buffer);
   return ok;
@@ -799,4 +794,4 @@ void DeleteEncodedProgram(EncodedProgram* encoded) {
   delete encoded;
 }
 
-}  // end namespace
+}  // namespace courgette

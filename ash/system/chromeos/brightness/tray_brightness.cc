@@ -51,7 +51,7 @@ class BrightnessView : public ShellObserver,
                        public views::SliderListener {
  public:
   BrightnessView(bool default_view, double initial_percent);
-  virtual ~BrightnessView();
+  ~BrightnessView() override;
 
   bool is_default_view() const {
     return is_default_view_;
@@ -61,22 +61,22 @@ class BrightnessView : public ShellObserver,
   void SetBrightnessPercent(double percent);
 
   // ShellObserver:
-  virtual void OnMaximizeModeStarted() OVERRIDE;
-  virtual void OnMaximizeModeEnded() OVERRIDE;
+  void OnMaximizeModeStarted() override;
+  void OnMaximizeModeEnded() override;
 
  private:
   // views::View:
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds) OVERRIDE;
+  void OnBoundsChanged(const gfx::Rect& old_bounds) override;
 
   // views:SliderListener:
-  virtual void SliderValueChanged(views::Slider* sender,
-                                  float value,
-                                  float old_value,
-                                  views::SliderChangeReason reason) OVERRIDE;
+  void SliderValueChanged(views::Slider* sender,
+                          float value,
+                          float old_value,
+                          views::SliderChangeReason reason) override;
 
   // views:SliderListener:
-  virtual void SliderDragStarted(views::Slider* slider) OVERRIDE;
-  virtual void SliderDragEnded(views::Slider* slider) OVERRIDE;
+  void SliderDragStarted(views::Slider* slider) override;
+  void SliderDragEnded(views::Slider* slider) override;
 
   views::Slider* slider_;
 

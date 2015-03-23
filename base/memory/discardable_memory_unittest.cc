@@ -38,9 +38,8 @@ TEST_P(DiscardableMemoryTest, IsNamed) {
 }
 
 bool IsNativeType(DiscardableMemoryType type) {
-  return
-      type == DISCARDABLE_MEMORY_TYPE_ASHMEM ||
-      type == DISCARDABLE_MEMORY_TYPE_MAC;
+  return type == DISCARDABLE_MEMORY_TYPE_ASHMEM ||
+         type == DISCARDABLE_MEMORY_TYPE_MACH;
 }
 
 TEST_P(DiscardableMemoryTest, SupportedNatively) {
@@ -66,13 +65,13 @@ TEST_P(DiscardableMemoryTest, LockAndUnLock) {
   const scoped_ptr<DiscardableMemory> memory(CreateLockedMemory(kSize));
   ASSERT_TRUE(memory);
   void* addr = memory->Memory();
-  ASSERT_NE(static_cast<void*>(NULL), addr);
+  ASSERT_NE(nullptr, addr);
 
   memory->Unlock();
 
   EXPECT_NE(DISCARDABLE_MEMORY_LOCK_STATUS_FAILED, memory->Lock());
   addr = memory->Memory();
-  ASSERT_NE(static_cast<void*>(NULL), addr);
+  ASSERT_NE(nullptr, addr);
 
   memory->Unlock();
 }
@@ -83,16 +82,6 @@ TEST_P(DiscardableMemoryTest, DeleteWhileLocked) {
   ASSERT_TRUE(memory);
 }
 
-// Test forced purging.
-TEST_P(DiscardableMemoryTest, Purge) {
-  const scoped_ptr<DiscardableMemory> memory(CreateLockedMemory(kSize));
-  ASSERT_TRUE(memory);
-  memory->Unlock();
-
-  DiscardableMemory::PurgeForTesting();
-  EXPECT_EQ(DISCARDABLE_MEMORY_LOCK_STATUS_PURGED, memory->Lock());
-}
-
 #if !defined(NDEBUG) && !defined(OS_ANDROID)
 // Death tests are not supported with Android APKs.
 TEST_P(DiscardableMemoryTest, UnlockedMemoryAccessCrashesInDebugMode) {
@@ -101,6 +90,26 @@ TEST_P(DiscardableMemoryTest, UnlockedMemoryAccessCrashesInDebugMode) {
   memory->Unlock();
   ASSERT_DEATH_IF_SUPPORTED(
       { *static_cast<int*>(memory->Memory()) = 0xdeadbeef; }, ".*");
+}
+#endif
+
+// Test behavior when creating enough instances that could use up a 32-bit
+// address space.
+// This is disabled under AddressSanitizer on Windows as it crashes (by design)
+// on OOM. See http://llvm.org/PR22026 for the details.
+#if !defined(ADDRESS_SANITIZER) || !defined(OS_WIN)
+TEST_P(DiscardableMemoryTest, AddressSpace) {
+  const size_t kLargeSize = 4 * 1024 * 1024;  // 4MiB.
+  const size_t kNumberOfInstances = 1024 + 1;  // >4GiB total.
+
+  scoped_ptr<DiscardableMemory> instances[kNumberOfInstances];
+  for (auto& memory : instances) {
+    memory = CreateLockedMemory(kLargeSize);
+    ASSERT_TRUE(memory);
+    void* addr = memory->Memory();
+    ASSERT_NE(nullptr, addr);
+    memory->Unlock();
+  }
 }
 #endif
 

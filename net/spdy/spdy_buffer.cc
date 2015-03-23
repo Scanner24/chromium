@@ -8,6 +8,7 @@
 
 #include "base/callback.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "net/base/io_buffer.h"
 #include "net/spdy/spdy_protocol.h"
 
@@ -41,17 +42,15 @@ class SpdyBuffer::SharedFrameIOBuffer : public IOBuffer {
   SharedFrameIOBuffer(const scoped_refptr<SharedFrame>& shared_frame,
                       size_t offset)
       : IOBuffer(shared_frame->data->data() + offset),
-        shared_frame_(shared_frame),
-        offset_(offset) {}
+        shared_frame_(shared_frame) {}
 
  private:
-  virtual ~SharedFrameIOBuffer() {
+  ~SharedFrameIOBuffer() override {
     // Prevent ~IOBuffer() from trying to delete |data_|.
     data_ = NULL;
   }
 
   const scoped_refptr<SharedFrame> shared_frame_;
-  const size_t offset_;
 
   DISALLOW_COPY_AND_ASSIGN(SharedFrameIOBuffer);
 };
@@ -90,6 +89,9 @@ void SpdyBuffer::AddConsumeCallback(const ConsumeCallback& consume_callback) {
 }
 
 void SpdyBuffer::Consume(size_t consume_size) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/457517 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("457517 SpdyBuffer::Consume"));
   ConsumeHelper(consume_size, CONSUME);
 };
 

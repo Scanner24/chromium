@@ -14,10 +14,11 @@
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/localized_error.h"
-#include "chrome/common/net/net_error_info.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/renderer_resources.h"
 #include "chrome/renderer/net/net_error_page_controller.h"
+#include "components/error_page/common/error_page_params.h"
+#include "components/error_page/common/net_error_info.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -48,6 +49,8 @@ using content::RenderFrame;
 using content::RenderFrameObserver;
 using content::RenderThread;
 using content::kUnreachableWebDataURL;
+using error_page::ErrorPageParams;
+using error_page::NetErrorHelperCore;
 
 namespace {
 
@@ -74,7 +77,7 @@ NetErrorHelper::NetErrorHelper(RenderFrame* render_frame)
     : RenderFrameObserver(render_frame),
       content::RenderFrameObserverTracker<NetErrorHelper>(render_frame) {
   RenderThread::Get()->AddObserver(this);
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   bool auto_reload_enabled =
       command_line->HasSwitch(switches::kEnableOfflineAutoReload);
   bool auto_reload_visible_only =
@@ -165,7 +168,7 @@ void NetErrorHelper::TrackClick(int tracking_id) {
 void NetErrorHelper::GenerateLocalizedErrorPage(
     const blink::WebURLError& error,
     bool is_failed_post,
-    scoped_ptr<LocalizedError::ErrorPageParams> params,
+    scoped_ptr<ErrorPageParams> params,
     bool* reload_button_shown,
     bool* load_stale_button_shown,
     std::string* error_html) const {
@@ -177,7 +180,7 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
   if (template_html.empty()) {
     NOTREACHED() << "unable to load template.";
   } else {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     bool load_stale_cache_enabled =
         command_line->HasSwitch(switches::kEnableOfflineLoadStaleCache);
 
@@ -213,7 +216,7 @@ void NetErrorHelper::EnablePageHelperFunctions() {
 
 void NetErrorHelper::UpdateErrorPage(const blink::WebURLError& error,
                                      bool is_failed_post) {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     bool load_stale_cache_enabled =
         command_line->HasSwitch(switches::kEnableOfflineLoadStaleCache);
 
@@ -227,7 +230,7 @@ void NetErrorHelper::UpdateErrorPage(const blink::WebURLError& error,
                              RenderThread::Get()->GetLocale(),
                              render_frame()->GetRenderView()->
                                  GetAcceptLanguages(),
-                             scoped_ptr<LocalizedError::ErrorPageParams>(),
+                             scoped_ptr<ErrorPageParams>(),
                              &error_strings);
 
   std::string json;

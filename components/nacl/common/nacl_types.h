@@ -43,14 +43,28 @@ inline int ToNativeHandle(const FileDescriptor& desc) {
 static const int kNaClCrashInfoShmemSize = 4096;
 static const int kNaClCrashInfoMaxLogSize = 1024;
 
+// Types of untrusted NaCl processes.
+enum NaClAppProcessType {
+  kUnknownNaClProcessType,
+  // Runs user-provided *native* code. Enabled for Chrome Web Store apps.
+  kNativeNaClProcessType,
+  // Runs user-provided code that is translated from *bitcode* by an
+  // in-browser PNaCl translator.
+  kPNaClProcessType,
+  // Runs pnacl-llc/linker *native* code. These nexes are browser-provided
+  // (not user-provided).
+  kPNaClTranslatorProcessType,
+  kNumNaClProcessTypes
+};
+
 // Parameters sent to the NaCl process when we start it.
 struct NaClStartParams {
   NaClStartParams();
   ~NaClStartParams();
 
   IPC::PlatformFileForTransit nexe_file;
-  uint64_t nexe_token_lo;
-  uint64_t nexe_token_hi;
+  // Used only as a key for validation caching.
+  base::FilePath nexe_file_path_metadata;
 
   std::vector<FileDescriptor> handles;
   FileDescriptor debug_stub_server_bound_socket;
@@ -62,11 +76,13 @@ struct NaClStartParams {
   // executable or DLL.
   std::string version;
 
-  bool enable_exception_handling;
   bool enable_debug_stub;
   bool enable_ipc_proxy;
-  bool uses_irt;
-  bool enable_dyncode_syscalls;
+
+  // Enables plugin code to use Mojo APIs. See mojo/nacl for details.
+  bool enable_mojo;
+
+  NaClAppProcessType process_type;
 
   // For NaCl <-> renderer crash information reporting.
   base::SharedMemoryHandle crash_info_shmem_handle;
@@ -88,11 +104,8 @@ struct NaClLaunchParams {
                    uint64_t nexe_token_hi,
                    int render_view_id,
                    uint32 permission_bits,
-                   bool uses_irt,
                    bool uses_nonsfi_mode,
-                   bool enable_dyncode_syscalls,
-                   bool enable_exception_handling,
-                   bool enable_crash_throttling);
+                   NaClAppProcessType process_type);
   ~NaClLaunchParams();
 
   std::string manifest_url;
@@ -105,11 +118,9 @@ struct NaClLaunchParams {
 
   int render_view_id;
   uint32 permission_bits;
-  bool uses_irt;
   bool uses_nonsfi_mode;
-  bool enable_dyncode_syscalls;
-  bool enable_exception_handling;
-  bool enable_crash_throttling;
+
+  NaClAppProcessType process_type;
 };
 
 struct NaClLaunchResult {

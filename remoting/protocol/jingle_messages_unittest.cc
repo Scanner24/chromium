@@ -7,8 +7,8 @@
 #include "base/logging.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/xmpp/constants.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmpp/constants.h"
 
 using buzz::QName;
 using buzz::XmlAttr;
@@ -41,7 +41,7 @@ bool VerifyXml(const XmlElement* exp,
     return false;
   }
 
-  for (const XmlAttr* exp_attr = exp->FirstAttr(); exp_attr != NULL;
+  for (const XmlAttr* exp_attr = exp->FirstAttr(); exp_attr != nullptr;
        exp_attr = exp_attr->NextAttr()) {
     if (exp_attr->Name().Namespace() == kXmlNsNs ||
         exp_attr->Name() == QName(kXmlNs)) {
@@ -256,7 +256,7 @@ TEST(JingleMessageTest, SessionInfo) {
   EXPECT_TRUE(message.ParseXml(source_message.get(), &error)) << error;
 
   EXPECT_EQ(message.action, JingleMessage::SESSION_INFO);
-  ASSERT_TRUE(message.info.get() != NULL);
+  ASSERT_TRUE(message.info.get() != nullptr);
   EXPECT_TRUE(message.info->Name() ==
               buzz::QName("urn:xmpp:jingle:1", "test-info"));
 
@@ -314,7 +314,7 @@ TEST(JingleMessageReplyTest, ToXml) {
       "<unexpected-request/></error></iq>" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     JingleMessageReply reply_msg;
     if (tests[i].error_text.empty()) {
       reply_msg = JingleMessageReply(tests[i].error);

@@ -14,6 +14,8 @@
 #include "sync/test/fake_server/fake_server_verifier.h"
 #include "ui/base/layout.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::AddURL;
 using bookmarks_helper::CountBookmarksWithTitlesMatching;
@@ -32,7 +34,7 @@ using sync_integration_test_util::AwaitCommitActivityCompletion;
 class SingleClientBookmarksSyncTest : public SyncTest {
  public:
   SingleClientBookmarksSyncTest() : SyncTest(SINGLE_CLIENT) {}
-  virtual ~SingleClientBookmarksSyncTest() {}
+  ~SingleClientBookmarksSyncTest() override {}
 
   // Verify that the local bookmark model (for the Profile corresponding to
   // |index|) matches the data on the FakeServer. It is assumed that FakeServer

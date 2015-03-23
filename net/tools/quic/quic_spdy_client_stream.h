@@ -27,21 +27,21 @@ class QuicClientSession;
 class QuicSpdyClientStream : public QuicDataStream {
  public:
   QuicSpdyClientStream(QuicStreamId id, QuicClientSession* session);
-  virtual ~QuicSpdyClientStream();
+  ~QuicSpdyClientStream() override;
 
   // Override the base class to close the write side as soon as we get a
   // response.
   // SPDY/HTTP does not support bidirectional streaming.
-  virtual void OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE;
+  void OnStreamFrame(const QuicStreamFrame& frame) override;
 
   // Override the base class to store the size of the headers.
-  virtual void OnStreamHeadersComplete(bool fin, size_t frame_len) OVERRIDE;
+  void OnStreamHeadersComplete(bool fin, size_t frame_len) override;
 
   // ReliableQuicStream implementation called by the session when there's
   // data for us.
-  virtual uint32 ProcessData(const char* data, uint32 data_len) OVERRIDE;
+  uint32 ProcessData(const char* data, uint32 data_len) override;
 
-  virtual void OnFinRead() OVERRIDE;
+  void OnFinRead() override;
 
   // Serializes the headers and body, sends it to the server, and
   // returns the number of bytes sent.
@@ -51,6 +51,10 @@ class QuicSpdyClientStream : public QuicDataStream {
 
   // Sends body data to the server, or buffers if it can't be sent immediately.
   void SendBody(const std::string& data, bool fin);
+  // As above, but |delegate| will be notified once |data| is ACKed.
+  void SendBody(const std::string& data,
+                bool fin,
+                QuicAckNotifier::DelegateInterface* delegate);
 
   // Returns the response data.
   const std::string& data() { return data_; }

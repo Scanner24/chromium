@@ -13,42 +13,43 @@
 #include "ui/ozone/public/surface_factory_ozone.h"
 
 struct gbm_bo;
-struct gbm_device;
 
 namespace ui {
 
-class DriWrapper;
+class GbmWrapper;
 
 class GbmBuffer : public GbmBufferBase {
  public:
   static scoped_refptr<GbmBuffer> CreateBuffer(
-      DriWrapper* dri,
-      gbm_device* device,
+      const scoped_refptr<GbmWrapper>& gbm,
       SurfaceFactoryOzone::BufferFormat format,
       const gfx::Size& size,
       bool scanout);
 
  private:
-  GbmBuffer(DriWrapper* dri, gbm_bo* bo, bool scanout);
-  virtual ~GbmBuffer();
+  GbmBuffer(const scoped_refptr<GbmWrapper>& gbm, gbm_bo* bo, bool scanout);
+  ~GbmBuffer() override;
 
   DISALLOW_COPY_AND_ASSIGN(GbmBuffer);
 };
 
 class GbmPixmap : public NativePixmap {
  public:
-  GbmPixmap(scoped_refptr<GbmBuffer> buffer);
+  GbmPixmap(const scoped_refptr<GbmBuffer>& buffer);
+  bool Initialize();
 
   // NativePixmap:
-  virtual void* GetEGLClientBuffer() OVERRIDE;
-  virtual int GetDmaBufFd() OVERRIDE;
+  void* GetEGLClientBuffer() override;
+  int GetDmaBufFd() override;
+  int GetDmaBufPitch() override;
 
   scoped_refptr<GbmBuffer> buffer() { return buffer_; }
 
  private:
-  virtual ~GbmPixmap();
+  ~GbmPixmap() override;
 
   scoped_refptr<GbmBuffer> buffer_;
+  int dma_buf_;
 
   DISALLOW_COPY_AND_ASSIGN(GbmPixmap);
 };

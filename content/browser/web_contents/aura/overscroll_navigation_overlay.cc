@@ -6,12 +6,12 @@
 
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/web_contents/aura/image_window_delegate.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ui/aura/window.h"
+#include "ui/aura_extra/image_window_delegate.h"
 #include "ui/base/layout.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -26,6 +26,8 @@ namespace {
 // Returns true if the entry's URL or any of the URLs in entry's redirect chain
 // match |url|.
 bool DoesEntryMatchURL(NavigationEntry* entry, const GURL& url) {
+  if (!entry)
+    return false;
   if (entry->GetURL() == url)
     return true;
   const std::vector<GURL>& redirect_chain = entry->GetRedirectChain();
@@ -45,7 +47,7 @@ class ImageLayerDelegate : public ui::LayerDelegate {
  public:
   ImageLayerDelegate() {}
 
-  virtual ~ImageLayerDelegate() {}
+  ~ImageLayerDelegate() override {}
 
   void SetImage(const gfx::Image& image) {
     image_ = image;
@@ -55,7 +57,7 @@ class ImageLayerDelegate : public ui::LayerDelegate {
 
  private:
   // Overridden from ui::LayerDelegate:
-  virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaintLayer(gfx::Canvas* canvas) override {
     if (image_.IsEmpty()) {
       canvas->DrawColor(SK_ColorWHITE);
     } else {
@@ -68,16 +70,14 @@ class ImageLayerDelegate : public ui::LayerDelegate {
     }
   }
 
-  virtual void OnDelegatedFrameDamage(
-      const gfx::Rect& damage_rect_in_dip) OVERRIDE {}
+  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
 
   // Called when the layer's device scale factor has changed.
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {
-  }
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
 
   // Invoked prior to the bounds changing. The returned closured is run after
   // the bounds change.
-  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+  base::Closure PrepareForLayerBoundsChange() override {
     return base::Closure();
   }
 
@@ -110,21 +110,19 @@ class OverlayDismissAnimator
   }
 
   // Overridden from ui::LayerAnimationObserver
-  virtual void OnLayerAnimationEnded(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
+  void OnLayerAnimationEnded(ui::LayerAnimationSequence* sequence) override {
     delete this;
   }
 
-  virtual void OnLayerAnimationAborted(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
+  void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) override {
     delete this;
   }
 
-  virtual void OnLayerAnimationScheduled(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {}
+  void OnLayerAnimationScheduled(
+      ui::LayerAnimationSequence* sequence) override {}
 
  private:
-  virtual ~OverlayDismissAnimator() {}
+  ~OverlayDismissAnimator() override {}
 
   scoped_ptr<ui::Layer> layer_;
 
@@ -164,7 +162,7 @@ void OverscrollNavigationOverlay::StartObserving() {
 
 void OverscrollNavigationOverlay::SetOverlayWindow(
     scoped_ptr<aura::Window> window,
-    ImageWindowDelegate* delegate) {
+    aura_extra::ImageWindowDelegate* delegate) {
   window_ = window.Pass();
   if (window_.get() && window_->parent())
     window_->parent()->StackChildAtTop(window_.get());
@@ -210,8 +208,7 @@ void OverscrollNavigationOverlay::StopObservingIfDone() {
 
 ui::Layer* OverscrollNavigationOverlay::CreateSlideLayer(int offset) {
   const NavigationControllerImpl& controller = web_contents_->GetController();
-  const NavigationEntryImpl* entry = NavigationEntryImpl::FromNavigationEntry(
-      controller.GetEntryAtOffset(offset));
+  const NavigationEntryImpl* entry = controller.GetEntryAtOffset(offset);
 
   gfx::Image image;
   if (entry && entry->screenshot().get()) {
@@ -292,7 +289,7 @@ void OverscrollNavigationOverlay::OnWindowSliderDestroyed() {
   // (including recursively) for a single event.
   if (window_slider_.get()) {
     // The slider has just been destroyed. Release the ownership.
-    WindowSlider* slider ALLOW_UNUSED = window_slider_.release();
+    ignore_result(window_slider_.release());
     StopObservingIfDone();
   }
 }

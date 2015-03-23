@@ -55,7 +55,7 @@
 #include "third_party/WebKit/public/web/WebPluginParams.h"
 #include "third_party/WebKit/public/web/WebURLLoaderOptions.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 #include "url/url_util.h"
 
@@ -379,7 +379,7 @@ void WebPluginImpl::updateGeometry(
   first_geometry_update_ = false;
 }
 
-void WebPluginImpl::updateFocus(bool focused) {
+void WebPluginImpl::updateFocus(bool focused, blink::WebFocusType focus_type) {
   if (accepts_input_events_)
     delegate_->SetFocus(focused);
 }
@@ -650,7 +650,7 @@ bool WebPluginImpl::SetPostData(WebURLRequest* request,
   return rv;
 }
 
-bool WebPluginImpl::IsValidUrl(const GURL& url, Referrer referrer_flag) {
+bool WebPluginImpl::IsValidUrl(const GURL& url, ReferrerValue referrer_flag) {
   if (referrer_flag == PLUGIN_SRC &&
       mime_type_ == kFlashPluginSwfMimeType &&
       url.GetOrigin() != plugin_url_.GetOrigin()) {
@@ -682,7 +682,7 @@ WebPluginImpl::RoutingStatus WebPluginImpl::RouteToFrame(
     const char* buf,
     unsigned int len,
     int notify_id,
-    Referrer referrer_flag) {
+    ReferrerValue referrer_flag) {
   // If there is no target, there is nothing to do
   if (!target)
     return NOT_ROUTED;
@@ -734,6 +734,8 @@ WebPluginImpl::RoutingStatus WebPluginImpl::RouteToFrame(
   request.setFirstPartyForCookies(
       webframe_->document().firstPartyForCookies());
   request.setHasUserGesture(popups_allowed);
+  // ServiceWorker is disabled for NPAPI.
+  request.setSkipServiceWorker(true);
   if (len > 0) {
     if (!SetPostData(&request, buf, len)) {
       // Uhoh - we're in trouble.  There isn't a good way
@@ -1159,7 +1161,7 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
                                              unsigned int len,
                                              int notify_id,
                                              bool popups_allowed,
-                                             Referrer referrer_flag,
+                                             ReferrerValue referrer_flag,
                                              bool notify_redirects,
                                              bool is_plugin_src_load) {
   // For this request, we either route the output to a frame
@@ -1217,7 +1219,7 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
   if (!delegate_)
     return;
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableDirectNPAPIRequests)) {
     // We got here either because the plugin called GetURL/PostURL, or because
     // we're fetching the data for an embed tag. If we're in multi-process mode,
@@ -1231,8 +1233,9 @@ void WebPluginImpl::HandleURLRequestInternal(const char* url,
     // WebFrameImpl::setReferrerForRequest does.
     WebURLRequest request(complete_url);
     SetReferrer(&request, referrer_flag);
-    GURL referrer(
-        request.httpHeaderField(WebString::fromUTF8("Referer")).utf8());
+    Referrer referrer(
+        GURL(request.httpHeaderField(WebString::fromUTF8("Referer"))),
+        request.referrerPolicy());
 
     GURL first_party_for_cookies = webframe_->document().firstPartyForCookies();
     delegate_->FetchURL(resource_id, notify_id, complete_url,
@@ -1267,7 +1270,7 @@ bool WebPluginImpl::InitiateHTTPRequest(unsigned long resource_id,
                                         const char* buf,
                                         int buf_len,
                                         const char* range_info,
-                                        Referrer referrer_flag,
+                                        ReferrerValue referrer_flag,
                                         bool notify_redirects,
                                         bool is_plugin_src_load) {
   if (!client) {
@@ -1288,6 +1291,8 @@ bool WebPluginImpl::InitiateHTTPRequest(unsigned long resource_id,
   // (RequestContextPlugin)?
   info.request.setRequestContext(WebURLRequest::RequestContextPlugin);
   info.request.setHTTPMethod(WebString::fromUTF8(method));
+  // ServiceWorker is disabled for NPAPI.
+  info.request.setSkipServiceWorker(true);
   info.pending_failure_notification = false;
   info.notify_redirects = notify_redirects;
   info.is_plugin_src_load = is_plugin_src_load;
@@ -1516,7 +1521,7 @@ void WebPluginImpl::TearDownPluginInstance(
 }
 
 void WebPluginImpl::SetReferrer(blink::WebURLRequest* request,
-                                Referrer referrer_flag) {
+                                ReferrerValue referrer_flag) {
   switch (referrer_flag) {
     case DOCUMENT_URL:
       webframe_->setReferrerForRequest(*request, GURL());

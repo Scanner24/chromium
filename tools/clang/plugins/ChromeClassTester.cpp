@@ -62,15 +62,6 @@ void ChromeClassTester::CheckTag(TagDecl* tag) {
   // information instead of just parsing information.
 
   if (CXXRecordDecl* record = dyn_cast<CXXRecordDecl>(tag)) {
-    // If this is a POD or a class template or a type dependent on a
-    // templated class, assume there's no ctor/dtor/virtual method
-    // optimization that we can do.
-    if (record->isPOD() ||
-        record->getDescribedClassTemplate() ||
-        record->getTemplateSpecializationKind() ||
-        record->isDependentType())
-      return;
-
     if (InBannedNamespace(record))
       return;
 
@@ -206,7 +197,7 @@ void ChromeClassTester::BuildBannedLists() {
   // Enum type with _LAST members where _LAST doesn't mean last enum value.
   ignored_record_names_.insert("ServerFieldType");
 
-  // Used heavily in ui_unittests and once in views_unittests. Fixing this
+  // Used heavily in ui_base_unittests and once in views_unittests. Fixing this
   // isn't worth the overhead of an additional library.
   ignored_record_names_.insert("TestAnimationDelegate");
 

@@ -19,11 +19,17 @@
 //
 // These classes are represented as only a 64-bit value, so they can be
 // efficiently passed by value.
+//
+// Definitions of operator<< are provided to make these types work with
+// DCHECK_EQ() and other log macros. For human-readable formatting, see
+// "base/i18n/time_formatting.h".
 
 #ifndef BASE_TIME_TIME_H_
 #define BASE_TIME_TIME_H_
 
 #include <time.h>
+
+#include <iosfwd>
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
@@ -92,6 +98,15 @@ class BASE_EXPORT TimeDelta {
   // For serializing, use FromInternalValue to reconstitute.
   int64 ToInternalValue() const {
     return delta_;
+  }
+
+  // Returns the magnitude (absolute value) of this TimeDelta.
+  TimeDelta magnitude() const {
+    // Some toolchains provide an incomplete C++11 implementation and lack an
+    // int64 overload for std::abs().  The following is a simple branchless
+    // implementation:
+    const int64 mask = delta_ >> (sizeof(delta_) * 8 - 1);
+    return TimeDelta((delta_ + mask) ^ mask);
   }
 
   // Returns true if the time delta is the maximum time delta.
@@ -163,6 +178,14 @@ class BASE_EXPORT TimeDelta {
     return delta_ / a.delta_;
   }
 
+  // Multiplicative computations with floats.
+  TimeDelta multiply_by(double a) const {
+    return TimeDelta(delta_ * a);
+  }
+  TimeDelta divide_by(double a) const {
+    return TimeDelta(delta_ / a);
+  }
+
   // Defined below because it depends on the definition of the other classes.
   Time operator+(Time t) const;
   TimeTicks operator+(TimeTicks t) const;
@@ -206,6 +229,9 @@ inline TimeDelta operator*(int64 a, TimeDelta td) {
   return TimeDelta(a * td.delta_);
 }
 
+// For logging use only.
+BASE_EXPORT std::ostream& operator<<(std::ostream& os, TimeDelta time_delta);
+
 // Time -----------------------------------------------------------------------
 
 // Represents a wall clock time in UTC.
@@ -222,6 +248,10 @@ class BASE_EXPORT Time {
   static const int64 kNanosecondsPerMicrosecond = 1000;
   static const int64 kNanosecondsPerSecond = kNanosecondsPerMicrosecond *
                                              kMicrosecondsPerSecond;
+
+  // The representation of Jan 1, 1970 UTC in microseconds since the
+  // platform-dependent epoch.
+  static const int64 kTimeTToMicrosecondsOffset;
 
 #if !defined(OS_WIN)
   // On Mac & Linux, this value is the delta from the Windows epoch of 1601 to
@@ -483,10 +513,6 @@ class BASE_EXPORT Time {
                                  bool is_local,
                                  Time* parsed_time);
 
-  // The representation of Jan 1, 1970 UTC in microseconds since the
-  // platform-dependent epoch.
-  static const int64 kTimeTToMicrosecondsOffset;
-
   // Time in microseconds in UTC.
   int64 us_;
 };
@@ -538,7 +564,7 @@ inline TimeDelta TimeDelta::FromSecondsD(double secs) {
   // Preserve max to prevent overflow.
   if (secs == std::numeric_limits<double>::infinity())
     return Max();
-  return TimeDelta(secs * Time::kMicrosecondsPerSecond);
+  return TimeDelta(static_cast<int64>(secs * Time::kMicrosecondsPerSecond));
 }
 
 // static
@@ -546,7 +572,7 @@ inline TimeDelta TimeDelta::FromMillisecondsD(double ms) {
   // Preserve max to prevent overflow.
   if (ms == std::numeric_limits<double>::infinity())
     return Max();
-  return TimeDelta(ms * Time::kMicrosecondsPerMillisecond);
+  return TimeDelta(static_cast<int64>(ms * Time::kMicrosecondsPerMillisecond));
 }
 
 // static
@@ -560,6 +586,9 @@ inline TimeDelta TimeDelta::FromMicroseconds(int64 us) {
 inline Time TimeDelta::operator+(Time t) const {
   return Time(t.us_ + delta_);
 }
+
+// For logging use only.
+BASE_EXPORT std::ostream& operator<<(std::ostream& os, Time time);
 
 // TimeTicks ------------------------------------------------------------------
 
@@ -576,18 +605,17 @@ class BASE_EXPORT TimeTicks {
   TimeTicks() : ticks_(0) {
   }
 
-  // Platform-dependent tick count representing "right now."
-  // The resolution of this clock is ~1-15ms.  Resolution varies depending
-  // on hardware/operating system configuration.
+  // Platform-dependent tick count representing "right now." When
+  // IsHighResolution() returns false, the resolution of the clock could be
+  // as coarse as ~15.6ms. Otherwise, the resolution should be no worse than one
+  // microsecond.
   static TimeTicks Now();
 
-  // Returns a platform-dependent high-resolution tick count. Implementation
-  // is hardware dependent and may or may not return sub-millisecond
-  // resolution.  THIS CALL IS GENERALLY MUCH MORE EXPENSIVE THAN Now() AND
-  // SHOULD ONLY BE USED WHEN IT IS REALLY NEEDED.
-  static TimeTicks HighResNow();
-
-  static bool IsHighResNowFastAndReliable();
+  // Returns true if the high resolution clock is working on this system and
+  // Now() will return high resolution values. Note that, on systems where the
+  // high resolution clock works but is deemed inefficient, the low resolution
+  // clock will be used instead.
+  static bool IsHighResolution();
 
   // Returns true if ThreadNow() is supported on this system.
   static bool IsThreadNowSupported() {
@@ -604,27 +632,33 @@ class BASE_EXPORT TimeTicks {
   // to (approximately) measure how much time the calling thread spent doing
   // actual work vs. being de-scheduled. May return bogus results if the thread
   // migrates to another CPU between two calls.
+  //
+  // WARNING: The returned value might NOT have the same origin as Now(). Do not
+  // perform math between TimeTicks values returned by Now() and ThreadNow() and
+  // expect meaningful results.
+  // TODO(miu): Since the timeline of these values is different, the values
+  // should be of a different type.
   static TimeTicks ThreadNow();
 
-  // Returns the current system trace time or, if none is defined, the current
-  // high-res time (i.e. HighResNow()). On systems where a global trace clock
-  // is defined, timestamping TraceEvents's with this value guarantees
-  // synchronization between events collected inside chrome and events
-  // collected outside (e.g. kernel, X server).
+  // Returns the current system trace time or, if not available on this
+  // platform, a high-resolution time value; or a low-resolution time value if
+  // neither are avalable. On systems where a global trace clock is defined,
+  // timestamping TraceEvents's with this value guarantees synchronization
+  // between events collected inside chrome and events collected outside
+  // (e.g. kernel, X server).
+  //
+  // WARNING: The returned value might NOT have the same origin as Now(). Do not
+  // perform math between TimeTicks values returned by Now() and
+  // NowFromSystemTraceTime() and expect meaningful results.
+  // TODO(miu): Since the timeline of these values is different, the values
+  // should be of a different type.
   static TimeTicks NowFromSystemTraceTime();
 
 #if defined(OS_WIN)
-  // Get the absolute value of QPC time drift. For testing.
-  static int64 GetQPCDriftMicroseconds();
-
+  // Translates an absolute QPC timestamp into a TimeTicks value. The returned
+  // value has the same origin as Now(). Do NOT attempt to use this if
+  // IsHighResolution() returns false.
   static TimeTicks FromQPCValue(LONGLONG qpc_value);
-
-  // Returns true if the high resolution clock is working on this system.
-  // This is only for testing.
-  static bool IsHighResClockWorking();
-
-  // Returns a time value that is NOT rollover protected.
-  static TimeTicks UnprotectedNow();
 #endif
 
   // Returns true if this object has not been initialized.
@@ -653,6 +687,12 @@ class BASE_EXPORT TimeTicks {
   int64 ToInternalValue() const {
     return ticks_;
   }
+
+  // Returns |this| snapped to the next tick, given a |tick_phase| and
+  // repeating |tick_interval| in both directions. |this| may be before,
+  // after, or equal to the |tick_phase|.
+  TimeTicks SnappedToNextTick(TimeTicks tick_phase,
+                              TimeDelta tick_interval) const;
 
   TimeTicks& operator=(TimeTicks other) {
     ticks_ = other.ticks_;
@@ -722,6 +762,9 @@ class BASE_EXPORT TimeTicks {
 inline TimeTicks TimeDelta::operator+(TimeTicks t) const {
   return TimeTicks(t.ticks_ + delta_);
 }
+
+// For logging use only.
+BASE_EXPORT std::ostream& operator<<(std::ostream& os, TimeTicks time_ticks);
 
 }  // namespace base
 

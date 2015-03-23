@@ -17,7 +17,7 @@ class SystemLogsMemoryHandler : public MemoryDetails {
 
   // Sends the data to the callback.
   // MemoryDetails override.
-  virtual void OnDetailsAvailable() OVERRIDE {
+  void OnDetailsAvailable() override {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
     scoped_ptr<SystemLogsResponse> response(new SystemLogsResponse);
@@ -26,11 +26,18 @@ class SystemLogsMemoryHandler : public MemoryDetails {
   }
 
  private:
-  virtual ~SystemLogsMemoryHandler() {}
+  ~SystemLogsMemoryHandler() override {}
   SysLogsSourceCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemLogsMemoryHandler);
 };
+
+MemoryDetailsLogSource::MemoryDetailsLogSource()
+    : SystemLogsSource("MemoryDetails") {
+}
+
+MemoryDetailsLogSource::~MemoryDetailsLogSource() {
+}
 
 void MemoryDetailsLogSource::Fetch(const SysLogsSourceCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -38,8 +45,7 @@ void MemoryDetailsLogSource::Fetch(const SysLogsSourceCallback& callback) {
 
   scoped_refptr<SystemLogsMemoryHandler>
       handler(new SystemLogsMemoryHandler(callback));
-  // TODO(jamescook): Maybe we don't need to update histograms here?
-  handler->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
+  handler->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 }
 
 }  // namespace system_logs

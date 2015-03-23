@@ -11,7 +11,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -58,6 +57,16 @@ enum FlashUsage {
   // Total number of browser processes.
   TOTAL_BROWSER_PROCESSES,
   FLASH_USAGE_ENUM_COUNT
+};
+
+enum NPAPIPluginStatus {
+  // Platform does not support NPAPI.
+  NPAPI_STATUS_UNSUPPORTED,
+  // Platform supports NPAPI and NPAPI is disabled.
+  NPAPI_STATUS_DISABLED,
+  // Platform supports NPAPI and NPAPI is enabled.
+  NPAPI_STATUS_ENABLED,
+  NPAPI_STATUS_ENUM_COUNT
 };
 
 bool LoadPluginListInProcess() {
@@ -144,7 +153,7 @@ PluginServiceImpl* PluginServiceImpl::GetInstance() {
 }
 
 PluginServiceImpl::PluginServiceImpl()
-    : filter_(NULL) {
+    : npapi_plugins_enabled_(false), filter_(NULL) {
   // Collect the total number of browser processes (which create
   // PluginServiceImpl objects, to be precise). The number is used to normalize
   // the number of processes which start at least one NPAPI/PPAPI Flash process.
@@ -157,15 +166,6 @@ PluginServiceImpl::PluginServiceImpl()
 }
 
 PluginServiceImpl::~PluginServiceImpl() {
-#if defined(OS_WIN)
-  // Release the events since they're owned by RegKey, not WaitableEvent.
-  hkcu_watcher_.StopWatching();
-  hklm_watcher_.StopWatching();
-  if (hkcu_event_)
-    hkcu_event_->Release();
-  if (hklm_event_)
-    hklm_event_->Release();
-#endif
   // Make sure no plugin channel requests have been leaked.
   DCHECK(pending_plugin_clients_.empty());
 }
@@ -200,24 +200,18 @@ void PluginServiceImpl::StartWatchingPlugins() {
   if (hkcu_key_.Create(HKEY_CURRENT_USER,
                        kRegistryMozillaPlugins,
                        KEY_NOTIFY) == ERROR_SUCCESS) {
-    if (hkcu_key_.StartWatching() == ERROR_SUCCESS) {
-      hkcu_event_.reset(new base::WaitableEvent(hkcu_key_.watch_event()));
-      base::WaitableEventWatcher::EventCallback callback =
-            base::Bind(&PluginServiceImpl::OnWaitableEventSignaled,
-                       base::Unretained(this));
-      hkcu_watcher_.StartWatching(hkcu_event_.get(), callback);
-    }
+    base::win::RegKey::ChangeCallback callback =
+        base::Bind(&PluginServiceImpl::OnKeyChanged, base::Unretained(this),
+                   base::Unretained(&hkcu_key_));
+    hkcu_key_.StartWatching(callback);
   }
   if (hklm_key_.Create(HKEY_LOCAL_MACHINE,
                        kRegistryMozillaPlugins,
                        KEY_NOTIFY) == ERROR_SUCCESS) {
-    if (hklm_key_.StartWatching() == ERROR_SUCCESS) {
-      hklm_event_.reset(new base::WaitableEvent(hklm_key_.watch_event()));
-      base::WaitableEventWatcher::EventCallback callback =
-            base::Bind(&PluginServiceImpl::OnWaitableEventSignaled,
-                       base::Unretained(this));
-      hklm_watcher_.StartWatching(hklm_event_.get(), callback);
-    }
+    base::win::RegKey::ChangeCallback callback =
+        base::Bind(&PluginServiceImpl::OnKeyChanged, base::Unretained(this),
+                   base::Unretained(&hklm_key_));
+    hklm_key_.StartWatching(callback);
   }
 #endif
 #if defined(OS_POSIX) && !defined(OS_OPENBSD) && !defined(OS_ANDROID)
@@ -642,22 +636,16 @@ void PluginServiceImpl::GetPluginsOnIOThread(
 }
 #endif
 
-void PluginServiceImpl::OnWaitableEventSignaled(
-    base::WaitableEvent* waitable_event) {
 #if defined(OS_WIN)
-  if (waitable_event == hkcu_event_) {
-    hkcu_key_.StartWatching();
-  } else {
-    hklm_key_.StartWatching();
-  }
+void PluginServiceImpl::OnKeyChanged(base::win::RegKey* key) {
+  key->StartWatching(base::Bind(&PluginServiceImpl::OnKeyChanged,
+                                base::Unretained(this),
+                                base::Unretained(key)));
 
   PluginList::Singleton()->RefreshPlugins();
   PurgePluginListCache(NULL, false);
-#else
-  // This event should only get signaled on a Windows machine.
-  NOTREACHED();
-#endif  // defined(OS_WIN)
 }
+#endif  // defined(OS_WIN)
 
 void PluginServiceImpl::RegisterPepperPlugins() {
   ComputePepperPluginList(&ppapi_plugins_);
@@ -782,8 +770,9 @@ void PluginServiceImpl::AddExtraPluginDir(const base::FilePath& path) {
 void PluginServiceImpl::RegisterInternalPlugin(
     const WebPluginInfo& info,
     bool add_at_beginning) {
-  if (!NPAPIPluginsSupported() &&
-      info.type == WebPluginInfo::PLUGIN_TYPE_NPAPI) {
+  // Internal plugins should never be NPAPI.
+  CHECK_NE(info.type, WebPluginInfo::PLUGIN_TYPE_NPAPI);
+  if (info.type == WebPluginInfo::PLUGIN_TYPE_NPAPI) {
     DVLOG(0) << "Don't register NPAPI plugins when they're not supported";
     return;
   }
@@ -800,15 +789,31 @@ void PluginServiceImpl::GetInternalPlugins(
 }
 
 bool PluginServiceImpl::NPAPIPluginsSupported() {
+  static bool command_line_checked = false;
+
+  if (!command_line_checked) {
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  return true;
+    const base::CommandLine* command_line =
+        base::CommandLine::ForCurrentProcess();
+    npapi_plugins_enabled_ = command_line->HasSwitch(switches::kEnableNpapi);
+    NPAPIPluginStatus status =
+        npapi_plugins_enabled_ ? NPAPI_STATUS_ENABLED : NPAPI_STATUS_DISABLED;
 #else
-  return false;
+    NPAPIPluginStatus status = NPAPI_STATUS_UNSUPPORTED;
 #endif
+    UMA_HISTOGRAM_ENUMERATION("Plugin.NPAPIStatus", status,
+        NPAPI_STATUS_ENUM_COUNT);
+  }
+
+  return npapi_plugins_enabled_;
 }
 
 void PluginServiceImpl::DisablePluginsDiscoveryForTesting() {
   PluginList::Singleton()->DisablePluginsDiscovery();
+}
+
+void PluginServiceImpl::EnableNpapiPluginsForTesting() {
+  npapi_plugins_enabled_ = true;
 }
 
 #if defined(OS_MACOSX)

@@ -129,6 +129,7 @@ void SyncPrefs::RegisterProfilePrefs(
   model_set.Put(syncer::PREFERENCES);
   model_set.Put(syncer::PASSWORDS);
   model_set.Put(syncer::AUTOFILL_PROFILE);
+  model_set.Put(syncer::AUTOFILL_WALLET_DATA);
   model_set.Put(syncer::AUTOFILL);
   model_set.Put(syncer::THEMES);
   model_set.Put(syncer::EXTENSIONS);
@@ -139,6 +140,7 @@ void SyncPrefs::RegisterProfilePrefs(
   model_set.Put(syncer::TYPED_URLS);
   model_set.Put(syncer::SESSIONS);
   model_set.Put(syncer::ARTICLES);
+  model_set.Put(syncer::WIFI_CREDENTIALS);
   registry->RegisterListPref(prefs::kSyncAcknowledgedSyncTypes,
                              syncer::ModelTypeSetToValue(model_set),
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -298,6 +300,8 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
     case syncer::AUTOFILL:
       return prefs::kSyncAutofill;
     case syncer::AUTOFILL_PROFILE:
+      return prefs::kSyncAutofillWallet;
+    case syncer::AUTOFILL_WALLET_DATA:
       return prefs::kSyncAutofillProfile;
     case syncer::THEMES:
       return prefs::kSyncThemes;
@@ -343,8 +347,12 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
       return prefs::kSyncArticles;
     case syncer::SUPERVISED_USER_SHARED_SETTINGS:
       return prefs::kSyncSupervisedUserSharedSettings;
+    case syncer::SUPERVISED_USER_WHITELISTS:
+      return prefs::kSyncSupervisedUserWhitelists;
     case syncer::DEVICE_INFO:
       return prefs::kSyncDeviceInfo;
+    case syncer::WIFI_CREDENTIALS:
+      return prefs::kSyncWifiCredentials;
     default:
       break;
   }
@@ -410,6 +418,7 @@ void SyncPrefs::RegisterPrefGroups() {
   pref_groups_[syncer::APPS].Put(syncer::APP_LIST);
 
   pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_PROFILE);
+  pref_groups_[syncer::AUTOFILL].Put(syncer::AUTOFILL_WALLET_DATA);
 
   pref_groups_[syncer::EXTENSIONS].Put(syncer::EXTENSION_SETTINGS);
 

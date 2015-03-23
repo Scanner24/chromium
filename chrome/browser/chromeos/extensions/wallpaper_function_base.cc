@@ -8,6 +8,7 @@
 #include "chrome/browser/image_decoder.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/login/login_state.h"
+#include "components/wallpaper/wallpaper_layout.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
@@ -16,7 +17,7 @@ namespace wallpaper_api_util {
 namespace {
 
 // Keeps in sync (same order) with WallpaperLayout enum in header file.
-const char* kWallpaperLayoutArrays[] = {
+const char* const kWallpaperLayoutArrays[] = {
   "CENTER",
   "CENTER_CROPPED",
   "STRETCH",
@@ -25,17 +26,17 @@ const char* kWallpaperLayoutArrays[] = {
 
 const int kWallpaperLayoutCount = arraysize(kWallpaperLayoutArrays);
 
-} // namespace
+}  // namespace
 
 const char kCancelWallpaperMessage[] = "Set wallpaper was canceled.";
 
-ash::WallpaperLayout GetLayoutEnum(const std::string& layout) {
+wallpaper::WallpaperLayout GetLayoutEnum(const std::string& layout) {
   for (int i = 0; i < kWallpaperLayoutCount; i++) {
     if (layout.compare(kWallpaperLayoutArrays[i]) == 0)
-      return static_cast<ash::WallpaperLayout>(i);
+      return static_cast<wallpaper::WallpaperLayout>(i);
   }
   // Default to use CENTER layout.
-  return ash::WALLPAPER_LAYOUT_CENTER;
+  return wallpaper::WALLPAPER_LAYOUT_CENTER;
 }
 
 }  // namespace wallpaper_api_util
@@ -47,7 +48,7 @@ class WallpaperFunctionBase::UnsafeWallpaperDecoder
       : function_(function) {
   }
 
-  void Start(const std::string& image_data) {
+  void Start(const std::vector<char>& image_data) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     // This function can only be called after user login. It is fine to use
@@ -67,8 +68,8 @@ class WallpaperFunctionBase::UnsafeWallpaperDecoder
     cancel_flag_.Set();
   }
 
-  virtual void OnImageDecoded(const ImageDecoder* decoder,
-                              const SkBitmap& decoded_image) OVERRIDE {
+  void OnImageDecoded(const ImageDecoder* decoder,
+                      const SkBitmap& decoded_image) override {
     // Make the SkBitmap immutable as we won't modify it. This is important
     // because otherwise it gets duplicated during painting, wasting memory.
     SkBitmap immutable(decoded_image);
@@ -84,7 +85,7 @@ class WallpaperFunctionBase::UnsafeWallpaperDecoder
     delete this;
   }
 
-  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE {
+  void OnDecodeImageFailed(const ImageDecoder* decoder) override {
     function_->OnFailure(
         l10n_util::GetStringUTF8(IDS_WALLPAPER_MANAGER_INVALID_WALLPAPER));
     delete this;
@@ -107,7 +108,7 @@ WallpaperFunctionBase::WallpaperFunctionBase() {
 WallpaperFunctionBase::~WallpaperFunctionBase() {
 }
 
-void WallpaperFunctionBase::StartDecode(const std::string& data) {
+void WallpaperFunctionBase::StartDecode(const std::vector<char>& data) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (unsafe_wallpaper_decoder_)
     unsafe_wallpaper_decoder_->Cancel();

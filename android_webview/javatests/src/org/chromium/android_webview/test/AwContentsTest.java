@@ -7,6 +7,7 @@ package org.chromium.android_webview.test;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -24,6 +25,7 @@ import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.TestAwContentsClient.OnDownloadStartHelper;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.net.test.util.TestWebServer;
@@ -42,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * AwContents tests.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwContentsTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
@@ -103,10 +106,6 @@ public class AwContentsTest extends AwTestBase {
                 createAwTestContainerView(mContentsClient).getAwContents();
         awContents.destroy();
 
-        assertNull(awContents.getWebContents());
-        assertNull(awContents.getContentViewCore());
-        assertNull(awContents.getNavigationController());
-
         // The documentation for WebView#destroy() reads "This method should be called
         // after this WebView has been removed from the view system. No other methods
         // may be called on this WebView after destroy".
@@ -117,7 +116,6 @@ public class AwContentsTest extends AwTestBase {
         awContents.loadUrl(new LoadUrlParams("http://www.google.com"));
         awContents.findAllAsync("search");
         assertNull(awContents.getUrl());
-        assertNull(awContents.getContentSettings());
         assertFalse(awContents.canGoBack());
         awContents.disableJavascriptInterfacesInspection();
         awContents.invokeZoomPicker();
@@ -139,6 +137,7 @@ public class AwContentsTest extends AwTestBase {
                 new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MENU));
     }
 
+    @DisableHardwareAccelerationForTest
     @LargeTest
     @Feature({"AndroidWebView"})
     public void testCreateAndGcManyTimes() throws Throwable {
@@ -148,7 +147,7 @@ public class AwContentsTest extends AwTestBase {
         // so allow for 1 'leaked' instance.
         final int maxIdleInstances = 1;
 
-        System.gc();
+        Runtime.getRuntime().gc();
 
         pollOnUiThread(new Callable<Boolean>() {
             @Override
@@ -171,7 +170,7 @@ public class AwContentsTest extends AwTestBase {
             });
         }
 
-        System.gc();
+        Runtime.getRuntime().gc();
 
         pollOnUiThread(new Callable<Boolean>() {
             @Override
@@ -216,7 +215,7 @@ public class AwContentsTest extends AwTestBase {
         runTestOnUiThread(new Runnable() {
             @Override
             public void run() {
-              awContents.documentHasImages(msg);
+                awContents.documentHasImages(msg);
             }
         });
         assertTrue(s.tryAcquire(WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS));
@@ -254,9 +253,8 @@ public class AwContentsTest extends AwTestBase {
                 createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testContainer.getAwContents();
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String pagePath = "/clear_cache_test.html";
             List<Pair<String, String>> headers = new ArrayList<Pair<String, String>>();
             // Set Cache-Control headers to cache this request. One century should be long enough.
@@ -296,7 +294,7 @@ public class AwContentsTest extends AwTestBase {
                         pageUrl);
             assertEquals(2, webServer.getRequestCount(pagePath));
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -324,10 +322,8 @@ public class AwContentsTest extends AwTestBase {
         final AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testView.getAwContents();
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
-
             final String faviconUrl = webServer.setResponseBase64(
                     "/" + CommonResources.FAVICON_FILENAME, CommonResources.FAVICON_DATA_BASE64,
                     CommonResources.getImagePngHeaders(false));
@@ -344,20 +340,20 @@ public class AwContentsTest extends AwTestBase {
             pollOnUiThread(new Callable<Boolean>() {
                 @Override
                 public Boolean call() {
-                    return awContents.getFavicon() != null &&
-                        !awContents.getFavicon().sameAs(defaultFavicon);
+                    return awContents.getFavicon() != null
+                            && !awContents.getFavicon().sameAs(defaultFavicon);
                 }
             });
 
             final Object originalFaviconSource = (new URL(faviconUrl)).getContent();
             final Bitmap originalFavicon =
-                BitmapFactory.decodeStream((InputStream) originalFaviconSource);
+                    BitmapFactory.decodeStream((InputStream) originalFaviconSource);
             assertNotNull(originalFavicon);
 
             assertTrue(awContents.getFavicon().sameAs(originalFavicon));
 
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -376,13 +372,12 @@ public class AwContentsTest extends AwTestBase {
         downloadHeaders.add(Pair.create("Content-Type", mimeType));
         downloadHeaders.add(Pair.create("Content-Length", Integer.toString(data.length())));
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String pageUrl = webServer.setResponse(
                     "/download.txt", data, downloadHeaders);
             final OnDownloadStartHelper downloadStartHelper =
-                mContentsClient.getOnDownloadStartHelper();
+                    mContentsClient.getOnDownloadStartHelper();
             final int callCount = downloadStartHelper.getCallCount();
             loadUrlAsync(awContents, pageUrl);
             downloadStartHelper.waitForCallback(callCount);
@@ -392,7 +387,7 @@ public class AwContentsTest extends AwTestBase {
             assertEquals(mimeType, downloadStartHelper.getMimeType());
             assertEquals(data.length(), downloadStartHelper.getContentLength());
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -408,17 +403,17 @@ public class AwContentsTest extends AwTestBase {
 
         // Default to "online".
         assertEquals("true", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
-              script));
+                script));
 
         // Forcing "offline".
         setNetworkAvailableOnUiThread(awContents, false);
         assertEquals("false", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
-              script));
+                script));
 
         // Forcing "online".
         setNetworkAvailableOnUiThread(awContents, true);
         assertEquals("true", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
-              script));
+                script));
     }
 
 
@@ -479,9 +474,8 @@ public class AwContentsTest extends AwTestBase {
                 createAwTestContainerViewOnMainSync(mContentsClient);
         final AwContents awContents = testContainer.getAwContents();
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String pagePath = "/test_can_inject_headers.html";
             final String pageUrl = webServer.setResponse(
                     pagePath, "<html><body>foo</body></html>", null);
@@ -504,8 +498,87 @@ public class AwContentsTest extends AwTestBase {
                 assertEquals(value.getValue(), matchingHeaders[0].getValue());
             }
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
+    // This is a meta test that we don't accidentally turn off hardware
+    // acceleration in instrumentation tests without notice. Do not add the
+    // @DisableHardwareAccelerationForTest annotation for this test.
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testHardwareModeWorks() throws Throwable {
+        AwTestContainerView testContainer =
+                createAwTestContainerViewOnMainSync(mContentsClient);
+        assertTrue(testContainer.isHardwareAccelerated());
+        assertTrue(testContainer.isBackedByHardwareView());
+    }
+
+    // TODO(hush): more ssl tests. And put the ssl tests into a separate test
+    // class.
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    // If the user allows the ssl error, the same ssl error will not trigger
+    // the onReceivedSslError callback; If the user denies it, the same ssl
+    // error will still trigger the onReceivedSslError callback.
+    public void testSslPreferences() throws Throwable {
+        final AwTestContainerView testContainer =
+                createAwTestContainerViewOnMainSync(mContentsClient);
+        final AwContents awContents = testContainer.getAwContents();
+        TestWebServer webServer = TestWebServer.startSsl();
+        final String pagePath = "/hello.html";
+        final String pageUrl =
+                webServer.setResponse(pagePath, "<html><body>hello world</body></html>", null);
+        final CallbackHelper onReceivedSslErrorHelper =
+                mContentsClient.getOnReceivedSslErrorHelper();
+        int onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
+
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+
+        assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
+        assertEquals(1, webServer.getRequestCount(pagePath));
+
+        // Now load the page again. This time, we expect no ssl error, because
+        // user's decision should be remembered.
+        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        assertEquals(onSslErrorCallCount, onReceivedSslErrorHelper.getCallCount());
+
+        // Now clear the ssl preferences then load the same url again. Expect to see
+        // onReceivedSslError getting called again.
+        awContents.clearSslPreferences();
+        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
+
+        // Now clear the stored decisions and tell the client to deny ssl errors.
+        awContents.clearSslPreferences();
+        mContentsClient.setAllowSslError(false);
+        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
+
+        // Now load the same page again. This time, we still expect onReceivedSslError,
+        // because we only remember user's decision if it is "allow".
+        onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
+        assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
+    }
+
+    /**
+     * Verifies that Web Notifications and the Push API are not exposed in WebView.
+     */
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testPushAndNotificationsDisabled() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        String script = "window.Notification || window.PushManager";
+
+        enableJavaScriptOnUiThread(awContents);
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+        assertEquals("null", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
+                script));
+    }
 }

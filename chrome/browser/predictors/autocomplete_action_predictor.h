@@ -11,11 +11,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_table.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "url/gurl.h"
@@ -61,6 +62,7 @@ namespace predictors {
 class AutocompleteActionPredictor
     : public KeyedService,
       public content::NotificationObserver,
+      public history::HistoryServiceObserver,
       public base::SupportsWeakPtr<AutocompleteActionPredictor> {
  public:
   enum Action {
@@ -71,7 +73,7 @@ class AutocompleteActionPredictor
   };
 
   explicit AutocompleteActionPredictor(Profile* profile);
-  virtual ~AutocompleteActionPredictor();
+  ~AutocompleteActionPredictor() override;
 
   // Registers an AutocompleteResult for a given |user_text|. This will be used
   // when the user navigates from the Omnibox to determine early opportunities
@@ -98,7 +100,7 @@ class AutocompleteActionPredictor
   // prerenders (if any).
   void StartPrerendering(
       const GURL& url,
-      const content::SessionStorageNamespaceMap& session_storage_namespace_map,
+      content::SessionStorageNamespace* session_storage_namespace,
       const gfx::Size& size);
 
   // Cancels the current prerender, unless it has already been abandoned.
@@ -154,9 +156,9 @@ class AutocompleteActionPredictor
   static const int kMaximumDaysToKeepEntry;
 
   // NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // The first step in initializing the predictor is accessing the database and
   // building the local cache. This should be delayed until after critical DB
@@ -215,6 +217,17 @@ class AutocompleteActionPredictor
   // Calculates the confidence for an entry in the DBCacheMap.
   double CalculateConfidenceForDbEntry(DBCacheMap::const_iterator iter) const;
 
+  // KeyedService:
+  void Shutdown() override;
+
+  // history::HistoryServiceObserver:
+  void OnURLsDeleted(HistoryService* history_service,
+                     bool all_history,
+                     bool expired,
+                     const history::URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
+  void OnHistoryServiceLoaded(HistoryService* history_service) override;
+
   Profile* profile_;
 
   // Set when this is a predictor for an incognito profile.
@@ -245,6 +258,9 @@ class AutocompleteActionPredictor
   DBIdCacheMap db_id_cache_;
 
   bool initialized_;
+
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteActionPredictor);
 };

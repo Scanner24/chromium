@@ -14,6 +14,10 @@ namespace content {
 class WebContents;
 }  // namespace content
 
+namespace password_manager {
+enum class CredentialType : unsigned int;
+}
+
 // This mock is used in tests to ensure that we're just testing the controller
 // behavior, and not the behavior of the bits and pieces it relies upon (like
 // FormManager).
@@ -22,34 +26,44 @@ class ManagePasswordsUIControllerMock
  public:
   explicit ManagePasswordsUIControllerMock(
       content::WebContents* contents);
-  virtual ~ManagePasswordsUIControllerMock();
+  ~ManagePasswordsUIControllerMock() override;
 
   // Navigation, surprisingly, is platform-specific; Android's settings page
   // is native UI and therefore isn't available in a tab for unit tests.
   //
   // TODO(mkwst): Determine how to reasonably test this on that platform.
-  virtual void NavigateToPasswordManagerSettingsPage() OVERRIDE;
+  void NavigateToPasswordManagerSettingsPage() override;
   bool navigated_to_settings_page() const {
     return navigated_to_settings_page_;
   }
 
   // We don't have a FormManager in tests, so stub these out.
-  virtual void SavePasswordInternal() OVERRIDE;
+  void SavePasswordInternal() override;
   bool saved_password() const { return saved_password_; }
 
-  virtual void NeverSavePasswordInternal() OVERRIDE;
+  void NeverSavePasswordInternal() override;
   bool never_saved_password() const { return never_saved_password_; }
 
-  virtual const autofill::PasswordForm& PendingCredentials() const OVERRIDE;
-  void SetPendingCredentials(autofill::PasswordForm pending_credentials);
+  void ChooseCredential(const autofill::PasswordForm& form,
+                        password_manager::CredentialType form_type) override;
+  bool choose_credential() const { return choose_credential_; }
+
+  const autofill::PasswordForm& PendingPassword() const override;
+  void SetPendingPassword(autofill::PasswordForm pending_password);
+
+  void UpdateBubbleAndIconVisibility() override;
+
+  void UpdateAndroidAccountChooserInfoBarVisibility() override;
+
+  base::TimeDelta Elapsed() const override;
 
   // Sneaky setters for testing.
   void SetPasswordFormMap(const autofill::ConstPasswordFormMap& map) {
     password_form_map_ = map;
   }
-  void SetState(password_manager::ui::State state) { state_ = state; }
+  using ManagePasswordsUIController::SetState;
 
-  void SetTimer(base::ElapsedTimer* timer) { timer_.reset(timer); }
+  void SetElapsed(base::TimeDelta elapsed) { elapsed_ = elapsed; }
 
   // True if this controller is installed on |web_contents()|.
   bool IsInstalled() const;
@@ -60,8 +74,10 @@ class ManagePasswordsUIControllerMock
   bool navigated_to_settings_page_;
   bool saved_password_;
   bool never_saved_password_;
+  bool choose_credential_;
+  base::TimeDelta elapsed_;
 
-  autofill::PasswordForm pending_credentials_;
+  autofill::PasswordForm pending_password_;
 
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsUIControllerMock);
 };

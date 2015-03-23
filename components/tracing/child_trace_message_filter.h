@@ -21,12 +21,12 @@ class ChildTraceMessageFilter : public IPC::MessageFilter {
   explicit ChildTraceMessageFilter(base::MessageLoopProxy* ipc_message_loop);
 
   // IPC::MessageFilter implementation.
-  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE;
-  virtual void OnFilterRemoved() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterRemoved() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
  protected:
-  virtual ~ChildTraceMessageFilter();
+  ~ChildTraceMessageFilter() override;
 
  private:
   // Message handlers.
@@ -39,7 +39,7 @@ class ChildTraceMessageFilter : public IPC::MessageFilter {
                           const std::string& options);
   void OnDisableMonitoring();
   void OnCaptureMonitoringSnapshot();
-  void OnGetTraceBufferPercentFull();
+  void OnGetTraceLogStatus();
   void OnSetWatchEvent(const std::string& category_name,
                        const std::string& event_name);
   void OnCancelWatchEvent();

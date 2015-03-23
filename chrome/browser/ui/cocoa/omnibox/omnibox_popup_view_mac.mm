@@ -23,7 +23,7 @@
 #import "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/flipped_view.h"
 #include "ui/base/cocoa/window_size_constants.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/text_elider.h"
 
@@ -110,7 +110,7 @@ void OmniboxPopupViewMac::UpdatePopupAppearance() {
     const AutocompleteMatch& match = GetResult().match_at(ii + start_match);
     [cell setImage:ImageForMatch(match)];
     [cell setMatch:match];
-    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE) {
+    if (match.type == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
       max_match_contents_width = std::max(max_match_contents_width,
                                            [cell getMatchContentsWidth]);
       if (contents_offset < 0.0f) {

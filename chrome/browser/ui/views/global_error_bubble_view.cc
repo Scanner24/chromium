@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ui/views/global_error_bubble_view.h"
 
+#include <vector>
+
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/views/elevation_icon_setter.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/label_button.h"
@@ -97,6 +101,8 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
   accept_button->SetStyle(views::Button::STYLE_BUTTON);
   accept_button->SetIsDefault(true);
   accept_button->set_tag(TAG_ACCEPT_BUTTON);
+  if (error_->ShouldAddElevationIconToAcceptButton())
+    elevation_icon_setter_.reset(new ElevationIconSetter(accept_button.get()));
 
   base::string16 cancel_string(error_->GetBubbleViewCancelButtonLabel());
   scoped_ptr<views::LabelButton> cancel_button;
@@ -113,7 +119,7 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
 
   // Top row, icon and title.
   views::ColumnSet* cs = layout->AddColumnSet(0);
-  cs->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING,
+  cs->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
                 0, views::GridLayout::USE_PREF, 0, 0);
   cs->AddPaddingColumn(0, kTitleHorizontalPadding);
   cs->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL,
@@ -164,6 +170,9 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
 }
 
 GlobalErrorBubbleView::~GlobalErrorBubbleView() {
+  // |elevation_icon_setter_| references |accept_button_|, so make sure it is
+  // destroyed before |accept_button_|.
+  elevation_icon_setter_.reset();
 }
 
 void GlobalErrorBubbleView::ButtonPressed(views::Button* sender,
@@ -182,6 +191,10 @@ void GlobalErrorBubbleView::ButtonPressed(views::Button* sender,
 void GlobalErrorBubbleView::WindowClosing() {
   if (error_)
     error_->BubbleViewDidClose(browser_);
+}
+
+bool GlobalErrorBubbleView::ShouldShowCloseButton() const {
+  return error_ && error_->ShouldShowCloseButton();
 }
 
 void GlobalErrorBubbleView::CloseBubbleView() {

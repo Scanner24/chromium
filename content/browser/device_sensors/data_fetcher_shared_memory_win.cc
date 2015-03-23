@@ -30,15 +30,15 @@ class DataFetcherSharedMemory::SensorEventSink
   virtual ~SensorEventSink() {}
 
   // IUnknown interface
-  virtual ULONG STDMETHODCALLTYPE AddRef() OVERRIDE {
+  virtual ULONG STDMETHODCALLTYPE AddRef() override {
     return IUnknownImpl::AddRef();
   }
 
-  virtual ULONG STDMETHODCALLTYPE Release() OVERRIDE {
+  virtual ULONG STDMETHODCALLTYPE Release() override {
     return IUnknownImpl::Release();
   }
 
-  virtual STDMETHODIMP QueryInterface(REFIID riid, void** ppv) OVERRIDE {
+  virtual STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
     if (riid == __uuidof(ISensorEvents)) {
       *ppv = static_cast<ISensorEvents*>(this);
       AddRef();
@@ -50,26 +50,26 @@ class DataFetcherSharedMemory::SensorEventSink
   // ISensorEvents interface
   STDMETHODIMP OnEvent(ISensor* sensor,
                        REFGUID event_id,
-                       IPortableDeviceValues* event_data) OVERRIDE {
+                       IPortableDeviceValues* event_data) override {
     return S_OK;
   }
 
-  STDMETHODIMP OnLeave(REFSENSOR_ID sensor_id) OVERRIDE {
+  STDMETHODIMP OnLeave(REFSENSOR_ID sensor_id) override {
     return S_OK;
   }
 
-  STDMETHODIMP OnStateChanged(ISensor* sensor, SensorState state) OVERRIDE {
+  STDMETHODIMP OnStateChanged(ISensor* sensor, SensorState state) override {
     return S_OK;
   }
 
   STDMETHODIMP OnDataUpdated(ISensor* sensor,
-                             ISensorDataReport* new_data) OVERRIDE {
-    if (NULL == new_data || NULL == sensor)
+                             ISensorDataReport* new_data) override {
+    if (nullptr == new_data || nullptr == sensor)
       return E_INVALIDARG;
     return UpdateSharedMemoryBuffer(sensor, new_data) ? S_OK : E_FAIL;
   }
 
-protected:
+ protected:
   virtual bool UpdateSharedMemoryBuffer(
       ISensor* sensor, ISensorDataReport* new_data) = 0;
 
@@ -100,9 +100,9 @@ class DataFetcherSharedMemory::SensorEventSinkOrientation
       DeviceOrientationHardwareBuffer* const buffer) : buffer_(buffer) {}
   virtual ~SensorEventSinkOrientation() {}
 
-protected:
+ protected:
   virtual bool UpdateSharedMemoryBuffer(
-      ISensor* sensor, ISensorDataReport* new_data) OVERRIDE {
+      ISensor* sensor, ISensorDataReport* new_data) override {
     double alpha, beta, gamma;
     bool has_alpha, has_beta, has_gamma;
 
@@ -145,7 +145,7 @@ class DataFetcherSharedMemory::SensorEventSinkMotion
 
  protected:
   virtual bool UpdateSharedMemoryBuffer(
-      ISensor* sensor, ISensorDataReport* new_data) OVERRIDE {
+      ISensor* sensor, ISensorDataReport* new_data) override {
 
     SENSOR_TYPE_ID sensor_type = GUID_NULL;
     if (!SUCCEEDED(sensor->GetType(&sensor_type)))
@@ -216,16 +216,14 @@ class DataFetcherSharedMemory::SensorEventSinkMotion
     return true;
   }
 
-  private:
-   DeviceMotionHardwareBuffer* const buffer_;
+ private:
+  DeviceMotionHardwareBuffer* const buffer_;
 
-   DISALLOW_COPY_AND_ASSIGN(SensorEventSinkMotion);
- };
-
+  DISALLOW_COPY_AND_ASSIGN(SensorEventSinkMotion);
+};
 
 DataFetcherSharedMemory::DataFetcherSharedMemory()
-    : motion_buffer_(NULL),
-      orientation_buffer_(NULL) {
+    : motion_buffer_(nullptr), orientation_buffer_(nullptr) {
 }
 
 DataFetcherSharedMemory::~DataFetcherSharedMemory() {
@@ -290,10 +288,10 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
   SetBufferAvailableState(consumer_type, false);
   switch (consumer_type) {
     case CONSUMER_TYPE_ORIENTATION:
-      orientation_buffer_ = NULL;
+      orientation_buffer_ = nullptr;
       return true;
     case CONSUMER_TYPE_MOTION:
-      motion_buffer_ = NULL;
+      motion_buffer_ = nullptr;
       return true;
     default:
       NOTREACHED();
@@ -310,14 +308,14 @@ bool DataFetcherSharedMemory::RegisterForSensor(
 
   base::win::ScopedComPtr<ISensorManager> sensor_manager;
   HRESULT hr = sensor_manager.CreateInstance(CLSID_SensorManager);
-  if (FAILED(hr) || !sensor_manager)
+  if (FAILED(hr) || !sensor_manager.get())
     return false;
 
   base::win::ScopedComPtr<ISensorCollection> sensor_collection;
   hr = sensor_manager->GetSensorsByType(
       sensor_type, sensor_collection.Receive());
 
-  if (FAILED(hr) || !sensor_collection)
+  if (FAILED(hr) || !sensor_collection.get())
     return false;
 
   ULONG count = 0;
@@ -342,10 +340,10 @@ bool DataFetcherSharedMemory::RegisterForSensor(
   base::win::ScopedComPtr<ISensorEvents> sensor_events;
   hr = event_sink->QueryInterface(
       __uuidof(ISensorEvents), sensor_events.ReceiveVoid());
-  if (FAILED(hr) || !sensor_events)
+  if (FAILED(hr) || !sensor_events.get())
     return false;
 
-  hr = (*sensor)->SetEventSink(sensor_events);
+  hr = (*sensor)->SetEventSink(sensor_events.get());
   if (FAILED(hr))
     return false;
 
@@ -355,18 +353,18 @@ bool DataFetcherSharedMemory::RegisterForSensor(
 void DataFetcherSharedMemory::DisableSensors(ConsumerType consumer_type) {
   switch(consumer_type) {
     case CONSUMER_TYPE_ORIENTATION:
-      if (sensor_inclinometer_) {
-        sensor_inclinometer_->SetEventSink(NULL);
+      if (sensor_inclinometer_.get()) {
+        sensor_inclinometer_->SetEventSink(nullptr);
         sensor_inclinometer_.Release();
       }
       break;
     case CONSUMER_TYPE_MOTION:
-      if (sensor_accelerometer_) {
-        sensor_accelerometer_->SetEventSink(NULL);
+      if (sensor_accelerometer_.get()) {
+        sensor_accelerometer_->SetEventSink(nullptr);
         sensor_accelerometer_.Release();
       }
-      if (sensor_gyrometer_) {
-        sensor_gyrometer_->SetEventSink(NULL);
+      if (sensor_gyrometer_.get()) {
+        sensor_gyrometer_->SetEventSink(nullptr);
         sensor_gyrometer_.Release();
       }
       break;

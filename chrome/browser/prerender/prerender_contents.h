@@ -21,7 +21,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/referrer.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 class Profile;
 
@@ -122,7 +122,7 @@ class PrerenderContents : public content::NotificationObserver,
     MATCH_COMPLETE_REPLACEMENT_PENDING,
   };
 
-  virtual ~PrerenderContents();
+  ~PrerenderContents() override;
 
   // All observers of a PrerenderContents are removed after the OnPrerenderStop
   // event is sent, so there is no need to call RemoveObserver() in the normal
@@ -146,15 +146,11 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Start rendering the contents in the prerendered state. If
   // |is_control_group| is true, this will go through some of the mechanics of
-  // starting a prerender, without actually creating the RenderView.
-  // |creator_child_id| is the id of the child process that caused the prerender
-  // to be created, and is needed so that the prerendered URLs can be sent to it
-  // so render-initiated navigations will swap in the prerendered page. |size|
+  // starting a prerender, without actually creating the RenderView. |size|
   // indicates the rectangular dimensions that the prerendered page should be.
   // |session_storage_namespace| indicates the namespace that the prerendered
   // page should be part of.
   virtual void StartPrerendering(
-      int creator_child_id,
       const gfx::Size& size,
       content::SessionStorageNamespace* session_storage_namespace,
       net::URLRequestContextGetter* request_context);
@@ -194,7 +190,6 @@ class PrerenderContents : public content::NotificationObserver,
 
   Origin origin() const { return origin_; }
   uint8 experiment_id() const { return experiment_id_; }
-  int child_id() const { return child_id_; }
 
   base::TimeTicks load_start_time() const { return load_start_time_; }
 
@@ -205,33 +200,31 @@ class PrerenderContents : public content::NotificationObserver,
       const content::SessionStorageNamespace* session_storage_namespace) const;
 
   // content::WebContentsObserver implementation.
-  virtual void RenderFrameCreated(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void DidStopLoading(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
+  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
+  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DocumentLoadedInFrame(
+      content::RenderFrameHost* render_frame_host) override;
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void DidFinishLoad(content::RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE;
-  virtual void DidNavigateMainFrame(
+      bool is_iframe_srcdoc) override;
+  void DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override;
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void DidGetRedirectForResourceRequest(
-      content::RenderViewHost* render_view_host,
-      const content::ResourceRedirectDetails& details) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
+  void DidGetRedirectForResourceRequest(
+      content::RenderFrameHost* render_frame_host,
+      const content::ResourceRedirectDetails& details) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+  void RenderProcessGone(base::TerminationStatus status) override;
 
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Checks that a URL may be prerendered, for one of the many redirections. If
   // the URL can not be prerendered - for example, it's an ftp URL - |this| will
@@ -271,8 +264,6 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Marks prerender as used and releases any throttled resource requests.
   void PrepareForUse();
-
-  content::SessionStorageNamespace* GetSessionStorageNamespace() const;
 
   // Cookie events
   enum CookieEvent {
@@ -434,9 +425,6 @@ class PrerenderContents : public content::NotificationObserver,
   // Experiment during which this prerender is performed.
   uint8 experiment_id_;
 
-  // The process that created the child id.
-  int creator_child_id_;
-
   // The size of the WebView from the launching page.
   gfx::Size size_;
 
@@ -444,10 +432,6 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Caches pages to be added to the history.
   AddPageVector add_page_vector_;
-
-  // The alias session storage namespace for this prerender.
-  scoped_refptr<content::SessionStorageNamespace>
-      alias_session_storage_namespace;
 
   // Indicates what internal cookie events (see prerender_contents.cc) have
   // occurred, using 1 bit for each possible InternalCookieEvent.

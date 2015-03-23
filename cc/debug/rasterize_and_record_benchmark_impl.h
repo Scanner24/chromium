@@ -24,11 +24,11 @@ class RasterizeAndRecordBenchmarkImpl : public MicroBenchmarkImpl {
       scoped_refptr<base::MessageLoopProxy> origin_loop,
       base::Value* value,
       const MicroBenchmarkImpl::DoneCallback& callback);
-  virtual ~RasterizeAndRecordBenchmarkImpl();
+  ~RasterizeAndRecordBenchmarkImpl() override;
 
   // Implements MicroBenchmark interface.
-  virtual void DidCompleteCommit(LayerTreeHostImpl* host) OVERRIDE;
-  virtual void RunOnLayer(PictureLayerImpl* layer) OVERRIDE;
+  void DidCompleteCommit(LayerTreeHostImpl* host) override;
+  void RunOnLayer(PictureLayerImpl* layer) override;
 
  private:
   void Run(LayerImpl* layer);
@@ -41,6 +41,7 @@ class RasterizeAndRecordBenchmarkImpl : public MicroBenchmarkImpl {
     int pixels_rasterized_with_non_solid_color;
     int pixels_rasterized_as_opaque;
     base::TimeDelta total_best_time;
+    int total_memory_usage;
     int total_layers;
     int total_picture_layers;
     int total_picture_layers_with_no_content;
@@ -49,7 +50,6 @@ class RasterizeAndRecordBenchmarkImpl : public MicroBenchmarkImpl {
 
   RasterizeResults rasterize_results_;
   int rasterize_repeat_count_;
-  NamespaceToken task_namespace_;
 };
 
 }  // namespace cc

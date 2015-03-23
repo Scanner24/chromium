@@ -13,8 +13,8 @@
 #include "remoting/host/host_config.h"
 #include "remoting/signaling/iq_sender.h"
 #include "remoting/signaling/signal_strategy.h"
-#include "third_party/libjingle/source/talk/xmpp/constants.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmpp/constants.h"
 
 using buzz::QName;
 using buzz::XmlElement;
@@ -176,7 +176,7 @@ void RegisterSupportHostRequest::CallCallback(
   request_.reset();
   iq_sender_.reset();
   signal_strategy_->RemoveListener(this);
-  signal_strategy_ = NULL;
+  signal_strategy_ = nullptr;
 
   RegisterCallback callback = callback_;
   callback_.Reset();

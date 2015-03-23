@@ -20,6 +20,7 @@
 #include "net/base/upload_progress.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/url_request/redirect_info.h"
+#include "net/url_request/url_request.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -36,7 +37,6 @@ struct LoadTimingInfo;
 class NetworkDelegate;
 class SSLCertRequestInfo;
 class SSLInfo;
-class URLRequest;
 class UploadDataStream;
 class URLRequestStatus;
 class X509Certificate;
@@ -219,7 +219,7 @@ class NET_EXPORT URLRequestJob
 
   // base::PowerObserver methods:
   // We invoke URLRequestJob::Kill on suspend (crbug.com/4606).
-  virtual void OnSuspend() OVERRIDE;
+  void OnSuspend() override;
 
   // Called after a NetworkDelegate has been informed that the URLRequest
   // will be destroyed. This is used to track that no pending callbacks
@@ -227,9 +227,15 @@ class NET_EXPORT URLRequestJob
   // canceled by an explicit NetworkDelegate::NotifyURLRequestDestroyed() call.
   virtual void NotifyURLRequestDestroyed();
 
+  // Given |policy|, |referrer|, and |redirect_destination|, returns the
+  // referrer URL mandated by |request|'s referrer policy.
+  static GURL ComputeReferrerForRedirect(URLRequest::ReferrerPolicy policy,
+                                         const std::string& referrer,
+                                         const GURL& redirect_destination);
+
  protected:
   friend class base::RefCounted<URLRequestJob>;
-  virtual ~URLRequestJob();
+  ~URLRequestJob() override;
 
   // Notifies the job that a certificate is requested.
   void NotifyCertificateRequested(SSLCertRequestInfo* cert_request_info);

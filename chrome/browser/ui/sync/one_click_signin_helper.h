@@ -102,7 +102,7 @@ class OneClickSigninHelper
                   const std::string& refresh_token,
                   content::WebContents* web_contents,
                   bool untrusted_confirmation_required,
-                  signin::Source source,
+                  signin_metrics::Source source,
                   OneClickSigninSyncStarter::Callback callback);
     ~StartSyncArgs();
 
@@ -119,7 +119,7 @@ class OneClickSigninHelper
     content::WebContents* web_contents;
 
     OneClickSigninSyncStarter::ConfirmationRequired confirmation_required;
-    signin::Source source;
+    signin_metrics::Source source;
     OneClickSigninSyncStarter::Callback callback;
   };
 
@@ -133,7 +133,7 @@ class OneClickSigninHelper
     SyncStarterWrapper(
         const OneClickSigninHelper::StartSyncArgs& args,
         OneClickSigninSyncStarter::StartSyncMode start_mode);
-    virtual ~SyncStarterWrapper();
+    ~SyncStarterWrapper() override;
 
     void Start();
 
@@ -150,15 +150,15 @@ class OneClickSigninHelper
         const std::string& refresh_token);
 
     // Overriden from SigninOAuthHelper::Consumer.
-    virtual void OnSigninOAuthInformationAvailable(
+    void OnSigninOAuthInformationAvailable(
         const std::string& email,
         const std::string& display_email,
-        const std::string& refresh_token) OVERRIDE;
-    virtual void OnSigninOAuthInformationFailure(
-        const GoogleServiceAuthError& error) OVERRIDE;
+        const std::string& refresh_token) override;
+    void OnSigninOAuthInformationFailure(
+        const GoogleServiceAuthError& error) override;
 
     // Overriden from chrome::BrowserListObserver.
-    virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
+    void OnBrowserRemoved(Browser* browser) override;
 
     OneClickSigninHelper::StartSyncArgs args_;
     chrome::HostDesktopType desktop_type_;
@@ -169,11 +169,7 @@ class OneClickSigninHelper
     DISALLOW_COPY_AND_ASSIGN(SyncStarterWrapper);
   };
 
-  static void LogHistogramValue(signin::Source source, int action);
-
-  static void CreateForWebContentsWithPasswordManager(
-      content::WebContents* contents,
-      password_manager::PasswordManager* password_manager);
+  static void LogHistogramValue(int action);
 
   // Returns true if the one-click signin feature can be offered at this time.
   // If |email| is not empty, then the profile is checked to see if it's
@@ -220,17 +216,17 @@ class OneClickSigninHelper
       const std::string& password,
       const std::string& refresh_token,
       OneClickSigninHelper::AutoAccept auto_accept,
-      signin::Source source,
+      signin_metrics::Source source,
       OneClickSigninSyncStarter::StartSyncMode start_mode,
       OneClickSigninSyncStarter::Callback sync_callback);
 
   static void RedirectToNtpOrAppsPage(
-      content::WebContents* contents, signin::Source source);
+      content::WebContents* contents, signin_metrics::Source source);
 
   // If the |source| is not settings page/webstore, redirects to
   // the NTP/Apps page.
   static void RedirectToNtpOrAppsPageIfNecessary(
-      content::WebContents* contents, signin::Source source);
+      content::WebContents* contents, signin_metrics::Source source);
 
   // Remove the item currently at the top of the history list if it's
   // the Gaia redirect URL. Due to limitations of the NavigationController
@@ -282,10 +278,9 @@ class OneClickSigninHelper
   // SAML-based accounts, but causes bug crbug.com/181163.
   static const int kMaxNavigationsSince;
 
-  OneClickSigninHelper(content::WebContents* web_contents,
-                       password_manager::PasswordManager* password_manager);
+  explicit OneClickSigninHelper(content::WebContents* web_contents);
 
-  virtual ~OneClickSigninHelper();
+  ~OneClickSigninHelper() override;
 
   // Returns true if the one-click signin feature can be offered at this time.
   // It can be offered if the io_data is not in an incognito window and if the
@@ -309,7 +304,7 @@ class OneClickSigninHelper
   static void ShowInfoBarUIThread(const std::string& session_index,
                                   const std::string& email,
                                   AutoAccept auto_accept,
-                                  signin::Source source,
+                                  signin_metrics::Source source,
                                   const GURL& continue_url,
                                   int child_id,
                                   int route_id);
@@ -332,14 +327,13 @@ class OneClickSigninHelper
   void PasswordSubmitted(const autofill::PasswordForm& form);
 
   // content::WebContentsObserver overrides.
-  virtual void DidStartNavigationToPendingEntry(
+  void DidStartNavigationToPendingEntry(
       const GURL& url,
-      content::NavigationController::ReloadType reload_type) OVERRIDE;
-  virtual void DidNavigateMainFrame(
+      content::NavigationController::ReloadType reload_type) override;
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void DidStopLoading(
-      content::RenderViewHost* render_view_host) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
+  void DidStopLoading(content::RenderViewHost* render_view_host) override;
 
   OneClickSigninSyncStarter::Callback CreateSyncStarterCallback();
 
@@ -358,7 +352,7 @@ class OneClickSigninHelper
   std::string email_;
   std::string password_;
   AutoAccept auto_accept_;
-  signin::Source source_;
+  signin_metrics::Source source_;
   bool switched_to_advanced_;
   GURL continue_url_;
   // The orignal continue URL after sync setup is complete.

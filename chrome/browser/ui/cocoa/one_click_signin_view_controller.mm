@@ -9,10 +9,10 @@
 #include "base/mac/bundle_locations.h"
 #import "chrome/browser/ui/chrome_style.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
-#include "chrome/browser/ui/sync/one_click_signin_histogram.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/signin/core/browser/signin_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/components_strings.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -80,8 +80,8 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   if (isSyncDialog_) {
     OneClickSigninHelper::LogConfirmHistogramValue(
         clickedLearnMore_ ?
-            one_click_signin::HISTOGRAM_CONFIRM_LEARN_MORE_OK :
-            one_click_signin::HISTOGRAM_CONFIRM_OK);
+            signin_metrics::HISTOGRAM_CONFIRM_LEARN_MORE_OK :
+            signin_metrics::HISTOGRAM_CONFIRM_OK);
 
     base::ResetAndReturn(&startSyncCallback_).Run(
       OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS);
@@ -93,8 +93,8 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   if (isSyncDialog_) {
     OneClickSigninHelper::LogConfirmHistogramValue(
         clickedLearnMore_ ?
-            one_click_signin::HISTOGRAM_CONFIRM_LEARN_MORE_UNDO :
-            one_click_signin::HISTOGRAM_CONFIRM_UNDO);
+            signin_metrics::HISTOGRAM_CONFIRM_LEARN_MORE_UNDO :
+            signin_metrics::HISTOGRAM_CONFIRM_UNDO);
 
     base::ResetAndReturn(&startSyncCallback_).Run(
       OneClickSigninSyncStarter::UNDO_SYNC);
@@ -106,8 +106,8 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   if (isSyncDialog_) {
     OneClickSigninHelper::LogConfirmHistogramValue(
         clickedLearnMore_ ?
-            one_click_signin::HISTOGRAM_CONFIRM_LEARN_MORE_ADVANCED :
-            one_click_signin::HISTOGRAM_CONFIRM_ADVANCED);
+            signin_metrics::HISTOGRAM_CONFIRM_LEARN_MORE_ADVANCED :
+            signin_metrics::HISTOGRAM_CONFIRM_ADVANCED);
 
     base::ResetAndReturn(&startSyncCallback_).Run(
         OneClickSigninSyncStarter::CONFIGURE_SYNC_FIRST);
@@ -125,8 +125,8 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   if (isSyncDialog_) {
     OneClickSigninHelper::LogConfirmHistogramValue(
         clickedLearnMore_ ?
-            one_click_signin::HISTOGRAM_CONFIRM_LEARN_MORE_CLOSE :
-            one_click_signin::HISTOGRAM_CONFIRM_CLOSE);
+            signin_metrics::HISTOGRAM_CONFIRM_LEARN_MORE_CLOSE :
+            signin_metrics::HISTOGRAM_CONFIRM_CLOSE);
 
     base::ResetAndReturn(&startSyncCallback_).Run(
         OneClickSigninSyncStarter::UNDO_SYNC);
@@ -212,7 +212,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
 
   if (isSyncDialog_) {
     OneClickSigninHelper::LogConfirmHistogramValue(
-        one_click_signin::HISTOGRAM_CONFIRM_SHOWN);
+        signin_metrics::HISTOGRAM_CONFIRM_SHOWN);
   }
 }
 
@@ -232,6 +232,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   // Set the text.
   NSString* learnMoreText = l10n_util::GetNSStringWithFixup(IDS_LEARN_MORE);
   NSString* messageText;
+  NSUInteger learnMoreOffset = 0;
 
   ui::ResourceBundle::FontStyle fontStyle = isSyncDialog_ ?
       chrome_style::kTextFontStyle : ui::ResourceBundle::SmallFont;
@@ -243,20 +244,21 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   if (isSyncDialog_) {
     messageText = l10n_util::GetNSStringFWithFixup(
         IDS_ONE_CLICK_SIGNIN_DIALOG_MESSAGE_NEW, email_);
-    messageText = [messageText stringByAppendingString:@" "];
+    learnMoreOffset = [messageText length];
+    messageText = [messageText stringByAppendingFormat:@" %@", learnMoreText];
   } else {
-    messageText = @"";
+    messageText = learnMoreText;
   }
 
   NSColor* linkColor =
       gfx::SkColorToCalibratedNSColor(chrome_style::GetLinkColor());
-  [informativeTextView_ setMessageAndLink:messageText
-                                 withLink:learnMoreText
-                                 atOffset:[messageText length]
-                                     font:font
-                             messageColor:[NSColor blackColor]
-                                linkColor:linkColor];
-
+  [informativeTextView_ setMessage:messageText
+                          withFont:font
+                      messageColor:[NSColor blackColor]];
+  [informativeTextView_ addLinkRange:NSMakeRange(learnMoreOffset,
+                                                 [learnMoreText length])
+                            withName:@""
+                           linkColor:linkColor];
 
   // Make the "Advanced" link font as large as the "Learn More" link.
   [[advancedLink_ cell] setFont:font];
@@ -286,7 +288,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
     clickedLearnMore_ = YES;
 
     OneClickSigninHelper::LogConfirmHistogramValue(
-        one_click_signin::HISTOGRAM_CONFIRM_LEARN_MORE);
+        signin_metrics::HISTOGRAM_CONFIRM_LEARN_MORE);
   }
   WindowOpenDisposition location = isSyncDialog_ ?
                                    NEW_WINDOW : NEW_FOREGROUND_TAB;

@@ -16,7 +16,7 @@
 #include "third_party/WebKit/public/platform/WebMessagePortChannel.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }
 
 namespace content {
@@ -29,14 +29,17 @@ class WebMessagePortChannelImpl
       public base::RefCountedThreadSafe<WebMessagePortChannelImpl> {
  public:
   explicit WebMessagePortChannelImpl(
-      const scoped_refptr<base::MessageLoopProxy>& child_thread_loop);
+      const scoped_refptr<base::SingleThreadTaskRunner>&
+          main_thread_task_runner);
   WebMessagePortChannelImpl(
       int route_id,
       int message_port_id,
-      const scoped_refptr<base::MessageLoopProxy>& child_thread_loop);
+      const scoped_refptr<base::SingleThreadTaskRunner>&
+          main_thread_task_runner);
 
   static void CreatePair(
-      const scoped_refptr<base::MessageLoopProxy>& child_thread_loop,
+      const scoped_refptr<base::SingleThreadTaskRunner>&
+          main_thread_task_runner,
       blink::WebMessagePortChannel** channel1,
       blink::WebMessagePortChannel** channel2);
 
@@ -52,7 +55,7 @@ class WebMessagePortChannelImpl
 
  private:
   friend class base::RefCountedThreadSafe<WebMessagePortChannelImpl>;
-  virtual ~WebMessagePortChannelImpl();
+  ~WebMessagePortChannelImpl() override;
 
   // WebMessagePortChannel implementation.
   virtual void setClient(blink::WebMessagePortChannelClient* client);
@@ -69,7 +72,7 @@ class WebMessagePortChannelImpl
                    blink::WebMessagePortChannelArray* channels);
 
   // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   void OnMessage(const base::string16& message,
                  const std::vector<int>& sent_message_port_ids,
@@ -92,7 +95,7 @@ class WebMessagePortChannelImpl
 
   int route_id_;  // The routing id for this object.
   int message_port_id_;  // A globally unique identifier for this message port.
-  scoped_refptr<base::MessageLoopProxy> child_thread_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMessagePortChannelImpl);
 };

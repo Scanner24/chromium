@@ -7,6 +7,7 @@
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
+#include "content/common/frame_messages.h"
 #include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_details.h"
@@ -19,6 +20,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "net/dns/mock_host_resolver.h"
@@ -63,9 +65,9 @@ class LoadStopNotificationObserver : public WindowedNotificationObserver {
         session_index_(-1),
         controller_(NULL) {
   }
-  virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const NotificationSource& source,
+               const NotificationDetails& details) override {
     if (type == NOTIFICATION_LOAD_STOP) {
       const Details<LoadNotificationDetails> load_details(details);
       url_ = load_details->url;
@@ -93,8 +95,8 @@ class NavigateOnCommitObserver : public WebContentsObserver {
   }
 
   // WebContentsObserver:
-  virtual void NavigationEntryCommitted(
-      const LoadCommittedDetails& load_details) OVERRIDE {
+  void NavigationEntryCommitted(
+      const LoadCommittedDetails& load_details) override {
     if (!done_) {
       done_ = true;
       shell_->Stop();
@@ -114,8 +116,7 @@ class RenderViewSizeDelegate : public WebContentsDelegate {
   }
 
   // WebContentsDelegate:
-  virtual gfx::Size GetSizeForNewRenderView(
-      WebContents* web_contents) const OVERRIDE {
+  gfx::Size GetSizeForNewRenderView(WebContents* web_contents) const override {
     gfx::Size size(web_contents->GetContainerBounds().size());
     size.Enlarge(size_insets_.width(), size_insets_.height());
     return size;
@@ -134,13 +135,13 @@ class RenderViewSizeObserver : public WebContentsObserver {
   }
 
   // WebContentsObserver:
-  virtual void RenderViewCreated(RenderViewHost* rvh) OVERRIDE {
+  void RenderViewCreated(RenderViewHost* rvh) override {
     rwhv_create_size_ = rvh->GetView()->GetViewBounds().size();
   }
 
-  virtual void DidStartNavigationToPendingEntry(
+  void DidStartNavigationToPendingEntry(
       const GURL& url,
-      NavigationController::ReloadType reload_type) OVERRIDE {
+      NavigationController::ReloadType reload_type) override {
     ResizeWebContentsView(shell_, wcv_new_size_, false);
   }
 
@@ -160,8 +161,8 @@ class LoadingStateChangedDelegate : public WebContentsDelegate {
   }
 
   // WebContentsDelegate:
-  virtual void LoadingStateChanged(WebContents* contents,
-                                   bool to_different_document) OVERRIDE {
+  void LoadingStateChanged(WebContents* contents,
+                           bool to_different_document) override {
       loadingStateChangedCount_++;
       if (to_different_document)
         loadingStateToDifferentDocumentCount_++;
@@ -363,6 +364,19 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLSubframe) {
                 controller->GetPendingEntry())->frame_tree_node_id());
 }
 
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       AppendingFrameInWebUIDoesNotCrash) {
+  const GURL kWebUIUrl("chrome://tracing");
+  const char kJSCodeForAppendingFrame[] =
+      "document.body.appendChild(document.createElement('iframe'));";
+
+  NavigateToURL(shell(), kWebUIUrl);
+
+  bool js_executed = content::ExecuteScript(shell()->web_contents(),
+                                            kJSCodeForAppendingFrame);
+  EXPECT_TRUE(js_executed);
+}
+
 // Observer class to track the creation of RenderFrameHost objects. It is used
 // in subsequent tests.
 class RenderFrameCreatedObserver : public WebContentsObserver {
@@ -372,7 +386,7 @@ class RenderFrameCreatedObserver : public WebContentsObserver {
         last_rfh_(NULL) {
   }
 
-  virtual void RenderFrameCreated(RenderFrameHost* render_frame_host) OVERRIDE {
+  void RenderFrameCreated(RenderFrameHost* render_frame_host) override {
     last_rfh_ = render_frame_host;
   }
 
@@ -388,7 +402,7 @@ class RenderFrameCreatedObserver : public WebContentsObserver {
 // to the WebContentObservers. See http://crbug.com/347339.
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
                        RenderFrameCreatedCorrectProcessForObservers) {
-  std::string foo_com("foo.com");
+  static const char kFooCom[] = "foo.com";
   GURL::Replacements replace_host;
   net::HostPortPair foo_host_port;
   GURL cross_site_url;
@@ -399,12 +413,12 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   ASSERT_TRUE(test_server()->Start());
 
   foo_host_port = test_server()->host_port_pair();
-  foo_host_port.set_host(foo_com);
+  foo_host_port.set_host(kFooCom);
 
   GURL initial_url(test_server()->GetURL("/title1.html"));
 
   cross_site_url = test_server()->GetURL("/title2.html");
-  replace_host.SetHostStr(foo_com);
+  replace_host.SetHostStr(kFooCom);
   cross_site_url = cross_site_url.ReplaceComponents(replace_host);
 
   // Navigate to the initial URL and capture the RenderFrameHost for later
@@ -476,22 +490,21 @@ struct LoadProgressDelegateAndObserver : public WebContentsDelegate,
   }
 
   // WebContentsDelegate:
-  virtual void LoadProgressChanged(WebContents* source,
-                                   double progress) OVERRIDE {
+  void LoadProgressChanged(WebContents* source, double progress) override {
     EXPECT_TRUE(did_start_loading);
     EXPECT_FALSE(did_stop_loading);
     progresses.push_back(progress);
   }
 
   // WebContentsObserver:
-  virtual void DidStartLoading(RenderViewHost* render_view_host) OVERRIDE {
+  void DidStartLoading(RenderViewHost* render_view_host) override {
     EXPECT_FALSE(did_start_loading);
     EXPECT_EQ(0U, progresses.size());
     EXPECT_FALSE(did_stop_loading);
     did_start_loading = true;
   }
 
-  virtual void DidStopLoading(RenderViewHost* render_view_host) OVERRIDE {
+  void DidStopLoading(RenderViewHost* render_view_host) override {
     EXPECT_TRUE(did_start_loading);
     EXPECT_GE(progresses.size(), 1U);
     EXPECT_FALSE(did_stop_loading);
@@ -525,12 +538,74 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, LoadProgress) {
   EXPECT_EQ(1.0, *progresses.rbegin());
 }
 
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, LoadProgressWithFrames) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  scoped_ptr<LoadProgressDelegateAndObserver> delegate(
+      new LoadProgressDelegateAndObserver(shell()));
+
+  NavigateToURL(shell(),
+                embedded_test_server()->GetURL("/frame_tree/top.html"));
+
+  const std::vector<double>& progresses = delegate->progresses;
+  // All updates should be in order ...
+  if (std::adjacent_find(progresses.begin(),
+                         progresses.end(),
+                         std::greater<double>()) != progresses.end()) {
+    ADD_FAILURE() << "Progress values should be in order: "
+                  << ::testing::PrintToString(progresses);
+  }
+
+  // ... and the last one should be 1.0, meaning complete.
+  ASSERT_GE(progresses.size(), 1U)
+      << "There should be at least one progress update";
+  EXPECT_EQ(1.0, *progresses.rbegin());
+}
+
+// Ensure that a new navigation that interrupts a pending one will still fire
+// a DidStopLoading.  See http://crbug.com/429399.
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       LoadProgressAfterInterruptedNav) {
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+
+  // Start at a real page.
+  NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html"));
+
+  // Simulate a navigation that has not completed.
+  scoped_ptr<LoadProgressDelegateAndObserver> delegate(
+      new LoadProgressDelegateAndObserver(shell()));
+  RenderFrameHost* main_frame = shell()->web_contents()->GetMainFrame();
+  FrameHostMsg_DidStartLoading start_msg(main_frame->GetRoutingID(), true);
+  static_cast<WebContentsImpl*>(shell()->web_contents())->OnMessageReceived(
+      main_frame, start_msg);
+  EXPECT_TRUE(delegate->did_start_loading);
+  EXPECT_FALSE(delegate->did_stop_loading);
+
+  // Also simulate a DidChangeLoadProgress, but not a DidStopLoading.
+  FrameHostMsg_DidChangeLoadProgress progress_msg(main_frame->GetRoutingID(),
+                                                  1.0);
+  static_cast<WebContentsImpl*>(shell()->web_contents())->OnMessageReceived(
+      main_frame, progress_msg);
+  EXPECT_TRUE(delegate->did_start_loading);
+  EXPECT_FALSE(delegate->did_stop_loading);
+
+  // Now interrupt with a new cross-process navigation.
+  TestNavigationObserver tab_observer(shell()->web_contents(), 1);
+  GURL url(embedded_test_server()->GetURL("foo.com", "/title2.html"));
+  shell()->LoadURL(url);
+  tab_observer.Wait();
+  EXPECT_EQ(url, shell()->web_contents()->GetLastCommittedURL());
+
+  // We should have gotten to DidStopLoading.
+  EXPECT_TRUE(delegate->did_stop_loading);
+}
+
 struct FirstVisuallyNonEmptyPaintObserver : public WebContentsObserver {
   FirstVisuallyNonEmptyPaintObserver(Shell* shell)
       : WebContentsObserver(shell->web_contents()),
         did_fist_visually_non_empty_paint_(false) {}
 
-  virtual void DidFirstVisuallyNonEmptyPaint() OVERRIDE {
+  void DidFirstVisuallyNonEmptyPaint() override {
     did_fist_visually_non_empty_paint_ = true;
     on_did_first_visually_non_empty_paint_.Run();
   }

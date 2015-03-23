@@ -15,7 +15,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_platform_file.h"
-#include "native_client/src/public/nacl_file_info.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
@@ -121,7 +120,7 @@ void NaClHostMessageFilter::OnLaunchNaCl(
   // If we're running llc or ld for the PNaCl translator, we don't need to look
   // up permissions, and we don't have the right browser state to look up some
   // of the whitelisting parameters anyway.
-  if (!launch_params.uses_irt) {
+  if (launch_params.process_type == kPNaClTranslatorProcessType) {
     uint32 perms = launch_params.permission_bits & ppapi::PERMISSION_DEV;
     LaunchNaClContinuation(
         launch_params,
@@ -183,12 +182,9 @@ void NaClHostMessageFilter::LaunchNaClContinuation(
       permissions,
       launch_params.render_view_id,
       launch_params.permission_bits,
-      launch_params.uses_irt,
       launch_params.uses_nonsfi_mode,
-      launch_params.enable_dyncode_syscalls,
-      launch_params.enable_exception_handling,
-      launch_params.enable_crash_throttling,
       off_the_record_,
+      launch_params.process_type,
       profile_directory_);
   GURL manifest_url(launch_params.manifest_url);
   base::FilePath manifest_path;
@@ -287,10 +283,15 @@ void NaClHostMessageFilter::OnMissingArchError(int render_view_id) {
       ShowMissingArchInfobar(render_process_id_, render_view_id);
 }
 
-void NaClHostMessageFilter::OnOpenNaClExecutable(int render_view_id,
-                                                 const GURL& file_url,
-                                                 IPC::Message* reply_msg) {
-  nacl_file_host::OpenNaClExecutable(this, render_view_id, file_url,
+void NaClHostMessageFilter::OnOpenNaClExecutable(
+    int render_view_id,
+    const GURL& file_url,
+    bool enable_validation_caching,
+    IPC::Message* reply_msg) {
+  nacl_file_host::OpenNaClExecutable(this,
+                                     render_view_id,
+                                     file_url,
+                                     enable_validation_caching,
                                      reply_msg);
 }
 

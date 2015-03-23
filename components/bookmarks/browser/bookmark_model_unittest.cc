@@ -12,7 +12,6 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
-#include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -144,89 +143,85 @@ class BookmarkModelTest : public testing::Test,
     ClearCounts();
   }
 
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE {
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override {
     // We never load from the db, so that this should never get invoked.
     NOTREACHED();
   }
 
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index) OVERRIDE {
+  void BookmarkNodeMoved(BookmarkModel* model,
+                         const BookmarkNode* old_parent,
+                         int old_index,
+                         const BookmarkNode* new_parent,
+                         int new_index) override {
     ++moved_count_;
     observer_details_.Set(old_parent, new_parent, old_index, new_index);
   }
 
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE {
+  void BookmarkNodeAdded(BookmarkModel* model,
+                         const BookmarkNode* parent,
+                         int index) override {
     ++added_count_;
     observer_details_.Set(parent, NULL, index, -1);
   }
 
-  virtual void OnWillRemoveBookmarks(BookmarkModel* model,
-                                     const BookmarkNode* parent,
-                                     int old_index,
-                                     const BookmarkNode* node) OVERRIDE {
+  void OnWillRemoveBookmarks(BookmarkModel* model,
+                             const BookmarkNode* parent,
+                             int old_index,
+                             const BookmarkNode* node) override {
     ++before_remove_count_;
   }
 
-  virtual void BookmarkNodeRemoved(
-      BookmarkModel* model,
-      const BookmarkNode* parent,
-      int old_index,
-      const BookmarkNode* node,
-      const std::set<GURL>& removed_urls) OVERRIDE {
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override {
     ++removed_count_;
     observer_details_.Set(parent, NULL, old_index, -1);
   }
 
-  virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   const BookmarkNode* node) OVERRIDE {
+  void BookmarkNodeChanged(BookmarkModel* model,
+                           const BookmarkNode* node) override {
     ++changed_count_;
     observer_details_.Set(node, NULL, -1, -1);
   }
 
-  virtual void OnWillChangeBookmarkNode(BookmarkModel* model,
-                                        const BookmarkNode* node) OVERRIDE {
+  void OnWillChangeBookmarkNode(BookmarkModel* model,
+                                const BookmarkNode* node) override {
     ++before_change_count_;
   }
 
-  virtual void BookmarkNodeChildrenReordered(
-      BookmarkModel* model,
-      const BookmarkNode* node) OVERRIDE {
+  void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                     const BookmarkNode* node) override {
     ++reordered_count_;
   }
 
-  virtual void OnWillReorderBookmarkNode(BookmarkModel* model,
-                                         const BookmarkNode* node) OVERRIDE {
+  void OnWillReorderBookmarkNode(BookmarkModel* model,
+                                 const BookmarkNode* node) override {
     ++before_reorder_count_;
   }
 
-  virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
-                                          const BookmarkNode* node) OVERRIDE {
+  void BookmarkNodeFaviconChanged(BookmarkModel* model,
+                                  const BookmarkNode* node) override {
     // We never attempt to load favicons, so that this method never
     // gets invoked.
   }
 
-  virtual void ExtensiveBookmarkChangesBeginning(
-      BookmarkModel* model) OVERRIDE {
+  void ExtensiveBookmarkChangesBeginning(BookmarkModel* model) override {
     ++extensive_changes_beginning_count_;
   }
 
-  virtual void ExtensiveBookmarkChangesEnded(BookmarkModel* model) OVERRIDE {
+  void ExtensiveBookmarkChangesEnded(BookmarkModel* model) override {
     ++extensive_changes_ended_count_;
   }
 
-  virtual void BookmarkAllUserNodesRemoved(
+  void BookmarkAllUserNodesRemoved(
       BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE {
+      const std::set<GURL>& removed_urls) override {
     ++all_bookmarks_removed_;
   }
 
-  virtual void OnWillRemoveAllUserBookmarks(BookmarkModel* model) OVERRIDE {
+  void OnWillRemoveAllUserBookmarks(BookmarkModel* model) override {
     ++before_remove_all_count_;
   }
 
@@ -247,30 +242,30 @@ class BookmarkModelTest : public testing::Test,
                            int before_change_count,
                            int before_reorder_count,
                            int before_remove_all_count) {
-    EXPECT_EQ(added_count_, added_count);
-    EXPECT_EQ(moved_count_, moved_count);
-    EXPECT_EQ(removed_count_, removed_count);
-    EXPECT_EQ(changed_count_, changed_count);
-    EXPECT_EQ(reordered_count_, reordered_count);
-    EXPECT_EQ(before_remove_count_, before_remove_count);
-    EXPECT_EQ(before_change_count_, before_change_count);
-    EXPECT_EQ(before_reorder_count_, before_reorder_count);
-    EXPECT_EQ(before_remove_all_count_, before_remove_all_count);
+    EXPECT_EQ(added_count, added_count_);
+    EXPECT_EQ(moved_count, moved_count_);
+    EXPECT_EQ(removed_count, removed_count_);
+    EXPECT_EQ(changed_count, changed_count_);
+    EXPECT_EQ(reordered_count, reordered_count_);
+    EXPECT_EQ(before_remove_count, before_remove_count_);
+    EXPECT_EQ(before_change_count, before_change_count_);
+    EXPECT_EQ(before_reorder_count, before_reorder_count_);
+    EXPECT_EQ(before_remove_all_count, before_remove_all_count_);
   }
 
   void AssertExtensiveChangesObserverCount(
       int extensive_changes_beginning_count,
       int extensive_changes_ended_count) {
-    EXPECT_EQ(extensive_changes_beginning_count_,
-              extensive_changes_beginning_count);
-    EXPECT_EQ(extensive_changes_ended_count_, extensive_changes_ended_count);
+    EXPECT_EQ(extensive_changes_beginning_count,
+              extensive_changes_beginning_count_);
+    EXPECT_EQ(extensive_changes_ended_count, extensive_changes_ended_count_);
   }
 
   int AllNodesRemovedObserverCount() const { return all_bookmarks_removed_; }
 
   BookmarkPermanentNode* ReloadModelWithExtraNode() {
     BookmarkPermanentNode* extra_node = new BookmarkPermanentNode(100);
-    bookmarks::BookmarkPermanentNodeList extra_nodes;
+    BookmarkPermanentNodeList extra_nodes;
     extra_nodes.push_back(extra_node);
     client_.SetExtraNodesToLoad(extra_nodes.Pass());
 
@@ -370,7 +365,7 @@ TEST_F(BookmarkModelTest, AddURLWithUnicodeTitle) {
 }
 
 TEST_F(BookmarkModelTest, AddURLWithWhitespaceTitle) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(url_whitespace_test_cases); ++i) {
+  for (size_t i = 0; i < arraysize(url_whitespace_test_cases); ++i) {
     const BookmarkNode* root = model_->bookmark_bar_node();
     const base::string16 title(
         ASCIIToUTF16(url_whitespace_test_cases[i].input_title));
@@ -457,7 +452,7 @@ TEST_F(BookmarkModelTest, AddFolder) {
 }
 
 TEST_F(BookmarkModelTest, AddFolderWithWhitespaceTitle) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(title_whitespace_test_cases); ++i) {
+  for (size_t i = 0; i < arraysize(title_whitespace_test_cases); ++i) {
     const BookmarkNode* root = model_->bookmark_bar_node();
     const base::string16 title(
         ASCIIToUTF16(title_whitespace_test_cases[i].input_title));
@@ -554,7 +549,7 @@ TEST_F(BookmarkModelTest, SetTitle) {
 }
 
 TEST_F(BookmarkModelTest, SetTitleWithWhitespace) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(title_whitespace_test_cases); ++i) {
+  for (size_t i = 0; i < arraysize(title_whitespace_test_cases); ++i) {
     const BookmarkNode* root = model_->bookmark_bar_node();
     base::string16 title(ASCIIToUTF16("dummy"));
     const GURL url("http://foo.com");
@@ -727,15 +722,14 @@ TEST_F(BookmarkModelTest, MostRecentlyModifiedFolders) {
 
   // Make sure folder is in the most recently modified.
   std::vector<const BookmarkNode*> most_recent_folders =
-      bookmarks::GetMostRecentlyModifiedUserFolders(model_.get(), 1);
+      GetMostRecentlyModifiedUserFolders(model_.get(), 1);
   ASSERT_EQ(1U, most_recent_folders.size());
   ASSERT_EQ(folder, most_recent_folders[0]);
 
   // Nuke the folder and do another fetch, making sure folder isn't in the
   // returned list.
   model_->Remove(folder->parent(), 0);
-  most_recent_folders =
-      bookmarks::GetMostRecentlyModifiedUserFolders(model_.get(), 1);
+  most_recent_folders = GetMostRecentlyModifiedUserFolders(model_.get(), 1);
   ASSERT_EQ(1U, most_recent_folders.size());
   ASSERT_TRUE(most_recent_folders[0] != folder);
 }
@@ -768,7 +762,7 @@ TEST_F(BookmarkModelTest, MostRecentlyAddedEntries) {
 
   // Make sure order is honored.
   std::vector<const BookmarkNode*> recently_added;
-  bookmarks::GetMostRecentlyAddedEntries(model_.get(), 2, &recently_added);
+  GetMostRecentlyAddedEntries(model_.get(), 2, &recently_added);
   ASSERT_EQ(2U, recently_added.size());
   ASSERT_TRUE(n1 == recently_added[0]);
   ASSERT_TRUE(n2 == recently_added[1]);
@@ -776,7 +770,7 @@ TEST_F(BookmarkModelTest, MostRecentlyAddedEntries) {
   // swap 1 and 2, then check again.
   recently_added.clear();
   SwapDateAdded(n1, n2);
-  bookmarks::GetMostRecentlyAddedEntries(model_.get(), 4, &recently_added);
+  GetMostRecentlyAddedEntries(model_.get(), 4, &recently_added);
   ASSERT_EQ(4U, recently_added.size());
   ASSERT_TRUE(n2 == recently_added[0]);
   ASSERT_TRUE(n1 == recently_added[1]);
@@ -969,7 +963,7 @@ TEST_F(BookmarkModelTestWithProfile, CreateAndRestore) {
     { "a [ b ]", "" },
     { "a b c [ d e [ f ] ]", "g h i [ j k [ l ] ]"},
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     model_ = client_.CreateModel();
 
     TestNode bbn;
@@ -991,7 +985,8 @@ TEST_F(BookmarkModelTestWithProfile, CreateAndRestore) {
   }
 }
 
-TEST_F(BookmarkModelTest, Sort) {
+// http://crbug.com/450464
+TEST_F(BookmarkModelTest, DISABLED_Sort) {
   // Populate the bookmark bar node with nodes for 'B', 'a', 'd' and 'C'.
   // 'C' and 'a' are folders.
   TestNode bbn;
@@ -1133,12 +1128,9 @@ TEST_F(BookmarkModelTest, IsBookmarked) {
   EXPECT_TRUE(model_->IsBookmarked(GURL("http://youtube.com")));
   EXPECT_FALSE(model_->IsBookmarked(GURL("http://reddit.com")));
 
-  EXPECT_TRUE(
-      bookmarks::IsBookmarkedByUser(model_.get(), GURL("http://google.com")));
-  EXPECT_FALSE(
-      bookmarks::IsBookmarkedByUser(model_.get(), GURL("http://youtube.com")));
-  EXPECT_FALSE(
-      bookmarks::IsBookmarkedByUser(model_.get(), GURL("http://reddit.com")));
+  EXPECT_TRUE(IsBookmarkedByUser(model_.get(), GURL("http://google.com")));
+  EXPECT_FALSE(IsBookmarkedByUser(model_.get(), GURL("http://youtube.com")));
+  EXPECT_FALSE(IsBookmarkedByUser(model_.get(), GURL("http://reddit.com")));
 }
 
 // Verifies that GetMostRecentlyAddedUserNodeForURL skips bookmarks that

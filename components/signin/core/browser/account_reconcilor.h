@@ -16,6 +16,9 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/time/time.h"
+#include "components/content_settings/core/browser/content_settings_observer.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -33,6 +36,7 @@ class CanonicalCookie;
 }
 
 class AccountReconcilor : public KeyedService,
+                          public content_settings::Observer,
                           public GaiaAuthConsumer,
                           public MergeSessionHelper::Observer,
                           public OAuth2TokenService::Observer,
@@ -41,7 +45,7 @@ class AccountReconcilor : public KeyedService,
   AccountReconcilor(ProfileOAuth2TokenService* token_service,
                     SigninManagerBase* signin_manager,
                     SigninClient* client);
-  virtual ~AccountReconcilor();
+  ~AccountReconcilor() override;
 
   void Initialize(bool start_reconcile_if_tokens_available);
 
@@ -51,7 +55,7 @@ class AccountReconcilor : public KeyedService,
   void OnNewProfileManagementFlagChanged(bool new_flag_status);
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Add or remove observers for the merge session notification.
   void AddMergeSessionObserver(MergeSessionHelper::Observer* observer);
@@ -82,13 +86,20 @@ class AccountReconcilor : public KeyedService,
     return gaia_accounts_;
   }
 
-  // Virtual so that it can be overridden in tests.
-  virtual void StartFetchingExternalCcResult();
-
   friend class AccountReconcilorTest;
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, SigninManagerRegistration);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, Reauth);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, ProfileAlreadyConnected);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileCookiesDisabled);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettings);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettingsGaiaUrl);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettingsNonGaiaUrl);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettingsInvalidPattern);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, GetAccountsFromCookieSuccess);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, GetAccountsFromCookieFailure);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, StartReconcileNoop);
@@ -113,6 +124,10 @@ class AccountReconcilor : public KeyedService,
   void UnregisterWithSigninManager();
   void RegisterWithTokenService();
   void UnregisterWithTokenService();
+  void RegisterWithMergeSessionHelper();
+  void UnregisterWithMergeSessionHelper();
+  void RegisterWithContentSettings();
+  void UnregisterWithContentSettings();
 
   bool IsProfileConnected();
 
@@ -135,27 +150,33 @@ class AccountReconcilor : public KeyedService,
   // Note internally that this |account_id| is added to the cookie jar.
   bool MarkAccountAsAddedToCookie(const std::string& account_id);
 
-  void OnCookieChanged(const net::CanonicalCookie* cookie);
+  void OnCookieChanged(const net::CanonicalCookie& cookie, bool removed);
+
+  // Overriden from content_settings::Observer.
+  void OnContentSettingChanged(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      std::string resource_identifier) override;
 
   // Overriden from GaiaAuthConsumer.
-  virtual void OnListAccountsSuccess(const std::string& data) OVERRIDE;
-  virtual void OnListAccountsFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
+  void OnListAccountsSuccess(const std::string& data) override;
+  void OnListAccountsFailure(const GoogleServiceAuthError& error) override;
 
   // Overriden from MergeSessionHelper::Observer.
-  virtual void MergeSessionCompleted(const std::string& account_id,
-                                     const GoogleServiceAuthError& error)
-      OVERRIDE;
+  void MergeSessionCompleted(const std::string& account_id,
+                             const GoogleServiceAuthError& error) override;
+  void GetCheckConnectionInfoCompleted(bool succeeded) override;
 
   // Overriden from OAuth2TokenService::Observer.
-  virtual void OnEndBatchChanges() OVERRIDE;
+  void OnEndBatchChanges() override;
 
   // Overriden from SigninManagerBase::Observer.
-  virtual void GoogleSigninSucceeded(const std::string& account_id,
-                                     const std::string& username,
-                                     const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE;
+  void GoogleSigninSucceeded(const std::string& account_id,
+                             const std::string& username,
+                             const std::string& password) override;
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override;
 
   void MayBeDoNextListAccounts();
 
@@ -171,10 +192,13 @@ class AccountReconcilor : public KeyedService,
   MergeSessionHelper merge_session_helper_;
   scoped_ptr<GaiaAuthFetcher> gaia_fetcher_;
   bool registered_with_token_service_;
+  bool registered_with_merge_session_helper_;
+  bool registered_with_content_settings_;
 
   // True while the reconcilor is busy checking or managing the accounts in
   // this profile.
   bool is_reconcile_started_;
+  base::Time m_reconcile_start_time_;
 
   // True iff this is the first time the reconcilor is executing.
   bool first_execution_;
@@ -193,10 +217,11 @@ class AccountReconcilor : public KeyedService,
   std::string primary_account_;
   std::vector<std::string> chrome_accounts_;
   std::vector<std::string> add_to_cookie_;
+  bool chrome_accounts_changed_;
 
   std::deque<GetAccountsFromCookieCallback> get_gaia_accounts_callbacks_;
 
-  scoped_ptr<SigninClient::CookieChangedCallbackList::Subscription>
+  scoped_ptr<SigninClient::CookieChangedSubscription>
       cookie_changed_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountReconcilor);

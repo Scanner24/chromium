@@ -177,7 +177,6 @@ SSLConnectJob::SSLConnectJob(const std::string& group_name,
                              SOCKSClientSocketPool* socks_pool,
                              HttpProxyClientSocketPool* http_proxy_pool,
                              ClientSocketFactory* client_socket_factory,
-                             HostResolver* host_resolver,
                              const SSLClientSocketContext& context,
                              const GetMessengerCallback& get_messenger_callback,
                              Delegate* delegate,
@@ -192,11 +191,11 @@ SSLConnectJob::SSLConnectJob(const std::string& group_name,
       socks_pool_(socks_pool),
       http_proxy_pool_(http_proxy_pool),
       client_socket_factory_(client_socket_factory),
-      host_resolver_(host_resolver),
       context_(context.cert_verifier,
                context.channel_id_service,
                context.transport_security_state,
                context.cert_transparency_verifier,
+               context.cert_policy_enforcer,
                (params->privacy_mode() == PRIVACY_MODE_ENABLED
                     ? "pm/" + context.ssl_session_cache_shard
                     : context.ssl_session_cache_shard)),
@@ -248,6 +247,9 @@ void SSLConnectJob::GetAdditionalErrorState(ClientSocketHandle* handle) {
 }
 
 void SSLConnectJob::OnIOComplete(int result) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455884 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("455884 SSLConnectJob::OnIOComplete"));
   int rv = DoLoop(result);
   if (rv != ERR_IO_PENDING)
     NotifyDelegateOfCompletion(rv);  // Deletes |this|.
@@ -372,8 +374,7 @@ int SSLConnectJob::DoTunnelConnectComplete(int result) {
   } else if (result == ERR_PROXY_AUTH_REQUESTED ||
              result == ERR_HTTPS_PROXY_TUNNEL_RESPONSE) {
     StreamSocket* socket = transport_socket_handle_->socket();
-    HttpProxyClientSocket* tunnel_socket =
-        static_cast<HttpProxyClientSocket*>(socket);
+    ProxyClientSocket* tunnel_socket = static_cast<ProxyClientSocket*>(socket);
     error_response_info_ = *tunnel_socket->GetConnectResponseInfo();
   }
   if (result < 0)
@@ -452,8 +453,10 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
   // GetNextProto will fail and and trigger a NOTREACHED if we pass in a socket
   // that hasn't had SSL_ImportFD called on it. If we get a certificate error
   // here, then we know that we called SSL_ImportFD.
-  if (result == OK || IsCertificateError(result))
+  if (result == OK || IsCertificateError(result)) {
     status = ssl_socket_->GetNextProto(&proto);
+    ssl_socket_->RecordNegotiationExtension();
+  }
 
   // If we want spdy over npn, make sure it succeeded.
   if (status == SSLClientSocket::kNextProtoNegotiated) {
@@ -496,7 +499,12 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
                                100);
 
     SSLInfo ssl_info;
-    ssl_socket_->GetSSLInfo(&ssl_info);
+    bool has_ssl_info = ssl_socket_->GetSSLInfo(&ssl_info);
+    DCHECK(has_ssl_info);
+
+    UMA_HISTOGRAM_ENUMERATION("Net.SSLVersion", SSLConnectionStatusToVersion(
+                                                    ssl_info.connection_status),
+                              SSL_CONNECTION_VERSION_MAX);
 
     UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_CipherSuite",
                                 SSLConnectionStatusToCipherSuite(
@@ -549,8 +557,14 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
     }
   }
 
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_Connection_Error", std::abs(result));
+  if (params_->ssl_config().fastradio_padding_eligible) {
+    UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_Connection_Error_FastRadioPadding",
+                                std::abs(result));
+  }
+
   if (result == OK || IsCertificateError(result)) {
-    SetSocket(ssl_socket_.PassAs<StreamSocket>());
+    SetSocket(ssl_socket_.Pass());
   } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
     error_response_info_.cert_request_info = new SSLCertRequestInfo;
     ssl_socket_->GetSSLCertRequestInfo(
@@ -590,7 +604,6 @@ SSLClientSocketPool::SSLConnectJobFactory::SSLConnectJobFactory(
     SOCKSClientSocketPool* socks_pool,
     HttpProxyClientSocketPool* http_proxy_pool,
     ClientSocketFactory* client_socket_factory,
-    HostResolver* host_resolver,
     const SSLClientSocketContext& context,
     const SSLConnectJob::GetMessengerCallback& get_messenger_callback,
     NetLog* net_log)
@@ -598,7 +611,6 @@ SSLClientSocketPool::SSLConnectJobFactory::SSLConnectJobFactory(
       socks_pool_(socks_pool),
       http_proxy_pool_(http_proxy_pool),
       client_socket_factory_(client_socket_factory),
-      host_resolver_(host_resolver),
       context_(context),
       get_messenger_callback_(get_messenger_callback),
       net_log_(net_log) {
@@ -627,11 +639,11 @@ SSLClientSocketPool::SSLClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
     ClientSocketPoolHistograms* histograms,
-    HostResolver* host_resolver,
     CertVerifier* cert_verifier,
     ChannelIDService* channel_id_service,
     TransportSecurityState* transport_security_state,
     CTVerifier* cert_transparency_verifier,
+    CertPolicyEnforcer* cert_policy_enforcer,
     const std::string& ssl_session_cache_shard,
     ClientSocketFactory* client_socket_factory,
     TransportClientSocketPool* transport_pool,
@@ -654,11 +666,11 @@ SSLClientSocketPool::SSLClientSocketPool(
                 socks_pool,
                 http_proxy_pool,
                 client_socket_factory,
-                host_resolver,
                 SSLClientSocketContext(cert_verifier,
                                        channel_id_service,
                                        transport_security_state,
                                        cert_transparency_verifier,
+                                       cert_policy_enforcer,
                                        ssl_session_cache_shard),
                 base::Bind(
                     &SSLClientSocketPool::GetOrCreateSSLConnectJobMessenger,
@@ -695,7 +707,6 @@ scoped_ptr<ConnectJob> SSLClientSocketPool::SSLConnectJobFactory::NewConnectJob(
                                                   socks_pool_,
                                                   http_proxy_pool_,
                                                   client_socket_factory_,
-                                                  host_resolver_,
                                                   context_,
                                                   get_messenger_callback_,
                                                   delegate,

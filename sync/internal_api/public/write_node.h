@@ -34,6 +34,7 @@ class Cryptographer;
 class WriteTransaction;
 
 namespace syncable {
+class Id;
 class Entry;
 class MutableEntry;
 }
@@ -56,16 +57,15 @@ class SYNC_EXPORT WriteNode : public BaseNode {
 
   // Create a WriteNode using the given transaction.
   explicit WriteNode(WriteTransaction* transaction);
-  virtual ~WriteNode();
+  ~WriteNode() override;
 
   // A client must use one (and only one) of the following Init variants to
   // populate the node.
 
   // BaseNode implementation.
-  virtual InitByLookupResult InitByIdLookup(int64 id) OVERRIDE;
-  virtual InitByLookupResult InitByClientTagLookup(
-      ModelType model_type,
-      const std::string& tag) OVERRIDE;
+  InitByLookupResult InitByIdLookup(int64 id) override;
+  InitByLookupResult InitByClientTagLookup(ModelType model_type,
+                                           const std::string& tag) override;
 
   // Create a new bookmark node with the specified parent and predecessor.  Use
   // a NULL |predecessor| to indicate that this is to be the first child.
@@ -83,6 +83,12 @@ class SYNC_EXPORT WriteNode : public BaseNode {
   InitUniqueByCreationResult InitUniqueByCreation(
       ModelType model_type,
       const BaseNode& parent,
+      const std::string& client_tag);
+
+  // InitUniqueByCreation overload for model types without hierarchy.
+  // The parent node isn't stored but is assumed to be the type root folder.
+  InitUniqueByCreationResult InitUniqueByCreation(
+      ModelType model_type,
       const std::string& client_tag);
 
   // Looks up the type's root folder.  This is usually created by the sync
@@ -178,9 +184,9 @@ class SYNC_EXPORT WriteNode : public BaseNode {
       const sync_pb::AttachmentMetadata& attachment_metadata);
 
   // Implementation of BaseNode's abstract virtual accessors.
-  virtual const syncable::Entry* GetEntry() const OVERRIDE;
+  const syncable::Entry* GetEntry() const override;
 
-  virtual const BaseTransaction* GetTransaction() const OVERRIDE;
+  const BaseTransaction* GetTransaction() const override;
 
   syncable::MutableEntry* GetMutableEntryForTest();
 
@@ -188,6 +194,11 @@ class SYNC_EXPORT WriteNode : public BaseNode {
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, EncryptBookmarksWithLegacyData);
 
   void* operator new(size_t size);  // Node is meant for stack use only.
+
+  InitUniqueByCreationResult InitUniqueByCreationImpl(
+      ModelType model_type,
+      const syncable::Id& parent_id,
+      const std::string& client_tag);
 
   // Helper to set the previous node.
   bool PutPredecessor(const BaseNode* predecessor) WARN_UNUSED_RESULT;

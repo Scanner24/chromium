@@ -14,7 +14,7 @@ import sys
 import tarfile
 import urllib2
 
-from telemetry.core import platform
+from telemetry.core import util
 from telemetry.util import path
 
 
@@ -43,7 +43,7 @@ class CloudStorageError(Exception):
     if SupportsProdaccess(gsutil_path) and _FindExecutableInPath('prodaccess'):
       return 'Run prodaccess to authenticate.'
     else:
-      if platform.GetHostPlatform().GetOSName() == 'chromeos':
+      if util.IsRunningOnCrosDevice():
         gsutil_path = ('HOME=%s %s' % (_CROS_GSUTIL_HOME_WAR, gsutil_path))
       return ('To configure your credentials:\n'
               '  1. Run "%s config" and follow its instructions.\n'
@@ -66,6 +66,10 @@ class CredentialsError(CloudStorageError):
 
 
 class NotFoundError(CloudStorageError):
+  pass
+
+
+class ServerError(CloudStorageError):
   pass
 
 
@@ -92,10 +96,11 @@ def _DownloadGsutil():
 def FindGsutil():
   """Return the gsutil executable path. If we can't find it, download it."""
   # Look for a depot_tools installation.
-  gsutil_path = _FindExecutableInPath(
-      os.path.join('third_party', 'gsutil', 'gsutil'), _DOWNLOAD_PATH)
-  if gsutil_path:
-    return gsutil_path
+  # FIXME: gsutil in depot_tools is not working correctly. crbug.com/413414
+  #gsutil_path = _FindExecutableInPath(
+  #    os.path.join('third_party', 'gsutil', 'gsutil'), _DOWNLOAD_PATH)
+  #if gsutil_path:
+  #  return gsutil_path
 
   # Look for a gsutil installation.
   gsutil_path = _FindExecutableInPath('gsutil', _DOWNLOAD_PATH)
@@ -122,7 +127,7 @@ def _RunCommand(args):
   # TODO(tbarzic): Figure out a better way to handle gsutil on cros.
   #     http://crbug.com/386416, http://crbug.com/359293.
   gsutil_env = None
-  if platform.GetHostPlatform().GetOSName() == 'chromeos':
+  if util.IsRunningOnCrosDevice():
     gsutil_env = os.environ.copy()
     gsutil_env['HOME'] = _CROS_GSUTIL_HOME_WAR
 
@@ -136,13 +141,14 @@ def _RunCommand(args):
         'You are attempting to access protected data with no configured',
         'Failure: No handler was ready to authenticate.')):
       raise CredentialsError(gsutil_path)
-    if 'status=401' in stderr or 'status 401' in stderr:
-      raise CredentialsError(gsutil_path)
-    if 'status=403' in stderr or 'status 403' in stderr:
+    if ('status=403' in stderr or 'status 403' in stderr or
+        '403 Forbidden' in stderr):
       raise PermissionError(gsutil_path)
     if (stderr.startswith('InvalidUriError') or 'No such object' in stderr or
-        'No URLs matched' in stderr):
+        'No URLs matched' in stderr or 'One or more URLs matched no' in stderr):
       raise NotFoundError(stderr)
+    if '500 Internal Server Error' in stderr:
+      raise ServerError(stderr)
     raise CloudStorageError(stderr)
 
   return stdout
@@ -178,10 +184,25 @@ def Delete(bucket, remote_path):
 def Get(bucket, remote_path, local_path):
   url = 'gs://%s/%s' % (bucket, remote_path)
   logging.info('Downloading %s to %s' % (url, local_path))
-  _RunCommand(['cp', url, local_path])
+  try:
+    _RunCommand(['cp', url, local_path])
+  except ServerError:
+    logging.info('Cloud Storage server error, retrying download')
+    _RunCommand(['cp', url, local_path])
 
 
 def Insert(bucket, remote_path, local_path, publicly_readable=False):
+  """ Upload file in |local_path| to cloud storage.
+  Args:
+    bucket: the google cloud storage bucket name.
+    remote_path: the remote file path in |bucket|.
+    local_path: path of the local file to be uploaded.
+    publicly_readable: whether the uploaded file has publicly readable
+    permission.
+
+  Returns:
+    The url where the file is uploaded to.
+  """
   url = 'gs://%s/%s' % (bucket, remote_path)
   command_and_args = ['cp']
   extra_info = ''
@@ -191,9 +212,11 @@ def Insert(bucket, remote_path, local_path, publicly_readable=False):
   command_and_args += [local_path, url]
   logging.info('Uploading %s to %s%s' % (local_path, url, extra_info))
   _RunCommand(command_and_args)
+  return 'https://console.developers.google.com/m/cloudstorage/b/%s/o/%s' % (
+      bucket, remote_path)
 
 
-def GetIfChanged(file_path, bucket=None):
+def GetIfChanged(file_path, bucket):
   """Gets the file at file_path if it has a hash file that doesn't match.
 
   If the file is not in Cloud Storage, log a warning instead of raising an
@@ -201,6 +224,10 @@ def GetIfChanged(file_path, bucket=None):
 
   Returns:
     True if the binary was changed.
+  Raises:
+    CredentialsError if the user has no configured credentials.
+    PermissionError if the user does not have permission to access the bucket.
+    NotFoundError if the file is not in the given bucket in cloud_storage.
   """
   hash_path = file_path + '.sha1'
   if not os.path.exists(hash_path):
@@ -211,22 +238,8 @@ def GetIfChanged(file_path, bucket=None):
   if os.path.exists(file_path) and CalculateHash(file_path) == expected_hash:
     return False
 
-  if bucket:
-    buckets = [bucket]
-  else:
-    buckets = [PUBLIC_BUCKET, PARTNER_BUCKET, INTERNAL_BUCKET]
-
-  for bucket in buckets:
-    try:
-      url = 'gs://%s/%s' % (bucket, expected_hash)
-      _RunCommand(['cp', url, file_path])
-      logging.info('Downloaded %s to %s' % (url, file_path))
-      return True
-    except NotFoundError:
-      continue
-
-  logging.warning('Unable to find file in Cloud Storage: %s', file_path)
-  return False
+  Get(bucket, expected_hash, file_path)
+  return True
 
 
 def CalculateHash(file_path):

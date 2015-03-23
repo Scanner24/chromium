@@ -4,18 +4,26 @@
 
 import collections
 import copy
+import datetime
+import itertools
+import logging
+import random
+import sys
 import traceback
 
 from telemetry import value as value_module
 from telemetry.results import page_run
 from telemetry.results import progress_reporter as progress_reporter_module
+from telemetry.util import cloud_storage
 from telemetry.value import failure
 from telemetry.value import skip
+from telemetry.value import trace
 
 
 class PageTestResults(object):
   def __init__(self, output_stream=None, output_formatters=None,
-               progress_reporter=None, trace_tag=''):
+               progress_reporter=None, trace_tag='', output_dir=None,
+               value_can_be_added_predicate=lambda v: True):
     """
     Args:
       output_stream: The output stream to use to write test results.
@@ -24,8 +32,13 @@ class PageTestResults(object):
           as CsvOutputFormatter, which output the test results as CSV.
       progress_reporter: An instance of progress_reporter.ProgressReporter,
           to be used to output test status/results progressively.
-      trace_tag: A string to append to the buildbot trace
-      name. Currently only used for buildbot.
+      trace_tag: A string to append to the buildbot trace name. Currently only
+          used for buildbot.
+      output_dir: A string specified the directory where to store the test
+          artifacts, e.g: trace, videos,...
+      value_can_be_added_predicate: A function that takes an value.Value
+          instance as input. It returns True if the value can be added to the
+          test results and False otherwise.
     """
     # TODO(chrishenry): Figure out if trace_tag is still necessary.
 
@@ -37,11 +50,16 @@ class PageTestResults(object):
     self._output_formatters = (
         output_formatters if output_formatters is not None else [])
     self._trace_tag = trace_tag
+    self._output_dir = output_dir
+    self._value_can_be_added_predicate = value_can_be_added_predicate
 
     self._current_page_run = None
     self._all_page_runs = []
     self._representative_value_for_each_value_name = {}
     self._all_summary_values = []
+    self._serialized_trace_file_ids_to_paths = {}
+    self._pages_to_profiling_files = collections.defaultdict(list)
+    self._pages_to_profiling_files_cloud_url = collections.defaultdict(list)
 
   def __copy__(self):
     cls = self.__class__
@@ -51,6 +69,14 @@ class PageTestResults(object):
         v = copy.copy(v)
       setattr(result, k, v)
     return result
+
+  @property
+  def serialized_trace_file_ids_to_paths(self):
+    return self._serialized_trace_file_ids_to_paths
+
+  @property
+  def pages_to_profiling_files_cloud_url(self):
+    return self._pages_to_profiling_files_cloud_url
 
   @property
   def all_page_specific_values(self):
@@ -108,6 +134,20 @@ class PageTestResults(object):
   def _GetStringFromExcInfo(self, err):
     return ''.join(traceback.format_exception(*err))
 
+  def CleanUp(self):
+    """Clean up any TraceValues contained within this results object."""
+    for run in self._all_page_runs:
+      for v in run.values:
+        if isinstance(v, trace.TraceValue):
+          v.CleanUp()
+          run.values.remove(v)
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, _, __, ___):
+    self.CleanUp()
+
   def WillRunPage(self, page):
     assert not self._current_page_run, 'Did not call DidRunPage.'
     self._current_page_run = page_run.PageRun(page)
@@ -126,29 +166,17 @@ class PageTestResults(object):
       self._all_page_runs.append(self._current_page_run)
     self._current_page_run = None
 
-  def WillAttemptPageRun(self, attempt_count, max_attempts):
-    """To be called when a single attempt on a page run is starting.
-
-    This is called between WillRunPage and DidRunPage and can be
-    called multiple times, one for each attempt.
-
-    Args:
-      attempt_count: The current attempt number, start at 1
-          (attempt_count == 1 for the first attempt, 2 for second
-          attempt, and so on).
-      max_attempts: Maximum number of page run attempts before failing.
-    """
-    self._progress_reporter.WillAttemptPageRun(
-        self, attempt_count, max_attempts)
-    # Clear any values from previous attempts for this page run.
-    self._current_page_run.ClearValues()
-
   def AddValue(self, value):
     assert self._current_page_run, 'Not currently running test.'
     self._ValidateValue(value)
+    if not self._value_can_be_added_predicate(value):
+      return
     # TODO(eakuefner/chrishenry): Add only one skip per pagerun assert here
     self._current_page_run.AddValue(value)
     self._progress_reporter.DidAddValue(value)
+
+  def AddProfilingFile(self, page, file_handle):
+    self._pages_to_profiling_files[page].append(file_handle)
 
   def AddSummaryValue(self, value):
     assert value.page is None
@@ -165,6 +193,13 @@ class PageTestResults(object):
 
   def PrintSummary(self):
     self._progress_reporter.DidFinishAllTests(self)
+
+    # Only serialize the trace if output_format is json.
+    from telemetry.results import json_output_formatter
+    if (self._output_dir and
+        any(isinstance(o, json_output_formatter.JsonOutputFormatter)
+            for o in self._output_formatters)):
+      self._SerializeTracesToDirPath(self._output_dir)
     for output_formatter in self._output_formatters:
       output_formatter.Format(self)
 
@@ -181,3 +216,40 @@ class PageTestResults(object):
       if value.name == value_name:
         values.append(value)
     return values
+
+  def FindAllTraceValues(self):
+    values = []
+    for value in self.all_page_specific_values:
+      if isinstance(value, trace.TraceValue):
+        values.append(value)
+    return values
+
+  def _SerializeTracesToDirPath(self, dir_path):
+    """ Serialize all trace values to files in dir_path and return a list of
+    file handles to those files. """
+    for value in self.FindAllTraceValues():
+      fh = value.Serialize(dir_path)
+      self._serialized_trace_file_ids_to_paths[fh.id] = fh.GetAbsPath()
+
+  def UploadTraceFilesToCloud(self, bucket):
+    for value in self.FindAllTraceValues():
+      value.UploadToCloud(bucket)
+
+  def UploadProfilingFilesToCloud(self, bucket):
+    for page, file_handle_list in self._pages_to_profiling_files.iteritems():
+      for file_handle in file_handle_list:
+        remote_path = ('profiler-file-id_%s-%s%-d%s' % (
+            file_handle.id,
+            datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+            random.randint(1, 100000),
+            file_handle.extension))
+        try:
+          cloud_url = cloud_storage.Insert(
+              bucket, remote_path, file_handle.GetAbsPath())
+          sys.stderr.write(
+              'View generated profiler files online at %s for page %s\n' %
+              (cloud_url, page.display_name))
+          self._pages_to_profiling_files_cloud_url[page].append(cloud_url)
+        except cloud_storage.PermissionError as e:
+          logging.error('Cannot upload profiling files to cloud storage due to '
+                        ' permission error: %s' % e.message)

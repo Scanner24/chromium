@@ -16,22 +16,15 @@ using std::numeric_limits;
 
 namespace net {
 
-QuicDataWriter::QuicDataWriter(size_t size)
-    : buffer_(new char[size]),
-      capacity_(size),
-      length_(0) {
+QuicDataWriter::QuicDataWriter(size_t size, char* buffer)
+    : buffer_(buffer), capacity_(size), length_(0) {
 }
 
 QuicDataWriter::~QuicDataWriter() {
-  delete[] buffer_;
 }
 
-char* QuicDataWriter::take() {
-  char* rv = buffer_;
-  buffer_ = NULL;
-  capacity_ = 0;
-  length_ = 0;
-  return rv;
+char* QuicDataWriter::data() {
+  return buffer_;
 }
 
 bool QuicDataWriter::WriteUInt8(uint8 value) {
@@ -47,8 +40,8 @@ bool QuicDataWriter::WriteUInt32(uint32 value) {
 }
 
 bool QuicDataWriter::WriteUInt48(uint64 value) {
-  uint32 hi = value >> 32;
-  uint32 lo = value & GG_UINT64_C(0x00000000FFFFFFFF);
+  uint16 hi = static_cast<uint16>(value >> 32);
+  uint32 lo = static_cast<uint32>(value);
   return WriteUInt32(lo) && WriteUInt16(hi);
 }
 
@@ -61,7 +54,7 @@ bool QuicDataWriter::WriteUFloat16(uint64 value) {
   if (value < (GG_UINT64_C(1) << kUFloat16MantissaEffectiveBits)) {
     // Fast path: either the value is denormalized, or has exponent zero.
     // Both cases are represented by the value itself.
-    result = value;
+    result = static_cast<uint16>(value);
   } else if (value >= kUFloat16MaxValue) {
     // Value is out of range; clamp it to the maximum representable.
     result = numeric_limits<uint16>::max();
@@ -89,17 +82,17 @@ bool QuicDataWriter::WriteUFloat16(uint64 value) {
     // Hidden bit (position 11) is set. We should remove it and increment the
     // exponent. Equivalently, we just add it to the exponent.
     // This hides the bit.
-    result = value + (exponent << kUFloat16MantissaBits);
+    result = static_cast<uint16>(value + (exponent << kUFloat16MantissaBits));
   }
 
   return WriteBytes(&result, sizeof(result));
 }
 
 bool QuicDataWriter::WriteStringPiece16(StringPiece val) {
-  if (val.length() > numeric_limits<uint16>::max()) {
+  if (val.size() > numeric_limits<uint16>::max()) {
     return false;
   }
-  if (!WriteUInt16(val.size())) {
+  if (!WriteUInt16(static_cast<uint16>(val.size()))) {
     return false;
   }
   return WriteBytes(val.data(), val.size());
@@ -119,15 +112,15 @@ bool QuicDataWriter::WriteIOVector(const IOVector& data) {
 
 char* QuicDataWriter::BeginWrite(size_t length) {
   if (length_ > capacity_) {
-    return NULL;
+    return nullptr;
   }
 
   if (capacity_ - length_ < length) {
-    return NULL;
+    return nullptr;
   }
 
 #ifdef ARCH_CPU_64_BITS
-  DCHECK_LE(length, numeric_limits<uint32>::max());
+  DCHECK_LE(length, std::numeric_limits<uint32>::max());
 #endif
 
   return buffer_ + length_;

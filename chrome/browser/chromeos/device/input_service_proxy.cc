@@ -18,7 +18,7 @@ namespace chromeos {
 class InputServiceProxy::ServiceObserver : public InputServiceLinux::Observer {
  public:
   ServiceObserver() { DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI)); }
-  virtual ~ServiceObserver() { DCHECK(CalledOnValidThread()); }
+  ~ServiceObserver() override { DCHECK(CalledOnValidThread()); }
 
   void Initialize(const base::WeakPtr<InputServiceProxy>& proxy) {
     DCHECK(CalledOnValidThread());
@@ -54,8 +54,8 @@ class InputServiceProxy::ServiceObserver : public InputServiceLinux::Observer {
   }
 
   // InputServiceLinux::Observer implementation:
-  virtual void OnInputDeviceAdded(
-      const InputServiceLinux::InputDeviceInfo& info) OVERRIDE {
+  void OnInputDeviceAdded(
+      const InputServiceLinux::InputDeviceInfo& info) override {
     DCHECK(CalledOnValidThread());
     BrowserThread::PostTask(
         BrowserThread::UI,
@@ -63,7 +63,7 @@ class InputServiceProxy::ServiceObserver : public InputServiceLinux::Observer {
         base::Bind(&InputServiceProxy::OnDeviceAdded, proxy_, info));
   }
 
-  virtual void OnInputDeviceRemoved(const std::string& id) OVERRIDE {
+  void OnInputDeviceRemoved(const std::string& id) override {
     DCHECK(CalledOnValidThread());
     BrowserThread::PostTask(
         BrowserThread::UI,

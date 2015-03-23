@@ -6,58 +6,89 @@
 #define UI_OZONE_PLATFORM_DRI_DRI_WINDOW_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "ui/display/types/display_snapshot.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/platform/dri/channel_observer.h"
 #include "ui/platform_window/platform_window.h"
 
 namespace ui {
 
+class DisplayManager;
+class DriCursor;
 class DriWindowDelegate;
-class DriWindowDelegateManager;
 class DriWindowManager;
 class EventFactoryEvdev;
+class DriGpuPlatformSupportHost;
 
+// Implementation of the platform window. This object and its handle |widget_|
+// uniquely identify a window. Since the DRI/GBM platform is split into 2
+// pieces (Browser process and GPU process), internally we need to make sure the
+// state is synchronized between the 2 processes.
+//
+// |widget_| is used in both processes to uniquely identify the window. This
+// means that any state on the browser side needs to be propagated to the GPU.
+// State propagation needs to happen before the state change is acknowledged to
+// |delegate_| as |delegate_| is responsible for initializing the surface
+// associated with the window (the surface is created on the GPU process).
 class DriWindow : public PlatformWindow,
-                  public PlatformEventDispatcher {
+                  public PlatformEventDispatcher,
+                  public ChannelObserver {
  public:
   DriWindow(PlatformWindowDelegate* delegate,
             const gfx::Rect& bounds,
-            scoped_ptr<DriWindowDelegate> dri_window_delegate,
+            DriGpuPlatformSupportHost* sender,
             EventFactoryEvdev* event_factory,
-            DriWindowDelegateManager* window_delegate_manager,
-            DriWindowManager* window_manager);
-  virtual ~DriWindow();
+            DriCursor* cursor,
+            DriWindowManager* window_manager,
+            DisplayManager* display_manager);
+  ~DriWindow() override;
 
   void Initialize();
 
+  gfx::AcceleratedWidget GetAcceleratedWidget();
+
+  gfx::Rect GetCursorConfinedBounds() const;
+
   // PlatformWindow:
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void Close() OVERRIDE;
-  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual gfx::Rect GetBounds() OVERRIDE;
-  virtual void SetCapture() OVERRIDE;
-  virtual void ReleaseCapture() OVERRIDE;
-  virtual void ToggleFullscreen() OVERRIDE;
-  virtual void Maximize() OVERRIDE;
-  virtual void Minimize() OVERRIDE;
-  virtual void Restore() OVERRIDE;
-  virtual void SetCursor(PlatformCursor cursor) OVERRIDE;
-  virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
+  void Show() override;
+  void Hide() override;
+  void Close() override;
+  void SetBounds(const gfx::Rect& bounds) override;
+  gfx::Rect GetBounds() override;
+  void SetCapture() override;
+  void ReleaseCapture() override;
+  void ToggleFullscreen() override;
+  void Maximize() override;
+  void Minimize() override;
+  void Restore() override;
+  void SetCursor(PlatformCursor cursor) override;
+  void MoveCursorTo(const gfx::Point& location) override;
+  void ConfineCursorToBounds(const gfx::Rect& bounds) override;
 
   // PlatformEventDispatcher:
-  virtual bool CanDispatchEvent(const PlatformEvent& event) OVERRIDE;
-  virtual uint32_t DispatchEvent(const PlatformEvent& event) OVERRIDE;
+  bool CanDispatchEvent(const PlatformEvent& event) override;
+  uint32_t DispatchEvent(const PlatformEvent& event) override;
+
+  // ChannelObserver:
+  void OnChannelEstablished() override;
+  void OnChannelDestroyed() override;
 
  private:
-  PlatformWindowDelegate* delegate_;
+  void SendBoundsChange();
+
+  PlatformWindowDelegate* delegate_;   // Not owned.
+  DriGpuPlatformSupportHost* sender_;  // Not owned.
+  EventFactoryEvdev* event_factory_;   // Not owned.
+  DriCursor* cursor_;                  // Not owned.
+  DriWindowManager* window_manager_;   // Not owned.
+  DisplayManager* display_manager_;    // Not owned.
+
   gfx::Rect bounds_;
   gfx::AcceleratedWidget widget_;
-  DriWindowDelegate* dri_window_delegate_;
-  EventFactoryEvdev* event_factory_;
-  DriWindowDelegateManager* window_delegate_manager_;
-  DriWindowManager* window_manager_;
+
+  gfx::Rect cursor_confined_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(DriWindow);
 };

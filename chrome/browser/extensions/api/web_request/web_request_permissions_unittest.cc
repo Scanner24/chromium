@@ -29,7 +29,7 @@ class ExtensionWebRequestHelpersTestWithThreadsTest : public testing::Test {
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
 
  protected:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
  protected:
   net::TestURLRequestContext context;
@@ -77,7 +77,7 @@ void ExtensionWebRequestHelpersTestWithThreadsTest::SetUp() {
 
 TEST_F(ExtensionWebRequestHelpersTestWithThreadsTest, TestHideRequestForURL) {
   net::TestURLRequestContext context;
-  const char* sensitive_urls[] = {
+  const char* const sensitive_urls[] = {
       "http://clients2.google.com",
       "http://clients22.google.com",
       "https://clients2.google.com",
@@ -92,7 +92,7 @@ TEST_F(ExtensionWebRequestHelpersTestWithThreadsTest, TestHideRequestForURL) {
       "https://chrome.google.com/webstore/"
           "inlineinstall/detail/kcnhkahnjcbndmmehfkdnkjomaanaooo"
   };
-  const char* non_sensitive_urls[] = {
+  const char* const non_sensitive_urls[] = {
       "http://www.google.com/"
   };
   const int kSigninProcessId = 99;
@@ -136,7 +136,10 @@ TEST_F(ExtensionWebRequestHelpersTestWithThreadsTest, TestHideRequestForURL) {
                                             process_id,
                                             view_id,
                                             MSG_ROUTING_NONE,
-                                            false);
+                                            false,   // is_main_frame
+                                            false,   // parent_is_main_frame
+                                            true,    // allow_download
+                                            false);  // is_async
     extension_info_map_->RegisterExtensionProcess(
         extensions::kWebStoreAppId, process_id, site_instance_id);
     EXPECT_TRUE(WebRequestPermissions::HideRequest(
@@ -154,7 +157,10 @@ TEST_F(ExtensionWebRequestHelpersTestWithThreadsTest, TestHideRequestForURL) {
                                             process_id,
                                             view_id,
                                             MSG_ROUTING_NONE,
-                                            false);
+                                            false,   // is_main_frame
+                                            false,   // parent_is_main_frame
+                                            true,    // allow_download
+                                            false);  // is_async
     EXPECT_TRUE(WebRequestPermissions::HideRequest(
         extension_info_map_.get(), sensitive_request.get()));
   }

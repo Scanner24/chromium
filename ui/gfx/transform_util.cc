@@ -6,12 +6,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace gfx {
 
@@ -22,11 +23,6 @@ SkMScalar Length3(SkMScalar v[3]) {
                   SkMScalarToDouble(v[2])};
   return SkDoubleToMScalar(
       std::sqrt(vd[0] * vd[0] + vd[1] * vd[1] + vd[2] * vd[2]));
-}
-
-void Scale3(SkMScalar v[3], SkMScalar scale) {
-  for (int i = 0; i < 3; ++i)
-    v[i] *= scale;
 }
 
 template <int n>
@@ -107,7 +103,7 @@ bool Normalize(SkMatrix44& m) {
     // Cannot normalize.
     return false;
 
-  SkMScalar scale = 1.0 / m.get(3, 3);
+  SkMScalar scale = SK_MScalar1 / m.get(3, 3);
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 4; j++)
       m.set(i, j, m.get(i, j) * scale);
@@ -148,15 +144,15 @@ SkMatrix44 BuildRotationMatrix(const DecomposedTransform& decomp) {
   SkMatrix44 matrix(SkMatrix44::kUninitialized_Constructor);
 
   // Implicitly calls matrix.setIdentity()
-  matrix.set3x3(1.0 - 2.0 * (y * y + z * z),
-                2.0 * (x * y + z * w),
-                2.0 * (x * z - y * w),
-                2.0 * (x * y - z * w),
-                1.0 - 2.0 * (x * x + z * z),
-                2.0 * (y * z + x * w),
-                2.0 * (x * z + y * w),
-                2.0 * (y * z - x * w),
-                1.0 - 2.0 * (x * x + y * y));
+  matrix.set3x3(SkDoubleToMScalar(1.0 - 2.0 * (y * y + z * z)),
+                SkDoubleToMScalar(2.0 * (x * y + z * w)),
+                SkDoubleToMScalar(2.0 * (x * z - y * w)),
+                SkDoubleToMScalar(2.0 * (x * y - z * w)),
+                SkDoubleToMScalar(1.0 - 2.0 * (x * x + z * z)),
+                SkDoubleToMScalar(2.0 * (y * z + x * w)),
+                SkDoubleToMScalar(2.0 * (x * z + y * w)),
+                SkDoubleToMScalar(2.0 * (y * z - x * w)),
+                SkDoubleToMScalar(1.0 - 2.0 * (x * x + y * y)));
   return matrix;
 }
 
@@ -372,8 +368,11 @@ bool DecomposeTransform(DecomposedTransform* decomp,
 
   // Compute X scale factor and normalize first row.
   decomp->scale[0] = Length3(row[0]);
-  if (decomp->scale[0] != 0.0)
-    Scale3(row[0], 1.0 / decomp->scale[0]);
+  if (decomp->scale[0] != 0.0) {
+    row[0][0] /= decomp->scale[0];
+    row[0][1] /= decomp->scale[0];
+    row[0][2] /= decomp->scale[0];
+  }
 
   // Compute XY shear factor and make 2nd row orthogonal to 1st.
   decomp->skew[0] = Dot<3>(row[0], row[1]);
@@ -381,8 +380,11 @@ bool DecomposeTransform(DecomposedTransform* decomp,
 
   // Now, compute Y scale and normalize 2nd row.
   decomp->scale[1] = Length3(row[1]);
-  if (decomp->scale[1] != 0.0)
-    Scale3(row[1], 1.0 / decomp->scale[1]);
+  if (decomp->scale[1] != 0.0) {
+    row[1][0] /= decomp->scale[1];
+    row[1][1] /= decomp->scale[1];
+    row[1][2] /= decomp->scale[1];
+  }
 
   decomp->skew[0] /= decomp->scale[1];
 
@@ -394,8 +396,11 @@ bool DecomposeTransform(DecomposedTransform* decomp,
 
   // Next, get Z scale and normalize 3rd row.
   decomp->scale[2] = Length3(row[2]);
-  if (decomp->scale[2] != 0.0)
-    Scale3(row[2], 1.0 / decomp->scale[2]);
+  if (decomp->scale[2] != 0.0) {
+    row[2][0] /= decomp->scale[2];
+    row[2][1] /= decomp->scale[2];
+    row[2][2] /= decomp->scale[2];
+  }
 
   decomp->skew[1] /= decomp->scale[2];
   decomp->skew[2] /= decomp->scale[2];
@@ -413,14 +418,17 @@ bool DecomposeTransform(DecomposedTransform* decomp,
     }
   }
 
-  decomp->quaternion[0] =
-      0.5 * std::sqrt(std::max(1.0 + row[0][0] - row[1][1] - row[2][2], 0.0));
-  decomp->quaternion[1] =
-      0.5 * std::sqrt(std::max(1.0 - row[0][0] + row[1][1] - row[2][2], 0.0));
-  decomp->quaternion[2] =
-      0.5 * std::sqrt(std::max(1.0 - row[0][0] - row[1][1] + row[2][2], 0.0));
-  decomp->quaternion[3] =
-      0.5 * std::sqrt(std::max(1.0 + row[0][0] + row[1][1] + row[2][2], 0.0));
+  double row00 = SkMScalarToDouble(row[0][0]);
+  double row11 = SkMScalarToDouble(row[1][1]);
+  double row22 = SkMScalarToDouble(row[2][2]);
+  decomp->quaternion[0] = SkDoubleToMScalar(
+      0.5 * std::sqrt(std::max(1.0 + row00 - row11 - row22, 0.0)));
+  decomp->quaternion[1] = SkDoubleToMScalar(
+      0.5 * std::sqrt(std::max(1.0 - row00 + row11 - row22, 0.0)));
+  decomp->quaternion[2] = SkDoubleToMScalar(
+      0.5 * std::sqrt(std::max(1.0 - row00 - row11 + row22, 0.0)));
+  decomp->quaternion[3] = SkDoubleToMScalar(
+      0.5 * std::sqrt(std::max(1.0 + row00 + row11 + row22, 0.0)));
 
   if (row[2][1] > row[1][2])
       decomp->quaternion[0] = -decomp->quaternion[0];
@@ -472,6 +480,15 @@ bool SnapTransform(Transform* out,
   return snappable;
 }
 
+Transform TransformAboutPivot(const gfx::Point& pivot,
+                              const gfx::Transform& transform) {
+  gfx::Transform result;
+  result.Translate(pivot.x(), pivot.y());
+  result.PreconcatTransform(transform);
+  result.Translate(-pivot.x(), -pivot.y());
+  return result;
+}
+
 std::string DecomposedTransform::ToString() const {
   return base::StringPrintf(
       "translate: %+0.4f %+0.4f %+0.4f\n"
@@ -498,4 +515,20 @@ std::string DecomposedTransform::ToString() const {
       quaternion[3]);
 }
 
-}  // namespace ui
+float MatrixDistance(const Transform& a, const Transform& b) {
+  double sum = 0.0;
+
+  const SkMatrix44& a_data = a.matrix();
+  const SkMatrix44& b_data = b.matrix();
+
+  for (int row = 0; row < 4; ++row) {
+    for (int col = 0; col < 4; ++col) {
+      double diff = a_data.get(row, col) - b_data.get(row, col);
+      sum += diff * diff;
+    }
+  }
+
+  return static_cast<float>(std::sqrt(sum));
+}
+
+}  // namespace gfx

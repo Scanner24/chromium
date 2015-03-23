@@ -30,31 +30,31 @@ namespace android_webview {
 class AwContentsClientBridge : public AwContentsClientBridgeBase {
  public:
   AwContentsClientBridge(JNIEnv* env, jobject obj);
-  virtual ~AwContentsClientBridge();
+  ~AwContentsClientBridge() override;
 
   // AwContentsClientBridgeBase implementation
-  virtual void AllowCertificateError(int cert_error,
-                                     net::X509Certificate* cert,
-                                     const GURL& request_url,
-                                     const base::Callback<void(bool)>& callback,
-                                     bool* cancel_request) OVERRIDE;
-  virtual void SelectClientCertificate(
+  void AllowCertificateError(int cert_error,
+                             net::X509Certificate* cert,
+                             const GURL& request_url,
+                             const base::Callback<void(bool)>& callback,
+                             bool* cancel_request) override;
+  void SelectClientCertificate(
       net::SSLCertRequestInfo* cert_request_info,
-      const SelectCertificateCallback& callback) OVERRIDE;
+      const SelectCertificateCallback& callback) override;
 
-  virtual void RunJavaScriptDialog(
+  void RunJavaScriptDialog(
       content::JavaScriptMessageType message_type,
       const GURL& origin_url,
       const base::string16& message_text,
       const base::string16& default_prompt_text,
       const content::JavaScriptDialogManager::DialogClosedCallback& callback)
-      OVERRIDE;
-  virtual void RunBeforeUnloadDialog(
+      override;
+  void RunBeforeUnloadDialog(
       const GURL& origin_url,
       const base::string16& message_text,
       const content::JavaScriptDialogManager::DialogClosedCallback& callback)
-      OVERRIDE;
-  virtual bool ShouldOverrideUrlLoading(const base::string16& url) OVERRIDE;
+      override;
+  bool ShouldOverrideUrlLoading(const base::string16& url) override;
 
   // Methods called from Java.
   void ProceedSslError(JNIEnv* env, jobject obj, jboolean proceed, jint id);

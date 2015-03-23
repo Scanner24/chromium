@@ -23,14 +23,15 @@ class ExternalVideoSurfaceContainerImpl
   ExternalVideoSurfaceContainerImpl(content::WebContents* contents);
 
   // ExternalVideoSurfaceContainer implementation.
-  virtual void RequestExternalVideoSurface(
+  void RequestExternalVideoSurface(
       int player_id,
       const SurfaceCreatedCB& surface_created_cb,
-      const SurfaceDestroyedCB& surface_destroyed_cb) OVERRIDE;
-  virtual void ReleaseExternalVideoSurface(int player_id) OVERRIDE;
-  virtual void OnFrameInfoUpdated() OVERRIDE;
-  virtual void OnExternalVideoSurfacePositionChanged(
-      int player_id, const gfx::RectF& rect) OVERRIDE;
+      const SurfaceDestroyedCB& surface_destroyed_cb) override;
+  int GetCurrentPlayerId() override;
+  void ReleaseExternalVideoSurface(int player_id) override;
+  void OnFrameInfoUpdated() override;
+  void OnExternalVideoSurfacePositionChanged(int player_id,
+                                             const gfx::RectF& rect) override;
 
   // Methods called from Java.
   void SurfaceCreated(
@@ -38,7 +39,7 @@ class ExternalVideoSurfaceContainerImpl
   void SurfaceDestroyed(JNIEnv* env, jobject obj, jint player_id);
 
  private:
-  virtual ~ExternalVideoSurfaceContainerImpl();
+  ~ExternalVideoSurfaceContainerImpl() override;
 
   base::android::ScopedJavaGlobalRef<jobject> jobject_;
 

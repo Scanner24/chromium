@@ -30,11 +30,11 @@ QuicHttpStream::QuicHttpStream(const base::WeakPtr<QuicClientSession>& session)
       session_(session),
       session_error_(OK),
       was_handshake_confirmed_(session->IsCryptoHandshakeConfirmed()),
-      stream_(NULL),
-      request_info_(NULL),
-      request_body_stream_(NULL),
+      stream_(nullptr),
+      request_info_(nullptr),
+      request_body_stream_(nullptr),
       priority_(MINIMUM_PRIORITY),
-      response_info_(NULL),
+      response_info_(nullptr),
       response_status_(OK),
       response_headers_received_(false),
       read_buf_(new GrowableIOBuffer()),
@@ -108,7 +108,19 @@ int QuicHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
   CHECK(!callback.is_null());
   CHECK(response);
 
-   if (!stream_) {
+  // TODO(rch): remove this once we figure out why channel ID is not being
+  // sent when it should be.
+  HostPortPair origin = HostPortPair::FromURL(request_info_->url);
+  if (origin.Equals(HostPortPair("accounts.google.com", 443)) &&
+      request_headers.HasHeader(HttpRequestHeaders::kCookie)) {
+    SSLInfo ssl_info;
+    bool secure_session =
+        session_->GetSSLInfo(&ssl_info) && ssl_info.cert.get();
+    DCHECK(secure_session);
+    UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.CookieSentToAccountsOverChannelId",
+                          ssl_info.channel_id_sent);
+  }
+  if (!stream_) {
     return ERR_CONNECTION_CLOSED;
   }
 
@@ -155,7 +167,7 @@ UploadProgress QuicHttpStream::GetUploadProgress() const {
 int QuicHttpStream::ReadResponseHeaders(const CompletionCallback& callback) {
   CHECK(!callback.is_null());
 
-  if (stream_ == NULL)
+  if (stream_ == nullptr)
     return response_status_;
 
   // Check if we already have the response headers. If so, return synchronously.
@@ -216,16 +228,16 @@ void QuicHttpStream::Close(bool not_reusable) {
   // Note: the not_reusable flag has no meaning for SPDY streams.
   if (stream_) {
     closed_stream_received_bytes_ = stream_->stream_bytes_read();
-    stream_->SetDelegate(NULL);
+    stream_->SetDelegate(nullptr);
     stream_->Reset(QUIC_STREAM_CANCELLED);
-    stream_ = NULL;
+    stream_ = nullptr;
     response_status_ = was_handshake_confirmed_ ?
         ERR_CONNECTION_CLOSED : ERR_QUIC_HANDSHAKE_FAILED;
   }
 }
 
 HttpStream* QuicHttpStream::RenewStreamForAuth() {
-  return NULL;
+  return nullptr;
 }
 
 bool QuicHttpStream::IsResponseBodyComplete() const {
@@ -321,7 +333,7 @@ int QuicHttpStream::OnDataReceived(const char* data, int length) {
     length = user_buffer_len_;
   }
 
-  user_buffer_ = NULL;
+  user_buffer_ = nullptr;
   user_buffer_len_ = 0;
   DoCallback(length);
   return OK;
@@ -336,13 +348,13 @@ void QuicHttpStream::OnClose(QuicErrorCode error) {
   }
 
   closed_stream_received_bytes_ = stream_->stream_bytes_read();
-  stream_ = NULL;
+  stream_ = nullptr;
   if (!callback_.is_null())
     DoCallback(response_status_);
 }
 
 void QuicHttpStream::OnError(int error) {
-  stream_ = NULL;
+  stream_ = nullptr;
   response_status_ = was_handshake_confirmed_ ?
       error : ERR_QUIC_HANDSHAKE_FAILED;
   if (!callback_.is_null())
@@ -434,10 +446,10 @@ int QuicHttpStream::DoSendHeaders() {
       base::Bind(&QuicRequestNetLogCallback, stream_->id(), &request_headers_,
                  priority_));
 
-  bool has_upload_data = request_body_stream_ != NULL;
+  bool has_upload_data = request_body_stream_ != nullptr;
 
   next_state_ = STATE_SEND_HEADERS_COMPLETE;
-  int rv = stream_->WriteHeaders(request_headers_, !has_upload_data, NULL);
+  int rv = stream_->WriteHeaders(request_headers_, !has_upload_data, nullptr);
   request_headers_.clear();
   return rv;
 }

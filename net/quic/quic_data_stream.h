@@ -12,6 +12,7 @@
 #include <sys/types.h>
 
 #include <list>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/strings/string_piece.h"
@@ -54,16 +55,16 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
 
   QuicDataStream(QuicStreamId id, QuicSession* session);
 
-  virtual ~QuicDataStream();
+  ~QuicDataStream() override;
 
   // ReliableQuicStream implementation
-  virtual void OnClose() OVERRIDE;
-  virtual uint32 ProcessRawData(const char* data, uint32 data_len) OVERRIDE;
+  void OnClose() override;
+  uint32 ProcessRawData(const char* data, uint32 data_len) override;
   // By default, this is the same as priority(), however it allows streams
   // to temporarily alter effective priority.   For example if a SPDY stream has
   // compressed but not written headers it can write the headers with a higher
   // priority.
-  virtual QuicPriority EffectivePriority() const OVERRIDE;
+  QuicPriority EffectivePriority() const override;
 
   // Overridden by subclasses to process data.  The headers will be delivered
   // via OnStreamHeaders, so only data will be delivered through this method.
@@ -133,7 +134,7 @@ class NET_EXPORT_PRIVATE QuicDataStream : public ReliableQuicStream {
   QuicPriority priority_;
   // Contains a copy of the decompressed headers until they are consumed
   // via ProcessData or Readv.
-  string decompressed_headers_;
+  std::string decompressed_headers_;
   // True if an error was encountered during decompression.
   bool decompression_failed_;
   // True if the priority has been read, false otherwise.

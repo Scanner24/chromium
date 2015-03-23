@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/app_mode/kiosk_mode_idle_app_name_notification.h"
 
-#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -15,7 +14,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "extensions/browser/extension_system.h"
-#include "ui/wm/core/user_activity_detector.h"
+#include "ui/base/user_activity/user_activity_detector.h"
 
 namespace chromeos {
 
@@ -57,9 +56,10 @@ KioskModeIdleAppNameNotification::KioskModeIdleAppNameNotification()
 }
 
 KioskModeIdleAppNameNotification::~KioskModeIdleAppNameNotification() {
-  if (ash::Shell::HasInstance() &&
-      ash::Shell::GetInstance()->user_activity_detector()->HasObserver(this)) {
-    ash::Shell::GetInstance()->user_activity_detector()->RemoveObserver(this);
+  ui::UserActivityDetector* user_activity_detector =
+      ui::UserActivityDetector::Get();
+  if (user_activity_detector && user_activity_detector->HasObserver(this)) {
+    user_activity_detector->RemoveObserver(this);
     // At this time the DBusThreadManager might already be gone.
     if (chromeos::DBusThreadManager::IsInitialized())
       chromeos::DBusThreadManager::Get()->GetPowerManagerClient(
@@ -74,7 +74,7 @@ void KioskModeIdleAppNameNotification::Setup() {
 
 void KioskModeIdleAppNameNotification::OnUserActivity(const ui::Event* event) {
   if (show_notification_upon_next_user_activity_) {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     const std::string app_id =
         command_line->GetSwitchValueASCII(::switches::kAppId);
     Profile* profile = ProfileManager::GetActiveUserProfile();
@@ -98,8 +98,8 @@ void KioskModeIdleAppNameNotification::SuspendDone(
 }
 
 void KioskModeIdleAppNameNotification::Start() {
-  if (!ash::Shell::GetInstance()->user_activity_detector()->HasObserver(this)) {
-    ash::Shell::GetInstance()->user_activity_detector()->AddObserver(this);
+  if (!ui::UserActivityDetector::Get()->HasObserver(this)) {
+    ui::UserActivityDetector::Get()->AddObserver(this);
     chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
         this);
   }

@@ -77,20 +77,16 @@ class NetworkChangeNotifierAndroid::DnsConfigServiceThread
                          // We're only interested in tunnel interface changes.
                          base::Bind(NotifyNetworkChangeNotifierObservers)) {}
 
-  virtual ~DnsConfigServiceThread() {
-    Stop();
-  }
+  ~DnsConfigServiceThread() override { Stop(); }
 
-  virtual void Init() OVERRIDE {
+  void Init() override {
     address_tracker_.Init();
     dns_config_service_ = DnsConfigService::CreateSystemService();
     dns_config_service_->WatchConfig(
         base::Bind(&NetworkChangeNotifier::SetDnsConfig));
   }
 
-  virtual void CleanUp() OVERRIDE {
-    dns_config_service_.reset();
-  }
+  void CleanUp() override { dns_config_service_.reset(); }
 
   static void NotifyNetworkChangeNotifierObservers() {
     NetworkChangeNotifier::NotifyObserversOfIPAddressChange();
@@ -114,8 +110,18 @@ NetworkChangeNotifierAndroid::GetCurrentConnectionType() const {
   return delegate_->GetCurrentConnectionType();
 }
 
+double NetworkChangeNotifierAndroid::GetCurrentMaxBandwidth() const {
+  return delegate_->GetCurrentMaxBandwidth();
+}
+
 void NetworkChangeNotifierAndroid::OnConnectionTypeChanged() {
   DnsConfigServiceThread::NotifyNetworkChangeNotifierObservers();
+}
+
+void NetworkChangeNotifierAndroid::OnMaxBandwidthChanged(
+    double max_bandwidth_mbps) {
+  NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChange(
+      max_bandwidth_mbps);
 }
 
 // static

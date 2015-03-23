@@ -26,7 +26,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/cancelable_task_tracker.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -37,13 +36,16 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/connection_tester.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/onc/onc_constants.h"
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
@@ -56,6 +58,7 @@
 #include "grit/net_internals_resources.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log_logger.h"
+#include "net/base/net_log_util.h"
 #include "net/base/net_util.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
@@ -74,7 +77,6 @@
 #include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
 #include "chrome/browser/chromeos/net/onc_utils.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/system/syslogs_provider.h"
 #include "chrome/browser/chromeos/system_logs/debug_log_writer.h"
 #include "chrome/browser/net/nss_context.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -149,31 +151,6 @@ bool Base64StringToHashes(const std::string& hashes_str,
   return true;
 }
 
-// Returns a Value representing the state of a pre-existing URLRequest when
-// net-internals was opened.
-base::Value* GetRequestStateAsValue(const net::URLRequest* request,
-                                    net::NetLog::LogLevel log_level) {
-  return request->GetStateAsValue();
-}
-
-// Returns true if |request1| was created before |request2|.
-bool RequestCreatedBefore(const net::URLRequest* request1,
-                          const net::URLRequest* request2) {
-  return request1->creation_time() < request2->creation_time();
-}
-
-// Returns the disk cache backend for |context| if there is one, or NULL.
-disk_cache::Backend* GetDiskCacheBackend(net::URLRequestContext* context) {
-  if (!context->http_transaction_factory())
-    return NULL;
-
-  net::HttpCache* http_cache = context->http_transaction_factory()->GetCache();
-  if (!http_cache)
-    return NULL;
-
-  return http_cache->GetCurrentBackend();
-}
-
 // Returns the http network session for |context| if there is one.
 // Otherwise, returns NULL.
 net::HttpNetworkSession* GetHttpNetworkSession(
@@ -203,7 +180,6 @@ content::WebUIDataSource* CreateNetInternalsHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUINetInternalsHost);
 
-  source->SetUseJsonJSFormatV2();
   source->SetDefaultResource(IDR_NET_INTERNALS_INDEX_HTML);
   source->AddResourcePath("index.js", IDR_NET_INTERNALS_INDEX_JS);
   source->SetJsonPath("strings.js");
@@ -224,10 +200,10 @@ class NetInternalsMessageHandler
       public base::SupportsWeakPtr<NetInternalsMessageHandler> {
  public:
   NetInternalsMessageHandler();
-  virtual ~NetInternalsMessageHandler();
+  ~NetInternalsMessageHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // Calls g_browser.receive in the renderer, passing in |command| and |arg|.
   // Takes ownership of |arg|.  If the renderer is displaying a log file, the
@@ -240,9 +216,8 @@ class NetInternalsMessageHandler
   void OnGetPrerenderInfo(const base::ListValue* list);
   void OnGetHistoricNetworkStats(const base::ListValue* list);
   void OnGetExtensionInfo(const base::ListValue* list);
+  void OnGetDataReductionProxyInfo(const base::ListValue* list);
 #if defined(OS_CHROMEOS)
-  void OnRefreshSystemLogs(const base::ListValue* list);
-  void OnGetSystemLog(const base::ListValue* list);
   void OnImportONCFile(const base::ListValue* list);
   void OnStoreDebugLogs(const base::ListValue* list);
   void OnStoreDebugLogsCompleted(const base::FilePath& log_path,
@@ -269,70 +244,10 @@ class NetInternalsMessageHandler
  private:
   class IOThreadImpl;
 
-#if defined(OS_CHROMEOS)
-  // Class that is used for getting network related ChromeOS logs.
-  // Logs are fetched from ChromeOS libcros on user request, and only when we
-  // don't yet have a copy of logs. If a copy is present, we send back data from
-  // it, else we save request and answer to it when we get logs from libcros.
-  // If needed, we also send request for system logs to libcros.
-  // Logs refresh has to be done explicitly, by deleting old logs and then
-  // loading them again.
-  class SystemLogsGetter {
-   public:
-    SystemLogsGetter(NetInternalsMessageHandler* handler,
-                     chromeos::system::SyslogsProvider* syslogs_provider);
-    ~SystemLogsGetter();
-
-    // Deletes logs copy we currently have, and resets logs_requested and
-    // logs_received flags.
-    void DeleteSystemLogs();
-    // Starts log fetching. If logs copy is present, requested logs are sent
-    // back.
-    // If syslogs load request hasn't been sent to libcros yet, we do that now,
-    // and postpone sending response.
-    // Request data is specified by args:
-    //   $1 : key of the log we are interested in.
-    //   $2 : string used to identify request.
-    void RequestSystemLog(const base::ListValue* args);
-    // Requests logs from libcros, but only if we don't have a copy.
-    void LoadSystemLogs();
-    // Processes callback from libcros containing system logs. Postponed
-    // request responses are sent.
-    void OnSystemLogsLoaded(chromeos::system::LogDictionaryType* sys_info,
-                            std::string* ignored_content);
-
-   private:
-    // Struct we save postponed log request in.
-    struct SystemLogRequest {
-      std::string log_key;
-      std::string cell_id;
-    };
-
-    // Processes request.
-    void SendLogs(const SystemLogRequest& request);
-
-    NetInternalsMessageHandler* handler_;
-    chromeos::system::SyslogsProvider* syslogs_provider_;
-    // List of postponed requests.
-    std::list<SystemLogRequest> requests_;
-    scoped_ptr<chromeos::system::LogDictionaryType> logs_;
-    bool logs_received_;
-    bool logs_requested_;
-    base::CancelableTaskTracker tracker_;
-    // Libcros request task ID.
-    base::CancelableTaskTracker::TaskId syslogs_task_id_;
-  };
-#endif  // defined(OS_CHROMEOS)
-
   // This is the "real" message handler, which lives on the IO thread.
   scoped_refptr<IOThreadImpl> proxy_;
 
   base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
-
-#if defined(OS_CHROMEOS)
-  // Class that handles getting and filtering system logs.
-  scoped_ptr<SystemLogsGetter> syslogs_getter_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
 };
@@ -385,42 +300,34 @@ class NetInternalsMessageHandler::IOThreadImpl
 
   void OnRendererReady(const base::ListValue* list);
 
-  void OnGetProxySettings(const base::ListValue* list);
+  void OnGetNetInfo(const base::ListValue* list);
   void OnReloadProxySettings(const base::ListValue* list);
-  void OnGetBadProxies(const base::ListValue* list);
   void OnClearBadProxies(const base::ListValue* list);
-  void OnGetHostResolverInfo(const base::ListValue* list);
   void OnClearHostResolverCache(const base::ListValue* list);
   void OnEnableIPv6(const base::ListValue* list);
   void OnStartConnectionTests(const base::ListValue* list);
   void OnHSTSQuery(const base::ListValue* list);
   void OnHSTSAdd(const base::ListValue* list);
   void OnHSTSDelete(const base::ListValue* list);
-  void OnGetHttpCacheInfo(const base::ListValue* list);
-  void OnGetSocketPoolInfo(const base::ListValue* list);
   void OnGetSessionNetworkStats(const base::ListValue* list);
   void OnCloseIdleSockets(const base::ListValue* list);
   void OnFlushSocketPools(const base::ListValue* list);
-  void OnGetSpdySessionInfo(const base::ListValue* list);
-  void OnGetSpdyStatus(const base::ListValue* list);
-  void OnGetSpdyAlternateProtocolMappings(const base::ListValue* list);
-  void OnGetQuicInfo(const base::ListValue* list);
 #if defined(OS_WIN)
   void OnGetServiceProviders(const base::ListValue* list);
 #endif
   void OnSetLogLevel(const base::ListValue* list);
 
   // ChromeNetLog::ThreadSafeObserver implementation:
-  virtual void OnAddEntry(const net::NetLog::Entry& entry) OVERRIDE;
+  void OnAddEntry(const net::NetLog::Entry& entry) override;
 
   // ConnectionTester::Delegate implementation:
-  virtual void OnStartConnectionTestSuite() OVERRIDE;
-  virtual void OnStartConnectionTestExperiment(
-      const ConnectionTester::Experiment& experiment) OVERRIDE;
-  virtual void OnCompletedConnectionTestExperiment(
+  void OnStartConnectionTestSuite() override;
+  void OnStartConnectionTestExperiment(
+      const ConnectionTester::Experiment& experiment) override;
+  void OnCompletedConnectionTestExperiment(
       const ConnectionTester::Experiment& experiment,
-      int result) OVERRIDE;
-  virtual void OnCompletedConnectionTestSuite() OVERRIDE;
+      int result) override;
+  void OnCompletedConnectionTestSuite() override;
 
   // Helper that calls g_browser.receive in the renderer, passing in |command|
   // and |arg|.  Takes ownership of |arg|.  If the renderer is displaying a log
@@ -435,7 +342,7 @@ class NetInternalsMessageHandler::IOThreadImpl
   typedef std::list<scoped_refptr<net::URLRequestContextGetter> >
       ContextGetterList;
 
-  virtual ~IOThreadImpl();
+  ~IOThreadImpl() override;
 
   // Adds |entry| to the queue of pending log entries to be sent to the page via
   // Javascript.  Must be called on the IO Thread.  Also creates a delayed task
@@ -454,6 +361,11 @@ class NetInternalsMessageHandler::IOThreadImpl
   net::URLRequestContext* GetMainContext() {
     return main_context_getter_->GetURLRequestContext();
   }
+
+  // |info_sources| is an or'd together list of the net::NetInfoSources to
+  // send information about.  Information is sent to Javascript in the form of
+  // a single dictionary with information about all requests sources.
+  void SendNetInfo(int info_sources);
 
   // Pointer to the UI-thread message handler. Only access this from
   // the UI thread.
@@ -515,10 +427,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
                             profile->GetRequestContext());
   proxy_->AddRequestContextGetter(profile->GetMediaRequestContext());
   proxy_->AddRequestContextGetter(profile->GetRequestContextForExtensions());
-#if defined(OS_CHROMEOS)
-  syslogs_getter_.reset(new SystemLogsGetter(this,
-      chromeos::system::SyslogsProvider::GetInstance()));
-#endif
 
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(profile);
@@ -533,25 +441,17 @@ void NetInternalsMessageHandler::RegisterMessages() {
       base::Bind(&NetInternalsMessageHandler::OnRendererReady,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      "getProxySettings",
+      "getNetInfo",
       base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetProxySettings, proxy_));
+                 &IOThreadImpl::OnGetNetInfo, proxy_));
   web_ui()->RegisterMessageCallback(
       "reloadProxySettings",
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnReloadProxySettings, proxy_));
   web_ui()->RegisterMessageCallback(
-      "getBadProxies",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetBadProxies, proxy_));
-  web_ui()->RegisterMessageCallback(
       "clearBadProxies",
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnClearBadProxies, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "getHostResolverInfo",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetHostResolverInfo, proxy_));
   web_ui()->RegisterMessageCallback(
       "clearHostResolverCache",
       base::Bind(&IOThreadImpl::CallbackHelper,
@@ -577,14 +477,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnHSTSDelete, proxy_));
   web_ui()->RegisterMessageCallback(
-      "getHttpCacheInfo",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetHttpCacheInfo, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "getSocketPoolInfo",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetSocketPoolInfo, proxy_));
-  web_ui()->RegisterMessageCallback(
       "getSessionNetworkStats",
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnGetSessionNetworkStats, proxy_));
@@ -596,22 +488,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
       "flushSocketPools",
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnFlushSocketPools, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "getSpdySessionInfo",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetSpdySessionInfo, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "getSpdyStatus",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetSpdyStatus, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "getSpdyAlternateProtocolMappings",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetSpdyAlternateProtocolMappings, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "getQuicInfo",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetQuicInfo, proxy_));
 #if defined(OS_WIN)
   web_ui()->RegisterMessageCallback(
       "getServiceProviders",
@@ -639,15 +515,11 @@ void NetInternalsMessageHandler::RegisterMessages() {
       "getExtensionInfo",
       base::Bind(&NetInternalsMessageHandler::OnGetExtensionInfo,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getDataReductionProxyInfo",
+      base::Bind(&NetInternalsMessageHandler::OnGetDataReductionProxyInfo,
+                 base::Unretained(this)));
 #if defined(OS_CHROMEOS)
-  web_ui()->RegisterMessageCallback(
-      "refreshSystemLogs",
-      base::Bind(&NetInternalsMessageHandler::OnRefreshSystemLogs,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(
-      "getSystemLog",
-      base::Bind(&NetInternalsMessageHandler::OnGetSystemLog,
-                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "importONCFile",
       base::Bind(&NetInternalsMessageHandler::OnImportONCFile,
@@ -711,8 +583,10 @@ void NetInternalsMessageHandler::OnGetPrerenderInfo(
 void NetInternalsMessageHandler::OnGetHistoricNetworkStats(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  Profile* profile = Profile::FromWebUI(web_ui());
   base::Value* historic_network_info =
-      ChromeNetworkDelegate::HistoricNetworkStatsInfoToValue();
+      data_reduction_proxy::DataReductionProxyNetworkDelegate::
+          HistoricNetworkStatsInfoToValue(profile->GetPrefs());
   SendJavascriptCommand("receivedHistoricNetworkStats", historic_network_info);
 }
 
@@ -743,100 +617,19 @@ void NetInternalsMessageHandler::OnGetExtensionInfo(
   SendJavascriptCommand("receivedExtensionInfo", extension_list);
 }
 
-#if defined(OS_CHROMEOS)
-////////////////////////////////////////////////////////////////////////////////
-//
-// NetInternalsMessageHandler::SystemLogsGetter
-//
-////////////////////////////////////////////////////////////////////////////////
-
-NetInternalsMessageHandler::SystemLogsGetter::SystemLogsGetter(
-    NetInternalsMessageHandler* handler,
-    chromeos::system::SyslogsProvider* syslogs_provider)
-    : handler_(handler),
-      syslogs_provider_(syslogs_provider),
-      logs_received_(false),
-      logs_requested_(false) {
-  if (!syslogs_provider_)
-    LOG(ERROR) << "System access library not loaded";
+void NetInternalsMessageHandler::OnGetDataReductionProxyInfo(
+    const base::ListValue* list) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  Profile* profile = Profile::FromWebUI(web_ui());
+  DataReductionProxyChromeSettings* data_reduction_proxy_settings =
+      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile);
+  data_reduction_proxy::DataReductionProxyEventStore* event_store =
+      (data_reduction_proxy_settings == nullptr) ? nullptr :
+          data_reduction_proxy_settings->GetEventStore();
+  SendJavascriptCommand(
+      "receivedDataReductionProxyInfo",
+      (event_store == nullptr) ? nullptr : event_store->GetSummaryValue());
 }
-
-NetInternalsMessageHandler::SystemLogsGetter::~SystemLogsGetter() {
-  DeleteSystemLogs();
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::DeleteSystemLogs() {
-  if (syslogs_provider_ && logs_requested_ && !logs_received_) {
-    tracker_.TryCancel(syslogs_task_id_);
-  }
-  logs_requested_ = false;
-  logs_received_ = false;
-  logs_.reset();
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::RequestSystemLog(
-    const base::ListValue* args) {
-  if (!logs_requested_) {
-    DCHECK(!logs_received_);
-    LoadSystemLogs();
-  }
-  SystemLogRequest log_request;
-  args->GetString(0, &log_request.log_key);
-  args->GetString(1, &log_request.cell_id);
-
-  if (logs_received_) {
-    SendLogs(log_request);
-  } else {
-    requests_.push_back(log_request);
-  }
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::LoadSystemLogs() {
-  if (logs_requested_ || !syslogs_provider_)
-    return;
-  logs_requested_ = true;
-  syslogs_task_id_ = syslogs_provider_->RequestSyslogs(
-      false,  // compress logs.
-      chromeos::system::SyslogsProvider::SYSLOGS_NETWORK,
-      base::Bind(
-          &NetInternalsMessageHandler::SystemLogsGetter::OnSystemLogsLoaded,
-          base::Unretained(this)),
-      &tracker_);
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::OnSystemLogsLoaded(
-    chromeos::system::LogDictionaryType* sys_info,
-    std::string* ignored_content) {
-  DCHECK(!ignored_content);
-  logs_.reset(sys_info);
-  logs_received_ = true;
-  for (std::list<SystemLogRequest>::iterator request_it = requests_.begin();
-       request_it != requests_.end();
-       ++request_it) {
-    SendLogs(*request_it);
-  }
-  requests_.clear();
-}
-
-void NetInternalsMessageHandler::SystemLogsGetter::SendLogs(
-    const SystemLogRequest& request) {
-  base::DictionaryValue* result = new base::DictionaryValue();
-  chromeos::system::LogDictionaryType::iterator log_it =
-      logs_->find(request.log_key);
-  if (log_it != logs_->end()) {
-    if (!log_it->second.empty()) {
-      result->SetString("log", log_it->second);
-    } else {
-      result->SetString("log", "<no relevant lines found>");
-    }
-  } else {
-    result->SetString("log", "<invalid log name>");
-  }
-  result->SetString("cellId", request.cell_id);
-
-  handler_->SendJavascriptCommand("getSystemLogCallback", result);
-}
-#endif  // defined(OS_CHROMEOS)
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -902,35 +695,34 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  // If we have any pending entries, go ahead and get rid of them, so they won't
-  // appear before the REQUEST_ALIVE events we add for currently active
-  // URLRequests.
-  PostPendingEntries();
+  // If currently watching the NetLog, temporarily stop watching it and flush
+  // pending events, so they won't appear before the status events created for
+  // currently active network objects below.
+  if (net_log()) {
+    net_log()->RemoveThreadSafeObserver(this);
+    PostPendingEntries();
+  }
 
   SendJavascriptCommand("receivedConstants", NetInternalsUI::GetConstants());
 
-  // Add entries for ongoing URL requests.
+  // TODO(mmenke) DCHECK in CreateNetLogEntriesForActiveObjects in
+  // net_log_util.cc fails on Android (https://www.crbug.com/453088)
+#if !defined(OS_ANDROID)
   PrePopulateEventList();
+#endif
 
-  if (!net_log()) {
-    // Register with network stack to observe events.
-    io_thread_->net_log()->AddThreadSafeObserver(this,
-        net::NetLog::LOG_ALL_BUT_BYTES);
-  }
+  // Register with network stack to observe events.
+  io_thread_->net_log()->AddThreadSafeObserver(this,
+      net::NetLog::LOG_ALL_BUT_BYTES);
 }
 
-void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
+void NetInternalsMessageHandler::IOThreadImpl::OnGetNetInfo(
     const base::ListValue* list) {
-  DCHECK(!list);
-  net::ProxyService* proxy_service = GetMainContext()->proxy_service();
-
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  if (proxy_service->fetched_config().is_valid())
-    dict->Set("original", proxy_service->fetched_config().ToValue());
-  if (proxy_service->config().is_valid())
-    dict->Set("effective", proxy_service->config().ToValue());
-
-  SendJavascriptCommand("receivedProxySettings", dict);
+  DCHECK(list);
+  int info_sources;
+  if (!list->GetInteger(0, &info_sources))
+    return;
+  SendNetInfo(info_sources);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
@@ -939,32 +731,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
   GetMainContext()->proxy_service()->ForceReloadProxyConfig();
 
   // Cause the renderer to be notified of the new values.
-  OnGetProxySettings(NULL);
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
-    const base::ListValue* list) {
-  DCHECK(!list);
-
-  const net::ProxyRetryInfoMap& bad_proxies_map =
-      GetMainContext()->proxy_service()->proxy_retry_info();
-
-  base::ListValue* dict_list = new base::ListValue();
-
-  for (net::ProxyRetryInfoMap::const_iterator it = bad_proxies_map.begin();
-       it != bad_proxies_map.end(); ++it) {
-    const std::string& proxy_uri = it->first;
-    const net::ProxyRetryInfo& retry_info = it->second;
-
-    base::DictionaryValue* dict = new base::DictionaryValue();
-    dict->SetString("proxy_uri", proxy_uri);
-    dict->SetString("bad_until",
-                    net::NetLog::TickCountToString(retry_info.bad_until));
-
-    dict_list->Append(dict);
-  }
-
-  SendJavascriptCommand("receivedBadProxies", dict_list);
+  SendNetInfo(net::NET_INFO_PROXY_SETTINGS);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
@@ -973,69 +740,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
   GetMainContext()->proxy_service()->ClearBadProxiesCache();
 
   // Cause the renderer to be notified of the new values.
-  OnGetBadProxies(NULL);
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  net::URLRequestContext* context = GetMainContext();
-  net::HostCache* cache = GetHostResolverCache(context);
-
-  if (!cache) {
-    SendJavascriptCommand("receivedHostResolverInfo", NULL);
-    return;
-  }
-
-  base::DictionaryValue* dict = new base::DictionaryValue();
-
-  base::Value* dns_config = context->host_resolver()->GetDnsConfigAsValue();
-  if (dns_config)
-    dict->Set("dns_config", dns_config);
-
-  dict->SetInteger(
-      "default_address_family",
-      static_cast<int>(context->host_resolver()->GetDefaultAddressFamily()));
-
-  base::DictionaryValue* cache_info_dict = new base::DictionaryValue();
-
-  cache_info_dict->SetInteger(
-      "capacity",
-      static_cast<int>(cache->max_entries()));
-
-  base::ListValue* entry_list = new base::ListValue();
-
-  net::HostCache::EntryMap::Iterator it(cache->entries());
-  for (; it.HasNext(); it.Advance()) {
-    const net::HostCache::Key& key = it.key();
-    const net::HostCache::Entry& entry = it.value();
-
-    base::DictionaryValue* entry_dict = new base::DictionaryValue();
-
-    entry_dict->SetString("hostname", key.hostname);
-    entry_dict->SetInteger("address_family",
-        static_cast<int>(key.address_family));
-    entry_dict->SetString("expiration",
-                          net::NetLog::TickCountToString(it.expiration()));
-
-    if (entry.error != net::OK) {
-      entry_dict->SetInteger("error", entry.error);
-    } else {
-      // Append all of the resolved addresses.
-      base::ListValue* address_list = new base::ListValue();
-      for (size_t i = 0; i < entry.addrlist.size(); ++i) {
-        address_list->AppendString(entry.addrlist[i].ToStringWithoutPort());
-      }
-      entry_dict->Set("addresses", address_list);
-    }
-
-    entry_list->Append(entry_dict);
-  }
-
-  cache_info_dict->Set("entries", entry_list);
-  dict->Set("cache", cache_info_dict);
-
-  SendJavascriptCommand("receivedHostResolverInfo", dict);
+  SendNetInfo(net::NET_INFO_BAD_PROXIES);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
@@ -1047,7 +752,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
     cache->clear();
 
   // Cause the renderer to be notified of the new values.
-  OnGetHostResolverInfo(NULL);
+  SendNetInfo(net::NET_INFO_HOST_RESOLVER);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnEnableIPv6(
@@ -1058,7 +763,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnEnableIPv6(
   host_resolver->SetDefaultAddressFamily(net::ADDRESS_FAMILY_UNSPECIFIED);
 
   // Cause the renderer to be notified of the new value.
-  OnGetHostResolverInfo(NULL);
+  SendNetInfo(net::NET_INFO_HOST_RESOLVER);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
@@ -1117,6 +822,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
                           static_state.pkp.expiry.ToDoubleT());
         result->SetString("static_spki_hashes",
                           HashesToBase64String(static_state.pkp.spki_hashes));
+        result->SetString("static_sts_domain", static_state.sts.domain);
+        result->SetString("static_pkp_domain", static_state.pkp.domain);
       }
 
       net::TransportSecurityState::DomainState dynamic_state;
@@ -1140,16 +847,11 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
                           dynamic_state.pkp.expiry.ToDoubleT());
         result->SetString("dynamic_spki_hashes",
                           HashesToBase64String(dynamic_state.pkp.spki_hashes));
+        result->SetString("dynamic_sts_domain", dynamic_state.sts.domain);
+        result->SetString("dynamic_pkp_domain", dynamic_state.pkp.domain);
       }
 
       result->SetBoolean("result", found_static || found_dynamic);
-      if (found_static) {
-        result->SetString("domain", static_state.domain);
-      } else if (found_dynamic) {
-        result->SetString("domain", dynamic_state.domain);
-      } else {
-        result->SetString("domain", domain);
-      }
     }
   }
 
@@ -1208,42 +910,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSDelete(
   transport_security_state->DeleteDynamicDataForHost(domain);
 }
 
-void NetInternalsMessageHandler::IOThreadImpl::OnGetHttpCacheInfo(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  base::DictionaryValue* info_dict = new base::DictionaryValue();
-  base::DictionaryValue* stats_dict = new base::DictionaryValue();
-
-  disk_cache::Backend* disk_cache = GetDiskCacheBackend(GetMainContext());
-
-  if (disk_cache) {
-    // Extract the statistics key/value pairs from the backend.
-    base::StringPairs stats;
-    disk_cache->GetStats(&stats);
-    for (size_t i = 0; i < stats.size(); ++i) {
-      stats_dict->SetStringWithoutPathExpansion(
-          stats[i].first, stats[i].second);
-    }
-  }
-
-  info_dict->Set("stats", stats_dict);
-
-  SendJavascriptCommand("receivedHttpCacheInfo", info_dict);
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::OnGetSocketPoolInfo(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  net::HttpNetworkSession* http_network_session =
-      GetHttpNetworkSession(GetMainContext());
-
-  base::Value* socket_pool_info = NULL;
-  if (http_network_session)
-    socket_pool_info = http_network_session->SocketPoolInfoToValue();
-
-  SendJavascriptCommand("receivedSocketPoolInfo", socket_pool_info);
-}
-
 void NetInternalsMessageHandler::IOThreadImpl::OnGetSessionNetworkStats(
     const base::ListValue* list) {
   DCHECK(!list);
@@ -1252,8 +918,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSessionNetworkStats(
 
   base::Value* network_info = NULL;
   if (http_network_session) {
-    ChromeNetworkDelegate* net_delegate =
-        static_cast<ChromeNetworkDelegate*>(
+    data_reduction_proxy::DataReductionProxyNetworkDelegate* net_delegate =
+        static_cast<data_reduction_proxy::DataReductionProxyNetworkDelegate*>(
             http_network_session->network_delegate());
     if (net_delegate) {
       network_info = net_delegate->SessionNetworkStatsInfoToValue();
@@ -1280,77 +946,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnCloseIdleSockets(
 
   if (http_network_session)
     http_network_session->CloseIdleConnections();
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::OnGetSpdySessionInfo(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  net::HttpNetworkSession* http_network_session =
-      GetHttpNetworkSession(GetMainContext());
-
-  base::Value* spdy_info = http_network_session ?
-      http_network_session->SpdySessionPoolInfoToValue() : NULL;
-  SendJavascriptCommand("receivedSpdySessionInfo", spdy_info);
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::OnGetSpdyStatus(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  base::DictionaryValue* status_dict = new base::DictionaryValue();
-
-  net::HttpNetworkSession* http_network_session =
-      GetHttpNetworkSession(GetMainContext());
-
-  status_dict->SetBoolean("spdy_enabled",
-                          net::HttpStreamFactory::spdy_enabled());
-  status_dict->SetBoolean(
-      "use_alternate_protocols",
-      http_network_session->params().use_alternate_protocols);
-  status_dict->SetBoolean("force_spdy_over_ssl",
-                          http_network_session->params().force_spdy_over_ssl);
-  status_dict->SetBoolean("force_spdy_always",
-                          http_network_session->params().force_spdy_always);
-
-  std::vector<std::string> next_protos;
-  http_network_session->GetNextProtos(&next_protos);
-  std::string next_protos_string = JoinString(next_protos, ',');
-  status_dict->SetString("next_protos", next_protos_string);
-
-  SendJavascriptCommand("receivedSpdyStatus", status_dict);
-}
-
-void
-NetInternalsMessageHandler::IOThreadImpl::OnGetSpdyAlternateProtocolMappings(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  base::ListValue* dict_list = new base::ListValue();
-
-  const net::HttpServerProperties& http_server_properties =
-      *GetMainContext()->http_server_properties();
-
-  const net::AlternateProtocolMap& map =
-      http_server_properties.alternate_protocol_map();
-
-  for (net::AlternateProtocolMap::const_iterator it = map.begin();
-       it != map.end(); ++it) {
-    base::DictionaryValue* dict = new base::DictionaryValue();
-    dict->SetString("host_port_pair", it->first.ToString());
-    dict->SetString("alternate_protocol", it->second.ToString());
-    dict_list->Append(dict);
-  }
-
-  SendJavascriptCommand("receivedSpdyAlternateProtocolMappings", dict_list);
-}
-
-void NetInternalsMessageHandler::IOThreadImpl::OnGetQuicInfo(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  net::HttpNetworkSession* http_network_session =
-      GetHttpNetworkSession(GetMainContext());
-
-  base::Value* quic_info = http_network_session ?
-      http_network_session->QuicInfoToValue() : NULL;
-  SendJavascriptCommand("receivedQuicInfo", quic_info);
 }
 
 #if defined(OS_WIN)
@@ -1396,26 +991,13 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetServiceProviders(
 #endif
 
 #if defined(OS_CHROMEOS)
-void NetInternalsMessageHandler::OnRefreshSystemLogs(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  DCHECK(syslogs_getter_.get());
-  syslogs_getter_->DeleteSystemLogs();
-  syslogs_getter_->LoadSystemLogs();
-}
-
-void NetInternalsMessageHandler::OnGetSystemLog(
-    const base::ListValue* list) {
-  DCHECK(syslogs_getter_.get());
-  syslogs_getter_->RequestSystemLog(list);
-}
-
 void NetInternalsMessageHandler::ImportONCFileToNSSDB(
     const std::string& onc_blob,
     const std::string& passcode,
     net::NSSCertDatabase* nssdb) {
-  user_manager::User* user = chromeos::ProfileHelper::Get()->GetUserByProfile(
-      Profile::FromWebUI(web_ui()));
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(
+          Profile::FromWebUI(web_ui()));
 
   if (!user) {
     std::string error = "User not found.";
@@ -1634,7 +1216,7 @@ void NetInternalsMessageHandler::IOThreadImpl::PostPendingEntries() {
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
-  // Use a set to prevent duplicates.
+  // Using a set removes any duplicates.
   std::set<net::URLRequestContext*> contexts;
   for (ContextGetterList::const_iterator getter = context_getters_.begin();
        getter != context_getters_.end(); ++getter) {
@@ -1643,46 +1225,15 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
   contexts.insert(io_thread_->globals()->proxy_script_fetcher_context.get());
   contexts.insert(io_thread_->globals()->system_request_context.get());
 
-  // Put together the list of all requests.
-  std::vector<const net::URLRequest*> requests;
-  for (std::set<net::URLRequestContext*>::const_iterator context =
-           contexts.begin();
-       context != contexts.end(); ++context) {
-    std::set<const net::URLRequest*>* context_requests =
-        (*context)->url_requests();
-    for (std::set<const net::URLRequest*>::const_iterator request_it =
-             context_requests->begin();
-         request_it != context_requests->end(); ++request_it) {
-      DCHECK_EQ(io_thread_->net_log(), (*request_it)->net_log().net_log());
-      requests.push_back(*request_it);
-    }
-  }
+  // Add entries for ongoing network objects.
+  CreateNetLogEntriesForActiveObjects(contexts, this);
+}
 
-  // Sort by creation time.
-  std::sort(requests.begin(), requests.end(), RequestCreatedBefore);
-
-  // Create fake events.
-  for (std::vector<const net::URLRequest*>::const_iterator request_it =
-           requests.begin();
-       request_it != requests.end(); ++request_it) {
-    const net::URLRequest* request = *request_it;
-    net::NetLog::ParametersCallback callback =
-        base::Bind(&GetRequestStateAsValue, base::Unretained(request));
-
-    // Create and add the entry directly, to avoid sending it to any other
-    // NetLog observers.
-    net::NetLog::EntryData entry_data(net::NetLog::TYPE_REQUEST_ALIVE,
-                                      request->net_log().source(),
-                                      net::NetLog::PHASE_BEGIN,
-                                      request->creation_time(),
-                                      &callback);
-    net::NetLog::Entry entry(&entry_data, request->net_log().GetLogLevel());
-
-    // Have to add |entry| to the queue synchronously, as there may already
-    // be posted tasks queued up to add other events for |request|, which we
-    // want |entry| to precede.
-    AddEntryToQueue(entry.ToValue());
-  }
+void NetInternalsMessageHandler::IOThreadImpl::SendNetInfo(int info_sources) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  SendJavascriptCommand(
+      "receivedNetInfo",
+      net::GetNetInfo(GetMainContext(), info_sources).release());
 }
 
 }  // namespace
@@ -1696,7 +1247,7 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
 
 // static
 base::Value* NetInternalsUI::GetConstants() {
-  base::DictionaryValue* constants_dict = net::NetLogLogger::GetConstants();
+  scoped_ptr<base::DictionaryValue> constants_dict = net::GetNetConstants();
   DCHECK(constants_dict);
 
   // Add a dictionary with the version of the client and its command line
@@ -1706,27 +1257,26 @@ base::Value* NetInternalsUI::GetConstants() {
 
     chrome::VersionInfo version_info;
 
-    if (!version_info.is_valid()) {
-      DLOG(ERROR) << "Unable to create chrome::VersionInfo";
-    } else {
-      // We have everything we need to send the right values.
-      dict->SetString("name", version_info.Name());
-      dict->SetString("version", version_info.Version());
-      dict->SetString("cl", version_info.LastChange());
-      dict->SetString("version_mod",
-                      chrome::VersionInfo::GetVersionStringModifier());
-      dict->SetString("official",
-                      version_info.IsOfficialBuild() ? "official" :
-                                                       "unofficial");
-      dict->SetString("os_type", version_info.OSType());
-      dict->SetString("command_line",
-                      CommandLine::ForCurrentProcess()->GetCommandLineString());
-    }
+    // We have everything we need to send the right values.
+    dict->SetString("name", version_info.Name());
+    dict->SetString("version", version_info.Version());
+    dict->SetString("cl", version_info.LastChange());
+    dict->SetString("version_mod",
+                    chrome::VersionInfo::GetVersionStringModifier());
+    dict->SetString("official",
+                    version_info.IsOfficialBuild() ? "official" : "unofficial");
+    dict->SetString("os_type", version_info.OSType());
+    dict->SetString(
+        "command_line",
+        base::CommandLine::ForCurrentProcess()->GetCommandLineString());
 
     constants_dict->Set("clientInfo", dict);
+
+    data_reduction_proxy::DataReductionProxyEventStore::AddConstants(
+        constants_dict.get());
   }
 
-  return constants_dict;
+  return constants_dict.release();
 }
 
 NetInternalsUI::NetInternalsUI(content::WebUI* web_ui)

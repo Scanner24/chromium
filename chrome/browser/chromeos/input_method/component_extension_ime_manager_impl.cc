@@ -18,16 +18,14 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/ime/extension_ime_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
-#include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -96,6 +94,7 @@ const struct InputMethodNameMap {
        IDS_IME_NAME_INPUTMETHOD_HANGUL_AHNMATAE},
       {"__MSG_INPUTMETHOD_HANGUL_ROMAJA__",
        IDS_IME_NAME_INPUTMETHOD_HANGUL_ROMAJA},
+      {"__MSG_INPUTMETHOD_HANGUL__", IDS_IME_NAME_INPUTMETHOD_HANGUL},
       {"__MSG_INPUTMETHOD_MOZC_JP__", IDS_IME_NAME_INPUTMETHOD_MOZC_JP},
       {"__MSG_INPUTMETHOD_MOZC_US__", IDS_IME_NAME_INPUTMETHOD_MOZC_US},
       {"__MSG_INPUTMETHOD_PINYIN__", IDS_IME_NAME_INPUTMETHOD_PINYIN},
@@ -153,6 +152,7 @@ const struct InputMethodNameMap {
       {"__MSG_KEYBOARD_LITHUANIAN__", IDS_IME_NAME_KEYBOARD_LITHUANIAN},
       {"__MSG_KEYBOARD_MALAYALAM_PHONETIC__",
        IDS_IME_NAME_KEYBOARD_MALAYALAM_PHONETIC},
+      {"__MSG_KEYBOARD_MALTESE__", IDS_IME_NAME_KEYBOARD_MALTESE},
       {"__MSG_KEYBOARD_MONGOLIAN__", IDS_IME_NAME_KEYBOARD_MONGOLIAN},
       {"__MSG_KEYBOARD_MYANMAR_MYANSAN__",
        IDS_IME_NAME_KEYBOARD_MYANMAR_MYANSAN},
@@ -161,11 +161,18 @@ const struct InputMethodNameMap {
        IDS_IME_NAME_KEYBOARD_NEPALI_INSCRIPT},
       {"__MSG_KEYBOARD_NEPALI_PHONETIC__",
        IDS_IME_NAME_KEYBOARD_NEPALI_PHONETIC},
+      {"__MSG_KEYBOARD_NETHERLANDS__", IDS_IME_NAME_KEYBOARD_NETHERLANDS},
       {"__MSG_KEYBOARD_NORWEGIAN__", IDS_IME_NAME_KEYBOARD_NORWEGIAN},
       {"__MSG_KEYBOARD_PERSIAN__", IDS_IME_NAME_KEYBOARD_PERSIAN},
       {"__MSG_KEYBOARD_POLISH__", IDS_IME_NAME_KEYBOARD_POLISH},
       {"__MSG_KEYBOARD_PORTUGUESE__", IDS_IME_NAME_KEYBOARD_PORTUGUESE},
+      {"__MSG_KEYBOARD_ROMANIAN_STANDARD__",
+       IDS_IME_NAME_KEYBOARD_ROMANIAN_STANDARD},
       {"__MSG_KEYBOARD_ROMANIAN__", IDS_IME_NAME_KEYBOARD_ROMANIAN},
+      {"__MSG_KEYBOARD_RUSSIAN_PHONETIC_AATSEEL__",
+       IDS_IME_NAME_KEYBOARD_RUSSIAN_PHONETIC_AATSEEL},
+      {"__MSG_KEYBOARD_RUSSIAN_PHONETIC_YAZHERT__",
+       IDS_IME_NAME_KEYBOARD_RUSSIAN_PHONETIC_YAZHERT},
       {"__MSG_KEYBOARD_RUSSIAN_PHONETIC__",
        IDS_IME_NAME_KEYBOARD_RUSSIAN_PHONETIC},
       {"__MSG_KEYBOARD_RUSSIAN__", IDS_IME_NAME_KEYBOARD_RUSSIAN},
@@ -248,6 +255,7 @@ void DoLoadExtension(Profile* profile,
   extensions::ExtensionSystem* extension_system =
       extensions::ExtensionSystem::Get(profile);
   ExtensionService* extension_service = extension_system->extension_service();
+  DCHECK(extension_service);
   if (extension_service->GetExtensionById(extension_id, false))
     return;
   const std::string loaded_extension_id =
@@ -287,16 +295,9 @@ void ComponentExtensionIMEManagerImpl::Load(Profile* profile,
                                             const std::string& extension_id,
                                             const std::string& manifest,
                                             const base::FilePath& file_path) {
-  if (base::SysInfo::IsRunningOnChromeOS()) {
-    // In the case of real Chrome OS device, the no need to check the file path
-    // for preinstalled files existence.
-    DoLoadExtension(profile, extension_id, manifest, file_path);
-    return;
-  }
-  // If current environment is linux_chromeos, check the existence of file path
-  // to avoid unnecessary extension loading and InputMethodEngine creation, so
-  // that the virtual keyboard web content url won't be override by IME
-  // component extensions.
+  // Check the existence of file path to avoid unnecessary extension loading
+  // and InputMethodEngine creation, so that the virtual keyboard web content
+  // url won't be override by IME component extensions.
   base::FilePath* copied_file_path = new base::FilePath(file_path);
   content::BrowserThread::PostTaskAndReplyWithResult(
       content::BrowserThread::FILE,
@@ -345,6 +346,8 @@ bool ComponentExtensionIMEManagerImpl::ReadEngineComponent(
     return false;
   if (!dict.GetString(extensions::manifest_keys::kName, &out->display_name))
     return false;
+  if (!dict.GetString(extensions::manifest_keys::kIndicator, &out->indicator))
+    out->indicator = "";
 
   // Localizes the input method name.
   if (out->display_name.find("__MSG_") == 0) {

@@ -18,19 +18,13 @@ namespace protocol {
 class HostVideoDispatcher : public ChannelDispatcherBase, public VideoStub {
  public:
   HostVideoDispatcher();
-  virtual ~HostVideoDispatcher();
+  ~HostVideoDispatcher() override;
 
   // VideoStub interface.
-  virtual void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
-                                  const base::Closure& done) OVERRIDE;
-
- protected:
-  // ChannelDispatcherBase overrides.
-  virtual void OnInitialized() OVERRIDE;
+  void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
+                          const base::Closure& done) override;
 
  private:
-  BufferedSocketWriter writer_;
-
   DISALLOW_COPY_AND_ASSIGN(HostVideoDispatcher);
 };
 

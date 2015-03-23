@@ -59,13 +59,10 @@ extern const wchar_t kTestingInterfaceDLL[];
 extern const char    kInitialProfile[];
 extern const char    kMultiProfileDirPrefix[];
 extern const base::FilePath::CharType kGuestProfileDir[];
+extern const base::FilePath::CharType kSystemProfileDir[];
 extern const wchar_t kBrowserResourcesDll[];
 
 // filenames
-#if defined(OS_ANDROID)
-extern const base::FilePath::CharType kAndroidCacheFilename[];
-#endif
-extern const base::FilePath::CharType kArchivedHistoryFilename[];
 extern const base::FilePath::CharType kCacheDirname[];
 extern const base::FilePath::CharType kChannelIDFilename[];
 extern const base::FilePath::CharType kCookieFilename[];
@@ -73,10 +70,8 @@ extern const base::FilePath::CharType kCRLSetFilename[];
 extern const base::FilePath::CharType kCustomDictionaryFileName[];
 extern const base::FilePath::CharType kExtensionActivityLogFilename[];
 extern const base::FilePath::CharType kExtensionsCookieFilename[];
-extern const base::FilePath::CharType kFaviconsFilename[];
 extern const base::FilePath::CharType kFirstRunSentinel[];
 extern const base::FilePath::CharType kGCMStoreDirname[];
-extern const base::FilePath::CharType kHistoryFilename[];
 extern const base::FilePath::CharType kJumpListIconDirname[];
 extern const base::FilePath::CharType kLocalStateFilename[];
 extern const base::FilePath::CharType kLocalStorePoolName[];
@@ -109,11 +104,6 @@ extern const wchar_t kUserDataDirname[];
 
 extern const bool kRecordModeEnabled;
 
-// If a WebContents is impolite and displays a second JavaScript alert within
-// kJavaScriptMessageExpectedDelay of a previous JavaScript alert being
-// dismissed, display an option to suppress future alerts from this WebContents.
-extern const int kJavaScriptMessageExpectedDelay;
-
 // Are touch icons enabled? False by default.
 extern const bool kEnableTouchIcon;
 
@@ -123,9 +113,6 @@ extern const bool kEnableTouchIcon;
 // enough render processes and not be starved when a lot of extensions are
 // installed.
 extern const float kMaxShareOfExtensionProcesses;
-
-// This is used by the PreRead experiment.
-extern const char kPreReadEnvironmentVariable[];
 
 #if defined(OS_LINUX)
 // The highest and lowest assigned OOM score adjustment
@@ -147,9 +134,10 @@ extern const wchar_t kLaunchModeValue[];
 // stored in a subkey named with the version number of the build. Each value
 // under the subkey represents an additional attempt.
 extern const wchar_t kBrowserCrashDumpAttemptsRegistryPath[];
-// Used by chrome.exe to signal that chrome.dll was started via a key sequence
-// that requires it to start in safe mode. For example, in software rendering.
-extern const char kSafeModeEnvVar[];
+// Registry location where the browser watcher stores browser exit codes.
+// This is picked up and stored in histograms by the browser on the subsequent
+// launch.
+extern const wchar_t kBrowserExitCodesRegistryPath[];
 #endif
 
 #if defined(OS_CHROMEOS)

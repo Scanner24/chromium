@@ -114,8 +114,8 @@ void ShowItemInFolderOnFileThread(const base::FilePath& full_path) {
 // is empty. This function tells if it is.
 bool ValidateShellCommandForScheme(const std::string& scheme) {
   base::win::RegKey key;
-  std::wstring registry_path = base::ASCIIToWide(scheme) +
-                               L"\\shell\\open\\command";
+  base::string16 registry_path = base::ASCIIToUTF16(scheme) +
+                                 L"\\shell\\open\\command";
   key.Open(HKEY_CLASSES_ROOT, registry_path.c_str(), KEY_READ);
   if (!key.Valid())
     return false;
@@ -210,28 +210,5 @@ void OpenExternal(Profile* profile, const GURL& url) {
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
                           base::Bind(&OpenExternalOnFileThread, url));
 }
-
-#if !defined(USE_AURA)
-gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
-  return ::GetAncestor(view, GA_ROOT);
-}
-
-gfx::NativeView GetParent(gfx::NativeView view) {
-  return ::GetParent(view);
-}
-
-bool IsWindowActive(gfx::NativeWindow window) {
-  return ::GetForegroundWindow() == window;
-}
-
-void ActivateWindow(gfx::NativeWindow window) {
-  ::SetForegroundWindow(window);
-}
-
-bool IsVisible(gfx::NativeView view) {
-  // MSVC complains if we don't include != 0.
-  return ::IsWindowVisible(view) != 0;
-}
-#endif
 
 }  // namespace platform_util

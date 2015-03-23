@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * MetadataCache is a map from Entry to an object containing properties.
  * Properties are divided by types, and all properties of one type are accessed
@@ -11,8 +9,7 @@
  * Some of the properties:
  * {
  *   filesystem: size, modificationTime
- *   internal: presence
- *   external: pinned, present, hosted, availableOffline
+ *   external: pinned, present, hosted, availableOffline, externalFileUrl
  *
  *   Following are not fetched for non-present external files.
  *   media: artist, album, title, width, height, imageTransform, etc.
@@ -31,7 +28,7 @@
  *       alert("Pinned and empty!");
  *   });
  *
- *   cache.set(entry, 'internal', {presence: 'deleted'});
+ *   cache.set(entry, 'external', {present: true});
  *
  *   cache.clear([fileEntry1, fileEntry2], 'filesystem');
  *
@@ -47,6 +44,7 @@
  *
  * @param {Array.<MetadataProvider>} providers Metadata providers.
  * @constructor
+ * @struct
  */
 function MetadataCache(providers) {
   /**
@@ -86,8 +84,6 @@ function MetadataCache(providers) {
    * @private
    */
   this.lastBatchStart_ = new Date();
-
-  Object.seal(this);
 }
 
 /**
@@ -114,7 +110,8 @@ MetadataCache.DESCENDANTS = 2;
 MetadataCache.EVICTION_THRESHOLD_MARGIN = 500;
 
 /**
- * @param {VolumeManagerWrapper} volumeManager Volume manager instance.
+ * @param {VolumeManagerCommon.VolumeInfoProvider} volumeManager Volume manager
+ *     instance.
  * @return {MetadataCache!} The cache with all providers.
  */
 MetadataCache.createFull = function(volumeManager) {
@@ -130,8 +127,8 @@ MetadataCache.createFull = function(volumeManager) {
 /**
  * Clones metadata entry. Metadata entries may contain scalars, arrays,
  * hash arrays and Date object. Other objects are not supported.
- * @param {Object} metadata Metadata object.
- * @return {Object} Cloned entry.
+ * @param {!Object} metadata Metadata object.
+ * @return {!Object} Cloned entry.
  */
 MetadataCache.cloneMetadata = function(metadata) {
   if (metadata instanceof Array) {
@@ -197,7 +194,7 @@ MetadataCache.prototype.currentEvictionThreshold_ = function() {
  *
  * @param {Array.<Entry>} entries The list of entries.
  * @param {string} type The metadata type.
- * @param {function(Object)} callback The metadata is passed to callback.
+ * @param {?function(Object)} callback The metadata is passed to callback.
  *     The callback is called asynchronously.
  */
 MetadataCache.prototype.get = function(entries, type, callback) {
@@ -210,7 +207,7 @@ MetadataCache.prototype.get = function(entries, type, callback) {
  *
  * @param {Array.<Entry>} entries The list of entries.
  * @param {string} type The metadata type.
- * @param {function(Object)} callback The metadata is passed to callback.
+ * @param {?function(Object)} callback The metadata is passed to callback.
  *     The callback is called asynchronously.
  */
 MetadataCache.prototype.getLatest = function(entries, type, callback) {
@@ -224,7 +221,7 @@ MetadataCache.prototype.getLatest = function(entries, type, callback) {
  * @param {string} type The metadata type.
  * @param {boolean} refresh True to get the latest value and refresh the cache,
  *     false to get the value from the cache.
- * @param {function(Object)} callback The metadata is passed to callback.
+ * @param {?function(Object)} callback The metadata is passed to callback.
  *     The callback is called asynchronously.
  * @private
  */
@@ -360,8 +357,13 @@ MetadataCache.prototype.getOneInternal_ =
 
   var tryNextProvider = function() {
     if (providers.length === 0) {
+      // If not found, then mark the property as unavailable, so it's not
+      // retrieved again.
+      if (!(type in item.properties))
+        item.properties[type] = null;
+
       self.endBatchUpdates();
-      setTimeout(callback.bind(null, item.properties[type] || null), 0);
+      setTimeout(callback.bind(null, item.properties[type]), 0);
       return;
     }
 
@@ -495,13 +497,20 @@ MetadataCache.prototype.clearRecursively = function(entry, type) {
 MetadataCache.prototype.addObserver = function(
     entry, relation, type, observer) {
   var entryURL = entry.toURL();
+
+  // Escape following regexp special characters:
+  // \^$.*+?|&{}[]()<>
+  var escapedEntryURL = entryURL.replace(
+      /([\\\^\$\.\*\+\?\|\&\{\}\[\]\(\)\<\>])/g,
+      '\\$1');
+
   var re;
   if (relation === MetadataCache.CHILDREN)
-    re = entryURL + '(/[^/]*)?';
+    re = escapedEntryURL + '(/[^/]*)?';
   else if (relation === MetadataCache.DESCENDANTS)
-    re = entryURL + '(/.*)?';
+    re = escapedEntryURL + '(/.*)?';
   else
-    re = entryURL;
+    re = escapedEntryURL;
 
   var id = ++this.observerId_;
   this.observers_.push({
@@ -703,6 +712,7 @@ MetadataProvider.prototype.fetch = function(entry, type, callback) {
  * This provider returns the following objects:
  * filesystem: { size, modificationTime }
  * @constructor
+ * @extends {MetadataProvider}
  */
 function FilesystemProvider() {
   MetadataProvider.call(this);
@@ -763,14 +773,16 @@ FilesystemProvider.prototype.fetch = function(
  * This provider returns the following objects:
  *     external: { pinned, hosted, present, customIconUrl, etc. }
  *     thumbnail: { url, transform }
- * @param {VolumeManagerWrapper} volumeManager Volume manager instance.
+ * @param {VolumeManagerCommon.VolumeInfoProvider} volumeManager Volume manager
+ *     instance.
  * @constructor
+ * @extends {MetadataProvider}
  */
 function ExternalProvider(volumeManager) {
   MetadataProvider.call(this);
 
   /**
-   * @type {VolumeManagerWrapper}
+   * @type {VolumeManagerCommon.VolumeInfoProvider}
    * @private
    */
   this.volumeManager_ = volumeManager;
@@ -792,9 +804,11 @@ ExternalProvider.prototype = {
  * @return {boolean} Whether this provider supports the entry.
  */
 ExternalProvider.prototype.supportsEntry = function(entry) {
-  var locationInfo = this.volumeManager_.getLocationInfo(entry);
-  // TODO(mtomasz): Add support for provided file systems.
-  return locationInfo && locationInfo.isDriveBased;
+  var volumeInfo = this.volumeManager_.getVolumeInfo(entry);
+  if (!volumeInfo)
+    return false;
+  return volumeInfo.volumeType === VolumeManagerCommon.VolumeType.DRIVE ||
+      volumeInfo.volumeType === VolumeManagerCommon.VolumeType.PROVIDED;
 };
 
 /**
@@ -845,6 +859,10 @@ ExternalProvider.prototype.callApi_ = function() {
   var entryURLs = util.entriesToURLs(entries);
   chrome.fileManagerPrivate.getEntryProperties(
       entryURLs,
+      ['size', 'modificationTime', 'thumbnailUrl', 'imageWidth', 'imageHeight',
+       'imageRotation', 'pinned', 'present', 'hosted', 'availableOffline',
+       'availableWhenMetered', 'dirty', 'customIconUrl', 'contentMimeType',
+       'sharedWithMe', 'shared', 'externalFileUrl'],
       function(propertiesList) {
         console.assert(propertiesList.length === callbacks.length);
         for (var i = 0; i < callbacks.length; i++) {
@@ -855,50 +873,55 @@ ExternalProvider.prototype.callApi_ = function() {
 
 /**
  * Converts API metadata to internal format.
- * @param {Object} data Metadata from API call.
- * @param {Entry} entry File entry.
- * @return {Object} Metadata in internal format.
+ * @param {!EntryProperties} data Metadata from API call.
+ * @param {!Entry} entry File entry.
+ * @return {!Object} Metadata in internal format.
  * @private
  */
 ExternalProvider.prototype.convert_ = function(data, entry) {
   var result = {};
   result.external = {
-    present: data.isPresent,
-    pinned: data.isPinned,
-    hosted: data.isHosted,
+    present: data.present,
+    pinned: data.pinned,
+    hosted: data.hosted,
+    dirty: data.dirty,
     imageWidth: data.imageWidth,
     imageHeight: data.imageHeight,
     imageRotation: data.imageRotation,
-    availableOffline: data.isAvailableOffline,
-    availableWhenMetered: data.isAvailableWhenMetered,
+    availableOffline: data.availableOffline,
+    availableWhenMetered: data.availableWhenMetered,
     customIconUrl: data.customIconUrl || '',
     contentMimeType: data.contentMimeType || '',
     sharedWithMe: data.sharedWithMe,
     shared: data.shared,
-    thumbnailUrl: data.thumbnailUrl  // Thumbnail passed from external server.
+    thumbnailUrl: data.thumbnailUrl,  // Thumbnail passed from external server.
+    externalFileUrl: data.externalFileUrl
   };
 
   result.filesystem = {
-    size: (entry.isFile ? (data.fileSize || 0) : -1),
-    modificationTime: new Date(data.lastModifiedTime)
+    size: (entry.isFile ? (data.size || 0) : -1),
+    modificationTime: new Date(data.modificationTime)
   };
 
-  if (data.isPresent) {
-    // If the file is present, don't fill the thumbnail here and allow to
-    // generate it by next providers.
-    result.thumbnail = null;
-  } else if ('thumbnailUrl' in data) {
-    result.thumbnail = {
-      url: data.thumbnailUrl,
-      transform: null
-    };
-  } else {
-    // Not present in cache, so do not allow to generate it by next providers.
-    result.thumbnail = {url: '', transform: null};
+  // TODO(mtomasz): Remove all of the if logic in the new metadata cache.
+  // If the file is not present, then use the thumbnail url instead of
+  // extracting the thumbnail from contents.
+  if (data.present === false) {
+    if ('thumbnailUrl' in data) {
+      result.thumbnail = {
+        url: data.thumbnailUrl,
+        transform: null
+      };
+    } else {
+      // Not present in cache, so do not allow to generate it by next providers.
+      result.thumbnail = {url: '', transform: null};
+    }
   }
 
-  // If present in cache, then allow to fetch media by next providers.
-  result.media = data.isPresent ? null : {};
+  // If not present in cache, then do not allow to fetch media by next
+  // providers.
+  if (data.present === false)
+    result.media = {};
 
   return result;
 };
@@ -910,15 +933,19 @@ ExternalProvider.prototype.convert_ = function(data, entry) {
  * thumbnail: { url, transform }
  * media: { artist, album, title, width, height, imageTransform, etc. }
  * fetchedMedia: { same fields here }
+ * @param {!MessagePort=} opt_messagePort Message port overriding the default
+ *     worker port.
  * @constructor
+ * @extends {MetadataProvider}
  */
-function ContentProvider() {
+function ContentProvider(opt_messagePort) {
   MetadataProvider.call(this);
 
   // Pass all URLs to the metadata reader until we have a correct filter.
   this.urlFilter_ = /.*/;
 
-  var dispatcher = new SharedWorker(ContentProvider.WORKER_SCRIPT).port;
+  var dispatcher = opt_messagePort ?
+      opt_messagePort : new SharedWorker(ContentProvider.WORKER_SCRIPT).port;
   dispatcher.onmessage = this.onMessage_.bind(this);
   dispatcher.postMessage({verb: 'init'});
   dispatcher.start();
@@ -928,15 +955,19 @@ function ContentProvider() {
   // 'initialized' message.  See below.
   this.initialized_ = false;
 
-  // Map from Entry.toURL() to callback.
-  // Note that simultaneous requests for same url are handled in MetadataCache.
+  /**
+   * Map from Entry.toURL() to callback.
+   * Note that simultaneous requests for same url are handled in MetadataCache.
+   * @type {!Object<!string, !Array<function(Object)>>}
+   * @const
+   * @private
+   */
   this.callbacks_ = {};
 }
 
 /**
  * Path of a worker script.
  * @type {string}
- * @const
  */
 ContentProvider.WORKER_SCRIPT =
     'chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/' +
@@ -951,7 +982,7 @@ ContentProvider.prototype = {
  * @return {boolean} Whether this provider supports the entry.
  */
 ContentProvider.prototype.supportsEntry = function(entry) {
-  return entry.toURL().match(this.urlFilter_);
+  return !!entry.toURL().match(this.urlFilter_);
 };
 
 /**
@@ -979,9 +1010,13 @@ ContentProvider.prototype.fetch = function(entry, type, callback) {
     setTimeout(callback.bind(null, {}), 0);
     return;
   }
-  var entryURL = entry.toURL();
-  this.callbacks_[entryURL] = callback;
-  this.dispatcher_.postMessage({verb: 'request', arguments: [entryURL]});
+  var url = entry.toURL();
+  if (this.callbacks_[url]) {
+    this.callbacks_[url].push(callback);
+  } else {
+    this.callbacks_[url] = [callback];
+    this.dispatcher_.postMessage({verb: 'request', arguments: [url]});
+  }
 };
 
 /**
@@ -1066,9 +1101,11 @@ ContentProvider.ConvertContentMetadata = function(metadata, opt_result) {
  * @private
  */
 ContentProvider.prototype.onResult_ = function(url, metadata) {
-  var callback = this.callbacks_[url];
+  var callbacks = this.callbacks_[url];
   delete this.callbacks_[url];
-  callback(ContentProvider.ConvertContentMetadata(metadata));
+  for (var i = 0; i < callbacks.length; i++) {
+    callbacks[i](ContentProvider.ConvertContentMetadata(metadata));
+  }
 };
 
 /**

@@ -16,16 +16,15 @@ class SpinningBallsPage(page_module.Page):
       page_set=page_set)
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(SpinningBallsPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
         "document.readyState == 'complete'")
     action_runner.ClickElement(selector='input[type="submit"]')
     action_runner.WaitForJavaScriptCondition(
         "document.readyState == 'complete'")
 
-  def RunSmoothness(self, action_runner):
-    interaction = action_runner.BeginInteraction(
-        'RunSmoothAllActions', is_fast=True)
+  def RunPageInteractions(self, action_runner):
+    interaction = action_runner.BeginInteraction('RunSmoothAllActions')
     action_runner.Wait(15)
     interaction.End()
 
@@ -41,4 +40,4 @@ class GarbageCollectionCasesPageSet(page_set_module.PageSet):
       archive_data_file='data/garbage_collection_cases.json',
       bucket=page_set_module.PARTNER_BUCKET)
 
-    self.AddPage(SpinningBallsPage(self))
+    self.AddUserStory(SpinningBallsPage(self))

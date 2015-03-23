@@ -39,7 +39,7 @@ class TestingCursorClientObserver : public aura::client::CursorClientObserver {
   bool did_visibility_change() const { return did_visibility_change_; }
 
   // Overridden from aura::client::CursorClientObserver:
-  virtual void OnCursorVisibilityChanged(bool is_visible) OVERRIDE {
+  void OnCursorVisibilityChanged(bool is_visible) override {
     cursor_visibility_ = is_visible;
     did_visibility_change_ = true;
   }
@@ -64,7 +64,7 @@ class CustomEventHandler : public ui::test::TestEventHandler {
         mouse_result_(ui::ER_UNHANDLED) {
   }
 
-  virtual ~CustomEventHandler() {}
+  ~CustomEventHandler() override {}
 
   void set_key_event_handling_result(ui::EventResult result) {
     key_result_ = result;
@@ -75,7 +75,7 @@ class CustomEventHandler : public ui::test::TestEventHandler {
   }
 
   // Overridden from ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE {
+  void OnKeyEvent(ui::KeyEvent* event) override {
     ui::test::TestEventHandler::OnKeyEvent(event);
     if (key_result_ & ui::ER_HANDLED)
       event->SetHandled();
@@ -83,7 +83,7 @@ class CustomEventHandler : public ui::test::TestEventHandler {
       event->StopPropagation();
   }
 
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     ui::test::TestEventHandler::OnMouseEvent(event);
     if (mouse_result_ & ui::ER_HANDLED)
       event->SetHandled();
@@ -109,9 +109,7 @@ class NonFocusableDelegate : public aura::test::TestWindowDelegate {
   NonFocusableDelegate() {}
 
  private:
-  virtual bool CanFocus() OVERRIDE {
-    return false;
-  }
+  bool CanFocus() override { return false; }
 
   DISALLOW_COPY_AND_ASSIGN(NonFocusableDelegate);
 };
@@ -121,12 +119,12 @@ class HitTestWindowDelegate : public aura::test::TestWindowDelegate {
   HitTestWindowDelegate()
       : hittest_code_(HTNOWHERE) {
   }
-  virtual ~HitTestWindowDelegate() {}
+  ~HitTestWindowDelegate() override {}
   void set_hittest_code(int hittest_code) { hittest_code_ = hittest_code; }
 
  private:
   // Overridden from TestWindowDelegate:
-  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE {
+  int GetNonClientComponent(const gfx::Point& point) const override {
     return hittest_code_;
   }
 
@@ -515,7 +513,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
   {
     // Resize edges and corners show proper cursors.
     window_delegate.set_hittest_code(HTBOTTOM);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorSouthResize, host->last_cursor().native_type());
@@ -523,7 +522,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTBOTTOMLEFT);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorSouthWestResize, host->last_cursor().native_type());
@@ -531,7 +531,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTBOTTOMRIGHT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorSouthEastResize, host->last_cursor().native_type());
@@ -539,7 +540,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTLEFT);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorWestResize, host->last_cursor().native_type());
@@ -547,7 +549,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTRIGHT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorEastResize, host->last_cursor().native_type());
@@ -555,7 +558,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTTOP);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNorthResize, host->last_cursor().native_type());
@@ -563,7 +567,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTTOPLEFT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNorthWestResize, host->last_cursor().native_type());
@@ -571,7 +576,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTTOPRIGHT);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNorthEastResize, host->last_cursor().native_type());
@@ -580,7 +586,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
   {
     // Client area uses null cursor.
     window_delegate.set_hittest_code(HTCLIENT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNull, host->last_cursor().native_type());
@@ -614,29 +621,23 @@ TEST_F(WindowManagerTest, MAYBE_TransformActivate) {
 
   gfx::Point miss_point(5, 5);
   transform.TransformPoint(&miss_point);
-  ui::MouseEvent mouseev1(ui::ET_MOUSE_PRESSED,
-                          miss_point,
-                          miss_point,
-                          ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mouseev1(ui::ET_MOUSE_PRESSED, miss_point, miss_point,
+                          ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                           ui::EF_LEFT_MOUSE_BUTTON);
   ui::EventProcessor* dispatcher = root_window->GetHost()->event_processor();
   ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&mouseev1);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_EQ(NULL, aura::client::GetFocusClient(w1.get())->GetFocusedWindow());
-  ui::MouseEvent mouseup(ui::ET_MOUSE_RELEASED,
-                         miss_point,
-                         miss_point,
-                         ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mouseup(ui::ET_MOUSE_RELEASED, miss_point, miss_point,
+                         ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                          ui::EF_LEFT_MOUSE_BUTTON);
   details = dispatcher->OnEventFromSource(&mouseup);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
   gfx::Point hit_point(5, 15);
   transform.TransformPoint(&hit_point);
-  ui::MouseEvent mouseev2(ui::ET_MOUSE_PRESSED,
-                          hit_point,
-                          hit_point,
-                          ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mouseev2(ui::ET_MOUSE_PRESSED, hit_point, hit_point,
+                          ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                           ui::EF_LEFT_MOUSE_BUTTON);
   details = dispatcher->OnEventFromSource(&mouseev2);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -674,8 +675,8 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   ui::EventProcessor* dispatcher = root_window->GetHost()->event_processor();
   ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&key_event);
   ASSERT_FALSE(details.dispatcher_destroyed);
-  ui::MouseEvent mouse_pressed(
-      ui::ET_MOUSE_PRESSED, gfx::Point(0, 0), gfx::Point(0, 0), 0, 0);
+  ui::MouseEvent mouse_pressed(ui::ET_MOUSE_PRESSED, gfx::Point(0, 0),
+                               gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
   details = dispatcher->OnEventFromSource(&mouse_pressed);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
@@ -695,8 +696,8 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   // Dispatches events.
   details = dispatcher->OnEventFromSource(&key_event);
   ASSERT_FALSE(details.dispatcher_destroyed);
-  ui::MouseEvent mouse_released(
-      ui::ET_MOUSE_RELEASED, gfx::Point(0, 0), gfx::Point(0, 0), 0, 0);
+  ui::MouseEvent mouse_released(ui::ET_MOUSE_RELEASED, gfx::Point(0, 0),
+                                gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
   details = dispatcher->OnEventFromSource(&mouse_released);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
@@ -834,6 +835,8 @@ TEST_F(WindowManagerTest, TestCursorClientObserver) {
   EXPECT_TRUE(observer_a.did_visibility_change());
   EXPECT_FALSE(observer_b.did_visibility_change());
   EXPECT_TRUE(observer_a.is_cursor_visible());
+
+  cursor_manager->RemoveObserver(&observer_a);
 }
 #endif  // defined(OS_CHROMEOS)
 

@@ -5,12 +5,14 @@
 #ifndef MOJO_SERVICES_HTML_VIEWER_BLINK_BASIC_TYPE_CONVERTERS_H_
 #define MOJO_SERVICES_HTML_VIEWER_BLINK_BASIC_TYPE_CONVERTERS_H_
 
-#include "mojo/public/cpp/bindings/type_converter.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/type_converter.h"
 
-#include "mojo/public/cpp/bindings/array.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/array.h"
+#include "third_party/mojo_services/src/geometry/public/interfaces/geometry.mojom.h"
 
 namespace blink {
+struct WebRect;
 class WebString;
 }
 
@@ -28,6 +30,11 @@ struct TypeConverter<blink::WebString, String> {
 template <>
 struct TypeConverter<Array<uint8_t>, blink::WebString> {
   static Array<uint8_t> Convert(const blink::WebString& input);
+};
+
+template <>
+struct TypeConverter<RectPtr, blink::WebRect> {
+  static RectPtr Convert(const blink::WebRect& input);
 };
 
 template<typename T, typename U>

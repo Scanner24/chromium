@@ -6,9 +6,10 @@
 #define CHROME_BROWSER_EXTENSIONS_APP_SYNC_DATA_H_
 
 #include "chrome/browser/extensions/extension_sync_data.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "extensions/common/constants.h"
 #include "sync/api/string_ordinal.h"
 #include "sync/api/sync_change.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace syncer {
 class SyncData;
@@ -33,6 +34,7 @@ class AppSyncData {
               bool enabled,
               bool incognito_enabled,
               bool remote_install,
+              ExtensionSyncData::OptionalBoolean all_urls_enabled,
               const syncer::StringOrdinal& app_launch_ordinal,
               const syncer::StringOrdinal& page_ordinal,
               extensions::LaunchType launch_type);
@@ -70,6 +72,10 @@ class AppSyncData {
     return bookmark_app_description_;
   }
 
+  const std::string& bookmark_app_icon_color() const {
+    return bookmark_app_icon_color_;
+  }
+
  private:
   // Convert an AppSyncData back out to a sync structure.
   void PopulateAppSpecifics(sync_pb::AppSpecifics* specifics) const;
@@ -85,6 +91,7 @@ class AppSyncData {
   extensions::LaunchType launch_type_;
   std::string bookmark_app_url_;
   std::string bookmark_app_description_;
+  std::string bookmark_app_icon_color_;
 };
 
 }  // namespace extensions

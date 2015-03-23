@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/password_manager/password_store_x.h"
@@ -35,29 +36,29 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
  public:
   explicit NativeBackendKWallet(LocalProfileId id);
 
-  virtual ~NativeBackendKWallet();
+  ~NativeBackendKWallet() override;
 
-  virtual bool Init() OVERRIDE;
+  bool Init() override;
 
   // Implements NativeBackend interface.
-  virtual password_manager::PasswordStoreChangeList AddLogin(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual bool UpdateLogin(
-      const autofill::PasswordForm& form,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE;
-  virtual bool RemoveLogin(const autofill::PasswordForm& form) OVERRIDE;
-  virtual bool RemoveLoginsCreatedBetween(
+  password_manager::PasswordStoreChangeList AddLogin(
+      const autofill::PasswordForm& form) override;
+  bool UpdateLogin(const autofill::PasswordForm& form,
+                   password_manager::PasswordStoreChangeList* changes) override;
+  bool RemoveLogin(const autofill::PasswordForm& form) override;
+  bool RemoveLoginsCreatedBetween(
       base::Time delete_begin,
       base::Time delete_end,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE;
-  virtual bool RemoveLoginsSyncedBetween(
+      password_manager::PasswordStoreChangeList* changes) override;
+  bool RemoveLoginsSyncedBetween(
       base::Time delete_begin,
       base::Time delete_end,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE;
-  virtual bool GetLogins(const autofill::PasswordForm& form,
-                         PasswordFormList* forms) OVERRIDE;
-  virtual bool GetAutofillableLogins(PasswordFormList* forms) OVERRIDE;
-  virtual bool GetBlacklistLogins(PasswordFormList* forms) OVERRIDE;
+      password_manager::PasswordStoreChangeList* changes) override;
+  bool GetLogins(const autofill::PasswordForm& form,
+                 ScopedVector<autofill::PasswordForm>* forms) override;
+  bool GetAutofillableLogins(
+      ScopedVector<autofill::PasswordForm>* forms) override;
+  bool GetBlacklistLogins(ScopedVector<autofill::PasswordForm>* forms) override;
 
  protected:
   // Invalid handle returned by WalletHandle().
@@ -69,7 +70,7 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   // Deserializes a list of PasswordForms from the wallet.
   static void DeserializeValue(const std::string& signon_realm,
                                const Pickle& pickle,
-                               PasswordFormList* forms);
+                               ScopedVector<autofill::PasswordForm>* forms);
 
  private:
   enum InitResult {
@@ -91,22 +92,23 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
                       bool* success);
 
   // Reads PasswordForms from the wallet that match the given signon_realm.
-  bool GetLoginsList(PasswordFormList* forms,
-                     const std::string& signon_realm,
-                     int wallet_handle);
+  bool GetLoginsList(const std::string& signon_realm,
+                     int wallet_handle,
+                     ScopedVector<autofill::PasswordForm>* forms);
 
   // Reads PasswordForms from the wallet with the given autofillability state.
-  bool GetLoginsList(PasswordFormList* forms,
-                     bool autofillable,
-                     int wallet_handle);
+  bool GetLoginsList(bool autofillable,
+                     int wallet_handle,
+                     ScopedVector<autofill::PasswordForm>* forms);
 
   // Helper for some of the above GetLoginsList() methods.
-  bool GetAllLogins(PasswordFormList* forms, int wallet_handle);
+  bool GetAllLogins(int wallet_handle,
+                    ScopedVector<autofill::PasswordForm>* forms);
 
   // Writes a list of PasswordForms to the wallet with the given signon_realm.
   // Overwrites any existing list for this signon_realm. Removes the entry if
   // |forms| is empty. Returns true on success.
-  bool SetLoginsList(const PasswordFormList& forms,
+  bool SetLoginsList(const std::vector<autofill::PasswordForm*>& forms,
                      const std::string& signon_realm,
                      int wallet_handle);
 
@@ -122,7 +124,8 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   int WalletHandle();
 
   // Serializes a list of PasswordForms to be stored in the wallet.
-  static void SerializeValue(const PasswordFormList& forms, Pickle* pickle);
+  static void SerializeValue(const std::vector<autofill::PasswordForm*>& forms,
+                             Pickle* pickle);
 
   // Deserializes a list of PasswordForms from the wallet.
   // |size_32| controls reading the size field within the pickle as 32 bits.
@@ -132,12 +135,14 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   // when reading old pickles that fail to deserialize using the native size.
   static bool DeserializeValueSize(const std::string& signon_realm,
                                    const PickleIterator& iter,
-                                   int version, bool size_32, bool warn_only,
-                                   PasswordFormList* forms);
+                                   int version,
+                                   bool size_32,
+                                   bool warn_only,
+                                   ScopedVector<autofill::PasswordForm>* forms);
 
   // In case the fields in the pickle ever change, version them so we can try to
   // read old pickles. (Note: do not eat old pickles past the expiration date.)
-  static const int kPickleVersion = 4;
+  static const int kPickleVersion = 6;
 
   // Generates a profile-specific folder name based on profile_id_.
   std::string GetProfileSpecificFolderName() const;

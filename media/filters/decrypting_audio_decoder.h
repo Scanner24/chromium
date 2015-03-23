@@ -30,26 +30,19 @@ class Decryptor;
 // that no locks are required for thread safety.
 class MEDIA_EXPORT DecryptingAudioDecoder : public AudioDecoder {
  public:
-  // We do not currently have a way to let the Decryptor choose the output
-  // audio sample format and notify us of its choice. Therefore, we require all
-  // Decryptor implementations to decode audio into a fixed integer sample
-  // format designated by kSupportedBitsPerChannel.
-  // TODO(xhwang): Remove this restriction after http://crbug.com/169105 fixed.
-  static const int kSupportedBitsPerChannel;
-
   DecryptingAudioDecoder(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       const SetDecryptorReadyCB& set_decryptor_ready_cb);
-  virtual ~DecryptingAudioDecoder();
+  ~DecryptingAudioDecoder() override;
 
   // AudioDecoder implementation.
-  virtual std::string GetDisplayName() const OVERRIDE;
-  virtual void Initialize(const AudioDecoderConfig& config,
-                          const PipelineStatusCB& status_cb,
-                          const OutputCB& output_cb) OVERRIDE;
-  virtual void Decode(const scoped_refptr<DecoderBuffer>& buffer,
-                      const DecodeCB& decode_cb) OVERRIDE;
-  virtual void Reset(const base::Closure& closure) OVERRIDE;
+  std::string GetDisplayName() const override;
+  void Initialize(const AudioDecoderConfig& config,
+                  const PipelineStatusCB& status_cb,
+                  const OutputCB& output_cb) override;
+  void Decode(const scoped_refptr<DecoderBuffer>& buffer,
+              const DecodeCB& decode_cb) override;
+  void Reset(const base::Closure& closure) override;
 
  private:
   // For a detailed state diagram please see this link: http://goo.gl/8jAok
@@ -83,7 +76,7 @@ class MEDIA_EXPORT DecryptingAudioDecoder : public AudioDecoder {
   // Callback for Decryptor::DecryptAndDecodeAudio().
   void DeliverFrame(int buffer_size,
                     Decryptor::Status status,
-                    const Decryptor::AudioBuffers& frames);
+                    const Decryptor::AudioFrames& frames);
 
   // Callback for the |decryptor_| to notify this object that a new key has been
   // added.
@@ -93,7 +86,7 @@ class MEDIA_EXPORT DecryptingAudioDecoder : public AudioDecoder {
   void DoReset();
 
   // Sets timestamps for |frames| and then passes them to |output_cb_|.
-  void ProcessDecodedFrames(const Decryptor::AudioBuffers& frames);
+  void ProcessDecodedFrames(const Decryptor::AudioFrames& frames);
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
@@ -124,9 +117,8 @@ class MEDIA_EXPORT DecryptingAudioDecoder : public AudioDecoder {
 
   scoped_ptr<AudioTimestampHelper> timestamp_helper_;
 
-  // NOTE: Weak pointers must be invalidated before all other member variables.
-  base::WeakPtrFactory<DecryptingAudioDecoder> weak_factory_;
   base::WeakPtr<DecryptingAudioDecoder> weak_this_;
+  base::WeakPtrFactory<DecryptingAudioDecoder> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DecryptingAudioDecoder);
 };

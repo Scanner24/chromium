@@ -29,7 +29,7 @@
 #include "content/public/common/context_menu_params.h"
 #include "extensions/browser/view_type_utils.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using content::BrowserThread;
 
@@ -37,7 +37,6 @@ SpellingMenuObserver::SpellingMenuObserver(RenderViewContextMenuProxy* proxy)
     : proxy_(proxy),
       loading_frame_(0),
       succeeded_(false),
-      misspelling_hash_(0),
       client_(new SpellingServiceClient) {
   if (proxy_ && proxy_->GetBrowserContext()) {
     Profile* profile = Profile::FromBrowserContext(proxy_->GetBrowserContext());
@@ -68,7 +67,6 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
 
   suggestions_ = params.dictionary_suggestions;
   misspelled_word_ = params.misspelled_word;
-  misspelling_hash_ = params.misspelling_hash;
 
   bool use_suggestions = SpellingServiceClient::IsAvailable(
       browser_context, SpellingServiceClient::SUGGEST);
@@ -171,7 +169,8 @@ void SpellingMenuObserver::InitMenu(const content::ContextMenuParams& params) {
   proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_SPELLING_TOGGLE,
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE));
 
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableSpellingAutoCorrect)) {
     proxy_->AddCheckItem(IDC_CONTENT_CONTEXT_AUTOCORRECT_SPELLING_TOGGLE,
         l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPELLING_AUTOCORRECT));
@@ -257,8 +256,6 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
       if (spellcheck) {
         if (spellcheck->GetMetrics())
           spellcheck->GetMetrics()->RecordReplacedWordStats(1);
-        spellcheck->GetFeedbackSender()->SelectedSuggestion(
-            misspelling_hash_, suggestion_index);
       }
     }
     return;
@@ -283,7 +280,6 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
       if (spellcheck) {
         spellcheck->GetCustomDictionary()->AddWord(base::UTF16ToUTF8(
             misspelled_word_));
-        spellcheck->GetFeedbackSender()->AddedToDictionary(misspelling_hash_);
       }
     }
 #if defined(OS_MACOSX)
@@ -303,11 +299,13 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
     if (!integrate_spelling_service_.GetValue()) {
       content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
       gfx::Rect rect = rvh->GetView()->GetViewBounds();
+      scoped_ptr<SpellingBubbleModel> model(
+          new SpellingBubbleModel(profile, proxy_->GetWebContents(), false));
       chrome::ShowConfirmBubble(
           proxy_->GetWebContents()->GetTopLevelNativeWindow(),
           rvh->GetView()->GetNativeView(),
           gfx::Point(rect.CenterPoint().x(), rect.y()),
-          new SpellingBubbleModel(profile, proxy_->GetWebContents(), false));
+          model.Pass());
     } else {
       if (profile) {
         profile->GetPrefs()->SetBoolean(prefs::kSpellCheckUseSpellingService,
@@ -327,11 +325,13 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
     if (!integrate_spelling_service_.GetValue()) {
       content::RenderViewHost* rvh = proxy_->GetRenderViewHost();
       gfx::Rect rect = rvh->GetView()->GetViewBounds();
+      scoped_ptr<SpellingBubbleModel> model(
+          new SpellingBubbleModel(profile, proxy_->GetWebContents(), true));
       chrome::ShowConfirmBubble(
           proxy_->GetWebContents()->GetTopLevelNativeWindow(),
           rvh->GetView()->GetNativeView(),
           gfx::Point(rect.CenterPoint().x(), rect.y()),
-          new SpellingBubbleModel(profile, proxy_->GetWebContents(), true));
+          model.Pass());
     } else {
       if (profile) {
         bool current_value = autocorrect_spelling_.GetValue();
@@ -340,17 +340,6 @@ void SpellingMenuObserver::ExecuteCommand(int command_id) {
       }
     }
   }
-}
-
-void SpellingMenuObserver::OnMenuCancel() {
-  content::BrowserContext* browser_context = proxy_->GetBrowserContext();
-  if (!browser_context)
-    return;
-  SpellcheckService* spellcheck =
-      SpellcheckServiceFactory::GetForContext(browser_context);
-  if (!spellcheck)
-    return;
-  spellcheck->GetFeedbackSender()->IgnoredSuggestions(misspelling_hash_);
 }
 
 void SpellingMenuObserver::OnTextCheckComplete(

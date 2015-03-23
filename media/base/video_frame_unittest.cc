@@ -255,11 +255,11 @@ TEST(VideoFrame, TextureNoLongerNeededCallbackIsCalled) {
         make_scoped_ptr(
             new gpu::MailboxHolder(gpu::Mailbox(), 5, 0 /* sync_point */)),
         base::Bind(&TextureCallback, &called_sync_point),
-        gfx::Size(10, 10),            // coded_size
-        gfx::Rect(10, 10),            // visible_rect
-        gfx::Size(10, 10),            // natural_size
-        base::TimeDelta(),            // timestamp
-        VideoFrame::ReadPixelsCB());  // read_pixels_cb
+        gfx::Size(10, 10),           // coded_size
+        gfx::Rect(10, 10),           // visible_rect
+        gfx::Size(10, 10),           // natural_size
+        base::TimeDelta(),           // timestamp
+        false);                      // allow_overlay
   }
   // Nobody set a sync point to |frame|, so |frame| set |called_sync_point| to 0
   // as default value.
@@ -271,9 +271,9 @@ namespace {
 class SyncPointClientImpl : public VideoFrame::SyncPointClient {
  public:
   explicit SyncPointClientImpl(uint32 sync_point) : sync_point_(sync_point) {}
-  virtual ~SyncPointClientImpl() {}
-  virtual uint32 InsertSyncPoint() OVERRIDE { return sync_point_; }
-  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE {}
+  ~SyncPointClientImpl() override {}
+  uint32 InsertSyncPoint() override { return sync_point_; }
+  void WaitSyncPoint(uint32 sync_point) override {}
 
  private:
   uint32 sync_point_;
@@ -296,11 +296,11 @@ TEST(VideoFrame, TextureNoLongerNeededCallbackAfterTakingAndReleasingMailbox) {
     scoped_refptr<VideoFrame> frame = VideoFrame::WrapNativeTexture(
         make_scoped_ptr(new gpu::MailboxHolder(mailbox, target, sync_point)),
         base::Bind(&TextureCallback, &called_sync_point),
-        gfx::Size(10, 10),            // coded_size
-        gfx::Rect(10, 10),            // visible_rect
-        gfx::Size(10, 10),            // natural_size
-        base::TimeDelta(),            // timestamp
-        VideoFrame::ReadPixelsCB());  // read_pixels_cb
+        gfx::Size(10, 10),           // coded_size
+        gfx::Rect(10, 10),           // visible_rect
+        gfx::Size(10, 10),           // natural_size
+        base::TimeDelta(),           // timestamp
+        false);                      // allow_overlay
 
     const gpu::MailboxHolder* mailbox_holder = frame->mailbox_holder();
 

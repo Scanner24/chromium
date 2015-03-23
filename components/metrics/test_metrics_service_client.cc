@@ -6,6 +6,7 @@
 
 #include "base/callback.h"
 #include "components/metrics/metrics_log_uploader.h"
+#include "components/metrics/proto/chrome_user_metrics_extension.pb.h"
 
 namespace metrics {
 
@@ -13,7 +14,8 @@ namespace metrics {
 const char TestMetricsServiceClient::kBrandForTesting[] = "brand_for_testing";
 
 TestMetricsServiceClient::TestMetricsServiceClient()
-    : version_string_("5.0.322.0-64-devel") {
+    : version_string_("5.0.322.0-64-devel"),
+      product_(ChromeUserMetricsExtension::CHROME) {
 }
 
 TestMetricsServiceClient::~TestMetricsServiceClient() {
@@ -26,6 +28,10 @@ void TestMetricsServiceClient::SetMetricsClientId(
 
 bool TestMetricsServiceClient::IsOffTheRecordSessionActive() {
   return false;
+}
+
+int32_t TestMetricsServiceClient::GetProduct() {
+  return product_;
 }
 
 std::string TestMetricsServiceClient::GetApplicationLocale() {
@@ -59,8 +65,6 @@ void TestMetricsServiceClient::CollectFinalMetrics(
 }
 
 scoped_ptr<MetricsLogUploader> TestMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
     const base::Callback<void(int)>& on_upload_complete) {
   return scoped_ptr<MetricsLogUploader>();
 }

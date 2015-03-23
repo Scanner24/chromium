@@ -11,26 +11,31 @@
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <string.h>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/environment.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/thread_local.h"
 #include "crypto/ec_private_key.h"
 #include "crypto/openssl_util.h"
 #include "crypto/scoped_openssl_types.h"
 #include "net/base/net_errors.h"
+#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_ev_whitelist.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/single_request_cert_verifier.h"
 #include "net/cert/x509_certificate_net_log_param.h"
 #include "net/cert/x509_util_openssl.h"
 #include "net/http/transport_security_state.h"
 #include "net/socket/ssl_session_cache_openssl.h"
-#include "net/ssl/openssl_ssl_util.h"
+#include "net/ssl/scoped_openssl_types.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
@@ -66,13 +71,14 @@ const int kNoPendingReadResult = 1;
 // the server supports NPN, choosing "http/1.1" is the best answer.
 const char kDefaultSupportedNPNProtocol[] = "http/1.1";
 
+// Default size of the internal BoringSSL buffers.
+const int KDefaultOpenSSLBufferSize = 17 * 1024;
+
 void FreeX509Stack(STACK_OF(X509)* ptr) {
   sk_X509_pop_free(ptr, X509_free);
 }
 
-typedef crypto::ScopedOpenSSL<X509, X509_free>::Type ScopedX509;
-typedef crypto::ScopedOpenSSL<STACK_OF(X509), FreeX509Stack>::Type
-    ScopedX509Stack;
+using ScopedX509Stack = crypto::ScopedOpenSSL<STACK_OF(X509), FreeX509Stack>;
 
 #if OPENSSL_VERSION_NUMBER < 0x1000103fL
 // This method doesn't seem to have made it into the OpenSSL headers.
@@ -80,11 +86,10 @@ unsigned long SSL_CIPHER_get_id(const SSL_CIPHER* cipher) { return cipher->id; }
 #endif
 
 // Used for encoding the |connection_status| field of an SSLInfo object.
-int EncodeSSLConnectionStatus(int cipher_suite,
+int EncodeSSLConnectionStatus(uint16 cipher_suite,
                               int compression,
                               int version) {
-  return ((cipher_suite & SSL_CONNECTION_CIPHERSUITE_MASK) <<
-          SSL_CONNECTION_CIPHERSUITE_SHIFT) |
+  return cipher_suite |
          ((compression & SSL_CONNECTION_COMPRESSION_MASK) <<
           SSL_CONNECTION_COMPRESSION_SHIFT) |
          ((version & SSL_CONNECTION_VERSION_MASK) <<
@@ -101,9 +106,9 @@ int GetNetSSLVersion(SSL* ssl) {
       return SSL_CONNECTION_VERSION_SSL3;
     case TLS1_VERSION:
       return SSL_CONNECTION_VERSION_TLS1;
-    case 0x0302:
+    case TLS1_1_VERSION:
       return SSL_CONNECTION_VERSION_TLS1_1;
-    case 0x0303:
+    case TLS1_2_VERSION:
       return SSL_CONNECTION_VERSION_TLS1_2;
     default:
       return SSL_CONNECTION_VERSION_UNKNOWN;
@@ -140,6 +145,19 @@ int LogErrorCallback(const char* str, size_t len, void* context) {
   return 1;
 }
 
+bool IsOCSPStaplingSupported() {
+#if defined(OS_WIN)
+  // CERT_OCSP_RESPONSE_PROP_ID is only implemented on Vista+, but it can be
+  // set on Windows XP without error. There is some overhead from the server
+  // sending the OCSP response if it supports the extension, for the subset of
+  // XP clients who will request it but be unable to use it, but this is an
+  // acceptable trade-off for simplicity of implementation.
+  return true;
+#else
+  return false;
+#endif
+}
+
 }  // namespace
 
 class SSLClientSocketOpenSSL::SSLContext {
@@ -172,6 +190,10 @@ class SSLClientSocketOpenSSL::SSLContext {
     SSL_CTX_set_cert_verify_callback(ssl_ctx_.get(), CertVerifyCallback, NULL);
     SSL_CTX_set_cert_cb(ssl_ctx_.get(), ClientCertRequestCallback, NULL);
     SSL_CTX_set_verify(ssl_ctx_.get(), SSL_VERIFY_PEER, NULL);
+    // This stops |SSL_shutdown| from generating the close_notify message, which
+    // is currently not sent on the network.
+    // TODO(haavardm): Remove setting quiet shutdown once 118366 is fixed.
+    SSL_CTX_set_quiet_shutdown(ssl_ctx_.get(), 1);
     // TODO(kristianm): Only select this if ssl_config_.next_proto is not empty.
     // It would be better if the callback were not a global setting,
     // but that is an OpenSSL issue.
@@ -229,7 +251,7 @@ class SSLClientSocketOpenSSL::SSLContext {
   // SSLClientSocketOpenSSL object from an SSL instance.
   int ssl_socket_data_index_;
 
-  crypto::ScopedOpenSSL<SSL_CTX, SSL_CTX_free>::Type ssl_ctx_;
+  ScopedSSL_CTX ssl_ctx_;
   // |session_cache_| must be destroyed before |ssl_ctx_|.
   SSLSessionCacheOpenSSL session_cache_;
 };
@@ -331,6 +353,11 @@ void SSLClientSocket::ClearSessionCache() {
   context->session_cache()->Flush();
 }
 
+// static
+uint16 SSLClientSocket::GetMaxSupportedSSLVersion() {
+  return SSL_PROTOCOL_VERSION_TLS1_2;
+}
+
 SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
     scoped_ptr<ClientSocketHandle> transport_socket,
     const HostPortPair& host_and_port,
@@ -339,6 +366,7 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
     : transport_send_busy_(false),
       transport_recv_busy_(false),
       pending_read_error_(kNoPendingReadResult),
+      pending_read_ssl_error_(SSL_ERROR_NONE),
       transport_read_error_(OK),
       transport_write_error_(OK),
       server_cert_chain_(new PeerCertificateChain(NULL)),
@@ -361,6 +389,7 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       handshake_succeeded_(false),
       marked_session_as_good_(false),
       transport_security_state_(context.transport_security_state),
+      policy_enforcer_(context.cert_policy_enforcer),
       net_log_(transport_->socket()->NetLog()),
       weak_factory_(this) {
 }
@@ -448,6 +477,11 @@ int SSLClientSocketOpenSSL::Connect(const CompletionCallback& callback) {
   // Set SSL to client mode. Handshake happens in the loop below.
   SSL_set_connect_state(ssl_);
 
+  // Enable fastradio padding.
+  SSL_enable_fastradio_padding(ssl_,
+                               ssl_config_.fastradio_padding_enabled &&
+                                   ssl_config_.fastradio_padding_eligible);
+
   GotoState(STATE_HANDSHAKE);
   rv = DoHandshakeLoop(OK);
   if (rv == ERR_IO_PENDING) {
@@ -497,6 +531,9 @@ void SSLClientSocketOpenSSL::Disconnect() {
   user_write_buf_len_    = 0;
 
   pending_read_error_ = kNoPendingReadResult;
+  pending_read_ssl_error_ = SSL_ERROR_NONE;
+  pending_read_error_info_ = OpenSSLErrorInfo();
+
   transport_read_error_ = OK;
   transport_write_error_ = OK;
 
@@ -607,7 +644,7 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   ssl_info->security_bits = SSL_CIPHER_get_bits(cipher, NULL);
 
   ssl_info->connection_status = EncodeSSLConnectionStatus(
-      SSL_CIPHER_get_id(cipher), 0 /* no compression */,
+      static_cast<uint16>(SSL_CIPHER_get_id(cipher)), 0 /* no compression */,
       GetNetSSLVersion(ssl_));
 
   if (!SSL_get_secure_renegotiation_support(ssl_))
@@ -704,9 +741,19 @@ int SSLClientSocketOpenSSL::Init() {
   trying_cached_session_ = context->session_cache()->SetSSLSessionWithKey(
       ssl_, GetSessionCacheKey());
 
+  send_buffer_ = new GrowableIOBuffer();
+  send_buffer_->SetCapacity(KDefaultOpenSSLBufferSize);
+  recv_buffer_ = new GrowableIOBuffer();
+  recv_buffer_->SetCapacity(KDefaultOpenSSLBufferSize);
+
   BIO* ssl_bio = NULL;
-  // 0 => use default buffer sizes.
-  if (!BIO_new_bio_pair(&ssl_bio, 0, &transport_bio_, 0))
+
+  // SSLClientSocketOpenSSL retains ownership of the BIO buffers.
+  if (!BIO_new_bio_pair_external_buf(
+          &ssl_bio, send_buffer_->capacity(),
+          reinterpret_cast<uint8_t*>(send_buffer_->data()), &transport_bio_,
+          recv_buffer_->capacity(),
+          reinterpret_cast<uint8_t*>(recv_buffer_->data())))
     return ERR_UNEXPECTED;
   DCHECK(ssl_bio);
   DCHECK(transport_bio_);
@@ -749,7 +796,7 @@ int SSLClientSocketOpenSSL::Init() {
   mode.ConfigureFlag(SSL_MODE_RELEASE_BUFFERS, true);
   mode.ConfigureFlag(SSL_MODE_CBC_RECORD_SPLITTING, true);
 
-  mode.ConfigureFlag(SSL_MODE_HANDSHAKE_CUTTHROUGH,
+  mode.ConfigureFlag(SSL_MODE_ENABLE_FALSE_START,
                      ssl_config_.false_start_enabled);
 
   SSL_set_mode(ssl_, mode.set_mask);
@@ -764,13 +811,13 @@ int SSLClientSocketOpenSSL::Init() {
   // disabled by default. Note that !SHA256 and !SHA384 only remove HMAC-SHA256
   // and HMAC-SHA384 cipher suites, not GCM cipher suites with SHA256 or SHA384
   // as the handshake hash.
-  std::string command("DEFAULT:!NULL:!aNULL:!IDEA:!FZA:!SRP:!SHA256:!SHA384:"
-                      "!aECDH:!AESGCM+AES256");
+  std::string command(
+      "DEFAULT:!NULL:!aNULL:!SHA256:!SHA384:!aECDH:!AESGCM+AES256:!aPSK");
   // Walk through all the installed ciphers, seeing if any need to be
   // appended to the cipher removal |command|.
   for (size_t i = 0; i < sk_SSL_CIPHER_num(ciphers); ++i) {
     const SSL_CIPHER* cipher = sk_SSL_CIPHER_value(ciphers, i);
-    const uint16 id = SSL_CIPHER_get_id(cipher);
+    const uint16 id = static_cast<uint16>(SSL_CIPHER_get_id(cipher));
     // Remove any ciphers with a strength of less than 80 bits. Note the NSS
     // implementation uses "effective" bits here but OpenSSL does not provide
     // this detail. This only impacts Triple DES: reports 112 vs. 168 bits,
@@ -814,8 +861,20 @@ int SSLClientSocketOpenSSL::Init() {
   }
 
   if (!ssl_config_.next_protos.empty()) {
+    // Get list of ciphers that are enabled.
+    STACK_OF(SSL_CIPHER)* enabled_ciphers = SSL_get_ciphers(ssl_);
+    DCHECK(enabled_ciphers);
+    std::vector<uint16> enabled_ciphers_vector;
+    for (size_t i = 0; i < sk_SSL_CIPHER_num(enabled_ciphers); ++i) {
+      const SSL_CIPHER* cipher = sk_SSL_CIPHER_value(enabled_ciphers, i);
+      const uint16 id = static_cast<uint16>(SSL_CIPHER_get_id(cipher));
+      enabled_ciphers_vector.push_back(id);
+    }
+
     std::vector<uint8_t> wire_protos =
-        SerializeNextProtos(ssl_config_.next_protos);
+        SerializeNextProtos(ssl_config_.next_protos,
+                            HasCipherAdequateForHTTP2(enabled_ciphers_vector) &&
+                                IsTLSVersionAdequateForHTTP2(ssl_config_));
     SSL_set_alpn_protos(ssl_, wire_protos.empty() ? NULL : &wire_protos[0],
                         wire_protos.size());
   }
@@ -825,8 +884,8 @@ int SSLClientSocketOpenSSL::Init() {
     SSL_enable_ocsp_stapling(ssl_);
   }
 
-  // TODO(davidben): Enable OCSP stapling on platforms which support it and pass
-  // into the certificate verifier. https://crbug.com/398677
+  if (IsOCSPStaplingSupported())
+    SSL_enable_ocsp_stapling(ssl_);
 
   return OK;
 }
@@ -881,12 +940,53 @@ bool SSLClientSocketOpenSSL::DoTransportIO() {
   return network_moved;
 }
 
+// TODO(vadimt): Remove including "base/threading/thread_local.h" and
+// g_first_run_completed once crbug.com/424386 is fixed.
+base::LazyInstance<base::ThreadLocalBoolean>::Leaky g_first_run_completed =
+    LAZY_INSTANCE_INITIALIZER;
+
 int SSLClientSocketOpenSSL::DoHandshake() {
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
   int net_error = OK;
-  int rv = SSL_do_handshake(ssl_);
+
+  int rv;
+
+  // TODO(vadimt): Leave only 1 call to SSL_do_handshake once crbug.com/424386
+  // is fixed.
+  if (ssl_config_.send_client_cert && ssl_config_.client_cert.get()) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("424386 DoHandshake_WithCert"));
+
+    rv = SSL_do_handshake(ssl_);
+  } else {
+    if (g_first_run_completed.Get().Get()) {
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile1(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "424386 DoHandshake_WithoutCert Not First"));
+
+      rv = SSL_do_handshake(ssl_);
+    } else {
+      g_first_run_completed.Get().Set(true);
+
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile1(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "424386 DoHandshake_WithoutCert First"));
+
+      rv = SSL_do_handshake(ssl_);
+    }
+  }
 
   if (client_auth_cert_needed_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "424386 SSLClientSocketOpenSSL::DoHandshake2"));
+
     net_error = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
     // If the handshake already succeeded (because the server requests but
     // doesn't require a client cert), we need to invalidate the SSL session
@@ -902,6 +1002,11 @@ int SSLClientSocketOpenSSL::DoHandshake() {
       }
     }
   } else if (rv == 1) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "424386 SSLClientSocketOpenSSL::DoHandshake3"));
+
     if (trying_cached_session_ && logging::DEBUG_MODE) {
       DVLOG(2) << "Result of session reuse for " << host_and_port_.ToString()
                << " is: " << (SSL_session_reused(ssl_) ? "Success" : "Fail");
@@ -920,6 +1025,7 @@ int SSLClientSocketOpenSSL::DoHandshake() {
       if (alpn_len > 0) {
         npn_proto_.assign(reinterpret_cast<const char*>(alpn_proto), alpn_len);
         npn_status_ = kNextProtoNegotiated;
+        set_negotiation_extension(kExtensionALPN);
       }
     }
 
@@ -928,12 +1034,18 @@ int SSLClientSocketOpenSSL::DoHandshake() {
                            ssl_config_.channel_id_enabled,
                            crypto::ECPrivateKey::IsSupported());
 
-    uint8_t* ocsp_response;
-    size_t ocsp_response_len;
-    SSL_get0_ocsp_response(ssl_, &ocsp_response, &ocsp_response_len);
-    set_stapled_ocsp_response_received(ocsp_response_len != 0);
+    // Only record OCSP histograms if OCSP was requested.
+    if (ssl_config_.signed_cert_timestamps_enabled ||
+        IsOCSPStaplingSupported()) {
+      const uint8_t* ocsp_response;
+      size_t ocsp_response_len;
+      SSL_get0_ocsp_response(ssl_, &ocsp_response, &ocsp_response_len);
 
-    uint8_t* sct_list;
+      set_stapled_ocsp_response_received(ocsp_response_len != 0);
+      UMA_HISTOGRAM_BOOLEAN("Net.OCSPResponseStapled", ocsp_response_len != 0);
+    }
+
+    const uint8_t* sct_list;
     size_t sct_list_len;
     SSL_get0_signed_cert_timestamp_list(ssl_, &sct_list, &sct_list_len);
     set_signed_cert_timestamps_received(sct_list_len != 0);
@@ -942,6 +1054,11 @@ int SSLClientSocketOpenSSL::DoHandshake() {
     UpdateServerCert();
     GotoState(STATE_VERIFY_CERT);
   } else {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+    tracked_objects::ScopedTracker tracking_profile4(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "424386 SSLClientSocketOpenSSL::DoHandshake4"));
+
     int ssl_error = SSL_get_error(ssl_, rv);
 
     if (ssl_error == SSL_ERROR_WANT_CHANNEL_ID_LOOKUP) {
@@ -971,6 +1088,7 @@ int SSLClientSocketOpenSSL::DoHandshake() {
 }
 
 int SSLClientSocketOpenSSL::DoChannelIDLookup() {
+  net_log_.AddEvent(NetLog::TYPE_SSL_CHANNEL_ID_REQUESTED);
   GotoState(STATE_CHANNEL_ID_LOOKUP_COMPLETE);
   return channel_id_service_->GetOrCreateChannelID(
       host_and_port_.host(),
@@ -1017,6 +1135,7 @@ int SSLClientSocketOpenSSL::DoChannelIDLookupComplete(int result) {
 
   // Return to the handshake.
   set_channel_id_sent(true);
+  net_log_.AddEvent(NetLog::TYPE_SSL_CHANNEL_ID_PROVIDED);
   GotoState(STATE_HANDSHAKE);
   return OK;
 }
@@ -1090,6 +1209,16 @@ int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {
     }
   }
 
+  if (result == OK) {
+    if (SSL_session_reused(ssl_)) {
+      // Record whether or not the server tried to resume a session for a
+      // different version. See https://crbug.com/441456.
+      UMA_HISTOGRAM_BOOLEAN(
+          "Net.SSLSessionVersionMatch",
+          SSL_version(ssl_) == SSL_get_session(ssl_)->ssl_version);
+    }
+  }
+
   const CertStatus cert_status = server_cert_verify_result_.cert_status;
   if (transport_security_state_ &&
       (result == OK ||
@@ -1135,7 +1264,17 @@ void SSLClientSocketOpenSSL::DoConnectCallback(int rv) {
 }
 
 void SSLClientSocketOpenSSL::UpdateServerCert() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::UpdateServerCert"));
+
   server_cert_chain_->Reset(SSL_get_peer_cert_chain(ssl_));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::UpdateServerCert1"));
   server_cert_ = server_cert_chain_->AsOSChain();
 
   if (server_cert_.get()) {
@@ -1143,6 +1282,37 @@ void SSLClientSocketOpenSSL::UpdateServerCert() {
         NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
         base::Bind(&NetLogX509CertificateCallback,
                    base::Unretained(server_cert_.get())));
+
+    // TODO(rsleevi): Plumb an OCSP response into the Mac system library and
+    // update IsOCSPStaplingSupported for Mac. https://crbug.com/430714
+    if (IsOCSPStaplingSupported()) {
+#if defined(OS_WIN)
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile2(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "424386 SSLClientSocketOpenSSL::UpdateServerCert2"));
+
+      const uint8_t* ocsp_response_raw;
+      size_t ocsp_response_len;
+      SSL_get0_ocsp_response(ssl_, &ocsp_response_raw, &ocsp_response_len);
+
+      CRYPT_DATA_BLOB ocsp_response_blob;
+      ocsp_response_blob.cbData = ocsp_response_len;
+      ocsp_response_blob.pbData = const_cast<BYTE*>(ocsp_response_raw);
+      BOOL ok = CertSetCertificateContextProperty(
+          server_cert_->os_cert_handle(),
+          CERT_OCSP_RESPONSE_PROP_ID,
+          CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG,
+          &ocsp_response_blob);
+      if (!ok) {
+        VLOG(1) << "Failed to set OCSP response property: "
+                << GetLastError();
+      }
+#else
+      NOTREACHED();
+#endif
+    }
   }
 }
 
@@ -1150,7 +1320,7 @@ void SSLClientSocketOpenSSL::VerifyCT() {
   if (!cert_transparency_verifier_)
     return;
 
-  uint8_t* ocsp_response_raw;
+  const uint8_t* ocsp_response_raw;
   size_t ocsp_response_len;
   SSL_get0_ocsp_response(ssl_, &ocsp_response_raw, &ocsp_response_len);
   std::string ocsp_response;
@@ -1159,7 +1329,7 @@ void SSLClientSocketOpenSSL::VerifyCT() {
                          ocsp_response_len);
   }
 
-  uint8_t* sct_list_raw;
+  const uint8_t* sct_list_raw;
   size_t sct_list_len;
   SSL_get0_signed_cert_timestamp_list(ssl_, &sct_list_raw, &sct_list_len);
   std::string sct_list;
@@ -1169,15 +1339,28 @@ void SSLClientSocketOpenSSL::VerifyCT() {
   // Note that this is a completely synchronous operation: The CT Log Verifier
   // gets all the data it needs for SCT verification and does not do any
   // external communication.
-  int result = cert_transparency_verifier_->Verify(
-      server_cert_verify_result_.verified_cert.get(),
-      ocsp_response, sct_list, &ct_verify_result_, net_log_);
+  cert_transparency_verifier_->Verify(
+      server_cert_verify_result_.verified_cert.get(), ocsp_response, sct_list,
+      &ct_verify_result_, net_log_);
 
-  VLOG(1) << "CT Verification complete: result " << result
-          << " Invalid scts: " << ct_verify_result_.invalid_scts.size()
-          << " Verified scts: " << ct_verify_result_.verified_scts.size()
-          << " scts from unknown logs: "
-          << ct_verify_result_.unknown_logs_scts.size();
+  if (!policy_enforcer_) {
+    server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
+  } else {
+    if (server_cert_verify_result_.cert_status & CERT_STATUS_IS_EV) {
+      scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
+          SSLConfigService::GetEVCertsWhitelist();
+      if (!policy_enforcer_->DoesConformToCTEVPolicy(
+              server_cert_verify_result_.verified_cert.get(),
+              ev_whitelist.get(), ct_verify_result_, net_log_)) {
+        // TODO(eranm): Log via the BoundNetLog, see crbug.com/437766
+        VLOG(1) << "EV certificate for "
+                << server_cert_verify_result_.verified_cert->subject()
+                       .GetDisplayName()
+                << " does not conform to CT policy, removing EV status.";
+        server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
+      }
+    }
+  }
 }
 
 void SSLClientSocketOpenSSL::OnHandshakeIOComplete(int result) {
@@ -1319,7 +1502,14 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
     if (rv == 0) {
       net_log_.AddByteTransferEvent(NetLog::TYPE_SSL_SOCKET_BYTES_RECEIVED,
                                     rv, user_read_buf_->data());
+    } else {
+      net_log_.AddEvent(
+          NetLog::TYPE_SSL_READ_ERROR,
+          CreateNetLogOpenSSLErrorCallback(rv, pending_read_ssl_error_,
+                                           pending_read_error_info_));
     }
+    pending_read_ssl_error_ = SSL_ERROR_NONE;
+    pending_read_error_info_ = OpenSSLErrorInfo();
     return rv;
   }
 
@@ -1354,8 +1544,10 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
     if (client_auth_cert_needed_) {
       *next_result = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
     } else if (*next_result < 0) {
-      int err = SSL_get_error(ssl_, *next_result);
-      *next_result = MapOpenSSLError(err, err_tracer);
+      pending_read_ssl_error_ = SSL_get_error(ssl_, *next_result);
+      *next_result = MapOpenSSLErrorWithDetails(pending_read_ssl_error_,
+                                                err_tracer,
+                                                &pending_read_error_info_);
 
       // Many servers do not reliably send a close_notify alert when shutting
       // down a connection, and instead terminate the TCP connection. This is
@@ -1381,6 +1573,13 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
   if (rv >= 0) {
     net_log_.AddByteTransferEvent(NetLog::TYPE_SSL_SOCKET_BYTES_RECEIVED, rv,
                                   user_read_buf_->data());
+  } else if (rv != ERR_IO_PENDING) {
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_READ_ERROR,
+        CreateNetLogOpenSSLErrorCallback(rv, pending_read_ssl_error_,
+                                         pending_read_error_info_));
+    pending_read_ssl_error_ = SSL_ERROR_NONE;
+    pending_read_error_info_ = OpenSSLErrorInfo();
   }
   return rv;
 }
@@ -1394,28 +1593,37 @@ int SSLClientSocketOpenSSL::DoPayloadWrite() {
     return rv;
   }
 
-  int err = SSL_get_error(ssl_, rv);
-  return MapOpenSSLError(err, err_tracer);
+  int ssl_error = SSL_get_error(ssl_, rv);
+  OpenSSLErrorInfo error_info;
+  int net_error = MapOpenSSLErrorWithDetails(ssl_error, err_tracer,
+                                             &error_info);
+
+  if (net_error != ERR_IO_PENDING) {
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_WRITE_ERROR,
+        CreateNetLogOpenSSLErrorCallback(net_error, ssl_error, error_info));
+  }
+  return net_error;
 }
 
 int SSLClientSocketOpenSSL::BufferSend(void) {
   if (transport_send_busy_)
     return ERR_IO_PENDING;
 
-  if (!send_buffer_.get()) {
-    // Get a fresh send buffer out of the send BIO.
-    size_t max_read = BIO_pending(transport_bio_);
-    if (!max_read)
-      return 0;  // Nothing pending in the OpenSSL write BIO.
-    send_buffer_ = new DrainableIOBuffer(new IOBuffer(max_read), max_read);
-    int read_bytes = BIO_read(transport_bio_, send_buffer_->data(), max_read);
-    DCHECK_GT(read_bytes, 0);
-    CHECK_EQ(static_cast<int>(max_read), read_bytes);
-  }
+  size_t buffer_read_offset;
+  uint8_t* read_buf;
+  size_t max_read;
+  int status = BIO_zero_copy_get_read_buf(transport_bio_, &read_buf,
+                                          &buffer_read_offset, &max_read);
+  DCHECK_EQ(status, 1);  // Should never fail.
+  if (!max_read)
+    return 0;  // Nothing pending in the OpenSSL write BIO.
+  CHECK_EQ(read_buf, reinterpret_cast<uint8_t*>(send_buffer_->StartOfBuffer()));
+  CHECK_LT(buffer_read_offset, static_cast<size_t>(send_buffer_->capacity()));
+  send_buffer_->set_offset(buffer_read_offset);
 
   int rv = transport_->socket()->Write(
-      send_buffer_.get(),
-      send_buffer_->BytesRemaining(),
+      send_buffer_.get(), max_read,
       base::Bind(&SSLClientSocketOpenSSL::BufferSendComplete,
                  base::Unretained(this)));
   if (rv == ERR_IO_PENDING) {
@@ -1448,11 +1656,21 @@ int SSLClientSocketOpenSSL::BufferRecv(void) {
   // fill |transport_bio_| is issued. As long as an SSL client socket cannot
   // be gracefully shutdown (via SSL close alerts) and re-used for non-SSL
   // traffic, this over-subscribed Read()ing will not cause issues.
-  size_t max_write = BIO_ctrl_get_write_guarantee(transport_bio_);
+
+  size_t buffer_write_offset;
+  uint8_t* write_buf;
+  size_t max_write;
+  int status = BIO_zero_copy_get_write_buf(transport_bio_, &write_buf,
+                                           &buffer_write_offset, &max_write);
+  DCHECK_EQ(status, 1);  // Should never fail.
   if (!max_write)
     return ERR_IO_PENDING;
 
-  recv_buffer_ = new IOBuffer(max_write);
+  CHECK_EQ(write_buf,
+           reinterpret_cast<uint8_t*>(recv_buffer_->StartOfBuffer()));
+  CHECK_LT(buffer_write_offset, static_cast<size_t>(recv_buffer_->capacity()));
+
+  recv_buffer_->set_offset(buffer_write_offset);
   int rv = transport_->socket()->Read(
       recv_buffer_.get(),
       max_write,
@@ -1467,7 +1685,6 @@ int SSLClientSocketOpenSSL::BufferRecv(void) {
 }
 
 void SSLClientSocketOpenSSL::BufferSendComplete(int result) {
-  transport_send_busy_ = false;
   TransportWriteComplete(result);
   OnSendComplete(result);
 }
@@ -1479,18 +1696,18 @@ void SSLClientSocketOpenSSL::BufferRecvComplete(int result) {
 
 void SSLClientSocketOpenSSL::TransportWriteComplete(int result) {
   DCHECK(ERR_IO_PENDING != result);
+  int bytes_written = 0;
   if (result < 0) {
     // Record the error. Save it to be reported in a future read or write on
     // transport_bio_'s peer.
     transport_write_error_ = result;
-    send_buffer_ = NULL;
   } else {
-    DCHECK(send_buffer_.get());
-    send_buffer_->DidConsume(result);
-    DCHECK_GE(send_buffer_->BytesRemaining(), 0);
-    if (send_buffer_->BytesRemaining() <= 0)
-      send_buffer_ = NULL;
+    bytes_written = result;
   }
+  DCHECK_GE(send_buffer_->RemainingCapacity(), bytes_written);
+  int ret = BIO_zero_copy_get_read_buf_done(transport_bio_, bytes_written);
+  DCHECK_EQ(1, ret);
+  transport_send_busy_ = false;
 }
 
 int SSLClientSocketOpenSSL::TransportReadComplete(int result) {
@@ -1499,25 +1716,32 @@ int SSLClientSocketOpenSSL::TransportReadComplete(int result) {
   // does not report success.
   if (result == 0)
     result = ERR_CONNECTION_CLOSED;
+  int bytes_read = 0;
   if (result < 0) {
     DVLOG(1) << "TransportReadComplete result " << result;
     // Received an error. Save it to be reported in a future read on
     // transport_bio_'s peer.
     transport_read_error_ = result;
   } else {
-    DCHECK(recv_buffer_.get());
-    int ret = BIO_write(transport_bio_, recv_buffer_->data(), result);
-    // A write into a memory BIO should always succeed.
-    DCHECK_EQ(result, ret);
+    bytes_read = result;
   }
-  recv_buffer_ = NULL;
+  DCHECK_GE(recv_buffer_->RemainingCapacity(), bytes_read);
+  int ret = BIO_zero_copy_get_write_buf_done(transport_bio_, bytes_read);
+  DCHECK_EQ(1, ret);
   transport_recv_busy_ = false;
   return result;
 }
 
 int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::ClientCertRequestCallback"));
+
   DVLOG(3) << "OpenSSL ClientCertRequestCallback called";
   DCHECK(ssl == ssl_);
+
+  net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_REQUESTED);
 
   // Clear any currently configured certificates.
   SSL_certs_clear(ssl_);
@@ -1596,15 +1820,26 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
       LOG(WARNING) << "Failed to set client certificate";
       return -1;
     }
+
+    int cert_count = 1 + sk_X509_num(chain.get());
+    net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_PROVIDED,
+                      NetLog::IntegerCallback("cert_count", cert_count));
     return 1;
   }
 #endif  // defined(OS_IOS)
 
   // Send no client certificate.
+  net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_PROVIDED,
+                    NetLog::IntegerCallback("cert_count", 0));
   return 1;
 }
 
 int SSLClientSocketOpenSSL::CertVerifyCallback(X509_STORE_CTX* store_ctx) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::CertVerifyCallback"));
+
   if (!completed_connect_) {
     // If the first handshake hasn't completed then we accept any certificates
     // because we verify after the handshake.
@@ -1639,6 +1874,11 @@ int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
                                                     unsigned char* outlen,
                                                     const unsigned char* in,
                                                     unsigned int inlen) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::SelectNextProtoCallback"));
+
   if (ssl_config_.next_protos.empty()) {
     *out = reinterpret_cast<uint8*>(
         const_cast<char*>(kDefaultSupportedNPNProtocol));
@@ -1652,11 +1892,10 @@ int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
 
   // For each protocol in server preference order, see if we support it.
   for (unsigned int i = 0; i < inlen; i += in[i] + 1) {
-    for (std::vector<std::string>::const_iterator
-             j = ssl_config_.next_protos.begin();
-         j != ssl_config_.next_protos.end(); ++j) {
-      if (in[i] == j->size() &&
-          memcmp(&in[i + 1], j->data(), in[i]) == 0) {
+    for (NextProto next_proto : ssl_config_.next_protos) {
+      const std::string proto = NextProtoToString(next_proto);
+      if (in[i] == proto.size() &&
+          memcmp(&in[i + 1], proto.data(), in[i]) == 0) {
         // We found a match.
         *out = const_cast<unsigned char*>(in) + i + 1;
         *outlen = in[i];
@@ -1670,13 +1909,15 @@ int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
 
   // If we didn't find a protocol, we select the first one from our list.
   if (npn_status_ == kNextProtoNoOverlap) {
-    *out = reinterpret_cast<uint8*>(const_cast<char*>(
-        ssl_config_.next_protos[0].data()));
-    *outlen = ssl_config_.next_protos[0].size();
+    // NextProtoToString returns a pointer to a static string.
+    const char* proto = NextProtoToString(ssl_config_.next_protos[0]);
+    *out = reinterpret_cast<unsigned char*>(const_cast<char*>(proto));
+    *outlen = strlen(proto);
   }
 
   npn_proto_.assign(reinterpret_cast<const char*>(*out), *outlen);
   DVLOG(2) << "next protocol: '" << npn_proto_ << "' status: " << npn_status_;
+  set_negotiation_extension(kExtensionNPN);
   return SSL_TLSEXT_ERR_OK;
 }
 
@@ -1718,6 +1959,11 @@ long SSLClientSocketOpenSSL::BIOCallback(
     int cmd,
     const char *argp, int argi, long argl,
     long retvalue) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::BIOCallback"));
+
   SSLClientSocketOpenSSL* socket = reinterpret_cast<SSLClientSocketOpenSSL*>(
       BIO_get_callback_arg(bio));
   CHECK(socket);
@@ -1729,6 +1975,11 @@ long SSLClientSocketOpenSSL::BIOCallback(
 void SSLClientSocketOpenSSL::InfoCallback(const SSL* ssl,
                                           int type,
                                           int /*val*/) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketOpenSSL::InfoCallback"));
+
   if (type == SSL_CB_HANDSHAKE_DONE) {
     SSLClientSocketOpenSSL* ssl_socket =
         SSLContext::GetInstance()->GetClientSocketFromSSL(ssl);

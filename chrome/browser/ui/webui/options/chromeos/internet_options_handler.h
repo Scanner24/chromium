@@ -39,23 +39,18 @@ class InternetOptionsHandler
       public chromeos::NetworkStateHandlerObserver {
  public:
   InternetOptionsHandler();
-  virtual ~InternetOptionsHandler();
+  ~InternetOptionsHandler() override;
 
  private:
   // OptionsPageUIHandler
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializePage() override;
 
   // WebUIMessageHandler (from OptionsPageUIHandler)
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // Callbacks to set network state properties.
   void ShowMorePlanInfoCallback(const base::ListValue* args);
-  void SetApnCallback(const base::ListValue* args);
-  void SetApnProperties(const base::ListValue* args,
-                        const std::string& service_path,
-                        const base::DictionaryValue& shill_properties);
   void CarrierStatusCallback();
   void SetCarrierCallback(const base::ListValue* args);
   void SimOperationCallback(const base::ListValue* args);
@@ -77,39 +72,29 @@ class InternetOptionsHandler
   // Updates the display of network connection information for the details page
   // if visible.
   void UpdateConnectionData(const std::string& service_path);
-  void UpdateConnectionDataCallback(
-      const std::string& service_path,
-      const base::DictionaryValue& shill_properties);
+
+  // Callback for ManagedNetworkConnectionHandler::GetManagedProperties.
+  // Calls the JS callback |js_callback_function| with the result.
+  void GetManagedPropertiesResult(const std::string& js_callback_function,
+                                  const std::string& service_path,
+                                  const base::DictionaryValue& onc_properties);
+
   // Called when carrier data has been updated to informs the JS.
   void UpdateCarrier();
 
   // NetworkStateHandlerObserver
-  virtual void DeviceListChanged() OVERRIDE;
-  virtual void NetworkListChanged() OVERRIDE;
-  virtual void NetworkConnectionStateChanged(
-      const chromeos::NetworkState* network) OVERRIDE;
-  virtual void NetworkPropertiesUpdated(
-      const chromeos::NetworkState* network) OVERRIDE;
-  virtual void DevicePropertiesUpdated(
-      const chromeos::DeviceState* device) OVERRIDE;
+  void DeviceListChanged() override;
+  void NetworkListChanged() override;
+  void NetworkConnectionStateChanged(
+      const chromeos::NetworkState* network) override;
+  void NetworkPropertiesUpdated(const chromeos::NetworkState* network) override;
+  void DevicePropertiesUpdated(const chromeos::DeviceState* device) override;
 
   // Updates the logged in user type.
   void UpdateLoggedInUserType();
 
   // Additional callbacks to set network state properties.
-  void SetServerHostnameCallback(const base::ListValue* args);
-  void SetPreferNetworkCallback(const base::ListValue* args);
-  void SetAutoConnectCallback(const base::ListValue* args);
-  void SetIPConfigCallback(const base::ListValue* args);
-  void SetIPConfigProperties(const base::ListValue* args,
-                             const std::string& service_path,
-                             const base::DictionaryValue& shill_properties);
-
-  // Retrieves the properties for |service_path| and calls sendNetworkDetails
-  // with the results.
-  void PopulateDictionaryDetailsCallback(
-      const std::string& service_path,
-      const base::DictionaryValue& shill_properties);
+  void SetPropertiesCallback(const base::ListValue* args);
 
   // Gets the native window for hosting dialogs, etc.
   gfx::NativeWindow GetNativeWindow() const;
@@ -120,15 +105,11 @@ class InternetOptionsHandler
   // Gets the user PrefService associated with the WebUI.
   const PrefService* GetPrefs() const;
 
-  // Handle various network commands and clicks on a network item
-  // in the network list.
-  // |args| must be { network_type, service_path, command } with 'command'
-  // one of: [ add, forget, options, connect disconnect, activate ]
-  void NetworkCommandCallback(const base::ListValue* args);
-
-  // Helper functions called by NetworkCommandCallback(...)
-  void AddConnection(const std::string& type);
-  void SendShowDetailedInfo(const std::string& service_path);
+  // Additional callbacks for managing networks.
+  void AddConnection(const base::ListValue* args);
+  void ConfigureNetwork(const base::ListValue* args);
+  void ActivateNetwork(const base::ListValue* args);
+  void RemoveNetwork(const base::ListValue* args);
 
   // Creates the map of wired networks.
   base::ListValue* GetWiredList();

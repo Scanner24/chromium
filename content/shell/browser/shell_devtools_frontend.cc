@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
-#include "base/path_service.h"
+#include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,68 +19,34 @@
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
 #include "content/shell/browser/shell_content_browser_client.h"
-#include "content/shell/browser/shell_devtools_delegate.h"
+#include "content/shell/browser/shell_devtools_manager_delegate.h"
 #include "content/shell/browser/webkit_test_controller.h"
 #include "content/shell/common/shell_switches.h"
 #include "net/base/filename_util.h"
 
 namespace content {
 
-// DevTools frontend path for inspector LayoutTests.
-GURL GetDevToolsPathAsURL(const std::string& settings,
-                          const std::string& frontend_url) {
-  if (!frontend_url.empty())
-    return GURL(frontend_url);
-  base::FilePath dir_exe;
-  if (!PathService::Get(base::DIR_EXE, &dir_exe)) {
-    NOTREACHED();
-    return GURL();
-  }
-#if defined(OS_MACOSX)
-  // On Mac, the executable is in
-  // out/Release/Content Shell.app/Contents/MacOS/Content Shell.
-  // We need to go up 3 directories to get to out/Release.
-  dir_exe = dir_exe.AppendASCII("../../..");
-#endif
-  base::FilePath dev_tools_path = dir_exe.AppendASCII(
-      "resources/inspector/devtools.html");
-
-  GURL result = net::FilePathToFileURL(dev_tools_path);
-  if (!settings.empty())
-      result = GURL(base::StringPrintf("%s?settings=%s&experiments=true",
-                                       result.spec().c_str(),
-                                       settings.c_str()));
-  return result;
-}
+// This constant should be in sync with
+// the constant at devtools_ui_bindings.cc.
+const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 
 // static
 ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
     WebContents* inspected_contents) {
-  return ShellDevToolsFrontend::Show(inspected_contents, "", "");
-}
-
-// static
-ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
-    WebContents* inspected_contents,
-    const std::string& settings,
-    const std::string& frontend_url) {
   scoped_refptr<DevToolsAgentHost> agent(
       DevToolsAgentHost::GetOrCreateFor(inspected_contents));
   Shell* shell = Shell::CreateNewWindow(inspected_contents->GetBrowserContext(),
                                         GURL(),
                                         NULL,
-                                        MSG_ROUTING_NONE,
                                         gfx::Size());
   ShellDevToolsFrontend* devtools_frontend = new ShellDevToolsFrontend(
       shell,
       agent.get());
 
-  ShellDevToolsDelegate* delegate = ShellContentBrowserClient::Get()->
-      shell_browser_main_parts()->devtools_delegate();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    shell->LoadURL(GetDevToolsPathAsURL(settings, frontend_url));
-  else
-    shell->LoadURL(delegate->devtools_http_handler()->GetFrontendURL());
+  DevToolsHttpHandler* http_handler = ShellContentBrowserClient::Get()
+                                          ->shell_browser_main_parts()
+                                          ->devtools_http_handler();
+  shell->LoadURL(http_handler->GetFrontendURL("/devtools/devtools.html"));
 
   return devtools_frontend;
 }
@@ -94,11 +60,19 @@ void ShellDevToolsFrontend::Focus() {
 }
 
 void ShellDevToolsFrontend::InspectElementAt(int x, int y) {
-  agent_host_->InspectElement(x, y);
+  if (agent_host_)
+    agent_host_->InspectElement(x, y);
 }
 
 void ShellDevToolsFrontend::Close() {
   frontend_shell_->Close();
+}
+
+void ShellDevToolsFrontend::DisconnectFromTarget() {
+  if (!agent_host_)
+    return;
+  agent_host_->DetachClient();
+  agent_host_ = NULL;
 }
 
 ShellDevToolsFrontend::ShellDevToolsFrontend(Shell* frontend_shell,
@@ -114,53 +88,54 @@ ShellDevToolsFrontend::~ShellDevToolsFrontend() {
 void ShellDevToolsFrontend::RenderViewCreated(
     RenderViewHost* render_view_host) {
   if (!frontend_host_) {
-    frontend_host_.reset(DevToolsFrontendHost::Create(render_view_host, this));
-    agent_host_->AttachClient(this);
+    frontend_host_.reset(
+        DevToolsFrontendHost::Create(web_contents()->GetMainFrame(), this));
   }
 }
 
-void ShellDevToolsFrontend::DocumentOnLoadCompletedInMainFrame() {
-  web_contents()->GetMainFrame()->ExecuteJavaScript(
-      base::ASCIIToUTF16("InspectorFrontendAPI.setUseSoftMenu(true);"));
+void ShellDevToolsFrontend::DidNavigateMainFrame(
+    const LoadCommittedDetails& details,
+    const FrameNavigateParams& params) {
+  if (agent_host_)
+    agent_host_->AttachClient(this);
 }
 
 void ShellDevToolsFrontend::WebContentsDestroyed() {
-  agent_host_->DetachClient();
+  if (agent_host_)
+    agent_host_->DetachClient();
   delete this;
-}
-
-void ShellDevToolsFrontend::RenderProcessGone(base::TerminationStatus status) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    WebKitTestController::Get()->DevToolsProcessCrashed();
 }
 
 void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
     const std::string& message) {
+  if (!agent_host_)
+    return;
   std::string method;
-  std::string browser_message;
   int id = 0;
-
   base::ListValue* params = NULL;
   base::DictionaryValue* dict = NULL;
   scoped_ptr<base::Value> parsed_message(base::JSONReader::Read(message));
   if (!parsed_message ||
       !parsed_message->GetAsDictionary(&dict) ||
-      !dict->GetString("method", &method) ||
-      !dict->GetList("params", &params)) {
+      !dict->GetString("method", &method)) {
+    return;
+  }
+  dict->GetList("params", &params);
+
+  std::string browser_message;
+  if (method == "sendMessageToBrowser" && params &&
+      params->GetSize() == 1 && params->GetString(0, &browser_message)) {
+    agent_host_->DispatchProtocolMessage(browser_message);
+  } else if (method == "loadCompleted") {
+    web_contents()->GetMainFrame()->ExecuteJavaScript(
+        base::ASCIIToUTF16("DevToolsAPI.setUseSoftMenu(true);"));
+  } else {
     return;
   }
 
-  if (method != "sendMessageToBrowser" ||
-      params->GetSize() != 1 ||
-      !params->GetString(0, &browser_message)) {
-    return;
-  }
   dict->GetInteger("id", &id);
-
-  agent_host_->DispatchProtocolMessage(browser_message);
-
   if (id) {
-    std::string code = "InspectorFrontendAPI.embedderMessageAck(" +
+    std::string code = "DevToolsAPI.embedderMessageAck(" +
         base::IntToString(id) + ",\"\");";
     base::string16 javascript = base::UTF8ToUTF16(code);
     web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
@@ -169,14 +144,34 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
 
 void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontendToBackend(
     const std::string& message) {
-  agent_host_->DispatchProtocolMessage(message);
+  if (agent_host_)
+    agent_host_->DispatchProtocolMessage(message);
 }
 
 void ShellDevToolsFrontend::DispatchProtocolMessage(
     DevToolsAgentHost* agent_host, const std::string& message) {
-  std::string code = "InspectorFrontendAPI.dispatchMessage(" + message + ");";
-  base::string16 javascript = base::UTF8ToUTF16(code);
-  web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+
+  if (message.length() < kMaxMessageChunkSize) {
+    base::string16 javascript = base::UTF8ToUTF16(
+        "DevToolsAPI.dispatchMessage(" + message + ");");
+    web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+    return;
+  }
+
+  base::FundamentalValue total_size(static_cast<int>(message.length()));
+  for (size_t pos = 0; pos < message.length(); pos += kMaxMessageChunkSize) {
+    base::StringValue message_value(message.substr(pos, kMaxMessageChunkSize));
+    std::string param;
+    base::JSONWriter::Write(&message_value, &param);
+    std::string code = "DevToolsAPI.dispatchMessageChunk(" + param + ");";
+    base::string16 javascript = base::UTF8ToUTF16(code);
+    web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+  }
+}
+
+void ShellDevToolsFrontend::AttachTo(WebContents* inspected_contents) {
+  DisconnectFromTarget();
+  agent_host_ = DevToolsAgentHost::GetOrCreateFor(inspected_contents);
 }
 
 void ShellDevToolsFrontend::AgentHostClosed(

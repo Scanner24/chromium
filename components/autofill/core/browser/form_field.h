@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "components/autofill/core/browser/field_types.h"
 
@@ -28,6 +29,7 @@ class FormField {
   // The association is stored into |map|.  Each field has a derived unique name
   // that is used as the key into the |map|.
   static void ParseFormFields(const std::vector<AutofillField*>& fields,
+                              bool is_form_tag,
                               ServerFieldTypeMap* map);
 
  protected:
@@ -44,9 +46,10 @@ class FormField {
     MATCH_TELEPHONE  = 1 << 5,
     MATCH_SELECT     = 1 << 6,
     MATCH_TEXT_AREA  = 1 << 7,
+    MATCH_PASSWORD   = 1 << 8,
     MATCH_ALL_INPUTS =
         MATCH_TEXT | MATCH_EMAIL | MATCH_TELEPHONE | MATCH_SELECT |
-        MATCH_TEXT_AREA,
+        MATCH_TEXT_AREA | MATCH_PASSWORD,
 
     // By default match label and name for input/text types.
     MATCH_DEFAULT    = MATCH_LABEL | MATCH_NAME | MATCH_VALUE | MATCH_TEXT,
@@ -91,7 +94,7 @@ class FormField {
 
   // Function pointer type for the parsing function that should be passed to the
   // ParseFormFieldsPass() helper function.
-  typedef FormField* ParseFunction(AutofillScanner* scanner);
+  typedef scoped_ptr<FormField> ParseFunction(AutofillScanner* scanner);
 
   // Matches |pattern| to the contents of the field at the head of the
   // |scanner|.

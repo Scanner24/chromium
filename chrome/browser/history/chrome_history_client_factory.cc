@@ -19,6 +19,13 @@ ChromeHistoryClient* ChromeHistoryClientFactory::GetForProfile(
 }
 
 // static
+ChromeHistoryClient* ChromeHistoryClientFactory::GetForProfileWithoutCreating(
+    Profile* profile) {
+  return static_cast<ChromeHistoryClient*>(
+      GetInstance()->GetServiceForBrowserContext(profile, false));
+}
+
+// static
 ChromeHistoryClientFactory* ChromeHistoryClientFactory::GetInstance() {
   return Singleton<ChromeHistoryClientFactory>::get();
 }
@@ -36,9 +43,7 @@ ChromeHistoryClientFactory::~ChromeHistoryClientFactory() {
 KeyedService* ChromeHistoryClientFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   Profile* profile = static_cast<Profile*>(context);
-  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile),
-                                 profile,
-                                 profile->GetTopSites());
+  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile));
 }
 
 content::BrowserContext* ChromeHistoryClientFactory::GetBrowserContextToUse(

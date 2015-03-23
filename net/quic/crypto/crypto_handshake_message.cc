@@ -65,8 +65,8 @@ void CryptoHandshakeMessage::MarkDirty() {
 void CryptoHandshakeMessage::SetTaglist(QuicTag tag, ...) {
   // Warning, if sizeof(QuicTag) > sizeof(int) then this function will break
   // because the terminating 0 will only be promoted to int.
-  COMPILE_ASSERT(sizeof(QuicTag) <= sizeof(int),
-                 crypto_tag_may_not_be_larger_than_int_or_varargs_will_break);
+  static_assert(sizeof(QuicTag) <= sizeof(int),
+                "crypto tag may not be larger than int or varargs will break");
 
   vector<QuicTag> tags;
   va_list ap;
@@ -109,7 +109,7 @@ QuicErrorCode CryptoHandshakeMessage::GetTaglist(QuicTag tag,
   }
 
   if (ret != QUIC_NO_ERROR) {
-    *out_tags = NULL;
+    *out_tags = nullptr;
     *out_len = 0;
     return ret;
   }
@@ -240,11 +240,9 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
     bool done = false;
     switch (it->first) {
       case kICSL:
-      case kIFCW:
       case kCFCW:
       case kSFCW:
       case kIRTT:
-      case kKATO:
       case kMSPC:
       case kSWND:
         // uint32 value
@@ -259,7 +257,6 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
       case kAEAD:
       case kCGST:
       case kCOPT:
-      case kLOSS:
       case kPDMD:
       case kVER:
         // tag lists
@@ -303,8 +300,9 @@ string CryptoHandshakeMessage::DebugStringInternal(size_t indent) const {
                             static_cast<int>(it->second.size()));
         done = true;
         break;
+      case kSNI:
       case kUAID:
-        ret += it->second;
+        ret += "\"" + it->second + "\"";
         done = true;
         break;
     }

@@ -28,13 +28,13 @@ class CastIPCDispatcher : public IPC::MessageFilter {
   void RemoveSender(int32 channel_id);
 
   // IPC::MessageFilter implementation
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE;
-  virtual void OnFilterRemoved() OVERRIDE;
-  virtual void OnChannelClosing() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterRemoved() override;
+  void OnChannelClosing() override;
 
  protected:
-  virtual ~CastIPCDispatcher();
+  ~CastIPCDispatcher() override;
 
  private:
   void OnNotifyStatusChange(
@@ -53,6 +53,7 @@ class CastIPCDispatcher : public IPC::MessageFilter {
   void OnRtcpCastMessage(int32 channel_id,
                          uint32 ssrc,
                          const media::cast::RtcpCastMessage& cast_message);
+  void OnReceivedPacket(int32 channel_id, const media::cast::Packet& packet);
 
   static CastIPCDispatcher* global_instance_;
 

@@ -7,6 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/thread_checker.h"
 #include "cc/layers/video_frame_provider.h"
 #include "ui/gfx/transform.h"
 
@@ -23,12 +24,10 @@ class VideoFrameProviderClientImpl
       VideoFrameProvider* provider);
 
   VideoLayerImpl* active_video_layer() { return active_video_layer_; }
-  void set_active_video_layer(VideoLayerImpl* video_layer) {
-    active_video_layer_ = video_layer;
-  }
+  void SetActiveVideoLayer(VideoLayerImpl* video_layer);
 
   void Stop();
-  bool Stopped() const { return !provider_; }
+  bool Stopped();
 
   scoped_refptr<media::VideoFrame> AcquireLockAndCurrentFrame();
   void PutCurrentFrame(const scoped_refptr<media::VideoFrame>& frame);
@@ -39,20 +38,21 @@ class VideoFrameProviderClientImpl
 
   // VideoFrameProvider::Client implementation. These methods are all callable
   // on any thread.
-  virtual void StopUsingProvider() OVERRIDE;
-  virtual void DidReceiveFrame() OVERRIDE;
-  virtual void DidUpdateMatrix(const float* matrix) OVERRIDE;
+  void StopUsingProvider() override;
+  void DidReceiveFrame() override;
+  void DidUpdateMatrix(const float* matrix) override;
 
  private:
   explicit VideoFrameProviderClientImpl(VideoFrameProvider* provider);
   friend class base::RefCounted<VideoFrameProviderClientImpl>;
-  virtual ~VideoFrameProviderClientImpl();
+  ~VideoFrameProviderClientImpl() override;
 
   VideoLayerImpl* active_video_layer_;
 
   // Guards the destruction of provider_ and the frame that it provides
   base::Lock provider_lock_;
   VideoFrameProvider* provider_;
+  base::ThreadChecker thread_checker_;
 
   gfx::Transform stream_texture_matrix_;
 

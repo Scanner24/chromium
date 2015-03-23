@@ -23,7 +23,7 @@ class SupervisedUserPrefStoreFixture : public PrefStore::Observer {
  public:
   explicit SupervisedUserPrefStoreFixture(
       SupervisedUserSettingsService* settings_service);
-  virtual ~SupervisedUserPrefStoreFixture();
+  ~SupervisedUserPrefStoreFixture() override;
 
   base::DictionaryValue* changed_prefs() {
     return &changed_prefs_;
@@ -34,8 +34,8 @@ class SupervisedUserPrefStoreFixture : public PrefStore::Observer {
   }
 
   // PrefStore::Observer implementation:
-  virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
-  virtual void OnInitializationCompleted(bool succeeded) OVERRIDE;
+  void OnPrefValueChanged(const std::string& key) override;
+  void OnInitializationCompleted(bool succeeded) override;
 
  private:
   scoped_refptr<SupervisedUserPrefStore> pref_store_;
@@ -72,8 +72,8 @@ void SupervisedUserPrefStoreFixture::OnInitializationCompleted(bool succeeded) {
 
 class SupervisedUserPrefStoreTest : public ::testing::Test {
  public:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   SupervisedUserSettingsService service_;
@@ -127,7 +127,7 @@ TEST_F(SupervisedUserPrefStoreTest, ConfigureSettings) {
   scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
   dict->SetBoolean("example.com", true);
   dict->SetBoolean("moose.org", false);
-  service_.SetLocalSettingForTesting(
+  service_.SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts,
       scoped_ptr<base::Value>(dict->DeepCopy()));
   EXPECT_EQ(1u, fixture.changed_prefs()->size());
@@ -138,7 +138,7 @@ TEST_F(SupervisedUserPrefStoreTest, ConfigureSettings) {
   // kForceSafeSearch can be configured by the custodian, overriding the
   // hardcoded default.
   fixture.changed_prefs()->Clear();
-  service_.SetLocalSettingForTesting(
+  service_.SetLocalSetting(
       supervised_users::kForceSafeSearch,
       scoped_ptr<base::Value>(new base::FundamentalValue(false)));
   EXPECT_EQ(1u, fixture.changed_prefs()->size());

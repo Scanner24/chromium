@@ -22,10 +22,10 @@
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_family.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/size.h"
 
 using content::BrowserThread;
 using content::NotificationService;
@@ -100,7 +100,7 @@ class ImageLoaderTest : public testing::Test {
   gfx::ImageFamily image_family_;
 
  private:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
     file_thread_.Start();
     io_thread_.Start();

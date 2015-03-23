@@ -5,6 +5,7 @@
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
@@ -35,13 +36,13 @@ class VideoDecoder : public PPB_VideoDecoder_Shared {
 
   // PPB_VideoDecoder_Dev_API implementation.
   virtual int32_t Decode(const PP_VideoBitstreamBuffer_Dev* bitstream_buffer,
-                         scoped_refptr<TrackedCallback> callback) OVERRIDE;
+                         scoped_refptr<TrackedCallback> callback) override;
   virtual void AssignPictureBuffers(
-      uint32_t no_of_buffers, const PP_PictureBuffer_Dev* buffers) OVERRIDE;
-  virtual void ReusePictureBuffer(int32_t picture_buffer_id) OVERRIDE;
-  virtual int32_t Flush(scoped_refptr<TrackedCallback> callback) OVERRIDE;
-  virtual int32_t Reset(scoped_refptr<TrackedCallback> callback) OVERRIDE;
-  virtual void Destroy() OVERRIDE;
+      uint32_t no_of_buffers, const PP_PictureBuffer_Dev* buffers) override;
+  virtual void ReusePictureBuffer(int32_t picture_buffer_id) override;
+  virtual int32_t Flush(scoped_refptr<TrackedCallback> callback) override;
+  virtual int32_t Reset(scoped_refptr<TrackedCallback> callback) override;
+  virtual void Destroy() override;
 
  private:
   friend class PPB_VideoDecoder_Proxy;
@@ -247,7 +248,8 @@ void PPB_VideoDecoder_Proxy::OnMsgAssignPictureBuffers(
   EnterHostFromHostResource<PPB_VideoDecoder_Dev_API> enter(decoder);
   if (enter.succeeded() && !buffers.empty()) {
     const PP_PictureBuffer_Dev* buffer_array = &buffers.front();
-    enter.object()->AssignPictureBuffers(buffers.size(), buffer_array);
+    enter.object()->AssignPictureBuffers(
+        base::checked_cast<uint32_t>(buffers.size()), buffer_array);
   }
 }
 

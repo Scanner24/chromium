@@ -27,6 +27,8 @@
 #include "testing/platform_test.h"
 
 using base::ASCIIToUTF16;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using content::WebContents;
 
 // Watch for bookmark pulse notifications so we can confirm they were sent.
@@ -78,7 +80,7 @@ class BookmarkBubbleControllerTest : public CocoaProfileTest {
     edits_ = 0;
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     [controller_ close];
     CocoaProfileTest::TearDown();
   }

@@ -81,15 +81,17 @@ void MaximizeModeWindowManager::OnOverviewModeStarting() {
     return;
 
   EnableBackdropBehindTopWindowOnEachDisplay(false);
+  SetDeferBoundsUpdates(true);
   backdrops_hidden_ = true;
 }
 
-void MaximizeModeWindowManager::OnOverviewModeEnding() {
+void MaximizeModeWindowManager::OnOverviewModeEnded() {
   if (!backdrops_hidden_)
     return;
 
   backdrops_hidden_ = false;
   EnableBackdropBehindTopWindowOnEachDisplay(true);
+  SetDeferBoundsUpdates(false);
 }
 
 void MaximizeModeWindowManager::OnWindowDestroying(aura::Window* window) {
@@ -180,8 +182,8 @@ MaximizeModeWindowManager::MaximizeModeWindowManager()
 }
 
 void MaximizeModeWindowManager::MaximizeAllWindows() {
-  MruWindowTracker::WindowList windows =
-      MruWindowTracker::BuildWindowList(false);
+  MruWindowTracker::WindowList windows = ash::Shell::GetInstance()->
+      mru_window_tracker()->BuildWindowListIgnoreModal();
   // Add all existing Mru windows.
   for (MruWindowTracker::WindowList::iterator window = windows.begin();
       window != windows.end(); ++window) {
@@ -192,6 +194,15 @@ void MaximizeModeWindowManager::MaximizeAllWindows() {
 void MaximizeModeWindowManager::RestoreAllWindows() {
   while (window_state_map_.size())
     ForgetWindow(window_state_map_.begin()->first);
+}
+
+void MaximizeModeWindowManager::SetDeferBoundsUpdates(
+    bool defer_bounds_updates) {
+  for (WindowToState::iterator it = window_state_map_.begin();
+       it != window_state_map_.end();
+       ++it) {
+    it->second->SetDeferBoundsUpdates(defer_bounds_updates);
+  }
 }
 
 void MaximizeModeWindowManager::MaximizeAndTrackWindow(

@@ -22,9 +22,9 @@ class ServiceWorkerProviderHostTest : public testing::Test {
  protected:
   ServiceWorkerProviderHostTest()
       : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
-  virtual ~ServiceWorkerProviderHostTest() {}
+  ~ServiceWorkerProviderHostTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     helper_.reset(new EmbeddedWorkerTestHelper(kRenderProcessId));
     context_ = helper_->context();
     pattern_ = GURL("http://www.example.com/");
@@ -36,10 +36,12 @@ class ServiceWorkerProviderHostTest : public testing::Test {
 
     // Prepare provider hosts (for the same process).
     scoped_ptr<ServiceWorkerProviderHost> host1(new ServiceWorkerProviderHost(
-        kRenderProcessId, 1 /* provider_id */,
+        kRenderProcessId, MSG_ROUTING_NONE, 1 /* provider_id */,
+        SERVICE_WORKER_PROVIDER_FOR_CONTROLLEE,
         context_->AsWeakPtr(), NULL));
     scoped_ptr<ServiceWorkerProviderHost> host2(new ServiceWorkerProviderHost(
-        kRenderProcessId, 2 /* provider_id */,
+        kRenderProcessId, MSG_ROUTING_NONE, 2 /* provider_id */,
+        SERVICE_WORKER_PROVIDER_FOR_CONTROLLEE,
         context_->AsWeakPtr(), NULL));
     provider_host1_ = host1->AsWeakPtr();
     provider_host2_ = host2->AsWeakPtr();
@@ -47,7 +49,7 @@ class ServiceWorkerProviderHostTest : public testing::Test {
     context_->AddProviderHost(make_scoped_ptr(host2.release()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     version_ = 0;
     registration_ = 0;
     helper_.reset();

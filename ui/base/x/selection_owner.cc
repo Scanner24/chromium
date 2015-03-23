@@ -40,8 +40,8 @@ const int kTimerPeriodMs = 1000;
 // sent by the selection owner before aborting an incremental data transfer.
 const int kIncrementalTransferTimeoutMs = 10000;
 
-COMPILE_ASSERT(kTimerPeriodMs <= kIncrementalTransferTimeoutMs,
-               timer_period_must_be_less_or_equal_to_transfer_timeout);
+static_assert(kTimerPeriodMs <= kIncrementalTransferTimeoutMs,
+              "timer period must be <= transfer timeout");
 
 // Returns a conservative max size of the data we can pass into
 // XChangeProperty(). Copied from GTK.
@@ -247,7 +247,7 @@ bool SelectionOwner::ProcessTarget(XAtom target,
         // We must send the data back in several chunks due to a limitation in
         // the size of X requests. Notify the selection requestor that the data
         // will be sent incrementally by returning data of type "INCR".
-        int length = it->second->size();
+        long length = it->second->size();
         XChangeProperty(x_display_,
                         requestor,
                         property,

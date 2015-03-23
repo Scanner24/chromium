@@ -80,7 +80,7 @@ variations::Study_Channel GetChannelForVariations() {
       break;
   }
   const std::string forced_channel =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kFakeVariationsChannel);
   if (forced_channel == "stable")
     return variations::Study_Channel_STABLE;
@@ -166,7 +166,8 @@ void RecordRequestsAllowedHistogram(ResourceRequestsAllowedState state) {
 // Converts ResourceRequestAllowedNotifier::State to the corresponding
 // ResourceRequestsAllowedState value.
 ResourceRequestsAllowedState ResourceRequestStateToHistogramValue(
-    ResourceRequestAllowedNotifier::State state) {
+    web_resource::ResourceRequestAllowedNotifier::State state) {
+  using web_resource::ResourceRequestAllowedNotifier;
   switch (state) {
     case ResourceRequestAllowedNotifier::DISALLOWED_EULA_NOT_ACCEPTED:
       return RESOURCE_REQUESTS_NOT_ALLOWED_EULA_NOT_ACCEPTED;
@@ -234,7 +235,7 @@ void OverrideUIString(uint32_t hash, const base::string16& string) {
 }  // namespace
 
 VariationsService::VariationsService(
-    ResourceRequestAllowedNotifier* notifier,
+    web_resource::ResourceRequestAllowedNotifier* notifier,
     PrefService* local_state,
     metrics::MetricsStateManager* state_manager)
     : local_state_(local_state),
@@ -259,19 +260,19 @@ bool VariationsService::CreateTrialsFromSeed() {
     return false;
 
   const chrome::VersionInfo current_version_info;
-  if (!current_version_info.is_valid())
-    return false;
-
   const base::Version current_version(current_version_info.Version());
   if (!current_version.IsValid())
     return false;
+
+  variations::Study_Channel channel = GetChannelForVariations();
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Variations.UserChannel", channel);
 
   variations::VariationsSeedProcessor().CreateTrialsFromSeed(
       seed,
       g_browser_process->GetApplicationLocale(),
       GetReferenceDateForExpiryChecks(local_state_),
       current_version,
-      GetChannelForVariations(),
+      channel,
       GetCurrentFormFactor(),
       GetHardwareClass(),
       base::Bind(&OverrideUIString));
@@ -325,7 +326,8 @@ void VariationsService::StartRepeatedVariationsSeedFetch() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   // Initialize the Variations server URL.
-  variations_server_url_ = GetVariationsServerURL(policy_pref_service_);
+  variations_server_url_ =
+      GetVariationsServerURL(policy_pref_service_, restrict_mode_);
 
   // Check that |CreateTrialsFromSeed| was called, which is necessary to
   // retrieve the serial number that will be sent to the server.
@@ -333,12 +335,11 @@ void VariationsService::StartRepeatedVariationsSeedFetch() {
 
   DCHECK(!request_scheduler_.get());
   // Note that the act of instantiating the scheduler will start the fetch, if
-  // the scheduler deems appropriate. Using Unretained is fine here since the
-  // lifespan of request_scheduler_ is guaranteed to be shorter than that of
-  // this service.
+  // the scheduler deems appropriate.
   request_scheduler_.reset(VariationsRequestScheduler::Create(
       base::Bind(&VariationsService::FetchVariationsSeed,
-          base::Unretained(this)), local_state_));
+                 weak_ptr_factory_.GetWeakPtr()),
+      local_state_));
   request_scheduler_->Start();
 }
 
@@ -350,12 +351,11 @@ void VariationsService::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-// TODO(rkaplow): Handle this and the similar event in metrics_service by
-// observing an 'OnAppEnterForeground' event in RequestScheduler instead of
-// requiring the frontend code to notify each service individually. Since the
-// scheduler will handle it directly the VariationService shouldn't need to
-// know details of this anymore.
 void VariationsService::OnAppEnterForeground() {
+  // On mobile platforms, initialize the fetch scheduler when we receive the
+  // first app foreground notification.
+  if (!request_scheduler_)
+    StartRepeatedVariationsSeedFetch();
   request_scheduler_->OnAppEnterForeground();
 }
 
@@ -365,21 +365,29 @@ void VariationsService::StartGoogleUpdateRegistrySync() {
 }
 #endif
 
+void VariationsService::SetRestrictMode(const std::string& restrict_mode) {
+  // This should be called before the server URL has been computed.
+  DCHECK(variations_server_url_.is_empty());
+  restrict_mode_ = restrict_mode;
+}
+
 void VariationsService::SetCreateTrialsFromSeedCalledForTesting(bool called) {
   create_trials_from_seed_called_ = called;
 }
 
 // static
 GURL VariationsService::GetVariationsServerURL(
-    PrefService* policy_pref_service) {
-  std::string server_url_string(CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kVariationsServerURL));
+    PrefService* policy_pref_service,
+    const std::string& restrict_mode_override) {
+  std::string server_url_string(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kVariationsServerURL));
   if (server_url_string.empty())
     server_url_string = kDefaultVariationsServerURL;
   GURL server_url = GURL(server_url_string);
 
-  const std::string restrict_param =
-      GetRestrictParameterPref(policy_pref_service);
+  const std::string restrict_param = !restrict_mode_override.empty() ?
+      restrict_mode_override : GetRestrictParameterPref(policy_pref_service);
   if (!restrict_param.empty()) {
     server_url = net::AppendOrReplaceQueryParameter(server_url,
                                                     "restrict",
@@ -427,7 +435,7 @@ scoped_ptr<VariationsService> VariationsService::Create(
 #if !defined(GOOGLE_CHROME_BUILD)
   // Unless the URL was provided, unsupported builds should return NULL to
   // indicate that the service should not be used.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kVariationsServerURL)) {
     DVLOG(1) << "Not creating VariationsService in unofficial build without --"
              << switches::kVariationsServerURL << " specified.";
@@ -435,7 +443,9 @@ scoped_ptr<VariationsService> VariationsService::Create(
   }
 #endif
   result.reset(new VariationsService(
-      new ResourceRequestAllowedNotifier, local_state, state_manager));
+      new web_resource::ResourceRequestAllowedNotifier(
+          local_state, switches::kDisableBackgroundNetworking),
+      local_state, state_manager));
   return result.Pass();
 }
 
@@ -490,10 +500,10 @@ void VariationsService::StoreSeed(const std::string& seed_data,
 void VariationsService::FetchVariationsSeed() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  const ResourceRequestAllowedNotifier::State state =
+  const web_resource::ResourceRequestAllowedNotifier::State state =
       resource_request_allowed_notifier_->GetResourceRequestsAllowedState();
   RecordRequestsAllowedHistogram(ResourceRequestStateToHistogramValue(state));
-  if (state != ResourceRequestAllowedNotifier::ALLOWED) {
+  if (state != web_resource::ResourceRequestAllowedNotifier::ALLOWED) {
     DVLOG(1) << "Resource requests were not allowed. Waiting for notification.";
     return;
   }
@@ -634,6 +644,10 @@ void VariationsService::RecordLastFetchTime() {
     local_state_->SetInt64(prefs::kVariationsLastFetchTime,
                            base::Time::Now().ToInternalValue());
   }
+}
+
+std::string VariationsService::GetInvalidVariationsSeedSignature() const {
+  return seed_store_.GetInvalidSignature();
 }
 
 }  // namespace chrome_variations

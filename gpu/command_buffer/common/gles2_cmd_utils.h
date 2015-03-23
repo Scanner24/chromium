@@ -126,8 +126,9 @@ class GLES2_UTILS_EXPORT GLES2Util {
   // then the padded_row_size will be the same as the unpadded_row_size since
   // padding is not necessary.
   static bool ComputeImageDataSizes(
-      int width, int height, int format, int type, int unpack_alignment,
-      uint32_t* size, uint32_t* unpadded_row_size, uint32_t* padded_row_size);
+      int width, int height, int depth, int format, int type,
+      int unpack_alignment, uint32_t* size, uint32_t* unpadded_row_size,
+      uint32_t* padded_row_size);
 
   static size_t RenderbufferBytesPerPixel(int format);
 
@@ -182,6 +183,13 @@ class GLES2_UTILS_EXPORT GLES2Util {
       size_t* array_pos,
       int* element_index,
       bool* getting_array);
+
+  static size_t CalcClearBufferivDataCount(int buffer);
+  static size_t CalcClearBufferfvDataCount(int buffer);
+
+  static void MapUint64ToTwoUint32(
+      uint64_t v64, uint32_t* v32_0, uint32_t* v32_1);
+  static uint64_t MapTwoUint32ToUint64(uint32_t v32_0, uint32_t v32_1);
 
   #include "../common/gles2_cmd_utils_autogen.h"
 

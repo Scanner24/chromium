@@ -73,7 +73,7 @@ class BufferedSocketWriterBase : public base::NonThreadSafe {
   // Following three methods must be implemented in child classes.
 
   // Returns next packet that needs to be written to the socket. Implementation
-  // must set |*buffer| to NULL if there is nothing left in the queue.
+  // must set |*buffer| to nullptr if there is nothing left in the queue.
   virtual void GetNextPacket(net::IOBuffer** buffer, int* size) = 0;
 
   // Returns closure that must be executed or null closure if the last write
@@ -104,12 +104,12 @@ class BufferedSocketWriterBase : public base::NonThreadSafe {
 class BufferedSocketWriter : public BufferedSocketWriterBase {
  public:
   BufferedSocketWriter();
-  virtual ~BufferedSocketWriter();
+  ~BufferedSocketWriter() override;
 
  protected:
-  virtual void GetNextPacket(net::IOBuffer** buffer, int* size) OVERRIDE;
-  virtual base::Closure AdvanceBufferPosition(int written) OVERRIDE;
-  virtual void OnError(int result) OVERRIDE;
+  void GetNextPacket(net::IOBuffer** buffer, int* size) override;
+  base::Closure AdvanceBufferPosition(int written) override;
+  void OnError(int result) override;
 
  private:
   scoped_refptr<net::DrainableIOBuffer> current_buf_;
@@ -118,12 +118,12 @@ class BufferedSocketWriter : public BufferedSocketWriterBase {
 class BufferedDatagramWriter : public BufferedSocketWriterBase {
  public:
   BufferedDatagramWriter();
-  virtual ~BufferedDatagramWriter();
+  ~BufferedDatagramWriter() override;
 
  protected:
-  virtual void GetNextPacket(net::IOBuffer** buffer, int* size) OVERRIDE;
-  virtual base::Closure AdvanceBufferPosition(int written) OVERRIDE;
-  virtual void OnError(int result) OVERRIDE;
+  void GetNextPacket(net::IOBuffer** buffer, int* size) override;
+  base::Closure AdvanceBufferPosition(int written) override;
+  void OnError(int result) override;
 };
 
 }  // namespace protocol

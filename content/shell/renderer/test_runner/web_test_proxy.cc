@@ -8,18 +8,18 @@
 
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/renderer/test_runner/accessibility_controller.h"
 #include "content/shell/renderer/test_runner/event_sender.h"
 #include "content/shell/renderer/test_runner/mock_color_chooser.h"
 #include "content/shell/renderer/test_runner/mock_credential_manager_client.h"
+#include "content/shell/renderer/test_runner/mock_presentation_service.h"
 #include "content/shell/renderer/test_runner/mock_screen_orientation_client.h"
-#include "content/shell/renderer/test_runner/mock_web_push_client.h"
 #include "content/shell/renderer/test_runner/mock_web_speech_recognizer.h"
 #include "content/shell/renderer/test_runner/mock_web_user_media_client.h"
 #include "content/shell/renderer/test_runner/spell_check_client.h"
@@ -87,7 +87,7 @@ class HostMethodTask : public WebMethodTask<WebTestProxyBase> {
   HostMethodTask(WebTestProxyBase* object, CallbackMethodType callback)
       : WebMethodTask<WebTestProxyBase>(object), callback_(callback) {}
 
-  virtual void RunIfValid() OVERRIDE { (object_->*callback_)(); }
+  void RunIfValid() override { (object_->*callback_)(); }
 
  private:
   CallbackMethodType callback_;
@@ -296,7 +296,7 @@ std::string DumpFramesAsPrintedText(blink::WebFrame* frame, bool recursive) {
 
   std::string result = DumpFrameHeaderIfNeeded(frame);
   result.append(
-      frame->renderTreeAsText(blink::WebFrame::RenderAsTextPrinting).utf8());
+      frame->layoutTreeAsText(blink::WebFrame::LayoutAsTextPrinting).utf8());
   result.append("\n");
 
   if (recursive) {
@@ -376,6 +376,7 @@ blink::WebView* WebTestProxyBase::GetWebView() const {
 }
 
 void WebTestProxyBase::Reset() {
+  drag_image_.reset();
   animate_scheduled_ = false;
   resource_identifier_map_.clear();
   log_console_output_ = true;
@@ -439,13 +440,13 @@ std::string WebTestProxyBase::CaptureTree(bool debug_render_tree) {
   } else {
     bool recursive = test_interfaces_->GetTestRunner()
                          ->shouldDumpChildFrameScrollPositions();
-    blink::WebFrame::RenderAsTextControls render_text_behavior =
-        blink::WebFrame::RenderAsTextNormal;
+    blink::WebFrame::LayoutAsTextControls layout_text_behavior =
+        blink::WebFrame::LayoutAsTextNormal;
     if (should_dump_as_printed)
-      render_text_behavior |= blink::WebFrame::RenderAsTextPrinting;
+      layout_text_behavior |= blink::WebFrame::LayoutAsTextPrinting;
     if (debug_render_tree)
-      render_text_behavior |= blink::WebFrame::RenderAsTextDebug;
-    data_utf8 = frame->renderTreeAsText(render_text_behavior).utf8();
+      layout_text_behavior |= blink::WebFrame::LayoutAsTextDebug;
+    data_utf8 = frame->layoutTreeAsText(layout_text_behavior).utf8();
     data_utf8 += DumpFrameScrollPosition(frame, recursive);
   }
 
@@ -486,12 +487,6 @@ void WebTestProxyBase::SetAcceptLanguages(const std::string& accept_languages) {
 
 void WebTestProxyBase::CopyImageAtAndCapturePixels(
     int x, int y, const base::Callback<void(const SkBitmap&)>& callback) {
-  // It may happen that there is a scheduled animation and
-  // no rootGraphicsLayer yet. If so we would run it right now. Otherwise
-  // isAcceleratedCompositingActive will return false;
-  // TODO(enne): remove this: http://crbug.com/397321
-  AnimateNow();
-
   DCHECK(!callback.is_null());
   uint64_t sequence_number =  blink::Platform::current()->clipboard()->
       sequenceNumber(blink::WebClipboard::Buffer());
@@ -570,14 +565,25 @@ void CaptureCallback::didCompositeAndReadback(const SkBitmap& bitmap) {
 void WebTestProxyBase::CapturePixelsAsync(
     const base::Callback<void(const SkBitmap&)>& callback) {
   TRACE_EVENT0("shell", "WebTestProxyBase::CapturePixelsAsync");
-
-  // It may happen that there is a scheduled animation and
-  // no rootGraphicsLayer yet. If so we would run it right now. Otherwise
-  // isAcceleratedCompositingActive will return false;
-  // TODO(enne): remove this: http://crbug.com/397321
-  AnimateNow();
-
   DCHECK(!callback.is_null());
+
+  if (test_interfaces_->GetTestRunner()->shouldDumpDragImage()) {
+    if (drag_image_.isNull()) {
+      // This means the test called dumpDragImage but did not initiate a drag.
+      // Return a blank image so that the test fails.
+      SkBitmap bitmap;
+      bitmap.allocN32Pixels(1, 1);
+      {
+        SkAutoLockPixels lock(bitmap);
+        bitmap.eraseColor(0);
+      }
+      callback.Run(bitmap);
+      return;
+    }
+
+    callback.Run(drag_image_.getSkBitmap());
+    return;
+  }
 
   if (test_interfaces_->GetTestRunner()->isPrinting()) {
     base::MessageLoopProxy::current()->PostTask(
@@ -622,13 +628,6 @@ void WebTestProxyBase::DidDisplayAsync(const base::Closure& callback,
 
 void WebTestProxyBase::DisplayAsyncThen(const base::Closure& callback) {
   TRACE_EVENT0("shell", "WebTestProxyBase::DisplayAsyncThen");
-
-  // It may happen that there is a scheduled animation and
-  // no rootGraphicsLayer yet. If so we would run it right now. Otherwise
-  // isAcceleratedCompositingActive will return false;
-  // TODO(enne): remove this: http://crbug.com/397321
-  AnimateNow();
-
   CapturePixelsAsync(base::Bind(
       &WebTestProxyBase::DidDisplayAsync, base::Unretained(this), callback));
 }
@@ -673,6 +672,12 @@ WebTestProxyBase::GetCredentialManagerClientMock() {
   return credential_manager_client_.get();
 }
 
+MockPresentationService* WebTestProxyBase::GetPresentationServiceMock() {
+  if (!presentation_service_.get())
+    presentation_service_.reset(new MockPresentationService());
+  return presentation_service_.get();
+}
+
 void WebTestProxyBase::ScheduleAnimation() {
   if (!test_interfaces_->GetTestRunner()->TestIsRunning())
     return;
@@ -687,8 +692,12 @@ void WebTestProxyBase::ScheduleAnimation() {
 void WebTestProxyBase::AnimateNow() {
   if (animate_scheduled_) {
     animate_scheduled_ = false;
-    web_widget_->animate(0.0);
+    web_widget_->beginFrame(blink::WebBeginFrameArgs(0.0, 0.0, 0.0));
     web_widget_->layout();
+    if (blink::WebPagePopup* popup = web_widget_->pagePopup()) {
+      popup->beginFrame(blink::WebBeginFrameArgs(0.0, 0.0, 0.0));
+      popup->layout();
+    }
   }
 }
 
@@ -823,6 +832,10 @@ void WebTestProxyBase::StartDragging(blink::WebLocalFrame* frame,
                                      blink::WebDragOperationsMask mask,
                                      const blink::WebImage& image,
                                      const blink::WebPoint& point) {
+  if (test_interfaces_->GetTestRunner()->shouldDumpDragImage()) {
+    if (drag_image_.isNull())
+      drag_image_ = image;
+  }
   // When running a test, we need to fake a drag drop operation otherwise
   // Windows waits for real mouse events to know when the drag is over.
   test_interfaces_->GetEventSender()->DoDragDrop(data, mask);
@@ -899,10 +912,6 @@ void WebTestProxyBase::PrintPage(blink::WebLocalFrame* frame) {
   blink::WebPrintParams printParams(page_size_in_pixels);
   frame->printBegin(printParams);
   frame->printEnd();
-}
-
-blink::WebNotificationPresenter* WebTestProxyBase::GetNotificationPresenter() {
-  return test_interfaces_->GetTestRunner()->notification_presenter();
 }
 
 blink::WebMIDIClient* WebTestProxyBase::GetWebMIDIClient() {
@@ -1234,9 +1243,7 @@ void WebTestProxyBase::DidFinishResourceLoad(blink::WebLocalFrame* frame,
     delegate_->PrintMessage(" - didFinishLoading\n");
   }
   resource_identifier_map_.erase(identifier);
-#if !defined(ENABLE_LOAD_COMPLETION_HACKS)
   CheckDone(frame, ResourceLoadCompleted);
-#endif
 }
 
 void WebTestProxyBase::DidAddMessageToConsole(
@@ -1285,17 +1292,9 @@ void WebTestProxyBase::CheckDone(blink::WebLocalFrame* frame,
                                  CheckDoneReason reason) {
   if (frame != test_interfaces_->GetTestRunner()->topLoadingFrame())
     return;
-
-#if !defined(ENABLE_LOAD_COMPLETION_HACKS)
-  // Quirk for MHTML prematurely completing on resource load completion.
-  std::string mime_type = frame->dataSource()->response().mimeType().utf8();
-  if (reason == ResourceLoadCompleted && mime_type == "multipart/related")
-    return;
-
   if (reason != MainResourceLoadFailed &&
       (frame->isResourceLoadInProgress() || frame->isLoading()))
     return;
-#endif
   test_interfaces_->GetTestRunner()->setTopLoadingFrame(frame, true);
 }
 
@@ -1348,16 +1347,6 @@ void WebTestProxyBase::ResetInputMethod() {
 
 blink::WebString WebTestProxyBase::acceptLanguages() {
   return blink::WebString::fromUTF8(accept_languages_);
-}
-
-MockWebPushClient* WebTestProxyBase::GetPushClientMock() {
-  if (!push_client_.get())
-    push_client_.reset(new MockWebPushClient);
-  return push_client_.get();
-}
-
-blink::WebPushClient* WebTestProxyBase::GetWebPushClient() {
-  return GetPushClientMock();
 }
 
 }  // namespace content

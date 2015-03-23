@@ -101,8 +101,8 @@ class ExternalDefaultProtocolObserver
         tab_contents_id_(tab_contents_id),
         prompt_user_(prompt_user) {}
 
-  virtual void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
+  void SetDefaultWebClientUIState(
+      ShellIntegration::DefaultWebClientUIState state) override {
     DCHECK(base::MessageLoopForUI::IsCurrent());
 
     // If we are still working out if we're the default, or we've found
@@ -135,7 +135,7 @@ class ExternalDefaultProtocolObserver
         escaped_url_, render_process_host_id_, tab_contents_id_, delegate_);
   }
 
-  virtual bool IsOwnedByWorker() OVERRIDE { return true; }
+  bool IsOwnedByWorker() override { return true; }
 
  private:
   ExternalProtocolHandler::Delegate* delegate_;
@@ -216,8 +216,8 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
   }
 
   // Check the stored prefs.
-  // TODO(pkasting): http://b/1119651 This kind of thing should go in the
-  // preferences on the profile, not in the local state.
+  // TODO(pkasting): This kind of thing should go in the preferences on the
+  // profile, not in the local state. http://crbug.com/457254
   PrefService* pref = g_browser_process->local_state();
   if (pref) {  // May be NULL during testing.
     DictionaryPrefUpdate update_excluded_schemas(pref, prefs::kExcludedSchemes);
@@ -237,8 +237,8 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
 void ExternalProtocolHandler::SetBlockState(const std::string& scheme,
                                             BlockState state) {
   // Set in the stored prefs.
-  // TODO(pkasting): http://b/1119651 This kind of thing should go in the
-  // preferences on the profile, not in the local state.
+  // TODO(pkasting): This kind of thing should go in the preferences on the
+  // profile, not in the local state. http://crbug.com/457254
   PrefService* pref = g_browser_process->local_state();
   if (pref) {  // May be NULL during testing.
     DictionaryPrefUpdate update_excluded_schemas(pref, prefs::kExcludedSchemes);

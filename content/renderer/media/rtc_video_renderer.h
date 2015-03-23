@@ -12,7 +12,7 @@
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "content/renderer/media/video_frame_provider.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -39,13 +39,13 @@ class CONTENT_EXPORT RTCVideoRenderer
                    const RepaintCB& repaint_cb);
 
   // VideoFrameProvider implementation. Called on the main thread.
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void Play() OVERRIDE;
-  virtual void Pause() OVERRIDE;
+  void Start() override;
+  void Stop() override;
+  void Play() override;
+  void Pause() override;
 
  protected:
-  virtual ~RTCVideoRenderer();
+  ~RTCVideoRenderer() override;
 
  private:
   enum State {
@@ -59,8 +59,8 @@ class CONTENT_EXPORT RTCVideoRenderer
                     const base::TimeTicks& estimated_capture_time);
 
   // VideoTrackSink implementation. Called on the main thread.
-  virtual void OnReadyStateChanged(
-      blink::WebMediaStreamSource::ReadyState state) OVERRIDE;
+  void OnReadyStateChanged(
+      blink::WebMediaStreamSource::ReadyState state) override;
 
   void RenderSignalingFrame();
 

@@ -59,7 +59,7 @@ class CountedBrowserAccessibilityFactory : public BrowserAccessibilityFactory {
  private:
   virtual ~CountedBrowserAccessibilityFactory();
 
-  virtual BrowserAccessibility* Create() OVERRIDE;
+  virtual BrowserAccessibility* Create() override;
 
   DISALLOW_COPY_AND_ASSIGN(CountedBrowserAccessibilityFactory);
 };
@@ -90,7 +90,7 @@ class BrowserAccessibilityTest : public testing::Test {
   virtual ~BrowserAccessibilityTest();
 
  private:
-  virtual void SetUp() OVERRIDE;
+  virtual void SetUp() override;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityTest);
 };
@@ -442,7 +442,7 @@ TEST_F(BrowserAccessibilityTest, TestSimpleHypertext) {
   CountedBrowserAccessibility::reset();
   scoped_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, root, text1, text2),
+          MakeAXTreeUpdate(root, text1, text2),
           NULL, new CountedBrowserAccessibilityFactory()));
   ASSERT_EQ(3, CountedBrowserAccessibility::num_instances());
 
@@ -547,7 +547,7 @@ TEST_F(BrowserAccessibilityTest, TestComplexHypertext) {
   base::win::ScopedBstr text;
   ASSERT_EQ(S_OK, root_obj->get_text(0, text_len, text.Receive()));
   const std::string embed = base::UTF16ToUTF8(
-      BrowserAccessibilityWin::kEmbeddedCharacter);
+      base::string16(1, BrowserAccessibilityWin::kEmbeddedCharacter));
   EXPECT_EQ(text1_name + embed + text2_name + embed,
             base::UTF16ToUTF8(base::string16(text)));
   text.Reset();
@@ -675,6 +675,73 @@ TEST_F(BrowserAccessibilityTest, TestCreateEmptyDocument) {
   EXPECT_EQ(3, acc2_2->GetId());
 
   // Ensure we properly cleaned up.
+  manager.reset();
+  ASSERT_EQ(0, CountedBrowserAccessibility::num_instances());
+}
+
+// This is a regression test for a bug where the initial empty document
+// loaded by a BrowserAccessibilityManagerWin couldn't be looked up by
+// its UniqueIDWin, because the AX Tree was loaded in
+// BrowserAccessibilityManager code before BrowserAccessibilityManagerWin
+// was initialized.
+TEST_F(BrowserAccessibilityTest, EmptyDocHasUniqueIdWin) {
+  scoped_ptr<BrowserAccessibilityManagerWin> manager(
+      new BrowserAccessibilityManagerWin(
+          BrowserAccessibilityManagerWin::GetEmptyDocument(),
+          NULL,
+          new CountedBrowserAccessibilityFactory()));
+
+  // Verify the root is as we expect by default.
+  BrowserAccessibility* root = manager->GetRoot();
+  EXPECT_EQ(0, root->GetId());
+  EXPECT_EQ(ui::AX_ROLE_ROOT_WEB_AREA, root->GetRole());
+  EXPECT_EQ(1 << ui::AX_STATE_BUSY |
+            1 << ui::AX_STATE_READ_ONLY |
+            1 << ui::AX_STATE_ENABLED,
+            root->GetState());
+
+  LONG unique_id_win = root->ToBrowserAccessibilityWin()->unique_id_win();
+  ASSERT_EQ(root, manager->GetFromUniqueIdWin(unique_id_win));
+}
+
+TEST_F(BrowserAccessibilityTest, TestIA2Attributes) {
+  ui::AXNodeData button;
+  ui::AXNodeData checkbox;
+  checkbox.id = 2;
+  checkbox.SetName("Checkbox");
+  checkbox.role = ui::AX_ROLE_CHECK_BOX;
+  checkbox.state = 1 << ui::AX_STATE_CHECKED;
+
+  ui::AXNodeData root;
+  root.id = 1;
+  root.SetName("Document");
+  root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+  root.state = 0;
+  root.child_ids.push_back(2);
+
+  CountedBrowserAccessibility::reset();
+  scoped_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdate(root, checkbox),
+          nullptr, new CountedBrowserAccessibilityFactory()));
+  ASSERT_EQ(2, CountedBrowserAccessibility::num_instances());
+
+  ASSERT_NE(nullptr, manager->GetRoot());
+  BrowserAccessibilityWin* root_accessible =
+      manager->GetRoot()->ToBrowserAccessibilityWin();
+      ASSERT_NE(nullptr, root_accessible);
+  ASSERT_EQ(1, root_accessible->PlatformChildCount());
+  BrowserAccessibilityWin* checkbox_accessible =
+      root_accessible->PlatformGetChild(0)->ToBrowserAccessibilityWin();
+  ASSERT_NE(nullptr, checkbox_accessible);
+
+  base::win::ScopedBstr attributes;
+  HRESULT hr = checkbox_accessible->get_attributes(attributes.Receive());
+  EXPECT_EQ(S_OK, hr);
+  EXPECT_NE(nullptr, static_cast<BSTR>(attributes));
+  std::wstring attributes_str(attributes, attributes.Length());
+  EXPECT_EQ(L"checkable:true;", attributes_str);
+
   manager.reset();
   ASSERT_EQ(0, CountedBrowserAccessibility::num_instances());
 }

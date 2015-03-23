@@ -11,8 +11,8 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
-#include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/common/chrome_paths.h"
+#include "components/history/core/browser/thumbnail_database.h"
 #include "sql/connection.h"
 #include "sql/recovery.h"
 #include "sql/test/scoped_error_ignorer.h"
@@ -162,8 +162,7 @@ class ThumbnailDatabaseTest : public testing::Test {
  public:
   ThumbnailDatabaseTest() {
   }
-  virtual ~ThumbnailDatabaseTest() {
-  }
+  ~ThumbnailDatabaseTest() override {}
 
   // Initialize a thumbnail database instance from the SQL file at
   // |golden_path| in the "History/" subdirectory of test data.
@@ -181,7 +180,7 @@ class ThumbnailDatabaseTest : public testing::Test {
   }
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     // Get a temporary directory for the test DB files.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 

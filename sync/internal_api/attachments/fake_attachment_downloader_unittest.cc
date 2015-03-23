@@ -16,9 +16,9 @@ class FakeAttachmentDownloaderTest : public testing::Test {
  protected:
   FakeAttachmentDownloaderTest() {}
 
-  virtual void SetUp() OVERRIDE {}
+  void SetUp() override {}
 
-  virtual void TearDown() OVERRIDE {}
+  void TearDown() override {}
 
   AttachmentDownloader* downloader() {
     return &attachment_downloader_;

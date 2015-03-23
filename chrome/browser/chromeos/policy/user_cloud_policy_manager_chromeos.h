@@ -61,7 +61,7 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& file_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner);
-  virtual ~UserCloudPolicyManagerChromeOS();
+  ~UserCloudPolicyManagerChromeOS() override;
 
   // Initializes the cloud connection. |local_state| and
   // |device_management_service| must stay valid until this object is deleted.
@@ -90,23 +90,23 @@ class UserCloudPolicyManagerChromeOS : public CloudPolicyManager,
   void EnableWildcardLoginCheck(const std::string& username);
 
   // ConfigurationPolicyProvider:
-  virtual void Shutdown() OVERRIDE;
-  virtual bool IsInitializationComplete(PolicyDomain domain) const OVERRIDE;
+  void Shutdown() override;
+  bool IsInitializationComplete(PolicyDomain domain) const override;
 
   // CloudPolicyService::Observer:
-  virtual void OnInitializationCompleted(CloudPolicyService* service) OVERRIDE;
+  void OnInitializationCompleted(CloudPolicyService* service) override;
 
   // CloudPolicyClient::Observer:
-  virtual void OnPolicyFetched(CloudPolicyClient* client) OVERRIDE;
-  virtual void OnRegistrationStateChanged(CloudPolicyClient* client) OVERRIDE;
-  virtual void OnClientError(CloudPolicyClient* client) OVERRIDE;
+  void OnPolicyFetched(CloudPolicyClient* client) override;
+  void OnRegistrationStateChanged(CloudPolicyClient* client) override;
+  void OnClientError(CloudPolicyClient* client) override;
 
   // ComponentCloudPolicyService::Delegate:
-  virtual void OnComponentCloudPolicyUpdated() OVERRIDE;
+  void OnComponentCloudPolicyUpdated() override;
 
  protected:
   // CloudPolicyManager:
-  virtual void GetChromePolicy(PolicyMap* policy_map) OVERRIDE;
+  void GetChromePolicy(PolicyMap* policy_map) override;
 
  private:
   // Fetches a policy token using the authentication context of the signin

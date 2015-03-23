@@ -6,7 +6,6 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/path_service.h"
 #include "components/nacl/browser/nacl_broker_service_win.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/common/nacl_cmd_line.h"
@@ -28,7 +27,7 @@ class NaClBrokerSandboxedProcessLauncherDelegate
   NaClBrokerSandboxedProcessLauncherDelegate() {}
   virtual ~NaClBrokerSandboxedProcessLauncherDelegate() {}
 
-  virtual bool ShouldSandbox() OVERRIDE {
+  virtual bool ShouldSandbox() override {
     return false;
   }
 
@@ -58,7 +57,7 @@ bool NaClBrokerHost::Init() {
   if (!NaClBrowser::GetInstance()->GetNaCl64ExePath(&nacl_path))
     return false;
 
-  CommandLine* cmd_line = new CommandLine(nacl_path);
+  base::CommandLine* cmd_line = new base::CommandLine(nacl_path);
   CopyNaClCommandLineArguments(cmd_line);
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,

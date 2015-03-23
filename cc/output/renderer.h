@@ -34,7 +34,7 @@ struct RendererCapabilitiesImpl {
   // Capabilities used on compositor thread only.
   bool using_partial_swap;
   bool using_egl_image;
-  bool using_map_image;
+  bool using_image;
   bool using_discard_framebuffer;
   bool allow_rasterize_on_demand;
 
@@ -80,13 +80,13 @@ class CC_EXPORT Renderer {
   void SetVisible(bool visible);
 
  protected:
-  explicit Renderer(RendererClient* client, const LayerTreeSettings* settings)
+  Renderer(RendererClient* client, const RendererSettings* settings)
       : client_(client), settings_(settings), visible_(true) {}
 
   virtual void DidChangeVisibility() = 0;
 
   RendererClient* client_;
-  const LayerTreeSettings* settings_;
+  const RendererSettings* settings_;
   bool visible_;
 
  private:

@@ -42,7 +42,23 @@ class MockConnectionToClient : public ConnectionToClient {
   MOCK_METHOD0(session, Session*());
   MOCK_METHOD0(Disconnect, void());
 
+  void set_clipboard_stub(ClipboardStub* clipboard_stub) override {
+    clipboard_stub_ = clipboard_stub;
+  }
+  void set_host_stub(HostStub* host_stub) override { host_stub_ = host_stub; }
+  void set_input_stub(InputStub* input_stub) override {
+    input_stub_ = input_stub;
+  }
+
+  ClipboardStub* clipboard_stub() { return clipboard_stub_; }
+  HostStub* host_stub() { return host_stub_; }
+  InputStub* input_stub() { return input_stub_; }
+
  private:
+  ClipboardStub* clipboard_stub_;
+  HostStub* host_stub_;
+  InputStub* input_stub_;
+
   DISALLOW_COPY_AND_ASSIGN(MockConnectionToClient);
 };
 
@@ -59,8 +75,8 @@ class MockConnectionToClientEventHandler :
                void(ConnectionToClient* connection));
   MOCK_METHOD2(OnConnectionClosed, void(ConnectionToClient* connection,
                                         ErrorCode error));
-  MOCK_METHOD2(OnSequenceNumberUpdated, void(ConnectionToClient* connection,
-                                             int64 sequence_number));
+  MOCK_METHOD2(OnEventTimestamp,
+               void(ConnectionToClient* connection, int64 timestamp));
   MOCK_METHOD3(OnRouteChange, void(ConnectionToClient* connection,
                                    const std::string& channel_name,
                                    const TransportRoute& route));
@@ -144,6 +160,17 @@ class MockClientStub : public ClientStub {
   DISALLOW_COPY_AND_ASSIGN(MockClientStub);
 };
 
+class MockCursorShapeStub : public CursorShapeStub {
+ public:
+  MockCursorShapeStub();
+  virtual ~MockCursorShapeStub();
+
+  MOCK_METHOD1(SetCursorShape, void(const CursorShapeInfo& cursor_shape));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockCursorShapeStub);
+};
+
 class MockVideoStub : public VideoStub {
  public:
   MockVideoStub();
@@ -202,8 +229,8 @@ class MockSessionManager : public SessionManager {
       const std::string& host_jid,
       scoped_ptr<Authenticator> authenticator,
       scoped_ptr<CandidateSessionConfig> config) {
-    return scoped_ptr<Session>(ConnectPtr(
-        host_jid, authenticator.get(), config.get()));
+    return make_scoped_ptr(
+        ConnectPtr(host_jid, authenticator.get(), config.get()));
   }
   virtual void set_authenticator_factory(
       scoped_ptr<AuthenticatorFactory> authenticator_factory) {
@@ -218,15 +245,15 @@ class MockSessionManager : public SessionManager {
 class MockPairingRegistryDelegate : public PairingRegistry::Delegate {
  public:
   MockPairingRegistryDelegate();
-  virtual ~MockPairingRegistryDelegate();
+  ~MockPairingRegistryDelegate() override;
 
   // PairingRegistry::Delegate implementation.
-  virtual scoped_ptr<base::ListValue> LoadAll() OVERRIDE;
-  virtual bool DeleteAll() OVERRIDE;
-  virtual protocol::PairingRegistry::Pairing Load(
-      const std::string& client_id) OVERRIDE;
-  virtual bool Save(const protocol::PairingRegistry::Pairing& pairing) OVERRIDE;
-  virtual bool Delete(const std::string& client_id) OVERRIDE;
+  scoped_ptr<base::ListValue> LoadAll() override;
+  bool DeleteAll() override;
+  protocol::PairingRegistry::Pairing Load(
+      const std::string& client_id) override;
+  bool Save(const protocol::PairingRegistry::Pairing& pairing) override;
+  bool Delete(const std::string& client_id) override;
 
  private:
   typedef std::map<std::string, protocol::PairingRegistry::Pairing> Pairings;
@@ -238,13 +265,12 @@ class SynchronousPairingRegistry : public PairingRegistry {
   explicit SynchronousPairingRegistry(scoped_ptr<Delegate> delegate);
 
  protected:
-  virtual ~SynchronousPairingRegistry();
+  ~SynchronousPairingRegistry() override;
 
   // Runs tasks synchronously instead of posting them to |task_runner|.
-  virtual void PostTask(
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
+  void PostTask(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+                const tracked_objects::Location& from_here,
+                const base::Closure& task) override;
 };
 
 }  // namespace protocol

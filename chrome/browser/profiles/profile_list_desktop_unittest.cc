@@ -30,12 +30,9 @@ namespace {
 class MockObserver : public AvatarMenuObserver {
  public:
   MockObserver() : count_(0) {}
-  virtual ~MockObserver() {}
+  ~MockObserver() override {}
 
-  virtual void OnAvatarMenuChanged(
-      AvatarMenu* avatar_menu) OVERRIDE {
-    ++count_;
-  }
+  void OnAvatarMenuChanged(AvatarMenu* avatar_menu) override { ++count_; }
 
   int change_count() const { return count_; }
 
@@ -51,7 +48,7 @@ class ProfileListDesktopTest : public testing::Test {
       : manager_(TestingBrowserProcess::GetGlobal()) {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(manager_.SetUp());
 #if defined(OS_CHROMEOS)
     // AvatarMenu and multiple profiles works after user logged in.
@@ -288,7 +285,8 @@ TEST_F(ProfileListDesktopTest, ShowAvatarMenuInTrial) {
 }
 
 TEST_F(ProfileListDesktopTest, DontShowOldAvatarMenuForSingleProfile) {
-  switches::DisableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::DisableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   manager()->CreateTestingProfile("Test 1");
 
@@ -309,7 +307,8 @@ TEST_F(ProfileListDesktopTest, AlwaysShowNewAvatarMenu) {
   if (!profiles::IsMultipleProfilesEnabled())
     return;
 
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   manager()->CreateTestingProfile("Test 1");
 

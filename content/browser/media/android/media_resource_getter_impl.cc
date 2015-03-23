@@ -12,6 +12,7 @@
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/fileapi/browser_file_system_helper.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
+#include "content/browser/resource_context_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -27,6 +28,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/blob/blob_data_handle.h"
+#include "storage/browser/blob/blob_data_item.h"
+#include "storage/browser/blob/blob_data_snapshot.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "url/gurl.h"
 
@@ -44,25 +47,33 @@ static void ReturnResultOnUIThread(
 
 static void RequestPlatformPathFromBlobURL(
     const GURL& url,
-    BrowserContext* browser_context,
+    ResourceContext* resource_context,
     const base::Callback<void(const std::string&)>& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  ChromeBlobStorageContext* context =
-      ChromeBlobStorageContext::GetFor(browser_context);
+  ChromeBlobStorageContext* blob_storage_context =
+      GetChromeBlobStorageContextForResourceContext(resource_context);
+
   scoped_ptr<storage::BlobDataHandle> handle =
-      context->context()->GetBlobDataFromPublicURL(url);
-  storage::BlobData* data = handle->data();
+      blob_storage_context->context()->GetBlobDataFromPublicURL(url);
+  if (!handle) {
+    // There are plenty of cases where handle can be empty. The most trivial is
+    // when JS has aready revoked the given blob URL via URL.revokeObjectURL
+    ReturnResultOnUIThread(callback, std::string());
+    return;
+  }
+  scoped_ptr<storage::BlobDataSnapshot> data = handle->CreateSnapshot();
   if (!data) {
-    ReturnResultOnUIThread(callback, "");
+    ReturnResultOnUIThread(callback, std::string());
     NOTREACHED();
     return;
   }
-  const std::vector<storage::BlobData::Item> items = data->items();
+  const std::vector<scoped_refptr<storage::BlobDataItem>>& items =
+      data->items();
 
   // TODO(qinmin): handle the case when the blob data is not a single file.
   DLOG_IF(WARNING, items.size() != 1u)
-      << "More than one blob data are present: " << items.size();
-  ReturnResultOnUIThread(callback, items[0].path().value());
+      << "More than one blob item is present: " << items.size();
+  ReturnResultOnUIThread(callback, items[0]->path().value());
 }
 
 static void RequestPlaformPathFromFileSystemURL(
@@ -329,7 +340,8 @@ void MediaResourceGetterImpl::GetPlatformPathFromURL(
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        base::Bind(&RequestPlatformPathFromBlobURL, url, browser_context_, cb));
+        base::Bind(&RequestPlatformPathFromBlobURL, url,
+                   browser_context_->GetResourceContext(), cb));
     return;
   }
 

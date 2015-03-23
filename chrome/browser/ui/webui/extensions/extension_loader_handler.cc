@@ -51,7 +51,7 @@ class ExtensionLoaderHandler::FileHelper
     : public ui::SelectFileDialog::Listener {
  public:
   explicit FileHelper(ExtensionLoaderHandler* loader_handler);
-  virtual ~FileHelper();
+  ~FileHelper() override;
 
   // Create a FileDialog for the user to select the unpacked extension
   // directory.
@@ -59,11 +59,11 @@ class ExtensionLoaderHandler::FileHelper
 
  private:
   // ui::SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE;
-  virtual void MultiFilesSelected(
-      const std::vector<base::FilePath>& files, void* params) OVERRIDE;
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void MultiFilesSelected(const std::vector<base::FilePath>& files,
+                          void* params) override;
 
   // The associated ExtensionLoaderHandler. Weak, but guaranteed to be alive,
   // as it owns this object.
@@ -99,11 +99,16 @@ void ExtensionLoaderHandler::FileHelper::ChooseFile() {
   static const ui::SelectFileDialog::Type kSelectType =
       ui::SelectFileDialog::SELECT_FOLDER;
 
+  gfx::NativeWindow parent_window =
+      loader_handler_->web_ui()->GetWebContents()->GetTopLevelNativeWindow();
   if (!load_extension_dialog_.get()) {
     load_extension_dialog_ = ui::SelectFileDialog::Create(
         this,
         new ChromeSelectFilePolicy(
             loader_handler_->web_ui()->GetWebContents()));
+  } else if (load_extension_dialog_->IsRunning(parent_window)) {
+    // File chooser dialog is already running; ignore the click.
+    return;
   }
 
   load_extension_dialog_->SelectFile(
@@ -113,7 +118,7 @@ void ExtensionLoaderHandler::FileHelper::ChooseFile() {
       NULL,
       kFileTypeIndex,
       base::FilePath::StringType(),
-      loader_handler_->web_ui()->GetWebContents()->GetTopLevelNativeWindow(),
+      parent_window,
       NULL);
 
   content::RecordComputedAction("Options_LoadUnpackedExtension");

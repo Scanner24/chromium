@@ -12,21 +12,17 @@ class MemoryMobile(benchmark.Benchmark):
   test = memory.Memory
   page_set = page_sets.MobileMemoryPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'memory.mobile_memory'
 
-@benchmark.Disabled
-class MemoryTop25(benchmark.Benchmark):
+
+@benchmark.Disabled  # http://crbug.com/459646
+class MemoryTop7Stress(benchmark.Benchmark):
+  """Use (recorded) real world web sites and measure memory consumption."""
   test = memory.Memory
-  page_set = page_sets.Top25PageSet
+  page_set = page_sets.Top7StressPageSet
 
-
-@benchmark.Disabled
-class Reload2012Q3(benchmark.Benchmark):
-  tag = 'reload'
-  test = memory.Memory
-  page_set = page_sets.Top2012Q3PageSet
-
-
-@benchmark.Disabled  # crbug.com/371153
-class MemoryToughDomMemoryCases(benchmark.Benchmark):
-  test = memory.Memory
-  page_set = page_sets.ToughDomMemoryCasesPageSet
+  @classmethod
+  def Name(cls):
+    return 'memory.top_7_stress'

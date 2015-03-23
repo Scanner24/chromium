@@ -11,6 +11,7 @@
 #include "cc/output/overlay_strategy_single_on_top.h"
 #include "cc/quads/checkerboard_draw_quad.h"
 #include "cc/quads/render_pass.h"
+#include "cc/quads/stream_video_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/texture_mailbox.h"
@@ -32,6 +33,16 @@ const gfx::Rect kOverlayTopLeftRect(0, 0, 64, 64);
 const gfx::Rect kOverlayBottomRightRect(64, 64, 64, 64);
 const gfx::PointF kUVTopLeft(0.1f, 0.2f);
 const gfx::PointF kUVBottomRight(1.0f, 1.0f);
+const gfx::Transform kNormalTransform =
+    gfx::Transform(0.9f, 0, 0, 0.8f, 0.1f, 0.2f);  // x,y -> x,y.
+const gfx::Transform kXMirrorTransform =
+    gfx::Transform(-0.9f, 0, 0, 0.8f, 1.0f, 0.2f);  // x,y -> 1-x,y.
+const gfx::Transform kYMirrorTransform =
+    gfx::Transform(0.9f, 0, 0, -0.8f, 0.1f, 1.0f);  // x,y -> x,1-y.
+const gfx::Transform kBothMirrorTransform =
+    gfx::Transform(-0.9f, 0, 0, -0.8f, 1.0f, 1.0f);  // x,y -> 1-x,1-y.
+const gfx::Transform kSwapTransform =
+    gfx::Transform(0, 1, 1, 0, 0, 0);  // x,y -> y,x.
 
 void MailboxReleased(unsigned sync_point,
                      bool lost_resource,
@@ -40,7 +51,7 @@ void MailboxReleased(unsigned sync_point,
 
 class SingleOverlayValidator : public OverlayCandidateValidator {
  public:
-  virtual void CheckOverlaySupport(OverlayCandidateList* surfaces) OVERRIDE;
+  void CheckOverlaySupport(OverlayCandidateList* surfaces) override;
 };
 
 void SingleOverlayValidator::CheckOverlaySupport(
@@ -62,7 +73,7 @@ class SingleOverlayProcessor : public OverlayProcessor {
   SingleOverlayProcessor(OutputSurface* surface,
                          ResourceProvider* resource_provider);
   // Virtual to allow testing different strategies.
-  virtual void Initialize() OVERRIDE;
+  void Initialize() override;
 };
 
 SingleOverlayProcessor::SingleOverlayProcessor(
@@ -102,10 +113,18 @@ class OverlayOutputSurface : public OutputSurface {
   explicit OverlayOutputSurface(scoped_refptr<ContextProvider> context_provider)
       : OutputSurface(context_provider) {}
 
+  // OutputSurface implementation
+  void SwapBuffers(CompositorFrame* frame) override;
+
   void InitWithSingleOverlayValidator() {
     overlay_candidate_validator_.reset(new SingleOverlayValidator);
   }
 };
+
+void OverlayOutputSurface::SwapBuffers(CompositorFrame* frame) {
+  client_->DidSwapBuffers();
+  client_->DidSwapBuffersComplete();
+}
 
 scoped_ptr<RenderPass> CreateRenderPass() {
   RenderPassId id(1, 0);
@@ -137,6 +156,17 @@ ResourceProvider::ResourceId CreateResource(
       mailbox, release_callback.Pass());
 }
 
+SolidColorDrawQuad* CreateSolidColorQuadAt(
+    const SharedQuadState* shared_quad_state,
+    SkColor color,
+    RenderPass* render_pass,
+    const gfx::Rect& rect) {
+  SolidColorDrawQuad* quad =
+      render_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
+  quad->SetNew(shared_quad_state, rect, rect, color, false);
+  return quad;
+}
+
 TextureDrawQuad* CreateCandidateQuadAt(ResourceProvider* resource_provider,
                                        const SharedQuadState* shared_quad_state,
                                        RenderPass* render_pass,
@@ -144,6 +174,7 @@ TextureDrawQuad* CreateCandidateQuadAt(ResourceProvider* resource_provider,
   ResourceProvider::ResourceId resource_id = CreateResource(resource_provider);
   bool premultiplied_alpha = false;
   bool flipped = false;
+  bool nearest_neighbor = false;
   float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
   TextureDrawQuad* overlay_quad =
@@ -158,7 +189,24 @@ TextureDrawQuad* CreateCandidateQuadAt(ResourceProvider* resource_provider,
                        kUVBottomRight,
                        SK_ColorTRANSPARENT,
                        vertex_opacity,
-                       flipped);
+                       flipped,
+                       nearest_neighbor);
+
+  return overlay_quad;
+}
+
+StreamVideoDrawQuad* CreateCandidateVideoQuadAt(
+    ResourceProvider* resource_provider,
+    const SharedQuadState* shared_quad_state,
+    RenderPass* render_pass,
+    const gfx::Rect& rect,
+    const gfx::Transform& transform) {
+  ResourceProvider::ResourceId resource_id = CreateResource(resource_provider);
+
+  StreamVideoDrawQuad* overlay_quad =
+      render_pass->CreateAndAppendDrawQuad<StreamVideoDrawQuad>();
+  overlay_quad->SetNew(shared_quad_state, rect, rect, rect, resource_id,
+                       transform);
 
   return overlay_quad;
 }
@@ -169,6 +217,15 @@ TextureDrawQuad* CreateFullscreenCandidateQuad(
     RenderPass* render_pass) {
   return CreateCandidateQuadAt(
       resource_provider, shared_quad_state, render_pass, kOverlayRect);
+}
+
+StreamVideoDrawQuad* CreateFullscreenCandidateVideoQuad(
+    ResourceProvider* resource_provider,
+    const SharedQuadState* shared_quad_state,
+    RenderPass* render_pass,
+    const gfx::Transform& transform) {
+  return CreateCandidateVideoQuadAt(resource_provider, shared_quad_state,
+                                    render_pass, kOverlayRect, transform);
 }
 
 void CreateCheckeredQuadAt(ResourceProvider* resource_provider,
@@ -195,10 +252,10 @@ static void CompareRenderPassLists(const RenderPassList& expected_list,
     RenderPass* actual = actual_list[i];
 
     EXPECT_EQ(expected->id, actual->id);
-    EXPECT_RECT_EQ(expected->output_rect, actual->output_rect);
+    EXPECT_EQ(expected->output_rect, actual->output_rect);
     EXPECT_EQ(expected->transform_to_root_target,
               actual->transform_to_root_target);
-    EXPECT_RECT_EQ(expected->damage_rect, actual->damage_rect);
+    EXPECT_EQ(expected->damage_rect, actual->damage_rect);
     EXPECT_EQ(expected->has_transparent_background,
               actual->has_transparent_background);
 
@@ -206,9 +263,9 @@ static void CompareRenderPassLists(const RenderPassList& expected_list,
               actual->shared_quad_state_list.size());
     EXPECT_EQ(expected->quad_list.size(), actual->quad_list.size());
 
-    for (QuadList::Iterator exp_iter = expected->quad_list.begin(),
-                            act_iter = actual->quad_list.begin();
-         exp_iter != expected->quad_list.end();
+    for (auto exp_iter = expected->quad_list.cbegin(),
+              act_iter = actual->quad_list.cbegin();
+         exp_iter != expected->quad_list.cend();
          ++exp_iter, ++act_iter) {
       EXPECT_EQ(exp_iter->rect.ToString(), act_iter->rect.ToString());
       EXPECT_EQ(exp_iter->shared_quad_state->content_bounds.ToString(),
@@ -237,7 +294,7 @@ TEST(OverlayTest, OverlaysProcessorHasStrategy) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      &output_surface, shared_bitmap_manager.get(), NULL, 0, false, 1, false));
+      &output_surface, shared_bitmap_manager.get(), NULL, NULL, 0, false, 1));
 
   scoped_ptr<DefaultOverlayProcessor> overlay_processor(
       new DefaultOverlayProcessor(&output_surface, resource_provider.get()));
@@ -247,7 +304,7 @@ TEST(OverlayTest, OverlaysProcessorHasStrategy) {
 
 class SingleOverlayOnTopTest : public testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     provider_ = TestContextProvider::Create();
     output_surface_.reset(new OverlayOutputSurface(provider_));
     EXPECT_TRUE(output_surface_->BindToClient(&client_));
@@ -258,10 +315,10 @@ class SingleOverlayOnTopTest : public testing::Test {
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false);
+                                                  1);
 
     overlay_processor_.reset(new SingleOverlayProcessor(
         output_surface_.get(), resource_provider_.get()));
@@ -474,13 +531,13 @@ TEST_F(SingleOverlayOnTopTest, RejectOpacity) {
   EXPECT_EQ(0U, candidate_list.size());
 }
 
-TEST_F(SingleOverlayOnTopTest, RejectTransform) {
+TEST_F(SingleOverlayOnTopTest, RejectNonScaleTransform) {
   scoped_ptr<RenderPass> pass = CreateRenderPass();
   CreateFullscreenCandidateQuad(resource_provider_.get(),
                                 pass->shared_quad_state_list.back(),
                                 pass.get());
-  pass->shared_quad_state_list.back()->content_to_target_transform.Scale(2.f,
-                                                                         2.f);
+  pass->shared_quad_state_list.back()
+      ->content_to_target_transform.RotateAboutXAxis(45.f);
 
   RenderPassList pass_list;
   pass_list.push_back(pass.Pass());
@@ -488,6 +545,39 @@ TEST_F(SingleOverlayOnTopTest, RejectTransform) {
   overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
   ASSERT_EQ(1U, pass_list.size());
   EXPECT_EQ(0U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, RejectNegativeScaleTransform) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateFullscreenCandidateQuad(resource_provider_.get(),
+                                pass->shared_quad_state_list.back(),
+                                pass.get());
+  pass->shared_quad_state_list.back()->content_to_target_transform.Scale(2.0f,
+                                                                         -1.0f);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(0U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, AllowPositiveScaleTransform) {
+  gfx::Rect rect = kOverlayRect;
+  rect.set_width(rect.width() / 2);
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateCandidateQuadAt(resource_provider_.get(),
+                        pass->shared_quad_state_list.back(), pass.get(), rect);
+  pass->shared_quad_state_list.back()->content_to_target_transform.Scale(2.0f,
+                                                                         1.0f);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
 }
 
 TEST_F(SingleOverlayOnTopTest, AllowNotTopIfNotOccluded) {
@@ -513,10 +603,168 @@ TEST_F(SingleOverlayOnTopTest, AllowNotTopIfNotOccluded) {
   EXPECT_EQ(2U, candidate_list.size());
 }
 
+TEST_F(SingleOverlayOnTopTest, AllowTransparentOnTop) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  SharedQuadState* shared_state = pass->CreateAndAppendSharedQuadState();
+  shared_state->opacity = 0.f;
+  CreateSolidColorQuadAt(shared_state, SK_ColorBLACK, pass.get(),
+                         kOverlayBottomRightRect);
+  shared_state = pass->CreateAndAppendSharedQuadState();
+  shared_state->opacity = 1.f;
+  CreateCandidateQuadAt(resource_provider_.get(), shared_state, pass.get(),
+                        kOverlayBottomRightRect);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+
+  RenderPassList original_pass_list;
+  RenderPass::CopyAll(pass_list, &original_pass_list);
+
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  EXPECT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, AllowTransparentColorOnTop) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateSolidColorQuadAt(pass->shared_quad_state_list.back(),
+                         SK_ColorTRANSPARENT, pass.get(),
+                         kOverlayBottomRightRect);
+  CreateCandidateQuadAt(resource_provider_.get(),
+                        pass->shared_quad_state_list.back(), pass.get(),
+                        kOverlayBottomRightRect);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+
+  RenderPassList original_pass_list;
+  RenderPass::CopyAll(pass_list, &original_pass_list);
+
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  EXPECT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, RejectOpaqueColorOnTop) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  SharedQuadState* shared_state = pass->CreateAndAppendSharedQuadState();
+  shared_state->opacity = 0.5f;
+  CreateSolidColorQuadAt(shared_state, SK_ColorBLACK, pass.get(),
+                         kOverlayBottomRightRect);
+  shared_state = pass->CreateAndAppendSharedQuadState();
+  shared_state->opacity = 1.f;
+  CreateCandidateQuadAt(resource_provider_.get(), shared_state, pass.get(),
+                        kOverlayBottomRightRect);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+
+  RenderPassList original_pass_list;
+  RenderPass::CopyAll(pass_list, &original_pass_list);
+
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  EXPECT_EQ(1U, pass_list.size());
+  EXPECT_EQ(0U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, RejectTransparentColorOnTopWithoutBlending) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  SharedQuadState* shared_state = pass->CreateAndAppendSharedQuadState();
+  CreateSolidColorQuadAt(shared_state, SK_ColorTRANSPARENT, pass.get(),
+                         kOverlayBottomRightRect)->opaque_rect =
+      kOverlayBottomRightRect;
+  CreateCandidateQuadAt(resource_provider_.get(), shared_state, pass.get(),
+                        kOverlayBottomRightRect);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+
+  RenderPassList original_pass_list;
+  RenderPass::CopyAll(pass_list, &original_pass_list);
+
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  EXPECT_EQ(1U, pass_list.size());
+  EXPECT_EQ(0U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, RejectVideoSwapTransform) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateFullscreenCandidateVideoQuad(resource_provider_.get(),
+                                     pass->shared_quad_state_list.back(),
+                                     pass.get(), kSwapTransform);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(0U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, AllowVideoXMirrorTransform) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateFullscreenCandidateVideoQuad(resource_provider_.get(),
+                                     pass->shared_quad_state_list.back(),
+                                     pass.get(), kXMirrorTransform);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, AllowVideoBothMirrorTransform) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateFullscreenCandidateVideoQuad(resource_provider_.get(),
+                                     pass->shared_quad_state_list.back(),
+                                     pass.get(), kBothMirrorTransform);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, AllowVideoNormalTransform) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateFullscreenCandidateVideoQuad(resource_provider_.get(),
+                                     pass->shared_quad_state_list.back(),
+                                     pass.get(), kNormalTransform);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
+}
+
+TEST_F(SingleOverlayOnTopTest, AllowVideoYMirrorTransform) {
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  CreateFullscreenCandidateVideoQuad(resource_provider_.get(),
+                                     pass->shared_quad_state_list.back(),
+                                     pass.get(), kYMirrorTransform);
+
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+  OverlayCandidateList candidate_list;
+  overlay_processor_->ProcessForOverlays(&pass_list, &candidate_list);
+  ASSERT_EQ(1U, pass_list.size());
+  EXPECT_EQ(2U, candidate_list.size());
+}
+
 class OverlayInfoRendererGL : public GLRenderer {
  public:
   OverlayInfoRendererGL(RendererClient* client,
-                        const LayerTreeSettings* settings,
+                        const RendererSettings* settings,
                         OutputSurface* output_surface,
                         ResourceProvider* resource_provider)
       : GLRenderer(client,
@@ -529,7 +777,9 @@ class OverlayInfoRendererGL : public GLRenderer {
 
   MOCK_METHOD2(DoDrawQuad, void(DrawingFrame* frame, const DrawQuad* quad));
 
-  virtual void FinishDrawingFrame(DrawingFrame* frame) OVERRIDE {
+  using GLRenderer::BeginDrawingFrame;
+
+  void FinishDrawingFrame(DrawingFrame* frame) override {
     GLRenderer::FinishDrawingFrame(frame);
 
     if (!expect_overlays_) {
@@ -552,7 +802,7 @@ class OverlayInfoRendererGL : public GLRenderer {
 class FakeRendererClient : public RendererClient {
  public:
   // RendererClient methods.
-  virtual void SetFullRootLayerDamage() OVERRIDE {}
+  void SetFullRootLayerDamage() override {}
 };
 
 class MockOverlayScheduler {
@@ -572,7 +822,7 @@ class GLRendererWithOverlaysTest : public testing::Test {
     output_surface_.reset(new OverlayOutputSurface(provider_));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ = ResourceProvider::Create(
-        output_surface_.get(), NULL, NULL, 0, false, 1, false);
+        output_surface_.get(), NULL, NULL, NULL, 0, false, 1);
 
     provider_->support()->SetScheduleOverlayPlaneCallback(base::Bind(
         &MockOverlayScheduler::Schedule, base::Unretained(&scheduler_)));
@@ -591,7 +841,7 @@ class GLRendererWithOverlaysTest : public testing::Test {
 
   void SwapBuffers() { renderer_->SwapBuffers(CompositorFrameMetadata()); }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<OverlayOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
@@ -716,19 +966,26 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   ResourceProvider::ResourceId resource2 =
       CreateResource(resource_provider_.get());
 
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+
   DirectRenderer::DrawingFrame frame1;
+  frame1.render_passes_in_draw_order = &pass_list;
   frame1.overlay_list.resize(2);
   OverlayCandidate& overlay1 = frame1.overlay_list.back();
   overlay1.resource_id = resource1;
   overlay1.plane_z_order = 1;
 
   DirectRenderer::DrawingFrame frame2;
+  frame2.render_passes_in_draw_order = &pass_list;
   frame2.overlay_list.resize(2);
   OverlayCandidate& overlay2 = frame2.overlay_list.back();
   overlay2.resource_id = resource2;
   overlay2.plane_z_order = 1;
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_FALSE(resource_provider_->InUseByConsumer(resource2));
@@ -736,6 +993,7 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   Mock::VerifyAndClearExpectations(&scheduler_);
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame2);
   renderer_->FinishDrawingFrame(&frame2);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource2));
@@ -744,6 +1002,7 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   Mock::VerifyAndClearExpectations(&scheduler_);
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource2));
@@ -754,7 +1013,9 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   // No overlays, release the resource.
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(0);
   DirectRenderer::DrawingFrame frame3;
+  frame3.render_passes_in_draw_order = &pass_list;
   renderer_->set_expect_overlays(false);
+  renderer_->BeginDrawingFrame(&frame3);
   renderer_->FinishDrawingFrame(&frame3);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_FALSE(resource_provider_->InUseByConsumer(resource2));
@@ -765,12 +1026,14 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   // Use the same buffer twice.
   renderer_->set_expect_overlays(true);
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   SwapBuffers();
   Mock::VerifyAndClearExpectations(&scheduler_);
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   SwapBuffers();
@@ -779,6 +1042,7 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(0);
   renderer_->set_expect_overlays(false);
+  renderer_->BeginDrawingFrame(&frame3);
   renderer_->FinishDrawingFrame(&frame3);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   SwapBuffers();

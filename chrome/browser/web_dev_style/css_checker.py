@@ -5,7 +5,7 @@
 """Presubmit script for Chromium WebUI resources.
 
 See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
-for more details about the presubmit API built into gcl/git cl, and see
+for more details about the presubmit API built into depot_tools, and see
 http://www.chromium.org/developers/web-development-style-guide for the rules
 we're checking against here.
 """
@@ -33,9 +33,9 @@ class CSSChecker(object):
 
     def _remove_ats(s):
       at_reg = re.compile(r"""
-          @\w+[^'"]*?{  # @at-keyword selector junk {
-          (.*{.*?})+    # inner { curly } blocks, rules, and selector junk
-          .*?}          # stuff up to the first end curly }""",
+          @(?!\d+x\b)\w+[^'"]*?{  # @at-keyword selector junk {, not @2x
+          (.*{.*?})+              # inner { curly } blocks, rules, and selector
+          .*?}                    # stuff up to the first end curly }""",
           re.DOTALL | re.VERBOSE)
       return at_reg.sub('\\1', s)
 
@@ -93,10 +93,10 @@ class CSSChecker(object):
     def close_brace_on_new_line(line):
       # Ignore single frames in a @keyframe, i.e. 0% { margin: 50px; }
       frame_reg = re.compile(r"""
-          \s*\d+%\s*{       # 50% {
-          \s*[\w-]+:        # rule:
-          (\s*[\w-]+)+\s*;  # value;
-          \s*}\s*           # }""",
+          \s*(from|to|\d+%)\s*{   # 50% {
+          \s*[\w-]+:              # rule:
+          (\s*[\w\(\), -]+)+\s*;  # value;
+          \s*}\s*                 # }""",
           re.VERBOSE)
       return ('}' in line and re.search(r'[^ }]', line) and
               not frame_reg.match(line))
@@ -141,7 +141,10 @@ class CSSChecker(object):
       return ' (replace with %dms)' % ms
 
     def no_data_uris_in_source_files(line):
-      return re.search(r'\(\s*\'?\s*data:', line)
+      return re.search(r'\(\s*\s*data:', line)
+
+    def no_quotes_in_url(line):
+      return re.search('url\s*\(\s*["\']', line, re.IGNORECASE)
 
     def one_rule_per_line(line):
       one_rule_reg = re.compile(r"""
@@ -245,18 +248,28 @@ class CSSChecker(object):
       h = hex_reg.search(line).group(1)
       return ' (replace with #%s)' % (h[0] + h[2] + h[4])
 
-    def zero_length_values(contents):
+    webkit_before_or_after_reg = re.compile(r'-webkit-(\w+-)(after|before):')
+
+    def suggest_top_or_bottom(line):
+      prop, pos = webkit_before_or_after_reg.search(line).groups()
+      top_or_bottom = 'top' if pos == 'before' else 'bottom'
+      return ' (replace with %s)' % (prop + top_or_bottom)
+
+    def webkit_before_or_after(line):
+      return webkit_before_or_after_reg.search(line)
+
+    def zero_width_lengths(contents):
       hsl_reg = re.compile(r"""
           hsl\([^\)]*       # hsl(<maybe stuff>
           (?:[, ]|(?<=\())  # a comma or space not followed by a (
           (?:0?\.?)?0%      # some equivalent to 0%""",
           re.VERBOSE)
       zeros_reg = re.compile(r"""
-          ^.*(?:^|[^0-9.])                                 # start/non-number
-          (?:\.0|0(?:\.0?                                  # .0, 0, or 0.0
-          |px|em|%|in|cm|mm|pc|pt|ex|deg|g?rad|m?s|k?hz))  # a length unit
-          (?:\D|$)                                         # non-number/end
-          (?=[^{}]+?}).*$                                  # only { rules }""",
+          ^.*(?:^|[^0-9.])              # start/non-number
+          (?:\.0|0(?:\.0?               # .0, 0, or 0.0
+          |px|em|%|in|cm|mm|pc|pt|ex))  # a length unit
+          (?:\D|$)                      # non-number/end
+          (?=[^{}]+?}).*$               # only { rules }""",
           re.MULTILINE | re.VERBOSE)
       errors = []
       for z in re.finditer(zeros_reg, contents):
@@ -301,6 +314,9 @@ class CSSChecker(object):
         { 'desc': "Don't use data URIs in source files. Use grit instead.",
           'test': no_data_uris_in_source_files,
         },
+        { 'desc': "Don't use quotes in url().",
+          'test': no_quotes_in_url,
+        },
         { 'desc': 'One rule per line (what not to do: color: red; margin: 0;).',
           'test': one_rule_per_line,
         },
@@ -316,9 +332,12 @@ class CSSChecker(object):
           'test': rgb_if_not_gray,
           'after': suggest_rgb_from_hex,
         },
-        { 'desc': 'Make all zero length terms (i.e. 0px) 0 unless inside of '
-                  'hsl() or part of @keyframe.',
-          'test': zero_length_values,
+        { 'desc': 'Use *-top/bottom instead of -webkit-*-before/after.',
+          'test': webkit_before_or_after,
+          'after': suggest_top_or_bottom,
+        },
+        { 'desc': 'Use "0" for zero-width lengths (i.e. 0px -> 0)',
+          'test': zero_width_lengths,
           'multiline': True,
         },
     ]

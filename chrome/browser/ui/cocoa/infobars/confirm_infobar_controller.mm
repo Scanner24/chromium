@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar_cocoa.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
@@ -107,20 +108,23 @@
 
   // Set the text and link.
   NSString* message = base::SysUTF16ToNSString(delegate->GetMessageText());
-  base::string16 link = delegate->GetLinkText();
-  if (!link.empty()) {
+  NSString* link = base::SysUTF16ToNSString(delegate->GetLinkText());
+  NSUInteger linkOffset = [message length];
+  NSUInteger linkLength = [link length];
+  if (linkLength != 0) {
     // Add spacing between the label and the link.
-    message = [message stringByAppendingString:@"   "];
+    message = [message stringByAppendingFormat:@"   %@", link];
+    linkOffset = [message length] - [link length];
   }
   NSFont* font = [NSFont labelFontOfSize:
       [NSFont systemFontSizeForControlSize:NSRegularControlSize]];
   HyperlinkTextView* view = (HyperlinkTextView*)label_.get();
-  [view setMessageAndLink:message
-                 withLink:base::SysUTF16ToNSString(link)
-                 atOffset:[message length]
-                     font:font
-             messageColor:[NSColor blackColor]
-                linkColor:[NSColor blueColor]];
+  [view setMessage:message withFont:font messageColor:[NSColor blackColor]];
+  if (linkLength != 0) {
+    [view addLinkRange:NSMakeRange(linkOffset, linkLength)
+              withName:@""
+             linkColor:[NSColor blueColor]];
+  }
 }
 
 // Called when someone clicks on the link in the infobar.  This method
@@ -137,13 +141,11 @@
 
 @end
 
-// static
-scoped_ptr<infobars::InfoBar> ConfirmInfoBarDelegate::CreateInfoBar(
+scoped_ptr<infobars::InfoBar> InfoBarService::CreateConfirmInfoBar(
     scoped_ptr<ConfirmInfoBarDelegate> delegate) {
-  scoped_ptr<InfoBarCocoa> infobar(
-      new InfoBarCocoa(delegate.PassAs<infobars::InfoBarDelegate>()));
+  scoped_ptr<InfoBarCocoa> infobar(new InfoBarCocoa(delegate.Pass()));
   base::scoped_nsobject<ConfirmInfoBarController> controller(
       [[ConfirmInfoBarController alloc] initWithInfoBar:infobar.get()]);
   infobar->set_controller(controller);
-  return infobar.PassAs<infobars::InfoBar>();
+  return infobar.Pass();
 }

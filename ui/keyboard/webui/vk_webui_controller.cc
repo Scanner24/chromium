@@ -13,8 +13,8 @@
 #include "content/public/common/service_registry.h"
 #include "grit/keyboard_resources.h"
 #include "grit/keyboard_resources_map.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
-#include "mojo/public/cpp/system/core.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/core.h"
 #include "ui/keyboard/keyboard_constants.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/keyboard/webui/vk_mojo_handler.h"
@@ -68,8 +68,7 @@ void VKWebUIController::RenderViewCreated(content::RenderViewHost* host) {
 
 void VKWebUIController::CreateAndStoreUIHandler(
     mojo::InterfaceRequest<KeyboardUIHandlerMojo> request) {
-  ui_handler_ = scoped_ptr<VKMojoHandler>(
-      mojo::WeakBindToRequest(new VKMojoHandler(), &request));
+  ui_handler_ = make_scoped_ptr(new VKMojoHandler(request.Pass()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

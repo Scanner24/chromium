@@ -12,10 +12,10 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/hmac.h"
-#include "third_party/libjingle/source/talk/p2p/base/stun.h"
 #include "third_party/webrtc/base/asyncpacketsocket.h"
 #include "third_party/webrtc/base/byteorder.h"
 #include "third_party/webrtc/base/messagedigest.h"
+#include "third_party/webrtc/p2p/base/stun.h"
 
 namespace {
 
@@ -141,12 +141,11 @@ void UpdateAbsSendTimeExtensionValue(char* extension_data,
     return;
   }
 
-  // Now() has resolution ~1-15ms, using HighResNow(). But it is warned not to
-  // use it unless necessary, as it is expensive than Now().
+  // Now() has resolution ~1-15ms
   uint32 now_second = abs_send_time;
   if (!now_second) {
     uint64 now_us =
-        (base::TimeTicks::HighResNow() - base::TimeTicks()).InMicroseconds();
+        (base::TimeTicks::Now() - base::TimeTicks()).InMicroseconds();
     // Convert second to 24-bit unsigned with 18 bit fractional part
     now_second =
         ((now_us << 18) / base::Time::kMicrosecondsPerSecond) & 0x00FFFFFF;
@@ -463,12 +462,12 @@ P2PSocketHost::P2PSocketHost(IPC::Sender* message_sender,
       state_(STATE_UNINITIALIZED),
       dump_incoming_rtp_packet_(false),
       dump_outgoing_rtp_packet_(false),
-      weak_ptr_factory_(this),
       protocol_type_(protocol_type),
       send_packets_delayed_total_(0),
       send_packets_total_(0),
       send_bytes_delayed_max_(0),
-      send_bytes_delayed_cur_(0) {
+      send_bytes_delayed_cur_(0),
+      weak_ptr_factory_(this) {
 }
 
 P2PSocketHost::~P2PSocketHost() {

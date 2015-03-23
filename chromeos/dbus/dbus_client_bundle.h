@@ -5,6 +5,8 @@
 #ifndef CHROMEOS_DBUS_DBUS_CLIENT_BUNDLE_H_
 #define CHROMEOS_DBUS_DBUS_CLIENT_BUNDLE_H_
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "chromeos/chromeos_export.h"
 
@@ -18,18 +20,22 @@ class BluetoothGattDescriptorClient;
 class BluetoothGattManagerClient;
 class BluetoothGattServiceClient;
 class BluetoothInputClient;
+class BluetoothMediaClient;
+class BluetoothMediaTransportClient;
 class BluetoothProfileManagerClient;
 class CrasAudioClient;
 class CrosDisksClient;
 class CryptohomeClient;
 class DebugDaemonClient;
 class EasyUnlockClient;
+class LeadershipDaemonManagerClient;
 class LorgnetteManagerClient;
 class ShillDeviceClient;
 class ShillIPConfigClient;
 class ShillManagerClient;
 class ShillServiceClient;
 class ShillProfileClient;
+class ShillThirdPartyVpnDriverClient;
 class GsmSMSClient;
 class ImageBurnerClient;
 class IntrospectableClient;
@@ -39,6 +45,7 @@ class NfcAdapterClient;
 class NfcDeviceClient;
 class NfcTagClient;
 class NfcRecordClient;
+class PeerDaemonManagerClient;
 class PermissionBrokerClient;
 class SystemClockClient;
 class PowerManagerClient;
@@ -46,9 +53,9 @@ class SessionManagerClient;
 class SMSClient;
 class UpdateEngineClient;
 
-// The bundle of all D-Bus clients used in DBusThreadManagerImpl. The bundle
+// The bundle of all D-Bus clients used in DBusThreadManager. The bundle
 // is used to delete them at once in the right order before shutting down the
-// system bus. See also the comment in the destructor of DBusThreadManagerImpl.
+// system bus. See also the comment in the destructor of DBusThreadManager.
 class CHROMEOS_EXPORT DBusClientBundle {
  public:
   typedef int DBusClientTypeMask;
@@ -76,9 +83,11 @@ class CHROMEOS_EXPORT DBusClientBundle {
     SMS =                  1 << 16,
     SYSTEM_CLOCK =         1 << 17,
     UPDATE_ENGINE =        1 << 18,
+    PEER_DAEMON =          1 << 19,
+    LEADERSHIP_DAEMON =    1 << 20,
   };
 
-  DBusClientBundle(DBusClientTypeMask unstub_client_mask);
+  explicit DBusClientBundle(DBusClientTypeMask unstub_client_mask);
   ~DBusClientBundle();
 
   // Returns true if |client| is stubbed.
@@ -112,8 +121,8 @@ class CHROMEOS_EXPORT DBusClientBundle {
 
   BluetoothGattDescriptorClient* bluetooth_gatt_descriptor_client() {
     return bluetooth_gatt_descriptor_client_.get();
-
   }
+
   BluetoothGattManagerClient* bluetooth_gatt_manager_client() {
     return bluetooth_gatt_manager_client_.get();
   }
@@ -124,6 +133,14 @@ class CHROMEOS_EXPORT DBusClientBundle {
 
   BluetoothInputClient* bluetooth_input_client() {
     return bluetooth_input_client_.get();
+  }
+
+  BluetoothMediaClient* bluetooth_media_client() {
+    return bluetooth_media_client_.get();
+  }
+
+  BluetoothMediaTransportClient* bluetooth_media_transport_client() {
+    return bluetooth_media_transport_client_.get();
   }
 
   BluetoothProfileManagerClient* bluetooth_profile_manager_client() {
@@ -150,6 +167,10 @@ class CHROMEOS_EXPORT DBusClientBundle {
     return easy_unlock_client_.get();
   }
 
+  LeadershipDaemonManagerClient* leadership_daemon_manager_client() {
+    return leadership_daemon_manager_client_.get();
+  }
+
   LorgnetteManagerClient* lorgnette_manager_client() {
     return lorgnette_manager_client_.get();
   }
@@ -172,6 +193,10 @@ class CHROMEOS_EXPORT DBusClientBundle {
 
   ShillProfileClient* shill_profile_client() {
     return shill_profile_client_.get();
+  }
+
+  ShillThirdPartyVpnDriverClient* shill_third_party_vpn_driver_client() {
+    return shill_third_party_vpn_driver_client_.get();
   }
 
   GsmSMSClient* gsm_sms_client() {
@@ -208,6 +233,10 @@ class CHROMEOS_EXPORT DBusClientBundle {
 
   NfcRecordClient* nfc_record_client() {
     return nfc_record_client_.get();
+  }
+
+  PeerDaemonManagerClient* peer_daemon_manager_client() {
+    return peer_daemon_manager_client_.get();
   }
 
   PermissionBrokerClient* permission_broker_client() {
@@ -250,18 +279,24 @@ class CHROMEOS_EXPORT DBusClientBundle {
   scoped_ptr<BluetoothGattManagerClient> bluetooth_gatt_manager_client_;
   scoped_ptr<BluetoothGattServiceClient> bluetooth_gatt_service_client_;
   scoped_ptr<BluetoothInputClient> bluetooth_input_client_;
+  scoped_ptr<BluetoothMediaClient> bluetooth_media_client_;
+  scoped_ptr<BluetoothMediaTransportClient> bluetooth_media_transport_client_;
   scoped_ptr<BluetoothProfileManagerClient> bluetooth_profile_manager_client_;
   scoped_ptr<CrasAudioClient> cras_audio_client_;
   scoped_ptr<CrosDisksClient> cros_disks_client_;
   scoped_ptr<CryptohomeClient> cryptohome_client_;
   scoped_ptr<DebugDaemonClient> debug_daemon_client_;
   scoped_ptr<EasyUnlockClient> easy_unlock_client_;
+  scoped_ptr<LeadershipDaemonManagerClient> leadership_daemon_manager_client_;
   scoped_ptr<LorgnetteManagerClient> lorgnette_manager_client_;
+  scoped_ptr<PeerDaemonManagerClient> peer_daemon_manager_client_;
   scoped_ptr<ShillDeviceClient> shill_device_client_;
   scoped_ptr<ShillIPConfigClient> shill_ipconfig_client_;
   scoped_ptr<ShillManagerClient> shill_manager_client_;
   scoped_ptr<ShillServiceClient> shill_service_client_;
   scoped_ptr<ShillProfileClient> shill_profile_client_;
+  scoped_ptr<ShillThirdPartyVpnDriverClient>
+      shill_third_party_vpn_driver_client_;
   scoped_ptr<GsmSMSClient> gsm_sms_client_;
   scoped_ptr<ImageBurnerClient> image_burner_client_;
   scoped_ptr<IntrospectableClient> introspectable_client_;

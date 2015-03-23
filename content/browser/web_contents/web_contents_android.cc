@@ -15,6 +15,7 @@
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/devtools_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
@@ -42,6 +43,16 @@ void JavaScriptResultCallback(const ScopedJavaGlobalRef<jobject>& callback,
       env, j_json.obj(), callback.obj());
 }
 
+void ReleaseAllMediaPlayers(content::WebContents* web_contents,
+                            content::RenderFrameHost* render_frame_host) {
+  content::BrowserMediaPlayerManager* manager =
+      static_cast<content::WebContentsImpl*>(web_contents)->
+          media_web_contents_observer()->GetMediaPlayerManager(
+              render_frame_host);
+  if (manager)
+    manager->ReleaseAllMediaPlayers();
+}
+
 }  // namespace
 
 namespace content {
@@ -63,13 +74,30 @@ WebContents* WebContents::FromJavaWebContents(
 }
 
 // static
+static void DestroyWebContents(JNIEnv* env,
+                               jclass clazz,
+                               jlong jweb_contents_android_ptr) {
+  WebContentsAndroid* web_contents_android =
+      reinterpret_cast<WebContentsAndroid*>(jweb_contents_android_ptr);
+  if (!web_contents_android)
+    return;
+
+  content::WebContents* web_contents = web_contents_android->web_contents();
+  if (!web_contents)
+    return;
+
+  delete web_contents;
+}
+
+// static
 bool WebContentsAndroid::Register(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
 WebContentsAndroid::WebContentsAndroid(WebContents* web_contents)
     : web_contents_(web_contents),
-      navigation_controller_(&(web_contents->GetController())) {
+      navigation_controller_(&(web_contents->GetController())),
+      weak_factory_(this) {
   JNIEnv* env = AttachCurrentThread();
   obj_.Reset(env,
              Java_WebContentsImpl_create(
@@ -79,7 +107,7 @@ WebContentsAndroid::WebContentsAndroid(WebContents* web_contents)
 }
 
 WebContentsAndroid::~WebContentsAndroid() {
-  Java_WebContentsImpl_destroy(AttachCurrentThread(), obj_.obj());
+  Java_WebContentsImpl_clearNativePtr(AttachCurrentThread(), obj_.obj());
 }
 
 base::android::ScopedJavaLocalRef<jobject>
@@ -99,6 +127,15 @@ ScopedJavaLocalRef<jstring> WebContentsAndroid::GetVisibleURL(
       env, web_contents_->GetVisibleURL().spec());
 }
 
+bool WebContentsAndroid::IsLoading(JNIEnv* env, jobject obj) const {
+  return web_contents_->IsLoading();
+}
+
+bool WebContentsAndroid::IsLoadingToDifferentDocument(JNIEnv* env,
+                                                      jobject obj) const {
+  return web_contents_->IsLoadingToDifferentDocument();
+}
+
 void WebContentsAndroid::Stop(JNIEnv* env, jobject obj) {
   web_contents_->Stop();
 }
@@ -113,9 +150,10 @@ RenderWidgetHostViewAndroid*
   RenderWidgetHostView* rwhv = NULL;
   rwhv = web_contents_->GetRenderWidgetHostView();
   if (web_contents_->ShowingInterstitialPage()) {
-    rwhv = static_cast<InterstitialPageImpl*>(
-        web_contents_->GetInterstitialPage())->
-            GetRenderViewHost()->GetView();
+    rwhv = web_contents_->GetInterstitialPage()
+               ->GetMainFrame()
+               ->GetRenderViewHost()
+               ->GetView();
   }
   return static_cast<RenderWidgetHostViewAndroid*>(rwhv);
 }
@@ -132,6 +170,14 @@ ScopedJavaLocalRef<jstring> WebContentsAndroid::GetURL(JNIEnv* env,
   return ConvertUTF8ToJavaString(env, web_contents_->GetURL().spec());
 }
 
+ScopedJavaLocalRef<jstring> WebContentsAndroid::GetLastCommittedURL(
+    JNIEnv* env,
+    jobject) const {
+  return ConvertUTF8ToJavaString(env,
+                                 web_contents_->GetLastCommittedURL().spec());
+}
+
+
 jboolean WebContentsAndroid::IsIncognito(JNIEnv* env, jobject obj) {
   return web_contents_->GetBrowserContext()->IsOffTheRecord();
 }
@@ -144,20 +190,18 @@ void WebContentsAndroid::ResumeResponseDeferredAtStart(JNIEnv* env,
 void WebContentsAndroid::SetHasPendingNavigationTransitionForTesting(
     JNIEnv* env,
     jobject obj) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalWebPlatformFeatures);
   RenderFrameHost* frame =
       static_cast<WebContentsImpl*>(web_contents_)->GetMainFrame();
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&TransitionRequestManager::AddPendingTransitionRequestData,
-                 base::Unretained(TransitionRequestManager::GetInstance()),
-                 frame->GetProcess()->GetID(),
-                 frame->GetRoutingID(),
-                 "*",
-                 "",
-                 ""));
+      base::Bind(
+          &TransitionRequestManager::AddPendingTransitionRequestDataForTesting,
+          base::Unretained(TransitionRequestManager::GetInstance()),
+          frame->GetProcess()->GetID(),
+          frame->GetRoutingID()));
 }
 
 void WebContentsAndroid::SetupTransitionView(JNIEnv* env,
@@ -170,10 +214,87 @@ void WebContentsAndroid::SetupTransitionView(JNIEnv* env,
 
 void WebContentsAndroid::BeginExitTransition(JNIEnv* env,
                                              jobject jobj,
-                                             jstring css_selector) {
+                                             jstring css_selector,
+                                             jboolean exit_to_native_app) {
   web_contents_->GetMainFrame()->Send(new FrameMsg_BeginExitTransition(
       web_contents_->GetMainFrame()->GetRoutingID(),
-      ConvertJavaStringToUTF8(env, css_selector)));
+      ConvertJavaStringToUTF8(env, css_selector),
+      exit_to_native_app));
+}
+
+void WebContentsAndroid::RevertExitTransition(JNIEnv* env,
+                                              jobject jobj) {
+  web_contents_->GetMainFrame()->Send(new FrameMsg_RevertExitTransition(
+      web_contents_->GetMainFrame()->GetRoutingID()));
+}
+
+void WebContentsAndroid::HideTransitionElements(JNIEnv* env,
+                                                jobject jobj,
+                                                jstring css_selector) {
+  web_contents_->GetMainFrame()->Send(
+      new FrameMsg_HideTransitionElements(
+          web_contents_->GetMainFrame()->GetRoutingID(),
+          ConvertJavaStringToUTF8(env, css_selector)));
+}
+
+void WebContentsAndroid::ShowTransitionElements(JNIEnv* env,
+                                                jobject jobj,
+                                                jstring css_selector) {
+  web_contents_->GetMainFrame()->Send(
+      new FrameMsg_ShowTransitionElements(
+          web_contents_->GetMainFrame()->GetRoutingID(),
+          ConvertJavaStringToUTF8(env, css_selector)));
+}
+
+
+void WebContentsAndroid::ClearNavigationTransitionData(JNIEnv* env,
+                                                       jobject jobj) {
+  static_cast<WebContentsImpl*>(web_contents_)->ClearNavigationTransitionData();
+}
+
+void WebContentsAndroid::FetchTransitionElements(JNIEnv* env,
+                                                 jobject jobj,
+                                                 jstring jurl) {
+  GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
+  RenderFrameHost* frame = web_contents_->GetMainFrame();
+
+  scoped_ptr<TransitionLayerData> transition_data(new TransitionLayerData());
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&TransitionRequestManager::GetPendingTransitionRequest,
+                 base::Unretained(TransitionRequestManager::GetInstance()),
+                 frame->GetProcess()->GetID(),
+                 frame->GetRoutingID(),
+                 url,
+                 transition_data.get()),
+      base::Bind(&WebContentsAndroid::OnTransitionElementsFetched,
+                 weak_factory_.GetWeakPtr(),
+                 base::Passed(&transition_data)));
+}
+
+void WebContentsAndroid::OnTransitionElementsFetched(
+    scoped_ptr<const TransitionLayerData> transition_data,
+    bool has_transition_data) {
+  // FetchTransitionElements is called after the navigation transition state
+  // machine starts, which means there must be transition data.
+  DCHECK(has_transition_data);
+  JNIEnv* env = AttachCurrentThread();
+
+  std::vector<TransitionElement>::const_iterator it =
+      transition_data->elements.begin();
+  for (; it != transition_data->elements.end(); ++it) {
+    ScopedJavaLocalRef<jstring> jstring_name(ConvertUTF8ToJavaString(env,
+                                                                     it->id));
+    Java_WebContentsImpl_addNavigationTransitionElements(
+        env, obj_.obj(), jstring_name.obj(),
+        it->rect.x(), it->rect.y(), it->rect.width(), it->rect.height());
+  }
+
+  ScopedJavaLocalRef<jstring> jstring_css_selector(
+      ConvertUTF8ToJavaString(env, transition_data->css_selector));
+  Java_WebContentsImpl_onTransitionElementsFetched(
+      env, obj_.obj(), jstring_css_selector.obj());
 }
 
 void WebContentsAndroid::OnHide(JNIEnv* env, jobject obj) {
@@ -186,16 +307,8 @@ void WebContentsAndroid::OnShow(JNIEnv* env, jobject obj) {
 
 void WebContentsAndroid::ReleaseMediaPlayers(JNIEnv* env, jobject jobj) {
 #if defined(ENABLE_BROWSER_CDMS)
-  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
-      web_contents_->GetRenderViewHost());
-  if (!rvhi || !rvhi->GetMainFrame())
-    return;
-
-  BrowserMediaPlayerManager* manager =
-      rvhi->media_web_contents_observer()->GetMediaPlayerManager(
-          rvhi->GetMainFrame());
-  if (manager)
-    manager->ReleaseAllMediaPlayers();
+  web_contents_->ForEachFrame(
+      base::Bind(&ReleaseAllMediaPlayers, base::Unretained(web_contents_)));
 #endif // defined(ENABLE_BROWSER_CDMS)
 }
 
@@ -235,10 +348,7 @@ jboolean WebContentsAndroid::IsRenderWidgetHostViewReady(
 }
 
 void WebContentsAndroid::ExitFullscreen(JNIEnv* env, jobject obj) {
-  RenderViewHost* host = web_contents_->GetRenderViewHost();
-  if (!host)
-    return;
-  host->ExitFullscreen();
+  web_contents_->ExitFullscreen();
 }
 
 void WebContentsAndroid::UpdateTopControlsState(
@@ -291,7 +401,7 @@ void WebContentsAndroid::DidDeferAfterResponseStarted(
   JNIEnv* env = AttachCurrentThread();
   std::vector<GURL> entering_stylesheets;
   std::string transition_color;
-  if (transition_data.response_headers) {
+  if (transition_data.response_headers.get()) {
     TransitionRequestManager::ParseTransitionStylesheetsFromHeaders(
         transition_data.response_headers,
         entering_stylesheets,
@@ -363,6 +473,26 @@ void WebContentsAndroid::EvaluateJavaScript(JNIEnv* env,
 
   web_contents_->GetMainFrame()->ExecuteJavaScript(
       ConvertJavaStringToUTF16(env, script), js_callback);
+}
+
+void WebContentsAndroid::AddMessageToDevToolsConsole(JNIEnv* env,
+                                                     jobject jobj,
+                                                     jint level,
+                                                     jstring message) {
+  DCHECK_GE(level, 0);
+  DCHECK_LE(level, CONSOLE_MESSAGE_LEVEL_LAST);
+
+  web_contents_->GetMainFrame()->Send(new DevToolsAgentMsg_AddMessageToConsole(
+      web_contents_->GetMainFrame()->GetRoutingID(),
+      static_cast<ConsoleMessageLevel>(level),
+      ConvertJavaStringToUTF8(env, message)));
+}
+
+jboolean WebContentsAndroid::HasAccessedInitialDocument(
+    JNIEnv* env,
+    jobject jobj) {
+  return static_cast<content::WebContentsImpl*>(web_contents_)->
+      HasAccessedInitialDocument();
 }
 
 }  // namespace content

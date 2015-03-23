@@ -4,15 +4,32 @@
 
 #include "content/app/mojo/mojo_init.h"
 
+#include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "mojo/embedder/embedder.h"
-#include "mojo/embedder/simple_platform_support.h"
+#include "third_party/mojo/src/mojo/edk/embedder/configuration.h"
+#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
+#include "third_party/mojo/src/mojo/edk/embedder/simple_platform_support.h"
 
 namespace content {
 
+namespace {
+
+class MojoInitializer {
+ public:
+  MojoInitializer() {
+    mojo::embedder::GetConfiguration()->max_message_num_bytes =
+        64 * 1024 * 1024;
+    mojo::embedder::Init(scoped_ptr<mojo::embedder::PlatformSupport>(
+        new mojo::embedder::SimplePlatformSupport()));
+  }
+};
+
+base::LazyInstance<MojoInitializer>::Leaky mojo_initializer;
+
+}  //  namespace
+
 void InitializeMojo() {
-  mojo::embedder::Init(scoped_ptr<mojo::embedder::PlatformSupport>(
-      new mojo::embedder::SimplePlatformSupport()));
+  mojo_initializer.Get();
 }
 
 }  // namespace content

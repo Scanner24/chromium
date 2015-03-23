@@ -64,6 +64,7 @@
           'conditions': [
             ['os_posix==1 and OS!="mac"', {
               'cflags!': ['-fvisibility=hidden'],
+              'libraries': ['-lm'],
             }],
             ['OS=="mac"', {
               'conditions': [
@@ -91,6 +92,16 @@
                 4018, # size/unsigned mismatch
                 4267, # size_t -> ExifLong truncation on amd64
               ],
+              # As of VS 2013 Update 3, building this project with /analyze hits
+              # an internal compiler error on exif-entry.c. This halts the build
+              # and prevents subsequent analysis. Therefore, /analyze is
+              # disabled for this project. See this bug for details:
+              # https://connect.microsoft.com/VisualStudio/feedback/details/1014689/internal-compiler-error
+              'msvs_settings': {
+                'VCCLCompilerTool': {
+                  'AdditionalOptions!': [ '/analyze' ]
+                },
+              },
             }],
           ],
         },

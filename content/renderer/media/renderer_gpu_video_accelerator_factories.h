@@ -14,7 +14,7 @@
 #include "content/child/thread_safe_sender.h"
 #include "content/common/content_export.h"
 #include "media/filters/gpu_video_accelerator_factories.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class WaitableEvent;
@@ -45,26 +45,23 @@ class CONTENT_EXPORT RendererGpuVideoAcceleratorFactories
       const scoped_refptr<ContextProviderCommandBuffer>& context_provider);
 
   // media::GpuVideoAcceleratorFactories implementation.
-  virtual scoped_ptr<media::VideoDecodeAccelerator>
-      CreateVideoDecodeAccelerator() OVERRIDE;
-  virtual scoped_ptr<media::VideoEncodeAccelerator>
-      CreateVideoEncodeAccelerator() OVERRIDE;
+  scoped_ptr<media::VideoDecodeAccelerator> CreateVideoDecodeAccelerator()
+      override;
+  scoped_ptr<media::VideoEncodeAccelerator> CreateVideoEncodeAccelerator()
+      override;
   // Creates textures and produces them into mailboxes. Returns true on success
   // or false on failure.
-  virtual bool CreateTextures(int32 count,
-                              const gfx::Size& size,
-                              std::vector<uint32>* texture_ids,
-                              std::vector<gpu::Mailbox>* texture_mailboxes,
-                              uint32 texture_target) OVERRIDE;
-  virtual void DeleteTexture(uint32 texture_id) OVERRIDE;
-  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE;
-  virtual void ReadPixels(uint32 texture_id,
-                          const gfx::Rect& visible_rect,
-                          const SkBitmap& pixels) OVERRIDE;
-  virtual base::SharedMemory* CreateSharedMemory(size_t size) OVERRIDE;
-  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() OVERRIDE;
-  virtual std::vector<media::VideoEncodeAccelerator::SupportedProfile>
-      GetVideoEncodeAcceleratorSupportedProfiles() OVERRIDE;
+  bool CreateTextures(int32 count,
+                      const gfx::Size& size,
+                      std::vector<uint32>* texture_ids,
+                      std::vector<gpu::Mailbox>* texture_mailboxes,
+                      uint32 texture_target) override;
+  void DeleteTexture(uint32 texture_id) override;
+  void WaitSyncPoint(uint32 sync_point) override;
+  scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() override;
+  std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+  GetVideoEncodeAcceleratorSupportedProfiles() override;
 
  private:
   friend class base::RefCountedThreadSafe<RendererGpuVideoAcceleratorFactories>;
@@ -72,7 +69,7 @@ class CONTENT_EXPORT RendererGpuVideoAcceleratorFactories
       GpuChannelHost* gpu_channel_host,
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       const scoped_refptr<ContextProviderCommandBuffer>& context_provider);
-  virtual ~RendererGpuVideoAcceleratorFactories();
+  ~RendererGpuVideoAcceleratorFactories() override;
 
   // Helper to bind |context_provider| to the |task_runner_| thread after
   // construction.

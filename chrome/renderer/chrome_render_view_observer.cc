@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/prerender_messages.h"
@@ -49,8 +49,8 @@
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/gfx/favicon_size.h"
-#include "ui/gfx/size.h"
-#include "ui/gfx/size_f.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "v8/include/v8-testing.h"
 
@@ -167,7 +167,8 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
           extensions::kExtensionScheme)),
       phishing_classifier_(NULL),
       capture_timer_(false, false) {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
     OnSetClientSidePhishingDetection(true);
 }
@@ -334,6 +335,11 @@ void ChromeRenderViewObserver::DidStartLoading() {
 
 void ChromeRenderViewObserver::DidStopLoading() {
   WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
+
+  // Remote frames don't host a document, so return early if that's the case.
+  if (main_frame->isWebRemoteFrame())
+    return;
+
   GURL osdd_url = main_frame->document().openSearchDescriptionURL();
   if (!osdd_url.is_empty()) {
     Send(new ChromeViewHostMsg_PageHasOSDD(
@@ -379,6 +385,13 @@ void ChromeRenderViewObserver::CapturePageInfo(bool preliminary_capture) {
 
   WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   if (!main_frame)
+    return;
+
+  // TODO(creis): Refactor WebFrame::contentAsText to handle RemoteFrames,
+  // likely by moving it to the browser process.  For now, only capture page
+  // info from main frames that are LocalFrames, and ignore their RemoteFrame
+  // children.
+  if (main_frame->isWebRemoteFrame())
     return;
 
   // Don't index/capture pages that are in view source mode.

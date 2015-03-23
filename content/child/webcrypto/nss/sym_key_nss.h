@@ -14,21 +14,21 @@ namespace content {
 namespace webcrypto {
 
 class CryptoData;
+class GenerateKeyResult;
 class Status;
 
 Status GenerateSecretKeyNss(const blink::WebCryptoKeyAlgorithm& algorithm,
                             bool extractable,
-                            blink::WebCryptoKeyUsageMask usage_mask,
-                            unsigned keylen_bytes,
+                            blink::WebCryptoKeyUsageMask usages,
+                            unsigned int keylen_bits,
                             CK_MECHANISM_TYPE mechanism,
-                            blink::WebCryptoKey* key);
+                            GenerateKeyResult* result);
 
 Status ImportKeyRawNss(const CryptoData& key_data,
                        const blink::WebCryptoKeyAlgorithm& algorithm,
                        bool extractable,
-                       blink::WebCryptoKeyUsageMask usage_mask,
+                       blink::WebCryptoKeyUsageMask usages,
                        CK_MECHANISM_TYPE mechanism,
-                       CK_FLAGS flags,
                        blink::WebCryptoKey* key);
 
 }  // namespace webcrypto

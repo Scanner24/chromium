@@ -93,10 +93,13 @@
 #include "ppapi/c/ppb_var_array_buffer.h"
 #include "ppapi/c/ppb_var_dictionary.h"
 #include "ppapi/c/ppb_video_decoder.h"
+#include "ppapi/c/ppb_video_encoder.h"
 #include "ppapi/c/ppb_video_frame.h"
 #include "ppapi/c/ppb_view.h"
 #include "ppapi/c/ppp.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/private/ppb_camera_capabilities_private.h"
+#include "ppapi/c/private/ppb_camera_device_private.h"
 #include "ppapi/c/private/ppb_ext_crx_file_system_private.h"
 #include "ppapi/c/private/ppb_file_io_private.h"
 #include "ppapi/c/private/ppb_file_ref_private.h"
@@ -327,7 +330,7 @@ const void* InternalGetInterface(const char* name) {
   // Only support the testing interface when the command line switch is
   // specified. This allows us to prevent people from (ab)using this interface
   // in production code.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnablePepperTesting)) {
     if (strcmp(name, PPB_TESTING_PRIVATE_INTERFACE) == 0)
       return &testing_interface;

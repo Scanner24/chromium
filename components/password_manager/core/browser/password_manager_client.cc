@@ -16,20 +16,46 @@ bool PasswordManagerClient::IsPasswordManagerEnabledForCurrentPage() const {
 
 base::FieldTrial::Probability
 PasswordManagerClient::GetProbabilityForExperiment(
-    const std::string& experiment_name) {
+    const std::string& experiment_name) const {
   return 0;
 }
 
-bool PasswordManagerClient::IsPasswordSyncEnabled() { return false; }
+void PasswordManagerClient::AskUserAndMaybeReportURL(const GURL& url) const {
+}
+
+void PasswordManagerClient::AutofillResultsComputed() {
+}
+
+void PasswordManagerClient::PasswordWasAutofilled(
+    const autofill::PasswordFormMap& best_matches) const {
+}
+
+void PasswordManagerClient::PasswordAutofillWasBlocked(
+    const autofill::PasswordFormMap& best_matches) const {
+}
+
+bool PasswordManagerClient::IsPasswordSyncEnabled(
+    CustomPassphraseState state) const {
+  return false;
+}
 
 void PasswordManagerClient::OnLogRouterAvailabilityChanged(
     bool router_can_be_used) {
 }
 
-void PasswordManagerClient::LogSavePasswordProgress(const std::string& text) {
+void PasswordManagerClient::LogSavePasswordProgress(
+    const std::string& text) const {
 }
 
 bool PasswordManagerClient::IsLoggingActive() const {
+  return false;
+}
+
+bool PasswordManagerClient::ShouldAskUserToSubmitURL(const GURL& url) {
+  return false;
+}
+
+bool PasswordManagerClient::WasLastNavigationHTTPError() const {
   return false;
 }
 
@@ -47,6 +73,27 @@ PasswordManagerClient::GetAuthorizationPromptPolicy(
   // relevant tags anyways (7/11/2014).
   // http://crbug.com/178358
   return PasswordStore::DISALLOW_PROMPT;
+}
+
+bool PasswordManagerClient::DidLastPageLoadEncounterSSLErrors() const {
+  return false;
+}
+
+bool PasswordManagerClient::IsOffTheRecord() const {
+  return false;
+}
+
+PasswordManager* PasswordManagerClient::GetPasswordManager() {
+  return nullptr;
+}
+
+autofill::AutofillManager*
+PasswordManagerClient::GetAutofillManagerForMainFrame() {
+  return nullptr;
+}
+
+const GURL& PasswordManagerClient::GetMainFrameURL() const {
+  return GURL::EmptyGURL();
 }
 
 }  // namespace password_manager

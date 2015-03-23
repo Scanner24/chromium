@@ -135,7 +135,7 @@ html[dir=rtl] #account-picture-wrapper {
   padding: 10px;
 }
 
-.sync-error .link-button {
+.sync-error [is='action-link'] {
   margin: 0 1ex;
   padding: 0;
 }
@@ -182,8 +182,30 @@ input[type='range'] {
   padding-bottom: 0;
 }
 
+.setting-extra-description {
+  -webkit-margin-start: 1.8em;
+  color: #999;
+}
+
 .hotword-settings {
   -webkit-margin-start: 22px;
+}
+
+.hotword-audio-history {
+  -webkit-margin-start: 1.8em;
+}
+
+#audio-history {
+  margin-top: 1.5em;
+}
+
+.hotword-link {
+  -webkit-margin-start: 8px;
+}
+
+#hotword-retrain-link {
+  -webkit-margin-start: 8px;
+  text-decoration: none;
 }
 
 /* Internet settings */
@@ -270,7 +292,7 @@ list:not([disabled]) > .network-group[selected] {
 }
 
 .network-add-connection {
-  background-image: url('chrome://theme/IDR_NETWORK_ADD_CONNECTION');
+  background-image: url(chrome://theme/IDR_NETWORK_ADD_CONNECTION);
   background-size: 16px;
 }
 
@@ -279,7 +301,7 @@ list:not([disabled]) > .network-group[selected] {
 }
 
 .network-control-active {
-  background-image: url('chrome://theme/IDR_PROFILE_SELECTED');
+  background-image: url(chrome://theme/IDR_PROFILE_SELECTED);
   background-size: 16px;
 }
 
@@ -339,17 +361,17 @@ list:not([disabled]) > .network-group[selected] {
 
 .network-selector {
   background: right center no-repeat;
-  background-image: url('../../../../ui/webui/resources/images/select.png');
+  background-image: url(../../../../ui/webui/resources/images/select.png);
   padding-right: 20px;
 }
 
 .network-menu {
-  -webkit-box-shadow:
+  background: #fff;
+  box-shadow:
       0 0 0 1px rgba(0,0,0,0.1),
       0 5px 1px 1px rgba(0,0,0,0.1),
       0 5px 2px 1px rgba(0,0,0,0.1),
       0 5px 12px 1px rgba(0,0,0,0.5);
-  background: #fff;
   display: block;
   position: absolute;
   width: 320px;
@@ -419,6 +441,11 @@ list:not([disabled]) > .network-group[selected] {
   vertical-align: baseline;
 }
 
+.loading #timezone-value select {
+  color: transparent;
+  text-shadow: none;
+}
+
 #privacy-explanation {
   line-height: 1.8em;
 }
@@ -451,6 +478,13 @@ list:not([disabled]) > .network-group[selected] {
 #accessibility-autoclick-label {
   /* Same as .controlled-setting-with-label > input + span. */
   -webkit-margin-start: 0.6em;
+}
+
+#battery-icon {
+  display: inline-block;
+  height: 25px;
+  vertical-align: middle;
+  width: 25px;
 }
 
 div[guestmode=true] :-webkit-any(

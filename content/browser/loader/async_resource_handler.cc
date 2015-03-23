@@ -73,7 +73,7 @@ class DependentIOBuffer : public net::WrappedIOBuffer {
         backing_(backing) {
   }
  private:
-  virtual ~DependentIOBuffer() {}
+  ~DependentIOBuffer() override {}
   scoped_refptr<ResourceBuffer> backing_;
 };
 
@@ -193,16 +193,19 @@ bool AsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
 
   DevToolsNetLogObserver::PopulateResponseInfo(request(), response);
 
-  HostZoomMap* host_zoom_map =
-      GetHostZoomMapForResourceContext(info->GetContext());
+  const HostZoomMapImpl* host_zoom_map =
+      static_cast<const HostZoomMapImpl*>(info->filter()->GetHostZoomMap());
 
   if (info->GetResourceType() == RESOURCE_TYPE_MAIN_FRAME && host_zoom_map) {
     const GURL& request_url = request()->url();
+    int render_process_id = info->GetChildID();
+    int render_view_id = info->GetRouteID();
+
+    double zoom_level = host_zoom_map->GetZoomLevelForView(
+        request_url, render_process_id, render_view_id);
+
     info->filter()->Send(new ViewMsg_SetZoomLevelForLoadingURL(
-        info->GetRouteID(),
-        request_url, host_zoom_map->GetZoomLevelForHostAndScheme(
-            request_url.scheme(),
-            net::GetHostOrSpecFromURL(request_url))));
+        render_view_id, request_url, zoom_level));
   }
 
   // If the parent handler downloaded the resource to a file, grant the child

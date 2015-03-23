@@ -16,6 +16,7 @@
 
 namespace net {
 
+class CertPolicyEnforcer;
 class CertVerifier;
 class ChannelIDService;
 class CTVerifier;
@@ -34,23 +35,27 @@ struct SSLClientSocketContext {
       : cert_verifier(NULL),
         channel_id_service(NULL),
         transport_security_state(NULL),
-        cert_transparency_verifier(NULL) {}
+        cert_transparency_verifier(NULL),
+        cert_policy_enforcer(NULL) {}
 
   SSLClientSocketContext(CertVerifier* cert_verifier_arg,
                          ChannelIDService* channel_id_service_arg,
                          TransportSecurityState* transport_security_state_arg,
                          CTVerifier* cert_transparency_verifier_arg,
+                         CertPolicyEnforcer* cert_policy_enforcer_arg,
                          const std::string& ssl_session_cache_shard_arg)
       : cert_verifier(cert_verifier_arg),
         channel_id_service(channel_id_service_arg),
         transport_security_state(transport_security_state_arg),
         cert_transparency_verifier(cert_transparency_verifier_arg),
+        cert_policy_enforcer(cert_policy_enforcer_arg),
         ssl_session_cache_shard(ssl_session_cache_shard_arg) {}
 
   CertVerifier* cert_verifier;
   ChannelIDService* channel_id_service;
   TransportSecurityState* transport_security_state;
   CTVerifier* cert_transparency_verifier;
+  CertPolicyEnforcer* cert_policy_enforcer;
   // ssl_session_cache_shard is an opaque string that identifies a shard of the
   // SSL session cache. SSL sockets with the same ssl_session_cache_shard may
   // resume each other's SSL sessions but we'll never sessions between shards.
@@ -79,9 +84,16 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
                                 // the first protocol in our list.
   };
 
+  // TLS extension used to negotiate protocol.
+  enum SSLNegotiationExtension {
+    kExtensionUnknown,
+    kExtensionALPN,
+    kExtensionNPN,
+  };
+
   // StreamSocket:
-  virtual bool WasNpnNegotiated() const OVERRIDE;
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
+  bool WasNpnNegotiated() const override;
+  NextProto GetNegotiatedProtocol() const override;
 
   // Computes a unique key string for the SSL session cache.
   virtual std::string GetSessionCacheKey() const = 0;
@@ -136,11 +148,17 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
 
   static const char* NextProtoStatusToString(const NextProtoStatus status);
 
+  // Returns true if |error| is OK or |load_flags| ignores certificate errors
+  // and |error| is a certificate error.
   static bool IgnoreCertError(int error, int load_flags);
 
   // ClearSessionCache clears the SSL session cache, used to resume SSL
   // sessions.
   static void ClearSessionCache();
+
+  // Get the maximum SSL version supported by the underlying library and
+  // cryptographic implementation.
+  static uint16 GetMaxSupportedSSLVersion();
 
   virtual bool set_was_npn_negotiated(bool negotiated);
 
@@ -149,6 +167,8 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   virtual bool set_was_spdy_negotiated(bool negotiated);
 
   virtual void set_protocol_negotiated(NextProto protocol_negotiated);
+
+  void set_negotiation_extension(SSLNegotiationExtension negotiation_extension);
 
   // Returns the ChannelIDService used by this socket, or NULL if
   // channel ids are not supported.
@@ -161,6 +181,10 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   //
   // Public for ssl_client_socket_openssl_unittest.cc.
   virtual bool WasChannelIDSent() const;
+
+  // Record which TLS extension was used to negotiate protocol and protocol
+  // chosen in a UMA histogram.
+  void RecordNegotiationExtension();
 
  protected:
   virtual void set_channel_id_sent(bool channel_id_sent);
@@ -184,10 +208,23 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
       const SSLConfig& ssl_config,
       ChannelIDService* channel_id_service);
 
+  // Determine if there is at least one enabled cipher suite that satisfies
+  // Section 9.2 of the HTTP/2 specification.  Note that the server might still
+  // pick an inadequate cipher suite.
+  static bool HasCipherAdequateForHTTP2(
+      const std::vector<uint16>& cipher_suites);
+
+  // Determine if the TLS version required by Section 9.2 of the HTTP/2
+  // specification is enabled.  Note that the server might still pick an
+  // inadequate TLS version.
+  static bool IsTLSVersionAdequateForHTTP2(const SSLConfig& ssl_config);
+
   // Serializes |next_protos| in the wire format for ALPN: protocols are listed
-  // in order, each prefixed by a one-byte length.
+  // in order, each prefixed by a one-byte length.  Any HTTP/2 protocols in
+  // |next_protos| are ignored if |can_advertise_http2| is false.
   static std::vector<uint8_t> SerializeNextProtos(
-      const std::vector<std::string>& next_protos);
+      const NextProtoVector& next_protos,
+      bool can_advertise_http2);
 
   // For unit testing only.
   // Returns the unverified certificate chain as presented by server.
@@ -197,6 +234,7 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
       const = 0;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SSLClientSocket, SerializeNextProtos);
   // For signed_cert_timestamps_received_ and stapled_ocsp_response_received_.
   FRIEND_TEST_ALL_PREFIXES(SSLClientSocketTest,
                            ConnectSignedCertTimestampsEnabledTLSExtension);
@@ -219,6 +257,8 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   bool signed_cert_timestamps_received_;
   // True if a stapled OCSP response was received.
   bool stapled_ocsp_response_received_;
+  // Protocol negotiation extension used.
+  SSLNegotiationExtension negotiation_extension_;
 };
 
 }  // namespace net

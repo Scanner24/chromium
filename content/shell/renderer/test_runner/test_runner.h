@@ -20,7 +20,6 @@ class SkBitmap;
 
 namespace blink {
 class WebFrame;
-class WebNotificationPresenter;
 class WebPermissionClient;
 class WebString;
 class WebView;
@@ -35,7 +34,6 @@ class Arguments;
 namespace content {
 
 class InvokeCallbackTask;
-class NotificationPresenter;
 class TestInterfaces;
 class TestPageOverlay;
 class WebPermissions;
@@ -65,12 +63,11 @@ class TestRunner : public WebTestRunner,
   void InvokeCallback(scoped_ptr<InvokeCallbackTask> callback);
 
   // WebTestRunner implementation.
-  virtual bool ShouldGeneratePixelResults() OVERRIDE;
-  virtual bool ShouldDumpAsAudio() const OVERRIDE;
-  virtual void GetAudioData(
-      std::vector<unsigned char>* buffer_view) const OVERRIDE;
-  virtual bool ShouldDumpBackForwardList() const OVERRIDE;
-  virtual blink::WebPermissionClient* GetWebPermissions() const OVERRIDE;
+  bool ShouldGeneratePixelResults() override;
+  bool ShouldDumpAsAudio() const override;
+  void GetAudioData(std::vector<unsigned char>* buffer_view) const override;
+  bool ShouldDumpBackForwardList() const override;
+  blink::WebPermissionClient* GetWebPermissions() const override;
 
   // Methods used by WebTestProxyBase.
   bool shouldDumpSelectionRect() const;
@@ -118,11 +115,11 @@ class TestRunner : public WebTestRunner,
   bool policyDelegateShouldNotifyDone() const;
   bool shouldInterceptPostMessage() const;
   bool shouldDumpResourcePriorities() const;
-  blink::WebNotificationPresenter* notification_presenter() const;
   bool RequestPointerLock();
   void RequestPointerUnlock();
   bool isPointerLocked();
   void setToolTipText(const blink::WebString&);
+  bool shouldDumpDragImage();
 
   bool midiAccessorResult();
 
@@ -164,7 +161,7 @@ class TestRunner : public WebTestRunner,
      public:
       WorkQueueTask(WorkQueue* object) : WebMethodTask<WorkQueue>(object) {}
 
-      virtual void RunIfValid() OVERRIDE;
+      void RunIfValid() override;
     };
 
     WebTaskList task_list_;
@@ -312,6 +309,9 @@ class TestRunner : public WebTestRunner,
                               double dischargingTime,
                               double level);
   void ResetBatteryStatus();
+
+  // Presentation API related functions.
+  void SetMockScreenAvailability(bool available);
 
   void DidAcquirePointerLock();
   void DidNotAcquirePointerLock();
@@ -473,6 +473,12 @@ class TestRunner : public WebTestRunner,
   // WebFrameClient receives a loadURLExternally() call.
   void WaitUntilExternalURLLoad();
 
+  // This function sets a flag which tells the WebTestProxy to dump the drag
+  // image when the next drag-and-drop is initiated. It is equivalent to
+  // DumpAsTextWithPixelResults but the pixel results will be the drag image
+  // instead of a snapshot of the page.
+  void DumpDragImage();
+
   ///////////////////////////////////////////////////////////////////////////
   // Methods interacting with the WebTestProxy
 
@@ -511,6 +517,20 @@ class TestRunner : public WebTestRunner,
   void SetColorProfile(const std::string& name,
                        v8::Handle<v8::Function> callback);
 
+  // Change the bluetooth test data while running a layout test.
+  void SetBluetoothMockDataSet(const std::string& name);
+
+  // Enables mock geofencing service while running a layout test.
+  // |service_available| indicates if the mock service should mock geofencing
+  // being available or not.
+  void SetGeofencingMockProvider(bool service_available);
+
+  // Disables mock geofencing service while running a layout test.
+  void ClearGeofencingMockProvider();
+
+  // Set the mock geofencing position while running a layout test.
+  void SetGeofencingMockPosition(double latitude, double longitude);
+
   // Calls setlocale(LC_ALL, ...) for a specified locale.
   // Resets between tests.
   void SetPOSIXLocale(const std::string& locale);
@@ -526,8 +546,8 @@ class TestRunner : public WebTestRunner,
   // Clears all previously granted Web Notification permissions.
   void ClearWebNotificationPermissions();
 
-  // Simulates a click on a desktop notification.
-  bool SimulateWebNotificationClick(const std::string& value);
+  // Simulates a click on a Web Notification.
+  void SimulateWebNotificationClick(const std::string& title);
 
   // Speech recognition related functions.
   void AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -562,9 +582,11 @@ class TestRunner : public WebTestRunner,
   void CopyImageAtAndCapturePixelsAsyncThen(
       int x, int y, const v8::Handle<v8::Function> callback);
 
-  void SetMockPushClientSuccess(const std::string& endpoint,
-                                const std::string& registration_id);
-  void SetMockPushClientError(const std::string& message);
+  // Sets the origin's permission to use the Push API to granted or denied.
+  void SetPushMessagingPermission(const GURL& origin, bool allowed);
+
+  // Clears all previously granted Push API permissions.
+  void ClearPushMessagingPermissions();
 
   void GetManifestThen(v8::Handle<v8::Function> callback);
 
@@ -588,6 +610,9 @@ class TestRunner : public WebTestRunner,
   // page has finished loading. From here, we can generate the dump for the
   // test.
   void LocationChangeDone();
+
+  // Sets a flag causing the next call to WebGLRenderingContext::create to fail.
+  void ForceNextWebGLContextCreationToFail();
 
   bool test_is_running_;
 
@@ -724,6 +749,9 @@ class TestRunner : public WebTestRunner,
   // taking possible transforms of the selection rect into account.
   bool dump_selection_rect_;
 
+  // If true, the test_shell will dump the drag image as pixel results.
+  bool dump_drag_image_;
+
   // If true, pixel dump will be produced as a series of 1px-tall, view-wide
   // individual paints over the height of the view.
   bool test_repaint_;
@@ -764,8 +792,6 @@ class TestRunner : public WebTestRunner,
 
   // WebPermissionClient mock object.
   scoped_ptr<WebPermissions> web_permissions_;
-
-  scoped_ptr<NotificationPresenter> notification_presenter_;
 
   bool pointer_locked_;
   enum {

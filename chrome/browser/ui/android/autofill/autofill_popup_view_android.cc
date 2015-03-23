@@ -6,13 +6,17 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
+#include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
+#include "components/autofill/core/browser/suggestion.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "jni/AutofillPopupBridge_jni.h"
 #include "ui/base/android/view_android.h"
 #include "ui/base/android/window_android.h"
-#include "ui/gfx/rect.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/android/java_bitmap.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace autofill {
 
@@ -40,7 +44,7 @@ void AutofillPopupViewAndroid::Show() {
 void AutofillPopupViewAndroid::Hide() {
   controller_ = NULL;
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_AutofillPopupBridge_hide(env, java_object_.obj());
+  Java_AutofillPopupBridge_dismiss(env, java_object_.obj());
 }
 
 void AutofillPopupViewAndroid::UpdateBoundsAndRedrawPopup() {
@@ -53,25 +57,32 @@ void AutofillPopupViewAndroid::UpdateBoundsAndRedrawPopup() {
       controller_->element_bounds().width(),
       controller_->element_bounds().height());
 
-  // We need an array of AutofillSuggestion.
-  size_t count = controller_->names().size();
-
+  size_t count = controller_->GetLineCount();
   ScopedJavaLocalRef<jobjectArray> data_array =
       Java_AutofillPopupBridge_createAutofillSuggestionArray(env, count);
 
   for (size_t i = 0; i < count; ++i) {
-    ScopedJavaLocalRef<jstring> name =
-        base::android::ConvertUTF16ToJavaString(env, controller_->names()[i]);
-    ScopedJavaLocalRef<jstring> subtext =
-        base::android::ConvertUTF16ToJavaString(env,
-                                                controller_->subtexts()[i]);
+    ScopedJavaLocalRef<jstring> value = base::android::ConvertUTF16ToJavaString(
+        env, controller_->GetElidedValueAt(i));
+    ScopedJavaLocalRef<jstring> label =
+        base::android::ConvertUTF16ToJavaString(
+            env, controller_->GetElidedLabelAt(i));
+    int android_icon_id = 0;
+
+    const autofill::Suggestion& suggestion = controller_->GetSuggestionAt(i);
+    if (!suggestion.icon.empty()) {
+      android_icon_id = ResourceMapper::MapFromChromiumId(
+          controller_->GetIconResourceID(suggestion.icon));
+    }
+
     Java_AutofillPopupBridge_addToAutofillSuggestionArray(
         env,
         data_array.obj(),
         i,
-        name.obj(),
-        subtext.obj(),
-        controller_->identifiers()[i]);
+        value.obj(),
+        label.obj(),
+        android_icon_id,
+        suggestion.frontend_id);
   }
 
   Java_AutofillPopupBridge_show(
@@ -81,7 +92,9 @@ void AutofillPopupViewAndroid::UpdateBoundsAndRedrawPopup() {
 void AutofillPopupViewAndroid::SuggestionSelected(JNIEnv* env,
                                                   jobject obj,
                                                   jint list_index) {
-  controller_->AcceptSuggestion(list_index);
+  // Race: Hide() may have already run.
+  if (controller_)
+    controller_->AcceptSuggestion(list_index);
 }
 
 void AutofillPopupViewAndroid::PopupDismissed(JNIEnv* env, jobject obj) {

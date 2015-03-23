@@ -20,23 +20,25 @@ class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
   QuicUnackedPacketMap();
   ~QuicUnackedPacketMap();
 
-  // Adds |serialized_packet| to the map.  Does not mark it in flight.
-  void AddPacket(const SerializedPacket& serialized_packet);
-
-  // Called when a packet is retransmitted with a new sequence number.
-  // |old_sequence_number| will remain unacked, but will have no
-  // retransmittable data associated with it. |new_sequence_number| will
-  // be both unacked and associated with retransmittable data.
-  void OnRetransmittedPacket(QuicPacketSequenceNumber old_sequence_number,
-                             QuicPacketSequenceNumber new_sequence_number,
-                             TransmissionType transmission_type);
+  // Adds |serialized_packet| to the map and marks it as sent at |sent_time|.
+  // Marks the packet as in flight if |set_in_flight| is true.
+  // Packets marked as in flight are expected to be marked as missing when they
+  // don't arrive, indicating the need for retransmission.
+  // |old_sequence_number| is the sequence number of the previous transmission,
+  // or 0 if there was none.
+  void AddSentPacket(const SerializedPacket& serialized_packet,
+                     QuicPacketSequenceNumber old_sequence_number,
+                     TransmissionType transmission_type,
+                     QuicTime sent_time,
+                     QuicByteCount bytes_sent,
+                     bool set_in_flight);
 
   // Returns true if the packet |sequence_number| is unacked.
   bool IsUnacked(QuicPacketSequenceNumber sequence_number) const;
 
   // Sets the nack count to the max of the current nack count and |min_nacks|.
   void NackPacket(QuicPacketSequenceNumber sequence_number,
-                  size_t min_nacks);
+                  QuicPacketCount min_nacks);
 
   // Marks |sequence_number| as no longer in flight.
   void RemoveFromInFlight(QuicPacketSequenceNumber sequence_number);
@@ -73,15 +75,6 @@ class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Returns the smallest sequence number of a serialized packet which has not
   // been acked by the peer.  If there are no unacked packets, returns 0.
   QuicPacketSequenceNumber GetLeastUnacked() const;
-
-  // Sets a packet as sent with the sent time |sent_time|.  Marks the packet
-  // as in flight if |set_in_flight| is true.
-  // Packets marked as in flight are expected to be marked as missing when they
-  // don't arrive, indicating the need for retransmission.
-  void SetSent(QuicPacketSequenceNumber sequence_number,
-               QuicTime sent_time,
-               QuicByteCount bytes_sent,
-               bool set_in_flight);
 
   // Restores the in flight status for a packet that was previously sent.
   void RestoreInFlight(QuicPacketSequenceNumber sequence_number);
@@ -137,11 +130,36 @@ class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
   void RemoveObsoletePackets();
 
  private:
+  // Called when a packet is retransmitted with a new sequence number.
+  // |old_sequence_number| will remain unacked, but will have no
+  // retransmittable data associated with it. Retransmittable frames will be
+  // transferred to |info| and all_transmissions will be populated.
+  void TransferRetransmissionInfo(QuicPacketSequenceNumber old_sequence_number,
+                                  QuicPacketSequenceNumber new_sequence_number,
+                                  TransmissionType transmission_type,
+                                  TransmissionInfo* info);
+
   void MaybeRemoveRetransmittableFrames(TransmissionInfo* transmission_info);
+
+  // Returns true if packet may be useful for an RTT measurement.
+  bool IsPacketUsefulForMeasuringRtt(QuicPacketSequenceNumber sequence_number,
+                                     const TransmissionInfo& info) const;
+
+  // Returns true if packet may be useful for congestion control purposes.
+  bool IsPacketUsefulForCongestionControl(
+      QuicPacketSequenceNumber sequence_number,
+      const TransmissionInfo& info) const;
+
+  // Returns true if packet may be associated with retransmittable data
+  // directly or through retransmissions.
+  bool IsPacketUsefulForRetransmittableData(
+      QuicPacketSequenceNumber sequence_number,
+      const TransmissionInfo& info) const;
 
   // Returns true if the packet no longer has a purpose in the map.
   bool IsPacketUseless(QuicPacketSequenceNumber sequence_number,
                        const TransmissionInfo& info) const;
+
   // Returns true if the packet is useless or it's only purpose is RTT
   // measurement, and it's old enough that is unlikely to ever happen.
   bool IsPacketRemovable(QuicPacketSequenceNumber sequence_number,
@@ -153,16 +171,16 @@ class NET_EXPORT_PRIVATE QuicUnackedPacketMap {
   // Newly serialized retransmittable and fec packets are added to this map,
   // which contains owning pointers to any contained frames.  If a packet is
   // retransmitted, this map will contain entries for both the old and the new
-  // packet. The old packet's retransmittable frames entry will be NULL, while
-  // the new packet's entry will contain the frames to retransmit.
+  // packet. The old packet's retransmittable frames entry will be nullptr,
+  // while the new packet's entry will contain the frames to retransmit.
   // If the old packet is acked before the new packet, then the old entry will
   // be removed from the map and the new entry's retransmittable frames will be
-  // set to NULL.
+  // set to nullptr.
   UnackedPacketMap unacked_packets_;
   // The packet at the 0th index of unacked_packets_.
   QuicPacketSequenceNumber least_unacked_;
 
-  size_t bytes_in_flight_;
+  QuicByteCount bytes_in_flight_;
   // Number of retransmittable crypto handshake packets.
   size_t pending_crypto_packet_count_;
 

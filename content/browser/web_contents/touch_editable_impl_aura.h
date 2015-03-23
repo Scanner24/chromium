@@ -12,9 +12,9 @@
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/touch/touch_editing_controller.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
 
 namespace ui {
 class Accelerator;
@@ -28,7 +28,7 @@ class CONTENT_EXPORT TouchEditableImplAura
     : public ui::TouchEditable,
       public NON_EXPORTED_BASE(RenderWidgetHostViewAura::TouchEditingClient) {
  public:
-  virtual ~TouchEditableImplAura();
+  ~TouchEditableImplAura() override;
 
   static TouchEditableImplAura* Create();
 
@@ -42,34 +42,33 @@ class CONTENT_EXPORT TouchEditableImplAura
   void OverscrollCompleted();
 
   // Overridden from RenderWidgetHostViewAura::TouchEditingClient.
-  virtual void StartTouchEditing() OVERRIDE;
-  virtual void EndTouchEditing(bool quick) OVERRIDE;
-  virtual void OnSelectionOrCursorChanged(const gfx::Rect& anchor,
-                                          const gfx::Rect& focus) OVERRIDE;
-  virtual void OnTextInputTypeChanged(ui::TextInputType type) OVERRIDE;
-  virtual bool HandleInputEvent(const ui::Event* event) OVERRIDE;
-  virtual void GestureEventAck(int gesture_event_type) OVERRIDE;
-  virtual void DidStopFlinging() OVERRIDE;
-  virtual void OnViewDestroyed() OVERRIDE;
+  void StartTouchEditing() override;
+  void EndTouchEditing(bool quick) override;
+  void OnSelectionOrCursorChanged(const ui::SelectionBound& anchor,
+                                  const ui::SelectionBound& focus) override;
+  void OnTextInputTypeChanged(ui::TextInputType type) override;
+  bool HandleInputEvent(const ui::Event* event) override;
+  void GestureEventAck(int gesture_event_type) override;
+  void DidStopFlinging() override;
+  void OnViewDestroyed() override;
 
   // Overridden from ui::TouchEditable:
-  virtual void SelectRect(const gfx::Point& start,
-                          const gfx::Point& end) OVERRIDE;
-  virtual void MoveCaretTo(const gfx::Point& point) OVERRIDE;
-  virtual void GetSelectionEndPoints(gfx::Rect* p1, gfx::Rect* p2) OVERRIDE;
-  virtual gfx::Rect GetBounds() OVERRIDE;
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual void ConvertPointToScreen(gfx::Point* point) OVERRIDE;
-  virtual void ConvertPointFromScreen(gfx::Point* point) OVERRIDE;
-  virtual bool DrawsHandles() OVERRIDE;
-  virtual void OpenContextMenu(const gfx::Point& anchor) OVERRIDE;
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
-  virtual void DestroyTouchSelection() OVERRIDE;
+  void SelectRect(const gfx::Point& start, const gfx::Point& end) override;
+  void MoveCaretTo(const gfx::Point& point) override;
+  void GetSelectionEndPoints(ui::SelectionBound* anchor,
+                             ui::SelectionBound* focus) override;
+  gfx::Rect GetBounds() override;
+  gfx::NativeView GetNativeView() const override;
+  void ConvertPointToScreen(gfx::Point* point) override;
+  void ConvertPointFromScreen(gfx::Point* point) override;
+  bool DrawsHandles() override;
+  void OpenContextMenu(const gfx::Point& anchor) override;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
+  void DestroyTouchSelection() override;
 
  protected:
   TouchEditableImplAura();
@@ -83,15 +82,15 @@ class CONTENT_EXPORT TouchEditableImplAura
 
   void Cleanup();
 
-  // Rectangles for the selection anchor and focus.
-  gfx::Rect selection_anchor_rect_;
-  gfx::Rect selection_focus_rect_;
+  // Bounds for the selection.
+  ui::SelectionBound selection_anchor_;
+  ui::SelectionBound selection_focus_;
 
   // The current text input type.
   ui::TextInputType text_input_type_;
 
   RenderWidgetHostViewAura* rwhva_;
-  scoped_ptr<ui::TouchSelectionController> touch_selection_controller_;
+  scoped_ptr<ui::TouchEditingControllerDeprecated> touch_selection_controller_;
 
   // True if |rwhva_| is currently handling a gesture that could result in a
   // change in selection (long press, double tap or triple tap).

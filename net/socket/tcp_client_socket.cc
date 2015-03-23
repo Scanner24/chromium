@@ -6,6 +6,7 @@
 
 #include "base/callback_helpers.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
@@ -62,6 +63,10 @@ int TCPClientSocket::Bind(const IPEndPoint& address) {
 }
 
 int TCPClientSocket::Connect(const CompletionCallback& callback) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPClientSocket::Connect"));
+
   DCHECK(!callback.is_null());
 
   // If connecting or already connected, then just return OK.
@@ -111,6 +116,10 @@ int TCPClientSocket::DoConnectLoop(int result) {
 }
 
 int TCPClientSocket::DoConnect() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPClientSocket::DoConnect1"));
+
   DCHECK_GE(current_address_index_, 0);
   DCHECK_LT(current_address_index_, static_cast<int>(addresses_.size()));
 
@@ -139,6 +148,10 @@ int TCPClientSocket::DoConnect() {
     }
   }
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPClientSocket::DoConnect2"));
+
   // |socket_| is owned by this class and the callback won't be run once
   // |socket_| is gone. Therefore, it is safe to use base::Unretained() here.
   return socket_->Connect(endpoint,
@@ -147,6 +160,11 @@ int TCPClientSocket::DoConnect() {
 }
 
 int TCPClientSocket::DoConnectComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436634 TCPClientSocket::DoConnectComplete"));
+
   if (result == OK) {
     use_history_.set_was_ever_connected();
     return OK;  // Done!
@@ -306,6 +324,10 @@ void TCPClientSocket::DidCompleteReadWrite(const CompletionCallback& callback,
   if (result > 0)
     use_history_.set_was_used_to_convey_data();
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 TCPClientSocket::DidCompleteReadWrite"));
   callback.Run(result);
 }
 

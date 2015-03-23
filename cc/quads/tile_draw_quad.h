@@ -12,7 +12,7 @@ namespace cc {
 class CC_EXPORT TileDrawQuad : public ContentDrawQuadBase {
  public:
   TileDrawQuad();
-  virtual ~TileDrawQuad();
+  ~TileDrawQuad() override;
 
   void SetNew(const SharedQuadState* shared_quad_state,
               const gfx::Rect& rect,
@@ -21,7 +21,8 @@ class CC_EXPORT TileDrawQuad : public ContentDrawQuadBase {
               unsigned resource_id,
               const gfx::RectF& tex_coord_rect,
               const gfx::Size& texture_size,
-              bool swizzle_contents);
+              bool swizzle_contents,
+              bool nearest_neighbor);
 
   void SetAll(const SharedQuadState* shared_quad_state,
               const gfx::Rect& rect,
@@ -31,17 +32,17 @@ class CC_EXPORT TileDrawQuad : public ContentDrawQuadBase {
               unsigned resource_id,
               const gfx::RectF& tex_coord_rect,
               const gfx::Size& texture_size,
-              bool swizzle_contents);
+              bool swizzle_contents,
+              bool nearest_neighbor);
 
   unsigned resource_id;
 
-  virtual void IterateResources(const ResourceIteratorCallback& callback)
-      OVERRIDE;
+  void IterateResources(const ResourceIteratorCallback& callback) override;
 
   static const TileDrawQuad* MaterialCast(const DrawQuad*);
 
  private:
-  virtual void ExtendValue(base::debug::TracedValue* value) const OVERRIDE;
+  void ExtendValue(base::trace_event::TracedValue* value) const override;
 };
 
 }  // namespace cc

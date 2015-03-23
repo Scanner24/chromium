@@ -11,9 +11,7 @@
 #include "content/shell/common/test_runner/test_preferences.h"
 #include "content/shell/renderer/binding_helpers.h"
 #include "content/shell/renderer/test_runner/mock_credential_manager_client.h"
-#include "content/shell/renderer/test_runner/mock_web_push_client.h"
 #include "content/shell/renderer/test_runner/mock_web_speech_recognizer.h"
-#include "content/shell/renderer/test_runner/notification_presenter.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
 #include "content/shell/renderer/test_runner/web_permissions.h"
 #include "content/shell/renderer/test_runner/web_test_delegate.h"
@@ -23,7 +21,6 @@
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
-#include "third_party/WebKit/public/platform/WebArrayBuffer.h"
 #include "third_party/WebKit/public/platform/WebBatteryStatus.h"
 #include "third_party/WebKit/public/platform/WebCanvas.h"
 #include "third_party/WebKit/public/platform/WebData.h"
@@ -31,13 +28,16 @@
 #include "third_party/WebKit/public/platform/WebDeviceOrientationData.h"
 #include "third_party/WebKit/public/platform/WebLocalCredential.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
+#include "third_party/WebKit/public/platform/WebServiceWorkerRegistration.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/public/web/WebArrayBuffer.h"
 #include "third_party/WebKit/public/web/WebArrayBufferConverter.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFindOptions.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebGraphicsContext.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebMIDIClientMock.h"
@@ -50,6 +50,10 @@
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/skia_util.h"
 
 #if defined(__linux__) || defined(ANDROID)
 #include "third_party/WebKit/public/web/linux/WebFontRendering.h"
@@ -74,7 +78,7 @@ class HostMethodTask : public WebMethodTask<TestRunner> {
   HostMethodTask(TestRunner* object, CallbackMethodType callback)
       : WebMethodTask<TestRunner>(object), callback_(callback) {}
 
-  virtual void RunIfValid() OVERRIDE { (object_->*callback_)(); }
+  void RunIfValid() override { (object_->*callback_)(); }
 
  private:
   CallbackMethodType callback_;
@@ -89,7 +93,7 @@ class InvokeCallbackTask : public WebMethodTask<TestRunner> {
         callback_(blink::mainThreadIsolate(), callback),
         argc_(0) {}
 
-  virtual void RunIfValid() OVERRIDE {
+  void RunIfValid() override {
     v8::Isolate* isolate = blink::mainThreadIsolate();
     v8::HandleScope handle_scope(isolate);
     WebFrame* frame = object_->web_view_->mainFrame();
@@ -138,11 +142,11 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
  private:
   explicit TestRunnerBindings(
       base::WeakPtr<TestRunner> controller);
-  virtual ~TestRunnerBindings();
+  ~TestRunnerBindings() override;
 
   // gin::Wrappable:
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   void LogToStderr(const std::string& output);
   void NotifyDone();
@@ -205,6 +209,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                               double dischargingTime,
                               double level);
   void ResetBatteryStatus();
+  void SetMockScreenAvailability(bool available);
   void DidAcquirePointerLock();
   void DidNotAcquirePointerLock();
   void DidLosePointerLock();
@@ -256,6 +261,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void DumpResourceRequestPriorities();
   void SetUseMockTheme(bool use);
   void WaitUntilExternalURLLoad();
+  void DumpDragImage();
   void ShowWebInspector(gin::Arguments* args);
   void CloseWebInspector();
   bool IsChooserShown();
@@ -273,7 +279,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetMIDISysexPermission(bool value);
   void GrantWebNotificationPermission(gin::Arguments* args);
   void ClearWebNotificationPermissions();
-  bool SimulateWebNotificationClick(const std::string& value);
+  void SimulateWebNotificationClick(const std::string& title);
   void AddMockSpeechRecognitionResult(const std::string& transcript,
                                       double confidence);
   void SetMockSpeechRecognitionError(const std::string& error,
@@ -294,9 +300,12 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                                             v8::Handle<v8::Function> callback);
   void SetCustomTextOutput(std::string output);
   void SetViewSourceForFrame(const std::string& name, bool enabled);
-  void SetMockPushClientSuccess(const std::string& endpoint,
-                                const std::string& registration_id);
-  void SetMockPushClientError(const std::string& message);
+  void SetPushMessagingPermission(const std::string& origin, bool allowed);
+  void ClearPushMessagingPermissions();
+  void SetBluetoothMockDataSet(const std::string& dataset_name);
+  void SetGeofencingMockProvider(bool service_available);
+  void ClearGeofencingMockProvider();
+  void SetGeofencingMockPosition(double latitude, double longitude);
 
   std::string PlatformName();
   std::string TooltipText();
@@ -306,6 +315,8 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetInterceptPostMessage(bool value);
 
   void NotImplemented(const gin::Arguments& args);
+
+  void ForceNextWebGLContextCreationToFail();
 
   base::WeakPtr<TestRunner> runner_;
 
@@ -406,6 +417,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("didChangeBatteryStatus",
                  &TestRunnerBindings::DidChangeBatteryStatus)
       .SetMethod("resetBatteryStatus", &TestRunnerBindings::ResetBatteryStatus)
+      .SetMethod("setMockScreenAvailability",
+                 &TestRunnerBindings::SetMockScreenAvailability)
       .SetMethod("didAcquirePointerLock",
                  &TestRunnerBindings::DidAcquirePointerLock)
       .SetMethod("didNotAcquirePointerLock",
@@ -489,6 +502,7 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("setUseMockTheme", &TestRunnerBindings::SetUseMockTheme)
       .SetMethod("waitUntilExternalURLLoad",
                  &TestRunnerBindings::WaitUntilExternalURLLoad)
+      .SetMethod("dumpDragImage", &TestRunnerBindings::DumpDragImage)
       .SetMethod("showWebInspector", &TestRunnerBindings::ShowWebInspector)
       .SetMethod("closeWebInspector", &TestRunnerBindings::CloseWebInspector)
       .SetMethod("isChooserShown", &TestRunnerBindings::IsChooserShown)
@@ -537,10 +551,20 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::SetCustomTextOutput)
       .SetMethod("setViewSourceForFrame",
                  &TestRunnerBindings::SetViewSourceForFrame)
-      .SetMethod("setMockPushClientSuccess",
-                 &TestRunnerBindings::SetMockPushClientSuccess)
-      .SetMethod("setMockPushClientError",
-                 &TestRunnerBindings::SetMockPushClientError)
+      .SetMethod("setPushMessagingPermission",
+                 &TestRunnerBindings::SetPushMessagingPermission)
+      .SetMethod("clearPushMessagingPermissions",
+                 &TestRunnerBindings::ClearPushMessagingPermissions)
+      .SetMethod("setBluetoothMockDataSet",
+                 &TestRunnerBindings::SetBluetoothMockDataSet)
+      .SetMethod("forceNextWebGLContextCreationToFail",
+                 &TestRunnerBindings::ForceNextWebGLContextCreationToFail)
+      .SetMethod("setGeofencingMockProvider",
+                 &TestRunnerBindings::SetGeofencingMockProvider)
+      .SetMethod("clearGeofencingMockProvider",
+                 &TestRunnerBindings::ClearGeofencingMockProvider)
+      .SetMethod("setGeofencingMockPosition",
+                 &TestRunnerBindings::SetGeofencingMockPosition)
 
       // Properties.
       .SetProperty("platformName", &TestRunnerBindings::PlatformName)
@@ -950,6 +974,11 @@ void TestRunnerBindings::ResetBatteryStatus() {
     runner_->ResetBatteryStatus();
 }
 
+void TestRunnerBindings::SetMockScreenAvailability(bool available) {
+  if (runner_)
+    runner_->SetMockScreenAvailability(available);
+}
+
 void TestRunnerBindings::DidAcquirePointerLock() {
   if (runner_)
     runner_->DidAcquirePointerLock();
@@ -1211,6 +1240,11 @@ void TestRunnerBindings::WaitUntilExternalURLLoad() {
     runner_->WaitUntilExternalURLLoad();
 }
 
+void TestRunnerBindings::DumpDragImage() {
+  if (runner_)
+    runner_->DumpDragImage();
+}
+
 void TestRunnerBindings::ShowWebInspector(gin::Arguments* args) {
   if (runner_) {
     std::string settings;
@@ -1276,6 +1310,11 @@ void TestRunnerBindings::SetColorProfile(
     runner_->SetColorProfile(name, callback);
 }
 
+void TestRunnerBindings::SetBluetoothMockDataSet(const std::string& name) {
+  if (runner_)
+    runner_->SetBluetoothMockDataSet(name);
+}
+
 void TestRunnerBindings::SetPOSIXLocale(const std::string& locale) {
   if (runner_)
     runner_->SetPOSIXLocale(locale);
@@ -1307,11 +1346,10 @@ void TestRunnerBindings::ClearWebNotificationPermissions() {
     runner_->ClearWebNotificationPermissions();
 }
 
-bool TestRunnerBindings::SimulateWebNotificationClick(
-    const std::string& value) {
+void TestRunnerBindings::SimulateWebNotificationClick(
+    const std::string& title) {
   if (runner_)
-    return runner_->SimulateWebNotificationClick(value);
-  return false;
+    runner_->SimulateWebNotificationClick(title);
 }
 
 void TestRunnerBindings::AddMockSpeechRecognitionResult(
@@ -1392,18 +1430,31 @@ void TestRunnerBindings::SetViewSourceForFrame(const std::string& name,
   }
 }
 
-void TestRunnerBindings::SetMockPushClientSuccess(
-    const std::string& endpoint,
-    const std::string& registration_id) {
-  if (!runner_)
-    return;
-  runner_->SetMockPushClientSuccess(endpoint, registration_id);
+void TestRunnerBindings::SetPushMessagingPermission(const std::string& origin,
+                                                    bool allowed) {
+  if (runner_)
+    runner_->SetPushMessagingPermission(GURL(origin), allowed);
 }
 
-void TestRunnerBindings::SetMockPushClientError(const std::string& message) {
-  if (!runner_)
-    return;
-  runner_->SetMockPushClientError(message);
+void TestRunnerBindings::ClearPushMessagingPermissions() {
+  if (runner_)
+    runner_->ClearPushMessagingPermissions();
+}
+
+void TestRunnerBindings::SetGeofencingMockProvider(bool service_available) {
+  if (runner_)
+    runner_->SetGeofencingMockProvider(service_available);
+}
+
+void TestRunnerBindings::ClearGeofencingMockProvider() {
+  if (runner_)
+    runner_->ClearGeofencingMockProvider();
+}
+
+void TestRunnerBindings::SetGeofencingMockPosition(double latitude,
+                                                   double longitude) {
+  if (runner_)
+    runner_->SetGeofencingMockPosition(latitude, longitude);
 }
 
 std::string TestRunnerBindings::PlatformName() {
@@ -1441,27 +1492,29 @@ void TestRunnerBindings::SetInterceptPostMessage(bool value) {
     runner_->intercept_post_message_ = value;
 }
 
+void TestRunnerBindings::ForceNextWebGLContextCreationToFail() {
+  if (runner_)
+    runner_->ForceNextWebGLContextCreationToFail();
+}
+
 void TestRunnerBindings::NotImplemented(const gin::Arguments& args) {
 }
 
 class TestPageOverlay : public WebPageOverlay {
  public:
-  explicit TestPageOverlay(WebView* web_view)
-      : web_view_(web_view) {
-  }
+  TestPageOverlay() {}
   virtual ~TestPageOverlay() {}
 
-  virtual void paintPageOverlay(WebCanvas* canvas) OVERRIDE  {
-    SkRect rect = SkRect::MakeWH(web_view_->size().width,
-                                 web_view_->size().height);
+  virtual void paintPageOverlay(WebGraphicsContext* context,
+                                const WebSize& webViewSize) {
+    gfx::Rect rect(webViewSize);
+    SkCanvas* canvas = context->beginDrawing(gfx::RectF(rect));
     SkPaint paint;
     paint.setColor(SK_ColorCYAN);
     paint.setStyle(SkPaint::kFill_Style);
-    canvas->drawRect(rect, paint);
+    canvas->drawRect(gfx::RectToSkRect(rect), paint);
+    context->endDrawing();
   }
-
- private:
-  WebView* web_view_;
 };
 
 TestRunner::WorkQueue::WorkQueue(TestRunner* controller)
@@ -1527,11 +1580,10 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       web_history_item_count_(0),
       intercept_post_message_(false),
       test_interfaces_(interfaces),
-      delegate_(NULL),
-      web_view_(NULL),
-      page_overlay_(NULL),
+      delegate_(nullptr),
+      web_view_(nullptr),
+      page_overlay_(nullptr),
       web_permissions_(new WebPermissions()),
-      notification_presenter_(new NotificationPresenter()),
       weak_factory_(this) {}
 
 TestRunner::~TestRunner() {}
@@ -1543,7 +1595,6 @@ void TestRunner::Install(WebFrame* frame) {
 void TestRunner::SetDelegate(WebTestDelegate* delegate) {
   delegate_ = delegate;
   web_permissions_->SetDelegate(delegate);
-  notification_presenter_->set_delegate(delegate);
 }
 
 void TestRunner::SetWebView(WebView* webView, WebTestProxyBase* proxy) {
@@ -1569,11 +1620,11 @@ void TestRunner::Reset() {
     if (page_overlay_) {
       web_view_->removePageOverlay(page_overlay_);
       delete page_overlay_;
-      page_overlay_ = NULL;
+      page_overlay_ = nullptr;
     }
   }
 
-  top_loading_frame_ = NULL;
+  top_loading_frame_ = nullptr;
   wait_until_done_ = false;
   wait_until_external_url_load_ = false;
   policy_delegate_enabled_ = false;
@@ -1596,6 +1647,9 @@ void TestRunner::Reset() {
     delegate_->DisableAutoResizeMode(WebSize());
     delegate_->DeleteAllCookies();
     delegate_->ResetScreenOrientation();
+    delegate_->SetBluetoothMockDataSet("");
+    delegate_->ClearGeofencingMockProvider();
+    delegate_->ResetPresentationService();
     ResetBatteryStatus();
     ResetDeviceLight();
   }
@@ -1623,6 +1677,7 @@ void TestRunner::Reset() {
   dump_spell_check_callbacks_ = false;
   dump_back_forward_list_ = false;
   dump_selection_rect_ = false;
+  dump_drag_image_ = false;
   test_repaint_ = false;
   sweep_horizontally_ = false;
   is_printing_ = false;
@@ -1642,7 +1697,6 @@ void TestRunner::Reset() {
 
   web_permissions_->Reset();
 
-  notification_presenter_->Reset();
   use_mock_theme_ = true;
   pointer_locked_ = false;
   pointer_lock_planned_result_ = PointerLockWillSucceed;
@@ -1825,7 +1879,7 @@ void TestRunner::setTopLoadingFrame(WebFrame* frame, bool clear) {
   if (!test_is_running_)
     return;
   if (clear) {
-    top_loading_frame_ = NULL;
+    top_loading_frame_ = nullptr;
     LocationChangeDone();
   } else if (!top_loading_frame_) {
     top_loading_frame_ = frame;
@@ -1862,10 +1916,6 @@ bool TestRunner::shouldDumpResourcePriorities() const {
   return should_dump_resource_priorities_;
 }
 
-WebNotificationPresenter* TestRunner::notification_presenter() const {
-  return notification_presenter_.get();
-}
-
 bool TestRunner::RequestPointerLock() {
   switch (pointer_lock_planned_result_) {
     case PointerLockWillSucceed:
@@ -1898,6 +1948,10 @@ void TestRunner::setToolTipText(const WebString& text) {
   tooltip_text_ = text.utf8();
 }
 
+bool TestRunner::shouldDumpDragImage() {
+  return dump_drag_image_;
+}
+
 bool TestRunner::midiAccessorResult() {
   return midi_accessor_result_;
 }
@@ -1915,7 +1969,7 @@ class WorkItemBackForward : public TestRunner::WorkItem {
  public:
   WorkItemBackForward(int distance) : distance_(distance) {}
 
-  virtual bool Run(WebTestDelegate* delegate, WebView*) OVERRIDE {
+  bool Run(WebTestDelegate* delegate, WebView*) override {
     delegate->GoToOffset(distance_);
     return true; // FIXME: Did it really start a navigation?
   }
@@ -1948,7 +2002,7 @@ void TestRunner::QueueForwardNavigation(int how_far_forward) {
 
 class WorkItemReload : public TestRunner::WorkItem {
  public:
-  virtual bool Run(WebTestDelegate* delegate, WebView*) OVERRIDE {
+  bool Run(WebTestDelegate* delegate, WebView*) override {
     delegate->Reload();
     return true;
   }
@@ -1963,7 +2017,7 @@ class WorkItemLoadingScript : public TestRunner::WorkItem {
   WorkItemLoadingScript(const std::string& script)
       : script_(script) {}
 
-  virtual bool Run(WebTestDelegate*, WebView* web_view) OVERRIDE {
+  bool Run(WebTestDelegate*, WebView* web_view) override {
     web_view->mainFrame()->executeScript(
         WebScriptSource(WebString::fromUTF8(script_)));
     return true; // FIXME: Did it really start a navigation?
@@ -1982,7 +2036,7 @@ class WorkItemNonLoadingScript : public TestRunner::WorkItem {
   WorkItemNonLoadingScript(const std::string& script)
       : script_(script) {}
 
-  virtual bool Run(WebTestDelegate*, WebView* web_view) OVERRIDE {
+  bool Run(WebTestDelegate*, WebView* web_view) override {
     web_view->mainFrame()->executeScript(
         WebScriptSource(WebString::fromUTF8(script_)));
     return false;
@@ -2001,7 +2055,7 @@ class WorkItemLoad : public TestRunner::WorkItem {
   WorkItemLoad(const WebURL& url, const std::string& target)
       : url_(url), target_(target) {}
 
-  virtual bool Run(WebTestDelegate* delegate, WebView*) OVERRIDE {
+  bool Run(WebTestDelegate* delegate, WebView*) override {
     delegate->LoadURLForFrame(url_, target_);
     return true; // FIXME: Did it really start a navigation?
   }
@@ -2027,7 +2081,7 @@ class WorkItemLoadHTMLString : public TestRunner::WorkItem  {
                          const WebURL& unreachable_url)
       : html_(html), base_url_(base_url), unreachable_url_(unreachable_url) {}
 
-  virtual bool Run(WebTestDelegate*, WebView* web_view) OVERRIDE {
+  bool Run(WebTestDelegate*, WebView* web_view) override {
     web_view->mainFrame()->loadHTMLString(
         WebData(html_.data(), html_.length()),
         base_url_, unreachable_url_);
@@ -2124,7 +2178,7 @@ void TestRunner::SetDomainRelaxationForbiddenForURLScheme(
 v8::Handle<v8::Value> TestRunner::EvaluateScriptInIsolatedWorldAndReturnValue(
     int world_id,
     const std::string& script) {
-  WebVector<v8::Local<v8::Value> > values;
+  WebVector<v8::Local<v8::Value>> values;
   WebScriptSource source(WebString::fromUTF8(script));
   // This relies on the iframe focusing itself when it loads. This is a bit
   // sketchy, but it seems to be what other tests do.
@@ -2151,7 +2205,7 @@ void TestRunner::SetIsolatedWorldSecurityOrigin(int world_id,
   WebSecurityOrigin web_origin;
   if (origin->IsString()) {
     web_origin = WebSecurityOrigin::createFromString(
-        V8StringToWebString(origin->ToString()));
+        V8StringToWebString(origin.As<v8::String>()));
   }
   web_view_->focusedFrame()->setIsolatedWorldSecurityOrigin(world_id,
                                                             web_origin);
@@ -2223,8 +2277,7 @@ bool TestRunner::FindString(const std::string& search_text,
   find_options.matchCase = true;
   find_options.findNext = true;
 
-  for (size_t i = 0; i < options_array.size(); ++i) {
-    const std::string& option = options_array[i];
+  for (const std::string& option : options_array) {
     if (option == "CaseInsensitive")
       find_options.matchCase = false;
     else if (option == "Backwards")
@@ -2417,6 +2470,10 @@ void TestRunner::ResetBatteryStatus() {
   delegate_->DidChangeBatteryStatus(status);
 }
 
+void TestRunner::SetMockScreenAvailability(bool available) {
+  delegate_->SetScreenAvailability(available);
+}
+
 void TestRunner::DidAcquirePointerLock() {
   DidAcquirePointerLockInternal();
 }
@@ -2471,7 +2528,9 @@ void TestRunner::OverridePreference(const std::string key,
   } else if (key == "WebKitMinimumFontSize") {
     prefs->minimum_font_size = value->Int32Value();
   } else if (key == "WebKitDefaultTextEncodingName") {
-    prefs->default_text_encoding_name = V8StringToWebString(value->ToString());
+    v8::Isolate* isolate = blink::mainThreadIsolate();
+    prefs->default_text_encoding_name =
+        V8StringToWebString(value->ToString(isolate));
   } else if (key == "WebKitJavaScriptEnabled") {
     prefs->java_script_enabled = value->BooleanValue();
   } else if (key == "WebKitSupportsMultipleWindows") {
@@ -2500,6 +2559,12 @@ void TestRunner::OverridePreference(const std::string key,
     prefs->allow_display_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitAllowRunningInsecureContent") {
     prefs->allow_running_of_insecure_content = value->BooleanValue();
+  } else if (key == "WebKitDisableReadingFromCanvas") {
+    prefs->disable_reading_from_canvas = value->BooleanValue();
+  } else if (key == "WebKitStrictMixedContentChecking") {
+    prefs->strict_mixed_content_checking = value->BooleanValue();
+  } else if (key == "WebKitStrictPowerfulFeatureRestrictions") {
+    prefs->strict_powerful_feature_restrictions = value->BooleanValue();
   } else if (key == "WebKitShouldRespectImageOrientation") {
     prefs->should_respect_image_orientation = value->BooleanValue();
   } else if (key == "WebKitWebAudioEnabled") {
@@ -2687,6 +2752,11 @@ void TestRunner::WaitUntilExternalURLLoad() {
   wait_until_external_url_load_ = true;
 }
 
+void TestRunner::DumpDragImage() {
+  DumpAsTextWithPixelResults();
+  dump_drag_image_ = true;
+}
+
 void TestRunner::CloseWebInspector() {
   delegate_->CloseDevTools();
 }
@@ -2732,6 +2802,22 @@ void TestRunner::SetColorProfile(const std::string& name,
   delegate_->PostTask(new InvokeCallbackTask(this, callback));
 }
 
+void TestRunner::SetBluetoothMockDataSet(const std::string& name) {
+  delegate_->SetBluetoothMockDataSet(name);
+}
+
+void TestRunner::SetGeofencingMockProvider(bool service_available) {
+  delegate_->SetGeofencingMockProvider(service_available);
+}
+
+void TestRunner::ClearGeofencingMockProvider() {
+  delegate_->ClearGeofencingMockProvider();
+}
+
+void TestRunner::SetGeofencingMockPosition(double latitude, double longitude) {
+  delegate_->SetGeofencingMockPosition(latitude, longitude);
+}
+
 void TestRunner::SetPOSIXLocale(const std::string& locale) {
   delegate_->SetLocale(locale);
 }
@@ -2741,10 +2827,8 @@ void TestRunner::SetMIDIAccessorResult(bool result) {
 }
 
 void TestRunner::SetMIDISysexPermission(bool value) {
-  const std::vector<WebTestProxyBase*>& windowList =
-      test_interfaces_->GetWindowList();
-  for (unsigned i = 0; i < windowList.size(); ++i)
-    windowList.at(i)->GetMIDIClientMock()->setSysexPermission(value);
+  for (auto* window : test_interfaces_->GetWindowList())
+    window->GetMIDIClientMock()->setSysexPermission(value);
 }
 
 void TestRunner::GrantWebNotificationPermission(const GURL& origin,
@@ -2756,8 +2840,8 @@ void TestRunner::ClearWebNotificationPermissions() {
   delegate_->ClearWebNotificationPermissions();
 }
 
-bool TestRunner::SimulateWebNotificationClick(const std::string& value) {
-  return notification_presenter_->SimulateClick(value);
+void TestRunner::SimulateWebNotificationClick(const std::string& title) {
+  delegate_->SimulateWebNotificationClick(title);
 }
 
 void TestRunner::AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -2789,7 +2873,7 @@ void TestRunner::AddMockCredentialManagerResponse(const std::string& id,
 
 void TestRunner::AddWebPageOverlay() {
   if (web_view_ && !page_overlay_) {
-    page_overlay_ = new TestPageOverlay(web_view_);
+    page_overlay_ = new TestPageOverlay;
     web_view_->addPageOverlay(page_overlay_, 0);
   }
 }
@@ -2798,7 +2882,7 @@ void TestRunner::RemoveWebPageOverlay() {
   if (web_view_ && page_overlay_) {
     web_view_->removePageOverlay(page_overlay_);
     delete page_overlay_;
-    page_overlay_ = NULL;
+    page_overlay_ = nullptr;
   }
 }
 
@@ -2810,7 +2894,7 @@ void TestRunner::DisplayAsyncThen(v8::Handle<v8::Function> callback) {
   scoped_ptr<InvokeCallbackTask> task(
       new InvokeCallbackTask(this, callback));
   proxy_->DisplayAsyncThen(base::Bind(&TestRunner::InvokeCallback,
-                                      base::Unretained(this),
+                                      weak_factory_.GetWeakPtr(),
                                       base::Passed(&task)));
 }
 
@@ -2820,7 +2904,7 @@ void TestRunner::GetManifestThen(v8::Handle<v8::Function> callback) {
 
   FetchManifest(web_view_, web_view_->mainFrame()->document().manifestURL(),
       base::Bind(&TestRunner::GetManifestCallback,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  base::Passed(&task)));
 }
 
@@ -2828,8 +2912,13 @@ void TestRunner::CapturePixelsAsyncThen(v8::Handle<v8::Function> callback) {
   scoped_ptr<InvokeCallbackTask> task(
       new InvokeCallbackTask(this, callback));
   proxy_->CapturePixelsAsync(base::Bind(&TestRunner::CapturePixelsCallback,
-                                        base::Unretained(this),
+                                        weak_factory_.GetWeakPtr(),
                                         base::Passed(&task)));
+}
+
+void TestRunner::ForceNextWebGLContextCreationToFail() {
+  if (web_view_)
+    web_view_->forceNextWebGLContextCreationToFail();
 }
 
 void TestRunner::CopyImageAtAndCapturePixelsAsyncThen(
@@ -2838,7 +2927,7 @@ void TestRunner::CopyImageAtAndCapturePixelsAsyncThen(
       new InvokeCallbackTask(this, callback));
   proxy_->CopyImageAtAndCapturePixels(
       x, y, base::Bind(&TestRunner::CapturePixelsCallback,
-                       base::Unretained(this),
+                       weak_factory_.GetWeakPtr(),
                        base::Passed(&task)));
 }
 
@@ -2892,13 +2981,12 @@ void TestRunner::CapturePixelsCallback(scoped_ptr<InvokeCallbackTask> task,
   InvokeCallback(task.Pass());
 }
 
-void TestRunner::SetMockPushClientSuccess(const std::string& endpoint,
-                                          const std::string& registration_id) {
-  proxy_->GetPushClientMock()->SetMockSuccessValues(endpoint, registration_id);
+void TestRunner::SetPushMessagingPermission(const GURL& origin, bool allowed) {
+  delegate_->SetPushMessagingPermission(origin, allowed);
 }
 
-void TestRunner::SetMockPushClientError(const std::string& message) {
-  proxy_->GetPushClientMock()->SetMockErrorValues(message);
+void TestRunner::ClearPushMessagingPermissions() {
+  delegate_->ClearPushMessagingPermissions();
 }
 
 void TestRunner::LocationChangeDone() {

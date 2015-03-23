@@ -541,7 +541,7 @@ bool NativeAppWindowCocoa::IsFullscreenOrPending() const {
   return is_fullscreen_;
 }
 
-gfx::NativeWindow NativeAppWindowCocoa::GetNativeWindow() {
+gfx::NativeWindow NativeAppWindowCocoa::GetNativeWindow() const {
   return window();
 }
 
@@ -980,6 +980,11 @@ void NativeAppWindowCocoa::SetAlwaysOnTop(bool always_on_top) {
 
 void NativeAppWindowCocoa::SetVisibleOnAllWorkspaces(bool always_visible) {
   SetWorkspacesCollectionBehavior(window(), always_visible);
+}
+
+void NativeAppWindowCocoa::SetInterceptAllKeys(bool want_all_key) {
+  // TODO(sriramsr): implement for OSX (http://crbug.com/166928).
+  NOTIMPLEMENTED();
 }
 
 NativeAppWindowCocoa::~NativeAppWindowCocoa() {

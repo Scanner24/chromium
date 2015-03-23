@@ -32,11 +32,11 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   static gin::WrapperInfo kWrapperInfo;
 
   WebAXObjectProxy(const blink::WebAXObject& object, Factory* factory);
-  virtual ~WebAXObjectProxy();
+  ~WebAXObjectProxy() override;
 
   // gin::Wrappable:
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   virtual v8::Handle<v8::Object> GetChildAtIndex(unsigned index);
   virtual bool IsRoot() const;
@@ -62,6 +62,7 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   std::string Description();
   std::string HelpText();
   std::string StringValue();
+  std::string Language();
   int X();
   int Y();
   int Width();
@@ -93,10 +94,16 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   int ClickPointX();
   int ClickPointY();
   int32_t RowCount();
+  int32_t RowHeadersCount();
   int32_t ColumnCount();
+  int32_t ColumnHeadersCount();
   bool IsClickable();
+  bool IsButtonStateMixed();
 
   // Bound methods.
+  v8::Handle<v8::Object> AriaControlsElementAtIndex(unsigned index);
+  v8::Handle<v8::Object> AriaFlowToElementAtIndex(unsigned index);
+  v8::Handle<v8::Object> AriaOwnsElementAtIndex(unsigned index);
   std::string AllAttributes();
   std::string AttributesOfChildren();
   int LineForIndex(int index);
@@ -104,6 +111,8 @@ class WebAXObjectProxy : public gin::Wrappable<WebAXObjectProxy> {
   v8::Handle<v8::Object> ChildAtIndex(int index);
   v8::Handle<v8::Object> ElementAtPoint(int x, int y);
   v8::Handle<v8::Object> TableHeader();
+  v8::Handle<v8::Object> RowHeaderAtIndex(unsigned index);
+  v8::Handle<v8::Object> ColumnHeaderAtIndex(unsigned index);
   std::string RowIndexRange();
   std::string ColumnIndexRange();
   v8::Handle<v8::Object> CellForColumnAndRow(int column, int row);
@@ -140,8 +149,8 @@ class RootWebAXObjectProxy : public WebAXObjectProxy {
  public:
   RootWebAXObjectProxy(const blink::WebAXObject&, Factory*);
 
-  virtual v8::Handle<v8::Object> GetChildAtIndex(unsigned index) OVERRIDE;
-  virtual bool IsRoot() const OVERRIDE;
+  v8::Handle<v8::Object> GetChildAtIndex(unsigned index) override;
+  bool IsRoot() const override;
 };
 
 
@@ -151,11 +160,10 @@ class RootWebAXObjectProxy : public WebAXObjectProxy {
 class WebAXObjectProxyList : public WebAXObjectProxy::Factory {
  public:
   WebAXObjectProxyList();
-  virtual ~WebAXObjectProxyList();
+  ~WebAXObjectProxyList() override;
 
   void Clear();
-  virtual v8::Handle<v8::Object> GetOrCreate(
-      const blink::WebAXObject&) OVERRIDE;
+  v8::Handle<v8::Object> GetOrCreate(const blink::WebAXObject&) override;
   v8::Handle<v8::Object> CreateRoot(const blink::WebAXObject&);
 
  private:

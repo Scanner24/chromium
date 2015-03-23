@@ -50,7 +50,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
 
  protected:
   // InProcessBrowserTest
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     if (load_extensions_.empty()) {
       // If no |load_extensions_| were specified, allow unauthenticated
       // extension settings to be loaded from Preferences as if they had been
@@ -74,7 +74,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
     }
   }
 
-  virtual bool SetUpUserDataDirectory() OVERRIDE {
+  bool SetUpUserDataDirectory() override {
     base::FilePath profile_dir;
     PathService::Get(chrome::DIR_USER_DATA, &profile_dir);
     profile_dir = profile_dir.AppendASCII(TestingProfile::kTestUserProfileDir);
@@ -97,7 +97,15 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
     return true;
   }
 
-  virtual void TearDown() {
+  void SetUpInProcessBrowserTestFixture() override {
+    InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
+
+    // Bots are on a domain, turn off the domain check for settings hardening in
+    // order to be able to test all SettingsEnforcement groups.
+    chrome_prefs::DisableDomainCheckForTesting();
+  }
+
+  void TearDown() override {
     EXPECT_TRUE(base::DeleteFile(preferences_file_, false));
 
     // TODO(phajdan.jr): Check return values of the functions below, carefully.
@@ -109,15 +117,14 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
 
   void WaitForServicesToStart(int num_expected_extensions,
                               bool expect_extensions_enabled) {
-    ExtensionService* service = extensions::ExtensionSystem::Get(
-        browser()->profile())->extension_service();
+    extensions::ExtensionRegistry* registry =
+        extensions::ExtensionRegistry::Get(browser()->profile());
 
     // Count the number of non-component extensions.
     int found_extensions = 0;
-    for (extensions::ExtensionSet::const_iterator it =
-             service->extensions()->begin();
-         it != service->extensions()->end(); ++it) {
-      if ((*it)->location() != extensions::Manifest::COMPONENT)
+    for (const scoped_refptr<const extensions::Extension>& extension :
+         registry->enabled_extensions()) {
+      if (extension->location() != extensions::Manifest::COMPONENT)
         found_extensions++;
     }
 
@@ -126,6 +133,9 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
 
     ASSERT_EQ(static_cast<uint32>(num_expected_extensions),
               static_cast<uint32>(found_extensions));
+
+    ExtensionService* service = extensions::ExtensionSystem::Get(
+                                    browser()->profile())->extension_service();
     ASSERT_EQ(expect_extensions_enabled, service->extensions_enabled());
 
     content::WindowedNotificationObserver user_scripts_observer(

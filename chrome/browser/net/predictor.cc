@@ -17,6 +17,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -27,22 +28,23 @@
 #include "base/values.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/preconnect.h"
-#include "chrome/browser/net/spdyproxy/proxy_advisor.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/single_request_host_resolver.h"
 #include "net/http/transport_security_state.h"
+#include "net/proxy/proxy_info.h"
+#include "net/proxy/proxy_service.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -123,6 +125,11 @@ class Predictor::LookupRequest {
 
  private:
   void OnLookupFinished(int result) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "436634 Predictor::LookupRequest::OnLookupFinished"));
+
     predictor_->OnLookupFinished(this, url_, result == net::OK);
   }
 
@@ -148,6 +155,7 @@ Predictor::Predictor(bool preconnect_enabled, bool predictor_enabled)
       host_resolver_(NULL),
       transport_security_state_(NULL),
       ssl_config_service_(NULL),
+      proxy_service_(NULL),
       preconnect_enabled_(preconnect_enabled),
       consecutive_omnibox_preconnect_count_(0),
       next_trim_time_(base::TimeTicks::Now() +
@@ -204,18 +212,6 @@ void Predictor::InitNetworkPredictor(PrefService* user_prefs,
   // Data.
   user_prefs->ClearPref(prefs::kDnsPrefetchingStartupList);
   user_prefs->ClearPref(prefs::kDnsPrefetchingHostReferralList);
-
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  // TODO(marq): Once https://codereview.chromium.org/30883003/ lands, also
-  // condition this on DataReductionProxySettings::IsDataReductionProxyAllowed()
-  // Until then, we may create a proxy advisor when the proxy feature itself
-  // isn't available, and the advisor instance will never send advisory
-  // requests, which is slightly wasteful but not harmful.
-  if (data_reduction_proxy::DataReductionProxyParams::
-      IsIncludedInPreconnectHintingFieldTrial()) {
-    proxy_advisor_.reset(new ProxyAdvisor(user_prefs, getter));
-  }
-#endif
 
   BrowserThread::PostTask(
       BrowserThread::IO,
@@ -447,6 +443,10 @@ void Predictor::DiscardAllResults() {
 // Overloaded Resolve() to take a vector of names.
 void Predictor::ResolveList(const UrlList& urls,
                             UrlInfo::ResolutionMotivation motivation) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 Predictor::ResolveList"));
+
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   for (UrlList::const_iterator it = urls.begin(); it < urls.end(); ++it) {
@@ -689,16 +689,32 @@ void Predictor::FinalizeInitializationOnIOThread(
     base::ListValue* referral_list,
     IOThread* io_thread,
     ProfileIOData* profile_io_data) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::FinalizeInitializationOnIOThread1"));
+
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   profile_io_data_ = profile_io_data;
   initial_observer_.reset(new InitialObserver());
   host_resolver_ = io_thread->globals()->host_resolver.get();
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::FinalizeInitializationOnIOThread2"));
+
   net::URLRequestContext* context =
       url_request_context_getter_->GetURLRequestContext();
   transport_security_state_ = context->transport_security_state();
   ssl_config_service_ = context->ssl_config_service();
+  proxy_service_ = context->proxy_service();
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::FinalizeInitializationOnIOThread3"));
 
   // base::WeakPtrFactory instances need to be created and destroyed
   // on the same thread. The predictor lives on the IO thread and will die
@@ -707,8 +723,19 @@ void Predictor::FinalizeInitializationOnIOThread(
   // TODO(groby): Check if WeakPtrFactory has the same constraint.
   weak_factory_.reset(new base::WeakPtrFactory<Predictor>(this));
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::FinalizeInitializationOnIOThread4"));
+
   // Prefetch these hostnames on startup.
   DnsPrefetchMotivatedList(startup_urls, UrlInfo::STARTUP_LIST_MOTIVATED);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::FinalizeInitializationOnIOThread5"));
+
   DeserializeReferrersThenDelete(referral_list);
 }
 
@@ -749,6 +776,11 @@ void Predictor::DnsPrefetchList(const NameList& hostnames) {
 void Predictor::DnsPrefetchMotivatedList(
     const UrlList& urls,
     UrlInfo::ResolutionMotivation motivation) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::DnsPrefetchMotivatedList"));
+
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!predictor_enabled_)
@@ -869,8 +901,6 @@ void Predictor::PreconnectUrlOnIOThread(
   // Skip the HSTS redirect.
   GURL url = GetHSTSRedirectOnIOThread(original_url);
 
-  AdviseProxy(url, motivation, true /* is_preconnect */);
-
   if (observer_) {
     observer_->OnPreconnectUrl(
         url, first_party_for_cookies, motivation, count);
@@ -902,26 +932,6 @@ void Predictor::PredictFrameSubresources(const GURL& url,
         FROM_HERE,
         base::Bind(&Predictor::PrepareFrameSubresources,
                    base::Unretained(this), url, first_party_for_cookies));
-  }
-}
-
-void Predictor::AdviseProxy(const GURL& url,
-                            UrlInfo::ResolutionMotivation motivation,
-                            bool is_preconnect) {
-  if (!proxy_advisor_)
-    return;
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
-         BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    AdviseProxyOnIOThread(url, motivation, is_preconnect);
-  } else {
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&Predictor::AdviseProxyOnIOThread,
-                   base::Unretained(this), url, motivation, is_preconnect));
   }
 }
 
@@ -1033,9 +1043,25 @@ void Predictor::LookupFinished(LookupRequest* request, const GURL& url,
   }
 }
 
+bool Predictor::WouldLikelyProxyURL(const GURL& url) {
+  if (!proxy_service_)
+    return false;
+
+  net::ProxyInfo info;
+  bool synchronous_success = proxy_service_->TryResolveProxySynchronously(
+      url, net::LOAD_NORMAL, &info, NULL, net::BoundNetLog());
+
+  return synchronous_success && !info.is_direct();
+}
+
 UrlInfo* Predictor::AppendToResolutionQueue(
     const GURL& url,
     UrlInfo::ResolutionMotivation motivation) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::AppendToResolutionQueue1"));
+
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(url.has_host());
 
@@ -1054,14 +1080,29 @@ UrlInfo* Predictor::AppendToResolutionQueue(
     return NULL;
   }
 
-  AdviseProxy(url, motivation, false /* is_preconnect */);
-  if (proxy_advisor_ && proxy_advisor_->WouldProxyURL(url)) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::AppendToResolutionQueue2"));
+
+  if (WouldLikelyProxyURL(url)) {
     info->DLogResultsStats("DNS PrefetchForProxiedRequest");
     return NULL;
   }
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::AppendToResolutionQueue3"));
+
   info->SetQueuedState(motivation);
   work_queue_.Push(url, motivation);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 Predictor::AppendToResolutionQueue4"));
+
   StartSomeQueuedResolutions();
   return info;
 }
@@ -1089,6 +1130,11 @@ void Predictor::StartSomeQueuedResolutions() {
 
   while (!work_queue_.IsEmpty() &&
          pending_lookups_.size() < max_concurrent_dns_lookups_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "436671 Predictor::StartSomeQueuedResolutions1"));
+
     const GURL url(work_queue_.Pop());
     UrlInfo* info = &results_[url];
     DCHECK(info->HasUrl(url));
@@ -1100,7 +1146,19 @@ void Predictor::StartSomeQueuedResolutions() {
     }
 
     LookupRequest* request = new LookupRequest(this, host_resolver_, url);
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "436671 Predictor::StartSomeQueuedResolutions2"));
+
     int status = request->Start();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "436671 Predictor::StartSomeQueuedResolutions3"));
+
     if (status == net::ERR_IO_PENDING) {
       // Will complete asynchronously.
       pending_lookups_.insert(request);
@@ -1164,15 +1222,6 @@ void Predictor::IncrementalTrimReferrers(bool trim_all_now) {
       referrers_.erase(it);
   }
   PostIncrementalTrimTask();
-}
-
-void Predictor::AdviseProxyOnIOThread(const GURL& url,
-                                      UrlInfo::ResolutionMotivation motivation,
-                                      bool is_preconnect) {
-  if (!proxy_advisor_)
-    return;
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  proxy_advisor_->Advise(url, motivation, is_preconnect);
 }
 
 GURL Predictor::GetHSTSRedirectOnIOThread(const GURL& url) {

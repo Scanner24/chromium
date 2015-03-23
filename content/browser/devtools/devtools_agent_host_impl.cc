@@ -11,8 +11,9 @@
 #include "base/guid.h"
 #include "base/lazy_instance.h"
 #include "content/browser/devtools/devtools_manager.h"
-#include "content/browser/devtools/embedded_worker_devtools_manager.h"
 #include "content/browser/devtools/forwarding_agent_host.h"
+#include "content/browser/devtools/service_worker_devtools_manager.h"
+#include "content/browser/devtools/shared_worker_devtools_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_manager_delegate.h"
 
@@ -30,8 +31,9 @@ base::LazyInstance<AgentStateCallbacks>::Leaky g_callbacks =
 
 // static
 DevToolsAgentHost::List DevToolsAgentHost::GetOrCreateAll() {
-  List result = EmbeddedWorkerDevToolsManager::GetInstance()
-      ->GetOrCreateAllAgentHosts();
+  List result;
+  SharedWorkerDevToolsManager::GetInstance()->AddAllAgentHosts(&result);
+  ServiceWorkerDevToolsManager::GetInstance()->AddAllAgentHosts(&result);
   std::vector<WebContents*> wc_list =
       DevToolsAgentHostImpl::GetInspectableWebContents();
   for (std::vector<WebContents*>::iterator it = wc_list.begin();
@@ -75,11 +77,10 @@ void DevToolsAgentHostImpl::AttachClient(DevToolsAgentHostClient* client) {
   if (client_) {
     client_->AgentHostClosed(this, true);
     Detach();
-  } else {
-    DevToolsManager::GetInstance()->OnClientAttached();
   }
   client_ = client;
   Attach();
+  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 void DevToolsAgentHostImpl::DetachClient() {
@@ -88,8 +89,8 @@ void DevToolsAgentHostImpl::DetachClient() {
 
   scoped_refptr<DevToolsAgentHostImpl> protect(this);
   client_ = NULL;
-  DevToolsManager::GetInstance()->OnClientDetached();
   Detach();
+  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 bool DevToolsAgentHostImpl::IsAttached() {
@@ -101,6 +102,10 @@ void DevToolsAgentHostImpl::InspectElement(int x, int y) {
 
 std::string DevToolsAgentHostImpl::GetId() {
   return id_;
+}
+
+BrowserContext* DevToolsAgentHostImpl::GetBrowserContext() {
+  return nullptr;
 }
 
 WebContents* DevToolsAgentHostImpl::GetWebContents() {
@@ -125,8 +130,8 @@ void DevToolsAgentHostImpl::HostClosed() {
   // Clear |client_| before notifying it.
   DevToolsAgentHostClient* client = client_;
   client_ = NULL;
-  DevToolsManager::GetInstance()->OnClientDetached();
   client->AgentHostClosed(this, false);
+  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 void DevToolsAgentHostImpl::SendMessageToClient(const std::string& message) {
@@ -150,9 +155,9 @@ void DevToolsAgentHost::DetachAllClients() {
       // Clear |client_| before notifying it.
       DevToolsAgentHostClient* client = agent_host->client_;
       agent_host->client_ = NULL;
-      DevToolsManager::GetInstance()->OnClientDetached();
       client->AgentHostClosed(agent_host, true);
       agent_host->Detach();
+      DevToolsManager::GetInstance()->AgentHostChanged(protect);
     }
   }
 }

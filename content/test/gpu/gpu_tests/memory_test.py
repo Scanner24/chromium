@@ -13,7 +13,7 @@ from telemetry.timeline import model
 
 MEMORY_LIMIT_MB = 192
 SINGLE_TAB_LIMIT_MB = 192
-WIGGLE_ROOM_MB = 12
+WIGGLE_ROOM_MB = 24
 
 test_harness_script = r"""
   var domAutomationController = {};
@@ -103,7 +103,11 @@ class MemoryTest(benchmark.Benchmark):
   """Tests GPU memory limits"""
   test = _MemoryValidator
 
-  def CreateExpectations(self, page_set):
+  @classmethod
+  def Name(cls):
+    return 'memory_test'
+
+  def CreateExpectations(self):
     return memory_test_expectations.MemoryTestExpectations()
 
   def CreatePageSet(self, options):

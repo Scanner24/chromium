@@ -224,14 +224,14 @@ void PrivetNotificationService::DeviceCacheFlushed() {
 
 // static
 bool PrivetNotificationService::IsEnabled() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return !command_line->HasSwitch(
       switches::kDisableDeviceDiscoveryNotifications);
 }
 
 // static
 bool PrivetNotificationService::IsForced() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return command_line->HasSwitch(switches::kEnableDeviceDiscoveryNotifications);
 }
 
@@ -269,7 +269,6 @@ void PrivetNotificationService::PrivetNotify(bool has_multiple,
       body,
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_LOCAL_DISCOVERY_CLOUDPRINT_ICON),
-      blink::WebTextDirectionDefault,
       message_center::NotifierId(GURL(kPrivetNotificationOriginUrl)),
       product_name,
       base::UTF8ToUTF16(kPrivetNotificationID),
@@ -287,8 +286,10 @@ void PrivetNotificationService::PrivetNotify(bool has_multiple,
 
 void PrivetNotificationService::PrivetRemoveNotification() {
   ReportPrivetUmaEvent(PRIVET_NOTIFICATION_CANCELED);
+  Profile* profile_object = Profile::FromBrowserContext(profile_);
   g_browser_process->notification_ui_manager()->CancelById(
-      kPrivetNotificationID);
+      kPrivetNotificationID,
+      NotificationUIManager::GetProfileID(profile_object));
 }
 
 void PrivetNotificationService::Start() {
@@ -366,23 +367,6 @@ PrivetNotificationDelegate::~PrivetNotificationDelegate() {
 
 std::string PrivetNotificationDelegate::id() const {
   return kPrivetNotificationID;
-}
-
-content::WebContents* PrivetNotificationDelegate::GetWebContents() const {
-  return NULL;
-}
-
-void PrivetNotificationDelegate::Display() {
-}
-
-void PrivetNotificationDelegate::Error() {
-  LOG(ERROR) << "Error displaying privet notification";
-}
-
-void PrivetNotificationDelegate::Close(bool by_user) {
-}
-
-void PrivetNotificationDelegate::Click() {
 }
 
 void PrivetNotificationDelegate::ButtonClick(int button_index) {

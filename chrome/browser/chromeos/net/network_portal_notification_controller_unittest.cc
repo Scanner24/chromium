@@ -16,7 +16,7 @@ namespace chromeos {
 
 namespace {
 
-const char* kNotificationId =
+const char* const kNotificationId =
     NetworkPortalNotificationController::kNotificationId;
 
 bool HasNotification() {
@@ -29,20 +29,18 @@ class NotificationObserver : public message_center::MessageCenterObserver {
   NotificationObserver() : add_count_(0), remove_count_(0), update_count_(0) {}
 
   // Overridden from message_center::MessageCenterObserver:
-  virtual void OnNotificationAdded(
-      const std::string& notification_id) OVERRIDE {
+  void OnNotificationAdded(const std::string& notification_id) override {
     if (notification_id == kNotificationId)
       ++add_count_;
   }
 
-  virtual void OnNotificationRemoved(const std::string& notification_id,
-                                     bool /* by_user */) OVERRIDE {
+  void OnNotificationRemoved(const std::string& notification_id,
+                             bool /* by_user */) override {
     if (notification_id == kNotificationId)
       ++remove_count_;
   }
 
-  virtual void OnNotificationUpdated(
-      const std::string& notification_id) OVERRIDE {
+  void OnNotificationUpdated(const std::string& notification_id) override {
     if (notification_id == kNotificationId)
       ++update_count_;
   }
@@ -64,16 +62,16 @@ class NotificationObserver : public message_center::MessageCenterObserver {
 class NetworkPortalNotificationControllerTest : public testing::Test {
  public:
   NetworkPortalNotificationControllerTest() {}
-  virtual ~NetworkPortalNotificationControllerTest() {}
+  ~NetworkPortalNotificationControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    CommandLine* cl = CommandLine::ForCurrentProcess();
+  void SetUp() override {
+    base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
     cl->AppendSwitch(switches::kEnableNetworkPortalNotification);
     MessageCenter::Initialize();
     MessageCenter::Get()->AddObserver(&observer_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     MessageCenter::Get()->RemoveObserver(&observer_);
     MessageCenter::Shutdown();
   }

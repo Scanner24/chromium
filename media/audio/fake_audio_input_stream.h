@@ -9,34 +9,38 @@
 
 #include <vector>
 
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_parameters.h"
+#include "media/audio/sounds/wav_audio_handler.h"
+#include "media/base/audio_converter.h"
 
 namespace media {
 
 class AudioBus;
 class AudioManagerBase;
 
+// This class can either generate a beep sound or play audio from a file.
 class MEDIA_EXPORT FakeAudioInputStream
-    : public AudioInputStream {
+    : public AudioInputStream, AudioConverter::InputCallback {
  public:
-  static AudioInputStream* MakeFakeStream(AudioManagerBase* manager,
-                                          const AudioParameters& params);
+  static AudioInputStream* MakeFakeStream(
+      AudioManagerBase* manager, const AudioParameters& params);
 
-  virtual bool Open() OVERRIDE;
-  virtual void Start(AudioInputCallback* callback) OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void Close() OVERRIDE;
-  virtual double GetMaxVolume() OVERRIDE;
-  virtual void SetVolume(double volume) OVERRIDE;
-  virtual double GetVolume() OVERRIDE;
-  virtual void SetAutomaticGainControl(bool enabled) OVERRIDE;
-  virtual bool GetAutomaticGainControl() OVERRIDE;
-  virtual bool IsMuted() OVERRIDE;
+  bool Open() override;
+  void Start(AudioInputCallback* callback) override;
+  void Stop() override;
+  void Close() override;
+  double GetMaxVolume() override;
+  void SetVolume(double volume) override;
+  double GetVolume() override;
+  bool IsMuted() override;
+  bool SetAutomaticGainControl(bool enabled) override;
+  bool GetAutomaticGainControl() override;
 
   // Generate one beep sound. This method is called by
   // FakeVideoCaptureDevice to test audio/video synchronization.
@@ -52,10 +56,18 @@ class MEDIA_EXPORT FakeAudioInputStream
  private:
   FakeAudioInputStream(AudioManagerBase* manager,
                        const AudioParameters& params);
-
-  virtual ~FakeAudioInputStream();
+  ~FakeAudioInputStream() override;
 
   void DoCallback();
+
+  // Opens this stream reading from a |wav_filename| rather than beeping.
+  void OpenInFileMode(const base::FilePath& wav_filename);
+
+  // Returns true if the device is playing from a file; false if we're beeping.
+  bool PlayingFromFile();
+
+  void PlayFile();
+  void PlayBeep();
 
   AudioManagerBase* audio_manager_;
   AudioInputCallback* callback_;
@@ -69,12 +81,19 @@ class MEDIA_EXPORT FakeAudioInputStream
   int beep_duration_in_buffers_;
   int beep_generated_in_buffers_;
   int beep_period_in_frames_;
-  int frames_elapsed_;
   scoped_ptr<media::AudioBus> audio_bus_;
+  scoped_ptr<uint8[]> wav_file_data_;
+  scoped_ptr<media::WavAudioHandler> wav_audio_handler_;
+  scoped_ptr<media::AudioConverter> file_audio_converter_;
+  int wav_file_read_pos_;
 
   // Allows us to run tasks on the FakeAudioInputStream instance which are
   // bound by its lifetime.
   base::WeakPtrFactory<FakeAudioInputStream> weak_factory_;
+
+  // If running in file mode, this provides audio data from wav_audio_handler_.
+  double ProvideInput(AudioBus* audio_bus,
+                      base::TimeDelta buffer_delay) override;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAudioInputStream);
 };

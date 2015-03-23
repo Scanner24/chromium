@@ -6,19 +6,19 @@
 #define UI_OZONE_PLATFORM_DRI_GBM_SURFACE_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/ozone/platform/dri/gbm_surfaceless.h"
 #include "ui/ozone/public/surface_ozone_egl.h"
 
 struct gbm_bo;
-struct gbm_device;
 struct gbm_surface;
 
 namespace ui {
 
 class DriBuffer;
-class DriWrapper;
 class DriWindowDelegate;
+class GbmWrapper;
 
 // Extends the GBM surfaceless functionality and adds an implicit surface for
 // the primary plane. Arbitrary buffers can still be allocated and displayed as
@@ -27,21 +27,22 @@ class DriWindowDelegate;
 class GbmSurface : public GbmSurfaceless {
  public:
   GbmSurface(DriWindowDelegate* window_delegate,
-             gbm_device* device,
-             DriWrapper* dri);
-  virtual ~GbmSurface();
+             const scoped_refptr<GbmWrapper>& gbm);
+  ~GbmSurface() override;
 
   bool Initialize();
 
   // GbmSurfaceless:
-  virtual intptr_t GetNativeWindow() OVERRIDE;
-  virtual bool ResizeNativeWindow(const gfx::Size& viewport_size) OVERRIDE;
-  virtual bool OnSwapBuffers() OVERRIDE;
+  intptr_t GetNativeWindow() override;
+  bool ResizeNativeWindow(const gfx::Size& viewport_size) override;
+  bool OnSwapBuffers() override;
+  bool OnSwapBuffersAsync(const SwapCompletionCallback& callback) override;
 
  private:
-  gbm_device* gbm_device_;
+  void OnSwapBuffersCallback(const SwapCompletionCallback& callback,
+                             gbm_bo* pending_buffer);
 
-  DriWrapper* dri_;
+  scoped_refptr<GbmWrapper> gbm_;
 
   // The native GBM surface. In EGL this represents the EGLNativeWindowType.
   gbm_surface* native_surface_;
@@ -50,6 +51,8 @@ class GbmSurface : public GbmSurfaceless {
   gbm_bo* current_buffer_;
 
   gfx::Size size_;
+
+  base::WeakPtrFactory<GbmSurface> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GbmSurface);
 };

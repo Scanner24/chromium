@@ -7,12 +7,10 @@ from profile_creators import extensions_profile_creator
 
 class ManyExtensionsProfileCreator(
     extensions_profile_creator.ExtensionsProfileCreator):
-  """Install 25 popular extensions."""
+  """Install many popular extensions."""
 
   def __init__(self):
-    super(ManyExtensionsProfileCreator, self).__init__()
-
-    self._extensions_to_install = [
+    extensions_to_install = [
         "nklfajnmfbchcceflgddnkignfheooic",
         "keigpnkjljkelclbjbekcfnaomfodamj",
         "fjnbnpbmkenffdnngjfgmeleoegfcffe",
@@ -21,20 +19,15 @@ class ManyExtensionsProfileCreator(
         "elioihkkcdgakfbahdoddophfngopipi",
         "fheoggkfdfchfphceeifdbepaooicaho",
         "nkcpopggjcjkiicpenikeogioednjeac",
-        "gomekmidlodglbbmalcneegieacbdmki",
         "ifohbjbgfchkkfhphahclmkpgejiplfo",
-        "jpmbfleldcgkldadpdinhjjopdfpjfjp",
         "kbmfpngjjgdllneeigpgjifpgocmfgmb",
         "pdnfnkhpgegpcingjbfihlkjeighnddk",
         "aapbdbdomjkkjkaonfhkkikfgjllcleb",
-        "dhkplhfnhceodhffomolpfigojocbpcb",
         "fjbbjfdilbioabojmcplalojlmdngbjl",
-        "gkojfkhlekighikafcpjkiklfbnlmeio",
-        "cpngackimfmofbokmjmljamhdncknpmg",
         "hdokiejnpimakedhajhdlcegeplioahd",
         "ninpnjfmichdlipckmfacdjbpbkkbcfa",
-        "mihcahmgecmbnbcchbopgniflfhgnkff",
         "mgijmajocgfcbeboacabfgobmjgjcoja",
-        "ohjkicjidmohhfcjjlahfppkdblibkkb",
-        "bfbmjmiodbnnpllbbbfblcplfjjepjdn",
-        "opnbmdkdflhjiclaoiiifmheknpccalb"]
+        "ohjkicjidmohhfcjjlahfppkdblibkkb"]
+
+    super(ManyExtensionsProfileCreator, self).__init__(
+        extensions_to_install=extensions_to_install)

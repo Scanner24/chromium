@@ -18,14 +18,15 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
+#include "third_party/WebKit/public/platform/WebFocusType.h"
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "third_party/WebKit/public/web/WebDragStatus.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 #include "url/gurl.h"
 
 #undef IPC_MESSAGE_EXPORT
@@ -35,6 +36,7 @@
 
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebDragStatus, blink::WebDragStatusLast)
+IPC_ENUM_TRAITS_MAX_VALUE(blink::WebFocusType, blink::WebFocusTypeLast)
 
 IPC_STRUCT_BEGIN(BrowserPluginHostMsg_ResizeGuest_Params)
   // The new size of guest view.
@@ -53,6 +55,8 @@ IPC_STRUCT_BEGIN(BrowserPluginHostMsg_Attach_Params)
   IPC_STRUCT_MEMBER(BrowserPluginHostMsg_ResizeGuest_Params,
                     resize_guest_params)
   IPC_STRUCT_MEMBER(gfx::Point, origin)
+  // Whether the browser plugin is a full page plugin document.
+  IPC_STRUCT_MEMBER(bool, is_full_page_plugin)
 IPC_STRUCT_END()
 
 // Browser plugin messages
@@ -95,18 +99,24 @@ IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_ExtendSelectionAndDelete,
                     int /* before */,
                     int /* after */)
 
-// This message is sent to the browser process to indicate that a BrowserPlugin
-// has taken ownership of the lifetime of the guest of the given
-// |browser_plugin_instance_id|. |params| is the state of the BrowserPlugin
-// taking ownership of the guest.
+// This message is sent to the browser process to indicate that the
+// BrowserPlugin identified by |browser_plugin_instance_id| is ready to serve
+// as container for a guest. |params| is the state of the BrowserPlugin.
 IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_Attach,
                     int /* browser_plugin_instance_id */,
                     BrowserPluginHostMsg_Attach_Params /* params */)
 
+// This message is sent to the browser process to indicate that the
+// BrowserPlugin identified by |browser_plugin_instance_id| will no longer serve
+// as a container for a guest.
+IPC_MESSAGE_ROUTED1(BrowserPluginHostMsg_Detach,
+                    int /* browser_plugin_instance_id */)
+
 // Tells the guest to focus or defocus itself.
-IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_SetFocus,
+IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_SetFocus,
                     int /* browser_plugin_instance_id */,
-                    bool /* enable */)
+                    bool /* enable */,
+                    blink::WebFocusType /* focus_type */)
 
 // Sends an input event to the guest.
 IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_HandleInputEvent,
@@ -114,21 +124,11 @@ IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_HandleInputEvent,
                     gfx::Rect /* guest_window_rect */,
                     IPC::WebInputEventPointer /* event */)
 
-IPC_MESSAGE_ROUTED3(BrowserPluginHostMsg_CopyFromCompositingSurfaceAck,
-                    int /* browser_plugin_instance_id */,
-                    int /* request_id */,
-                    SkBitmap)
-
 // Notify the guest renderer that some resources given to the embededer
 // are not used any more.
 IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_ReclaimCompositorResources,
                     int /* browser_plugin_instance_id */,
                     FrameHostMsg_ReclaimCompositorResources_Params /* params */)
-
-// When a BrowserPlugin has been removed from the embedder's DOM, it informs
-// the browser process to cleanup the guest.
-IPC_MESSAGE_ROUTED1(BrowserPluginHostMsg_PluginDestroyed,
-                    int /* browser_plugin_instance_id */)
 
 // Tells the guest it has been shown or hidden.
 IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_SetVisibility,
@@ -170,11 +170,6 @@ IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_ResizeGuest,
 // -----------------------------------------------------------------------------
 // These messages are from the browser process to the embedder.
 
-// This message is sent in response to a completed attachment of a guest
-// to a BrowserPlugin.
-IPC_MESSAGE_CONTROL1(BrowserPluginMsg_Attach_ACK,
-                     int /* browser_plugin_instance_id */)
-
 // When the guest crashes, the browser process informs the embedder through this
 // message.
 IPC_MESSAGE_CONTROL1(BrowserPluginMsg_GuestGone,
@@ -202,12 +197,6 @@ IPC_MESSAGE_CONTROL2(BrowserPluginMsg_SetCursor,
                      int /* browser_plugin_instance_id */,
                      content::WebCursor /* cursor */)
 
-IPC_MESSAGE_CONTROL4(BrowserPluginMsg_CopyFromCompositingSurface,
-                     int /* browser_plugin_instance_id */,
-                     int /* request_id */,
-                     gfx::Rect  /* source_rect */,
-                     gfx::Size  /* dest_size */)
-
 IPC_MESSAGE_CONTROL2(BrowserPluginMsg_CompositorFrameSwapped,
                      int /* browser_plugin_instance_id */,
                      FrameMsg_CompositorFrameSwapped_Params /* params */)
@@ -216,6 +205,11 @@ IPC_MESSAGE_CONTROL2(BrowserPluginMsg_CompositorFrameSwapped,
 IPC_MESSAGE_CONTROL2(BrowserPluginMsg_SetMouseLock,
                      int /* browser_plugin_instance_id */,
                      bool /* enable */)
+
+// Sends text to be displayed in tooltip.
+IPC_MESSAGE_CONTROL2(BrowserPluginMsg_SetTooltipText,
+                     int /* browser_plugin_instance_id */,
+                     base::string16 /* tooltip_text */)
 
 // Acknowledge that we presented an ubercomp frame.
 IPC_MESSAGE_ROUTED2(BrowserPluginHostMsg_CompositorFrameSwappedACK,

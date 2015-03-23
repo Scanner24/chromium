@@ -13,24 +13,20 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "chrome/browser/predictors/resource_prefetch_common.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_tables.h"
 #include "chrome/browser/predictors/resource_prefetcher.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/common/resource_type.h"
 #include "url/gurl.h"
 
 class PredictorsHandler;
 class Profile;
-
-namespace content {
-class WebContents;
-}
 
 namespace net {
 class URLRequest;
@@ -74,7 +70,7 @@ class ResourcePrefetcherManager;
 // with main frame.
 class ResourcePrefetchPredictor
     : public KeyedService,
-      public content::NotificationObserver,
+      public history::HistoryServiceObserver,
       public base::SupportsWeakPtr<ResourcePrefetchPredictor> {
  public:
   // Stores the data that we need to get from the URLRequest.
@@ -95,7 +91,7 @@ class ResourcePrefetchPredictor
 
   ResourcePrefetchPredictor(const ResourcePrefetchPredictorConfig& config,
                             Profile* profile);
-  virtual ~ResourcePrefetchPredictor();
+  ~ResourcePrefetchPredictor() override;
 
   // Thread safe.
   static bool ShouldRecordRequest(net::URLRequest* request,
@@ -183,13 +179,8 @@ class ResourcePrefetchPredictor
   // Returns true if the request (should have a response in it) is cacheable.
   static bool IsCacheable(const net::URLRequest* request);
 
-  // content::NotificationObserver methods OVERRIDE.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
-  // KeyedService methods OVERRIDE.
-  virtual void Shutdown() OVERRIDE;
+  // KeyedService methods override.
+  void Shutdown() override;
 
   // Functions called on different network events pertaining to the loading of
   // main frame resource or sub resources.
@@ -264,6 +255,16 @@ class ResourcePrefetchPredictor
                        size_t max_data_map_size,
                        PrefetchDataMap* data_map);
 
+  // Reports overall page load time.
+  void ReportPageLoadTimeStats(base::TimeDelta plt) const;
+
+  // Reports page load time for prefetched and not prefetched pages
+  void ReportPageLoadTimePrefetchStats(
+      base::TimeDelta plt,
+      bool prefetched,
+      base::Callback<void(int)> report_network_type_callback,
+      PrefetchKeyType key_type) const;
+
   // Reports accuracy by comparing prefetched resources with resources that are
   // actually used by the page.
   void ReportAccuracyStats(PrefetchKeyType key_type,
@@ -283,6 +284,18 @@ class ResourcePrefetchPredictor
       size_t total_resources_fetched_from_network,
       size_t max_assumed_prefetched) const;
 
+  // history::HistoryServiceObserver:
+  void OnURLsDeleted(HistoryService* history_service,
+                     bool all_history,
+                     bool expired,
+                     const history::URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
+  void OnHistoryServiceLoaded(HistoryService* history_service) override;
+
+  // Used to connect to HistoryService or register for service loaded
+  // notificatioan.
+  void ConnectToHistoryService();
+
   // Used for testing to inject mock tables.
   void set_mock_tables(scoped_refptr<ResourcePrefetchPredictorTables> tables) {
     tables_ = tables;
@@ -293,7 +306,6 @@ class ResourcePrefetchPredictor
   InitializationState initialization_state_;
   scoped_refptr<ResourcePrefetchPredictorTables> tables_;
   scoped_refptr<ResourcePrefetcherManager> prefetch_manager_;
-  content::NotificationRegistrar notification_registrar_;
   base::CancelableTaskTracker history_lookup_consumer_;
 
   // Map of all the navigations in flight to their resource requests.
@@ -305,6 +317,9 @@ class ResourcePrefetchPredictor
 
   ResultsMap results_map_;
   STLValueDeleter<ResultsMap> results_map_deleter_;
+
+  ScopedObserver<HistoryService, history::HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourcePrefetchPredictor);
 };

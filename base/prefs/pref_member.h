@@ -103,9 +103,10 @@ class BASE_PREFS_EXPORT PrefMemberBase : public PrefObserver {
   virtual ~PrefMemberBase();
 
   // See PrefMember<> for description.
-  void Init(const char* pref_name, PrefService* prefs,
+  void Init(const std::string& pref_name,
+            PrefService* prefs,
             const NamedChangeCallback& observer);
-  void Init(const char* pref_name, PrefService* prefs);
+  void Init(const std::string& pref_name, PrefService* prefs);
 
   virtual void CreateInternal() const = 0;
 
@@ -116,8 +117,8 @@ class BASE_PREFS_EXPORT PrefMemberBase : public PrefObserver {
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
 
   // PrefObserver
-  virtual void OnPreferenceChanged(PrefService* service,
-                                   const std::string& pref_name) OVERRIDE;
+  void OnPreferenceChanged(PrefService* service,
+                           const std::string& pref_name) override;
 
   void VerifyValuePrefName() const {
     DCHECK(!pref_name_.empty());
@@ -169,17 +170,19 @@ class PrefMember : public subtle::PrefMemberBase {
   // Do the actual initialization of the class.  Use the two-parameter
   // version if you don't want any notifications of changes.  This
   // method should only be called on the UI thread.
-  void Init(const char* pref_name, PrefService* prefs,
+  void Init(const std::string& pref_name,
+            PrefService* prefs,
             const NamedChangeCallback& observer) {
     subtle::PrefMemberBase::Init(pref_name, prefs, observer);
   }
-  void Init(const char* pref_name, PrefService* prefs,
+  void Init(const std::string& pref_name,
+            PrefService* prefs,
             const base::Closure& observer) {
     subtle::PrefMemberBase::Init(
         pref_name, prefs,
         base::Bind(&PrefMemberBase::InvokeUnnamedCallback, observer));
   }
-  void Init(const char* pref_name, PrefService* prefs) {
+  void Init(const std::string& pref_name, PrefService* prefs) {
     subtle::PrefMemberBase::Init(pref_name, prefs);
   }
 
@@ -264,7 +267,7 @@ class PrefMember : public subtle::PrefMemberBase {
     virtual ~Internal() {}
 
     virtual BASE_PREFS_EXPORT bool UpdateValueInternal(
-        const base::Value& value) const OVERRIDE;
+        const base::Value& value) const override;
 
     // We cache the value of the pref so we don't have to keep walking the pref
     // tree.
@@ -273,8 +276,8 @@ class PrefMember : public subtle::PrefMemberBase {
     DISALLOW_COPY_AND_ASSIGN(Internal);
   };
 
-  virtual Internal* internal() const OVERRIDE { return internal_.get(); }
-  virtual void CreateInternal() const OVERRIDE { internal_ = new Internal(); }
+  virtual Internal* internal() const override { return internal_.get(); }
+  virtual void CreateInternal() const override { internal_ = new Internal(); }
 
   // This method is used to do the actual sync with pref of the specified type.
   void BASE_PREFS_EXPORT UpdatePref(const ValueType& value);

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/dbus/printer_service_provider.h"
 
-#include "chrome/browser/chromeos/dbus/service_provider_test_helper.h"
+#include "chromeos/dbus/services/service_provider_test_helper.h"
 #include "dbus/message.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -20,13 +20,11 @@ class MockPrinterServiceProvider : public PrinterServiceProvider {
 
 class PrinterServiceProviderTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test_helper_.SetUp(kPrinterAdded, &service_provider_);
   }
 
-  virtual void TearDown() OVERRIDE {
-    test_helper_.TearDown();
-  }
+  void TearDown() override { test_helper_.TearDown(); }
 
  protected:
   MockPrinterServiceProvider service_provider_;

@@ -12,6 +12,7 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/mojo/service_registration.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
@@ -69,9 +70,12 @@ void ExtensionWebContentsObserver::RenderViewCreated(
       // ExtensionDispatcher knows what Extension is active, not just its ID.
       // This is important for classifying the Extension's JavaScript context
       // correctly (see ExtensionDispatcher::ClassifyJavaScriptContext).
+      // We also have to include the tab-specific permissions here, since it's
+      // an extension process.
       render_view_host->Send(
           new ExtensionMsg_Loaded(std::vector<ExtensionMsg_Loaded_Params>(
-              1, ExtensionMsg_Loaded_Params(extension))));
+              1, ExtensionMsg_Loaded_Params(
+                     extension, true /* include tab permissions */))));
       render_view_host->Send(
           new ExtensionMsg_ActivateExtension(extension->id()));
       break;
@@ -84,6 +88,11 @@ void ExtensionWebContentsObserver::RenderViewCreated(
     case Manifest::NUM_LOAD_TYPES:
       NOTREACHED();
   }
+}
+
+void ExtensionWebContentsObserver::RenderFrameCreated(
+    content::RenderFrameHost* render_frame_host) {
+  RegisterCoreExtensionServices(render_frame_host);
 }
 
 void ExtensionWebContentsObserver::NotifyRenderViewType(

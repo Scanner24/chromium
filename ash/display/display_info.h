@@ -11,8 +11,8 @@
 #include "ash/ash_export.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ash {
 
@@ -24,8 +24,8 @@ struct ASH_EXPORT DisplayMode {
               bool interlaced,
               bool native);
 
-  // Returns the size in DIP which isvisible to the user.
-  gfx::Size GetSizeInDIP() const;
+  // Returns the size in DIP which is visible to the user.
+  gfx::Size GetSizeInDIP(bool is_internal) const;
 
   // Returns true if |other| has same size and scale factors.
   bool IsEquivalent(const DisplayMode& other) const;
@@ -111,8 +111,8 @@ class ASH_EXPORT DisplayInfo {
   }
   gfx::Display::TouchSupport touch_support() const { return touch_support_; }
 
-  void set_touch_device_id(int id) { touch_device_id_ = id; }
-  int touch_device_id() const { return touch_device_id_; }
+  void set_touch_device_id(unsigned int id) { touch_device_id_ = id; }
+  unsigned int touch_device_id() const { return touch_device_id_; }
 
   // Gets/Sets the device scale factor of the display.
   float device_scale_factor() const { return device_scale_factor_; }
@@ -168,15 +168,19 @@ class ASH_EXPORT DisplayInfo {
   void SetOverscanInsets(const gfx::Insets& insets_in_dip);
   gfx::Insets GetOverscanInsetsInPixel() const;
 
+  // Sets/Gets the flag to clear overscan insets.
+  bool clear_overscan_insets() const { return clear_overscan_insets_; }
+  void set_clear_overscan_insets(bool clear) { clear_overscan_insets_ = clear; }
+
   void set_native(bool native) { native_ = native; }
   bool native() const { return native_; }
 
   const std::vector<DisplayMode>& display_modes() const {
     return display_modes_;
   }
-  void set_display_modes(std::vector<DisplayMode>& display_modes) {
-    display_modes_.swap(display_modes);
-  }
+  // Sets the display mode list. The mode list will be sorted for the
+  // display.
+  void SetDisplayModes(const std::vector<DisplayMode>& display_modes);
 
   // Returns the native mode size. If a native mode is not present, return an
   // empty size.
@@ -220,6 +224,10 @@ class ASH_EXPORT DisplayInfo {
   std::string ToFullString() const;
 
  private:
+  // Returns true if this display should use DSF=1.25 for UI scaling; i.e.
+  // SetUse125DSFForUIScaling(true) is called and this is the internal display.
+  bool Use125DSFRorUIScaling() const;
+
   int64 id_;
   std::string name_;
   bool has_overscan_;
@@ -228,7 +236,7 @@ class ASH_EXPORT DisplayInfo {
 
   // If the display is also a touch device, it will have a positive
   // |touch_device_id_|. Otherwise |touch_device_id_| is 0.
-  int touch_device_id_;
+  unsigned int touch_device_id_;
 
   // This specifies the device's pixel density. (For example, a
   // display whose DPI is higher than the threshold is considered to have
@@ -259,6 +267,10 @@ class ASH_EXPORT DisplayInfo {
   // be used such that the aspect ratio is preserved.
   bool is_aspect_preserving_scaling_;
 
+  // True if the displays' overscan inset should be cleared. This is
+  // to distinguish the empty overscan insets from native display info.
+  bool clear_overscan_insets_;
+
   // The list of modes supported by this display.
   std::vector<DisplayMode> display_modes_;
 
@@ -267,6 +279,8 @@ class ASH_EXPORT DisplayInfo {
 
   // The list of available variations for the color calibration.
   std::vector<ui::ColorCalibrationProfile> available_color_profiles_;
+
+  // If you add a new member, you need to update Copy().
 };
 
 }  // namespace ash

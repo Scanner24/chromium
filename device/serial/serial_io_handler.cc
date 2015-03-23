@@ -12,8 +12,16 @@
 namespace device {
 
 SerialIoHandler::SerialIoHandler(
-    scoped_refptr<base::MessageLoopProxy> file_thread_message_loop)
-    : file_thread_message_loop_(file_thread_message_loop) {
+    scoped_refptr<base::MessageLoopProxy> file_thread_message_loop,
+    scoped_refptr<base::MessageLoopProxy> ui_thread_message_loop)
+    : file_thread_message_loop_(file_thread_message_loop),
+      ui_thread_message_loop_(ui_thread_message_loop) {
+  options_.bitrate = 9600;
+  options_.data_bits = serial::DATA_BITS_EIGHT;
+  options_.parity_bit = serial::PARITY_BIT_NO;
+  options_.stop_bits = serial::STOP_BITS_ONE;
+  options_.cts_flow_control = false;
+  options_.has_cts_flow_control = true;
 }
 
 SerialIoHandler::~SerialIoHandler() {
@@ -22,17 +30,63 @@ SerialIoHandler::~SerialIoHandler() {
 }
 
 void SerialIoHandler::Open(const std::string& port,
+                           const serial::ConnectionOptions& options,
                            const OpenCompleteCallback& callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(open_complete_.is_null());
   open_complete_ = callback;
   DCHECK(file_thread_message_loop_.get());
-  file_thread_message_loop_->PostTask(
-      FROM_HERE,
-      base::Bind(&SerialIoHandler::StartOpen,
-                 this,
-                 port,
-                 base::MessageLoopProxy::current()));
+  DCHECK(ui_thread_message_loop_.get());
+  MergeConnectionOptions(options);
+  RequestAccess(port, file_thread_message_loop_, ui_thread_message_loop_);
+}
+
+void SerialIoHandler::RequestAccess(
+    const std::string& port,
+    scoped_refptr<base::MessageLoopProxy> file_message_loop,
+    scoped_refptr<base::MessageLoopProxy> ui_message_loop) {
+  OnRequestAccessComplete(port, true /* success */);
+}
+
+void SerialIoHandler::OnRequestAccessComplete(const std::string& port,
+                                              bool success) {
+  DCHECK(CalledOnValidThread());
+  if (success) {
+    DCHECK(file_thread_message_loop_.get());
+    file_thread_message_loop_->PostTask(
+        FROM_HERE,
+        base::Bind(&SerialIoHandler::StartOpen,
+                   this,
+                   port,
+                   base::MessageLoopProxy::current()));
+    return;
+  } else {
+    DCHECK(!open_complete_.is_null());
+    OpenCompleteCallback callback = open_complete_;
+    open_complete_.Reset();
+    callback.Run(false);
+    return;
+  }
+}
+
+void SerialIoHandler::MergeConnectionOptions(
+    const serial::ConnectionOptions& options) {
+  if (options.bitrate) {
+    options_.bitrate = options.bitrate;
+  }
+  if (options.data_bits != serial::DATA_BITS_NONE) {
+    options_.data_bits = options.data_bits;
+  }
+  if (options.parity_bit != serial::PARITY_BIT_NONE) {
+    options_.parity_bit = options.parity_bit;
+  }
+  if (options.stop_bits != serial::STOP_BITS_NONE) {
+    options_.stop_bits = options.stop_bits;
+  }
+  if (options.has_cts_flow_control) {
+    DCHECK(options_.has_cts_flow_control);
+    options_.cts_flow_control = options.cts_flow_control;
+  }
 }
 
 void SerialIoHandler::StartOpen(
@@ -63,15 +117,19 @@ void SerialIoHandler::FinishOpen(base::File file) {
   open_complete_.Reset();
 
   if (!file.IsValid()) {
+    LOG(ERROR) << "Failed to open serial port: "
+               << base::File::ErrorToString(file.error_details());
     callback.Run(false);
     return;
   }
 
   file_ = file.Pass();
 
-  bool success = PostOpen();
-  if (!success)
+  bool success = PostOpen() && ConfigurePortImpl();
+  if (!success) {
     Close();
+  }
+
   callback.Run(success);
 }
 
@@ -163,6 +221,11 @@ void SerialIoHandler::CancelWrite(serial::SendError reason) {
     write_cancel_reason_ = reason;
     CancelWriteImpl();
   }
+}
+
+bool SerialIoHandler::ConfigurePort(const serial::ConnectionOptions& options) {
+  MergeConnectionOptions(options);
+  return ConfigurePortImpl();
 }
 
 void SerialIoHandler::QueueReadCompleted(int bytes_read,

@@ -17,7 +17,7 @@ class DiscardableMemoryEmulated
       public internal::DiscardableMemoryManagerAllocation {
  public:
   explicit DiscardableMemoryEmulated(size_t bytes);
-  virtual ~DiscardableMemoryEmulated();
+  ~DiscardableMemoryEmulated() override;
 
   static bool ReduceMemoryUsage();
 
@@ -26,19 +26,17 @@ class DiscardableMemoryEmulated
   // unavailable in kernel space. crbug.com/400423
   BASE_EXPORT static void ReduceMemoryUsageUntilWithinLimit(size_t bytes);
 
-  static void PurgeForTesting();
-
   bool Initialize();
 
   // Overridden from DiscardableMemory:
-  virtual DiscardableMemoryLockStatus Lock() OVERRIDE;
-  virtual void Unlock() OVERRIDE;
-  virtual void* Memory() const OVERRIDE;
+  DiscardableMemoryLockStatus Lock() override;
+  void Unlock() override;
+  void* Memory() const override;
 
   // Overridden from internal::DiscardableMemoryManagerAllocation:
-  virtual bool AllocateAndAcquireLock() OVERRIDE;
-  virtual void ReleaseLock() OVERRIDE {}
-  virtual void Purge() OVERRIDE;
+  bool AllocateAndAcquireLock() override;
+  void ReleaseLock() override {}
+  void Purge() override;
 
  private:
   const size_t bytes_;

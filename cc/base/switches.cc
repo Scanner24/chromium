@@ -15,10 +15,6 @@ const char kDisableThreadedAnimation[] = "disable-threaded-animation";
 const char kDisableCompositedAntialiasing[] =
     "disable-composited-antialiasing";
 
-// Disables sending the next BeginMainFrame before the previous commit has
-// drawn.
-const char kDisableMainFrameBeforeDraw[] = "disable-main-frame-before-draw";
-
 // Disables sending the next BeginMainFrame before the previous commit
 // activates. Overrides the kEnableMainFrameBeforeActivation flag.
 const char kDisableMainFrameBeforeActivation[] =
@@ -30,9 +26,6 @@ const char kEnableMainFrameBeforeActivation[] =
 
 const char kEnableTopControlsPositionCalculation[] =
     "enable-top-controls-position-calculation";
-
-// The height of the movable top controls.
-const char kTopControlsHeight[] = "top-controls-height";
 
 // Percentage of the top controls need to be hidden before they will auto hide.
 const char kTopControlsHideThreshold[] = "top-controls-hide-threshold";
@@ -76,7 +69,9 @@ const char kEnableGpuBenchmarking[] = "enable-gpu-benchmarking";
 const char kShowCompositedLayerBorders[] = "show-composited-layer-borders";
 const char kUIShowCompositedLayerBorders[] = "ui-show-layer-borders";
 
-// Draws a FPS indicator
+// Draws a heads-up-display showing Frames Per Second as well as GPU memory
+// usage. If you also use --vmodule="head*=1" then FPS will also be output to
+// the console log.
 const char kShowFPSCounter[] = "show-fps-counter";
 const char kUIShowFPSCounter[] = "ui-show-fps-counter";
 
@@ -103,16 +98,6 @@ const char kUIShowScreenSpaceRects[] = "ui-show-screenspace-rects";
 const char kShowReplicaScreenSpaceRects[] = "show-replica-screenspace-rects";
 const char kUIShowReplicaScreenSpaceRects[] =
     "ui-show-replica-screenspace-rects";
-
-// Show rects in the HUD wherever something is known to be drawn opaque and is
-// considered occluding the pixels behind it.
-const char kShowOccludingRects[] = "show-occluding-rects";
-const char kUIShowOccludingRects[] = "ui-show-occluding-rects";
-
-// Show rects in the HUD wherever something is not known to be drawn opaque and
-// is not considered to be occluding the pixels behind it.
-const char kShowNonOccludingRects[] = "show-nonoccluding-rects";
-const char kUIShowNonOccludingRects[] = "ui-show-nonoccluding-rects";
 
 // Prevents the layer tree unit tests from timing out.
 const char kCCLayerTreeTestNoTimeout[] = "cc-layer-tree-test-no-timeout";

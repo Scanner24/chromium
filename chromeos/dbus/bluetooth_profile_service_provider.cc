@@ -69,7 +69,7 @@ class BluetoothProfileServiceProviderImpl
                    weak_ptr_factory_.GetWeakPtr()));
   }
 
-  virtual ~BluetoothProfileServiceProviderImpl() {
+  ~BluetoothProfileServiceProviderImpl() override {
     VLOG(1) << "Cleaning up Bluetooth Profile: " << object_path_.value();
 
     // Unregister the object path so we can reuse with a new agent.
@@ -195,17 +195,13 @@ class BluetoothProfileServiceProviderImpl
         break;
       }
       case Delegate::REJECTED: {
-        response_sender.Run(
-            dbus::ErrorResponse::FromMethodCall(
-                method_call, bluetooth_profile::kErrorRejected, "rejected")
-            .PassAs<dbus::Response>());
+        response_sender.Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, bluetooth_profile::kErrorRejected, "rejected"));
         break;
       }
       case Delegate::CANCELLED: {
-        response_sender.Run(
-            dbus::ErrorResponse::FromMethodCall(
-                method_call, bluetooth_profile::kErrorCanceled, "canceled")
-            .PassAs<dbus::Response>());
+        response_sender.Run(dbus::ErrorResponse::FromMethodCall(
+            method_call, bluetooth_profile::kErrorCanceled, "canceled"));
         break;
       }
       default:

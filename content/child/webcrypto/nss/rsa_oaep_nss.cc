@@ -11,7 +11,7 @@
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
 #include "content/child/webcrypto/nss/key_nss.h"
-#include "content/child/webcrypto/nss/rsa_key_nss.h"
+#include "content/child/webcrypto/nss/rsa_hashed_algorithm_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
 #include "content/child/webcrypto/status.h"
 #include "content/child/webcrypto/webcrypto_util.h"
@@ -99,15 +99,10 @@ Status EncryptRsaOaep(SECKEYPublicKey* key,
   buffer->resize(SECKEY_PublicKeyStrength(key));
   unsigned char* buffer_data = vector_as_array(buffer);
   unsigned int output_len;
-  if (NssRuntimeSupport::Get()->pk11_pub_encrypt_func()(key,
-                                                        CKM_RSA_PKCS_OAEP,
-                                                        &param,
-                                                        buffer_data,
-                                                        &output_len,
-                                                        buffer->size(),
-                                                        data.bytes(),
-                                                        data.byte_length(),
-                                                        NULL) != SECSuccess) {
+  if (NssRuntimeSupport::Get()->pk11_pub_encrypt_func()(
+          key, CKM_RSA_PKCS_OAEP, &param, buffer_data, &output_len,
+          buffer->size(), data.bytes(), data.byte_length(),
+          NULL) != SECSuccess) {
     return Status::OperationError();
   }
 
@@ -142,15 +137,9 @@ Status DecryptRsaOaep(SECKEYPrivateKey* key,
 
   unsigned char* buffer_data = vector_as_array(buffer);
   unsigned int output_len;
-  if (NssRuntimeSupport::Get()->pk11_priv_decrypt_func()(key,
-                                                         CKM_RSA_PKCS_OAEP,
-                                                         &param,
-                                                         buffer_data,
-                                                         &output_len,
-                                                         buffer->size(),
-                                                         data.bytes(),
-                                                         data.byte_length()) !=
-      SECSuccess) {
+  if (NssRuntimeSupport::Get()->pk11_priv_decrypt_func()(
+          key, CKM_RSA_PKCS_OAEP, &param, buffer_data, &output_len,
+          buffer->size(), data.bytes(), data.byte_length()) != SECSuccess) {
     return Status::OperationError();
   }
 
@@ -168,29 +157,28 @@ class RsaOaepImplementation : public RsaHashedAlgorithm {
             blink::WebCryptoKeyUsageDecrypt |
                 blink::WebCryptoKeyUsageUnwrapKey) {}
 
-  virtual Status VerifyKeyUsagesBeforeGenerateKeyPair(
-      blink::WebCryptoKeyUsageMask combined_usage_mask,
-      blink::WebCryptoKeyUsageMask* public_usage_mask,
-      blink::WebCryptoKeyUsageMask* private_usage_mask) const OVERRIDE {
+  Status GenerateKey(const blink::WebCryptoAlgorithm& algorithm,
+                     bool extractable,
+                     blink::WebCryptoKeyUsageMask usages,
+                     GenerateKeyResult* result) const override {
     Status status = NssSupportsRsaOaep();
     if (status.IsError())
       return status;
-    return RsaHashedAlgorithm::VerifyKeyUsagesBeforeGenerateKeyPair(
-        combined_usage_mask, public_usage_mask, private_usage_mask);
+    return RsaHashedAlgorithm::GenerateKey(algorithm, extractable, usages,
+                                           result);
   }
 
-  virtual Status VerifyKeyUsagesBeforeImportKey(
+  Status VerifyKeyUsagesBeforeImportKey(
       blink::WebCryptoKeyFormat format,
-      blink::WebCryptoKeyUsageMask usage_mask) const OVERRIDE {
+      blink::WebCryptoKeyUsageMask usages) const override {
     Status status = NssSupportsRsaOaep();
     if (status.IsError())
       return status;
-    return RsaHashedAlgorithm::VerifyKeyUsagesBeforeImportKey(format,
-                                                              usage_mask);
+    return RsaHashedAlgorithm::VerifyKeyUsagesBeforeImportKey(format, usages);
   }
 
-  virtual const char* GetJwkAlgorithm(
-      const blink::WebCryptoAlgorithmId hash) const OVERRIDE {
+  const char* GetJwkAlgorithm(
+      const blink::WebCryptoAlgorithmId hash) const override {
     switch (hash) {
       case blink::WebCryptoAlgorithmIdSha1:
         return "RSA-OAEP";
@@ -205,34 +193,30 @@ class RsaOaepImplementation : public RsaHashedAlgorithm {
     }
   }
 
-  virtual Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     if (key.type() != blink::WebCryptoKeyTypePublic)
       return Status::ErrorUnexpectedKeyType();
 
     return EncryptRsaOaep(
         PublicKeyNss::Cast(key)->key(),
         key.algorithm().rsaHashedParams()->hash(),
-        CryptoData(algorithm.rsaOaepParams()->optionalLabel()),
-        data,
-        buffer);
+        CryptoData(algorithm.rsaOaepParams()->optionalLabel()), data, buffer);
   }
 
-  virtual Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     if (key.type() != blink::WebCryptoKeyTypePrivate)
       return Status::ErrorUnexpectedKeyType();
 
     return DecryptRsaOaep(
         PrivateKeyNss::Cast(key)->key(),
         key.algorithm().rsaHashedParams()->hash(),
-        CryptoData(algorithm.rsaOaepParams()->optionalLabel()),
-        data,
-        buffer);
+        CryptoData(algorithm.rsaOaepParams()->optionalLabel()), data, buffer);
   }
 };
 

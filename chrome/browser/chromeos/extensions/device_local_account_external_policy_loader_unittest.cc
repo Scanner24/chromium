@@ -17,7 +17,6 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
-#include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
@@ -29,6 +28,7 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/external_provider_interface.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/browser/updater/extension_downloader.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
@@ -63,12 +63,13 @@ class MockExternalPolicyProviderVisitor
   MockExternalPolicyProviderVisitor();
   virtual ~MockExternalPolicyProviderVisitor();
 
-  MOCK_METHOD6(OnExternalExtensionFileFound,
+  MOCK_METHOD7(OnExternalExtensionFileFound,
                bool(const std::string&,
                     const base::Version*,
                     const base::FilePath&,
                     extensions::Manifest::Location,
                     int,
+                    bool,
                     bool));
   MOCK_METHOD6(OnExternalExtensionUpdateUrlFound,
                bool(const std::string&,
@@ -95,10 +96,10 @@ MockExternalPolicyProviderVisitor::~MockExternalPolicyProviderVisitor() {
 class DeviceLocalAccountExternalPolicyLoaderTest : public testing::Test {
  protected:
   DeviceLocalAccountExternalPolicyLoaderTest();
-  virtual ~DeviceLocalAccountExternalPolicyLoaderTest();
+  ~DeviceLocalAccountExternalPolicyLoaderTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   void VerifyAndResetVisitorCallExpectations();
   void SetForceInstallListPolicy();
@@ -155,7 +156,7 @@ void DeviceLocalAccountExternalPolicyLoaderTest::TearDown() {
 void DeviceLocalAccountExternalPolicyLoaderTest::
     VerifyAndResetVisitorCallExpectations() {
   Mock::VerifyAndClearExpectations(&visitor_);
-  EXPECT_CALL(visitor_, OnExternalExtensionFileFound(_, _, _, _, _, _))
+  EXPECT_CALL(visitor_, OnExternalExtensionFileFound(_, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(visitor_, OnExternalExtensionUpdateUrlFound(_, _, _, _, _, _))
       .Times(0);
@@ -279,6 +280,7 @@ TEST_F(DeviceLocalAccountExternalPolicyLoaderTest, ForceInstallListSet) {
       _,
       cached_crx_path,
       extensions::Manifest::EXTERNAL_POLICY,
+      _,
       _,
       _));
   EXPECT_CALL(visitor_, OnExternalProviderReady(provider_.get()))

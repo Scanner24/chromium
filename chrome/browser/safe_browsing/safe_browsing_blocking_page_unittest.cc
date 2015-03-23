@@ -51,8 +51,7 @@ class TestSafeBrowsingUIManager: public SafeBrowsingUIManager {
       : SafeBrowsingUIManager(service) {
   }
 
-  virtual void SendSerializedMalwareDetails(
-      const std::string& serialized) OVERRIDE {
+  void SendSerializedMalwareDetails(const std::string& serialized) override {
     details_.push_back(serialized);
   }
 
@@ -61,7 +60,7 @@ class TestSafeBrowsingUIManager: public SafeBrowsingUIManager {
   }
 
  private:
-  virtual ~TestSafeBrowsingUIManager() {}
+  ~TestSafeBrowsingUIManager() override {}
 
   std::list<std::string> details_;
 };
@@ -70,13 +69,13 @@ class TestSafeBrowsingBlockingPageFactory
     : public SafeBrowsingBlockingPageFactory {
  public:
   TestSafeBrowsingBlockingPageFactory() { }
-  virtual ~TestSafeBrowsingBlockingPageFactory() { }
+  ~TestSafeBrowsingBlockingPageFactory() override {}
 
-  virtual SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
+  SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
       SafeBrowsingUIManager* manager,
       WebContents* web_contents,
       const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources)
-      OVERRIDE {
+      override {
     return new TestSafeBrowsingBlockingPage(manager, web_contents,
                                               unsafe_resources);
   }
@@ -99,13 +98,13 @@ class SafeBrowsingBlockingPageTest : public ChromeRenderViewHostTestHarness {
     ui_manager_ = new TestSafeBrowsingUIManager(NULL);
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     SafeBrowsingBlockingPage::RegisterFactory(&factory_);
     ResetUserResponse();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Release the UI manager before the BrowserThreads are destroyed.
     ui_manager_ = NULL;
     SafeBrowsingBlockingPage::RegisterFactory(NULL);
@@ -166,14 +165,14 @@ class SafeBrowsingBlockingPageTest : public ChromeRenderViewHostTestHarness {
 
   static void ProceedThroughInterstitial(
       SafeBrowsingBlockingPage* sb_interstitial) {
-    sb_interstitial->interstitial_page_->Proceed();
+    sb_interstitial->interstitial_page()->Proceed();
     // Proceed() posts a task to update the SafeBrowsingService::Client.
     base::RunLoop().RunUntilIdle();
   }
 
   static void DontProceedThroughInterstitial(
       SafeBrowsingBlockingPage* sb_interstitial) {
-    sb_interstitial->interstitial_page_->DontProceed();
+    sb_interstitial->interstitial_page()->DontProceed();
     // DontProceed() posts a task to update the SafeBrowsingService::Client.
     base::RunLoop().RunUntilIdle();
   }
@@ -579,8 +578,8 @@ TEST_F(SafeBrowsingBlockingPageTest, ProceedThenDontProceed) {
 
   // Simulate the user clicking "proceed" then "don't proceed" (before the
   // interstitial is shown).
-  sb_interstitial->interstitial_page_->Proceed();
-  sb_interstitial->interstitial_page_->DontProceed();
+  sb_interstitial->interstitial_page()->Proceed();
+  sb_interstitial->interstitial_page()->DontProceed();
   // Proceed() and DontProceed() post a task to update the
   // SafeBrowsingService::Client.
   base::RunLoop().RunUntilIdle();

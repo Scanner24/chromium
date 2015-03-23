@@ -17,15 +17,19 @@
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/clock.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
@@ -212,23 +216,6 @@ void RecordOfflineStatus(int load_flags, RequestOfflineStatus status) {
   }
 }
 
-// TODO(rvargas): Remove once we get the data.
-void RecordVaryHeaderHistogram(const net::HttpResponseInfo* response) {
-  enum VaryType {
-    VARY_NOT_PRESENT,
-    VARY_UA,
-    VARY_OTHER,
-    VARY_MAX
-  };
-  VaryType vary = VARY_NOT_PRESENT;
-  if (response->vary_data.is_valid()) {
-    vary = VARY_OTHER;
-    if (response->headers->HasHeaderValue("vary", "user-agent"))
-      vary = VARY_UA;
-  }
-  UMA_HISTOGRAM_ENUMERATION("HttpCache.Vary", vary, VARY_MAX);
-}
-
 void RecordNoStoreHeaderHistogram(int load_flags,
                                   const net::HttpResponseInfo* response) {
   if (load_flags & net::LOAD_MAIN_FRAME) {
@@ -236,6 +223,18 @@ void RecordNoStoreHeaderHistogram(int load_flags,
         "Net.MainFrameNoStore",
         response->headers->HasHeaderValue("cache-control", "no-store"));
   }
+}
+
+base::Value* NetLogAsyncRevalidationInfoCallback(
+    const net::NetLog::Source& source,
+    const net::HttpRequestInfo* request,
+    net::NetLog::LogLevel log_level) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  source.AddToEventParameters(dict);
+
+  dict->SetString("url", request->url.possibly_invalid_spec());
+  dict->SetString("method", request->method);
+  return dict;
 }
 
 enum ExternallyConditionalizedType {
@@ -309,9 +308,7 @@ static bool HeaderMatches(const HttpRequestHeaders& headers,
 
 //-----------------------------------------------------------------------------
 
-HttpCache::Transaction::Transaction(
-    RequestPriority priority,
-    HttpCache* cache)
+HttpCache::Transaction::Transaction(RequestPriority priority, HttpCache* cache)
     : next_state_(STATE_NONE),
       request_(NULL),
       priority_(priority),
@@ -332,6 +329,7 @@ HttpCache::Transaction::Transaction(
       vary_mismatch_(false),
       couldnt_conditionalize_request_(false),
       bypass_lock_for_test_(false),
+      fail_conditionalization_for_test_(false),
       io_buf_len_(0),
       read_offset_(0),
       effective_load_flags_(0),
@@ -340,9 +338,9 @@ HttpCache::Transaction::Transaction(
       total_received_bytes_(0),
       websocket_handshake_stream_base_create_helper_(NULL),
       weak_factory_(this) {
-  COMPILE_ASSERT(HttpCache::Transaction::kNumValidationHeaders ==
-                 arraysize(kValidationHeaders),
-                 Invalid_number_of_validation_headers);
+  static_assert(HttpCache::Transaction::kNumValidationHeaders ==
+                    arraysize(kValidationHeaders),
+                "invalid number of validation headers");
 
   io_callback_ = base::Bind(&Transaction::OnIOComplete,
                               weak_factory_.GetWeakPtr());
@@ -443,8 +441,12 @@ int HttpCache::Transaction::Start(const HttpRequestInfo* request,
 
   // Setting this here allows us to check for the existence of a callback_ to
   // determine if we are still inside Start.
-  if (rv == ERR_IO_PENDING)
-    callback_ = callback;
+  if (rv == ERR_IO_PENDING) {
+    callback_ = tracked_objects::ScopedTracker::TrackCallback(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422516 HttpCache::Transaction::Start"),
+        callback);
+  }
 
   return rv;
 }
@@ -461,8 +463,12 @@ int HttpCache::Transaction::RestartIgnoringLastError(
 
   int rv = RestartNetworkRequest();
 
-  if (rv == ERR_IO_PENDING)
-    callback_ = callback;
+  if (rv == ERR_IO_PENDING) {
+    callback_ = tracked_objects::ScopedTracker::TrackCallback(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422516 HttpCache::Transaction::RestartIgnoringLastError"),
+        callback);
+  }
 
   return rv;
 }
@@ -480,8 +486,12 @@ int HttpCache::Transaction::RestartWithCertificate(
 
   int rv = RestartNetworkRequestWithCertificate(client_cert);
 
-  if (rv == ERR_IO_PENDING)
-    callback_ = callback;
+  if (rv == ERR_IO_PENDING) {
+    callback_ = tracked_objects::ScopedTracker::TrackCallback(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422516 HttpCache::Transaction::RestartWithCertificate"),
+        callback);
+  }
 
   return rv;
 }
@@ -503,8 +513,12 @@ int HttpCache::Transaction::RestartWithAuth(
 
   int rv = RestartNetworkRequestWithAuth(credentials);
 
-  if (rv == ERR_IO_PENDING)
-    callback_ = callback;
+  if (rv == ERR_IO_PENDING) {
+    callback_ = tracked_objects::ScopedTracker::TrackCallback(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422516 HttpCache::Transaction::RestartWithAuth"),
+        callback);
+  }
 
   return rv;
 }
@@ -562,7 +576,9 @@ int HttpCache::Transaction::Read(IOBuffer* buf, int buf_len,
 
   if (rv == ERR_IO_PENDING) {
     DCHECK(callback_.is_null());
-    callback_ = callback;
+    callback_ = tracked_objects::ScopedTracker::TrackCallback(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("422516 HttpCache::Transaction::Read"),
+        callback);
   }
   return rv;
 }
@@ -701,6 +717,11 @@ int HttpCache::Transaction::ResumeNetworkStart() {
 //-----------------------------------------------------------------------------
 
 void HttpCache::Transaction::DoCallback(int rv) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCallback"));
+
   DCHECK(rv != ERR_IO_PENDING);
   DCHECK(!callback_.is_null());
 
@@ -735,8 +756,8 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 2. Cached entry, no validation:
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SetupEntryForRead()
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SetupEntryForRead()
 //
 //   Read():
 //   CacheReadData*
@@ -744,10 +765,10 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 3. Cached entry, validation (304):
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SendRequest* -> SuccessfulSendRequest -> UpdateCachedResponse ->
-//   CacheWriteResponse* -> UpdateCachedResponseComplete ->
-//   OverwriteCachedResponse -> PartialHeadersReceived
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   UpdateCachedResponse -> CacheWriteResponse* -> UpdateCachedResponseComplete
+//   -> OverwriteCachedResponse -> PartialHeadersReceived
 //
 //   Read():
 //   CacheReadData*
@@ -755,10 +776,10 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 4. Cached entry, validation and replace (200):
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SendRequest* -> SuccessfulSendRequest -> OverwriteCachedResponse ->
-//   CacheWriteResponse* -> DoTruncateCachedData* -> TruncateCachedMetadata* ->
-//   PartialHeadersReceived
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   OverwriteCachedResponse -> CacheWriteResponse* -> DoTruncateCachedData* ->
+//   TruncateCachedMetadata* -> PartialHeadersReceived
 //
 //   Read():
 //   NetworkRead* -> CacheWriteData*
@@ -766,12 +787,12 @@ int HttpCache::Transaction::HandleResult(int rv) {
 // 5. Sparse entry, partially cached, byte range request:
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> CacheQueryData* ->
-//   ValidateEntryHeadersAndContinue() -> StartPartialCacheValidation ->
-//   CompletePartialCacheValidation -> BeginCacheValidation() -> SendRequest* ->
-//   SuccessfulSendRequest -> UpdateCachedResponse -> CacheWriteResponse* ->
-//   UpdateCachedResponseComplete -> OverwriteCachedResponse ->
-//   PartialHeadersReceived
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   CacheQueryData* -> ValidateEntryHeadersAndContinue() ->
+//   StartPartialCacheValidation -> CompletePartialCacheValidation ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   UpdateCachedResponse -> CacheWriteResponse* -> UpdateCachedResponseComplete
+//   -> OverwriteCachedResponse -> PartialHeadersReceived
 //
 //   Read() 1:
 //   NetworkRead* -> CacheWriteData*
@@ -810,8 +831,9 @@ int HttpCache::Transaction::HandleResult(int rv) {
 //   itself.
 //   Start():
 //   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
-//   -> BeginPartialCacheValidation() -> BeginCacheValidation() ->
-//   SendRequest* -> SuccessfulSendRequest -> OverwriteCachedResponse
+//   -> CacheDispatchValidation -> BeginPartialCacheValidation() ->
+//   BeginCacheValidation() -> SendRequest* -> SuccessfulSendRequest ->
+//   OverwriteCachedResponse
 //
 // 10. HEAD. Sparse entry, partially cached:
 //   Serve the request from the cache, as long as it doesn't require
@@ -822,6 +844,28 @@ int HttpCache::Transaction::HandleResult(int rv) {
 //   Start(): Basically the same as example 7, as we never create a partial_
 //   object for this request.
 //
+// 11. Prefetch, not-cached entry:
+//   The same as example 1. The "unused_since_prefetch" bit is stored as true in
+//   UpdateCachedResponse.
+//
+// 12. Prefetch, cached entry:
+//   Like examples 2-4, only CacheToggleUnusedSincePrefetch* is inserted between
+//   CacheReadResponse* and CacheDispatchValidation if the unused_since_prefetch
+//   bit is unset.
+//
+// 13. Cached entry less than 5 minutes old, unused_since_prefetch is true:
+//   Skip validation, similar to example 2.
+//   GetBackend* -> InitEntry -> OpenEntry* -> AddToEntry* -> CacheReadResponse*
+//   -> CacheToggleUnusedSincePrefetch* -> CacheDispatchValidation ->
+//   BeginPartialCacheValidation() -> BeginCacheValidation() ->
+//   SetupEntryForRead()
+//
+//   Read():
+//   CacheReadData*
+//
+// 14. Cached entry more than 5 minutes old, unused_since_prefetch is true:
+//   Like examples 2-4, only CacheToggleUnusedSincePrefetch* is inserted between
+//   CacheReadResponse* and CacheDispatchValidation.
 int HttpCache::Transaction::DoLoop(int result) {
   DCHECK(next_state_ != STATE_NONE);
 
@@ -930,6 +974,17 @@ int HttpCache::Transaction::DoLoop(int result) {
       case STATE_CACHE_READ_RESPONSE_COMPLETE:
         rv = DoCacheReadResponseComplete(rv);
         break;
+      case STATE_CACHE_DISPATCH_VALIDATION:
+        DCHECK_EQ(OK, rv);
+        rv = DoCacheDispatchValidation();
+        break;
+      case STATE_TOGGLE_UNUSED_SINCE_PREFETCH:
+        DCHECK_EQ(OK, rv);
+        rv = DoCacheToggleUnusedSincePrefetch();
+        break;
+      case STATE_TOGGLE_UNUSED_SINCE_PREFETCH_COMPLETE:
+        rv = DoCacheToggleUnusedSincePrefetchComplete(rv);
+        break;
       case STATE_CACHE_WRITE_RESPONSE:
         DCHECK_EQ(OK, rv);
         rv = DoCacheWriteResponse();
@@ -982,6 +1037,11 @@ int HttpCache::Transaction::DoLoop(int result) {
 }
 
 int HttpCache::Transaction::DoGetBackend() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoGetBackend"));
+
   cache_pending_ = true;
   next_state_ = STATE_GET_BACKEND_COMPLETE;
   net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_GET_BACKEND);
@@ -989,6 +1049,11 @@ int HttpCache::Transaction::DoGetBackend() {
 }
 
 int HttpCache::Transaction::DoGetBackendComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoGetBackendComplete"));
+
   DCHECK(result == OK || result == ERR_FAILED);
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_GET_BACKEND,
                                     result);
@@ -1054,6 +1119,11 @@ int HttpCache::Transaction::DoGetBackendComplete(int result) {
 }
 
 int HttpCache::Transaction::DoSendRequest() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoSendRequest"));
+
   DCHECK(mode_ & WRITE || mode_ == NONE);
   DCHECK(!network_trans_.get());
 
@@ -1081,6 +1151,11 @@ int HttpCache::Transaction::DoSendRequest() {
 }
 
 int HttpCache::Transaction::DoSendRequestComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoSendRequestComplete"));
+
   if (!cache_.get())
     return ERR_UNEXPECTED;
 
@@ -1136,6 +1211,11 @@ int HttpCache::Transaction::DoSendRequestComplete(int result) {
 
 // We received the response headers and there is no error.
 int HttpCache::Transaction::DoSuccessfulSendRequest() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoSuccessfulSendRequest"));
+
   DCHECK(!new_response_);
   const HttpResponseInfo* new_response = network_trans_->GetResponseInfo();
   bool authentication_failure = false;
@@ -1173,6 +1253,7 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
     // If we have an authentication response, we are exposed to weird things
     // hapenning if the user cancels the authentication before we receive
     // the new response.
+    net_log_.AddEvent(NetLog::TYPE_HTTP_CACHE_RE_SEND_PARTIAL_REQUEST);
     UpdateTransactionPattern(PATTERN_NOT_COVERED);
     response_ = HttpResponseInfo();
     ResetNetworkTransaction();
@@ -1193,6 +1274,7 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
     UpdateTransactionPattern(PATTERN_ENTRY_NOT_CACHED);
   }
 
+  // Invalidate any cached GET with a successful PUT or DELETE.
   if (mode_ == WRITE &&
       (request_->method == "PUT" || request_->method == "DELETE")) {
     if (NonErrorResponse(new_response->headers->response_code())) {
@@ -1204,12 +1286,13 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
     mode_ = NONE;
   }
 
-  if (request_->method == "POST" &&
+  // Invalidate any cached GET with a successful POST.
+  if (!(effective_load_flags_ & LOAD_DISABLE_CACHE) &&
+      request_->method == "POST" &&
       NonErrorResponse(new_response->headers->response_code())) {
     cache_->DoomMainEntryForUrl(request_->url);
   }
 
-  RecordVaryHeaderHistogram(new_response);
   RecordNoStoreHeaderHistogram(request_->load_flags, new_response);
 
   if (new_response_->headers->response_code() == 416 &&
@@ -1235,11 +1318,21 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
 }
 
 int HttpCache::Transaction::DoNetworkRead() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoNetworkRead"));
+
   next_state_ = STATE_NETWORK_READ_COMPLETE;
   return network_trans_->Read(read_buf_.get(), io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoNetworkReadComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoNetworkReadComplete"));
+
   DCHECK(mode_ & WRITE || mode_ == NONE);
 
   if (!cache_.get())
@@ -1255,6 +1348,11 @@ int HttpCache::Transaction::DoNetworkReadComplete(int result) {
 }
 
 int HttpCache::Transaction::DoInitEntry() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoInitEntry"));
+
   DCHECK(!new_entry_);
 
   if (!cache_.get())
@@ -1270,6 +1368,11 @@ int HttpCache::Transaction::DoInitEntry() {
 }
 
 int HttpCache::Transaction::DoOpenEntry() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoOpenEntry"));
+
   DCHECK(!new_entry_);
   next_state_ = STATE_OPEN_ENTRY_COMPLETE;
   cache_pending_ = true;
@@ -1279,6 +1382,11 @@ int HttpCache::Transaction::DoOpenEntry() {
 }
 
 int HttpCache::Transaction::DoOpenEntryComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoOpenEntryComplete"));
+
   // It is important that we go to STATE_ADD_TO_ENTRY whenever the result is
   // OK, otherwise the cache will end up with an active entry without any
   // transaction attached.
@@ -1322,6 +1430,11 @@ int HttpCache::Transaction::DoOpenEntryComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCreateEntry() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCreateEntry"));
+
   DCHECK(!new_entry_);
   next_state_ = STATE_CREATE_ENTRY_COMPLETE;
   cache_pending_ = true;
@@ -1330,6 +1443,11 @@ int HttpCache::Transaction::DoCreateEntry() {
 }
 
 int HttpCache::Transaction::DoCreateEntryComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCreateEntryComplete"));
+
   // It is important that we go to STATE_ADD_TO_ENTRY whenever the result is
   // OK, otherwise the cache will end up with an active entry without any
   // transaction attached.
@@ -1343,10 +1461,7 @@ int HttpCache::Transaction::DoCreateEntryComplete(int result) {
     return OK;
   }
 
-  if (result == OK) {
-    UMA_HISTOGRAM_BOOLEAN("HttpCache.OpenToCreateRace", false);
-  } else {
-    UMA_HISTOGRAM_BOOLEAN("HttpCache.OpenToCreateRace", true);
+  if (result != OK) {
     // We have a race here: Maybe we failed to open the entry and decided to
     // create one, but by the time we called create, another transaction already
     // created the entry. If we want to eliminate this issue, we need an atomic
@@ -1361,6 +1476,11 @@ int HttpCache::Transaction::DoCreateEntryComplete(int result) {
 }
 
 int HttpCache::Transaction::DoDoomEntry() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoDoomEntry"));
+
   next_state_ = STATE_DOOM_ENTRY_COMPLETE;
   cache_pending_ = true;
   if (first_cache_access_since_.is_null())
@@ -1370,6 +1490,11 @@ int HttpCache::Transaction::DoDoomEntry() {
 }
 
 int HttpCache::Transaction::DoDoomEntryComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoDoomEntryComplete"));
+
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_DOOM_ENTRY, result);
   next_state_ = STATE_CREATE_ENTRY;
   cache_pending_ = false;
@@ -1379,6 +1504,11 @@ int HttpCache::Transaction::DoDoomEntryComplete(int result) {
 }
 
 int HttpCache::Transaction::DoAddToEntry() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoAddToEntry"));
+
   DCHECK(new_entry_);
   cache_pending_ = true;
   next_state_ = STATE_ADD_TO_ENTRY_COMPLETE;
@@ -1420,6 +1550,11 @@ int HttpCache::Transaction::DoAddToEntry() {
 }
 
 int HttpCache::Transaction::DoAddToEntryComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoAddToEntryComplete"));
+
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_ADD_TO_ENTRY,
                                     result);
   const TimeDelta entry_lock_wait =
@@ -1471,6 +1606,11 @@ int HttpCache::Transaction::DoAddToEntryComplete(int result) {
 
 // We may end up here multiple times for a given request.
 int HttpCache::Transaction::DoStartPartialCacheValidation() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoStartPartialCacheValidation"));
+
   if (mode_ == NONE)
     return OK;
 
@@ -1479,6 +1619,11 @@ int HttpCache::Transaction::DoStartPartialCacheValidation() {
 }
 
 int HttpCache::Transaction::DoCompletePartialCacheValidation(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCompletePartialCacheValidation"));
+
   if (!result) {
     // This is the end of the request.
     if (mode_ & WRITE) {
@@ -1506,6 +1651,11 @@ int HttpCache::Transaction::DoCompletePartialCacheValidation(int result) {
 
 // We received 304 or 206 and we want to update the cached response headers.
 int HttpCache::Transaction::DoUpdateCachedResponse() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoUpdateCachedResponse"));
+
   next_state_ = STATE_UPDATE_CACHED_RESPONSE_COMPLETE;
   int rv = OK;
   // Update cached response based on headers in new_response.
@@ -1514,6 +1664,7 @@ int HttpCache::Transaction::DoUpdateCachedResponse() {
   response_.response_time = new_response_->response_time;
   response_.request_time = new_response_->request_time;
   response_.network_accessed = new_response_->network_accessed;
+  response_.unused_since_prefetch = new_response_->unused_since_prefetch;
 
   if (response_.headers->HasHeaderValue("cache-control", "no-store")) {
     if (!entry_->doomed) {
@@ -1533,6 +1684,11 @@ int HttpCache::Transaction::DoUpdateCachedResponse() {
 }
 
 int HttpCache::Transaction::DoUpdateCachedResponseComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoUpdateCachedResponseComplete"));
+
   if (mode_ == UPDATE) {
     DCHECK(!handling_206_);
     // We got a "not modified" response and already updated the corresponding
@@ -1566,6 +1722,11 @@ int HttpCache::Transaction::DoUpdateCachedResponseComplete(int result) {
 }
 
 int HttpCache::Transaction::DoOverwriteCachedResponse() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoOverwriteCachedResponse"));
+
   if (mode_ & READ) {
     next_state_ = STATE_PARTIAL_HEADERS_RECEIVED;
     return OK;
@@ -1585,6 +1746,16 @@ int HttpCache::Transaction::DoOverwriteCachedResponse() {
     return OK;
   }
 
+  if (handling_206_ && !CanResume(false)) {
+    // There is no point in storing this resource because it will never be used.
+    // This may change if we support LOAD_ONLY_FROM_CACHE with sparse entries.
+    DoneWritingToEntry(false);
+    if (partial_.get())
+      partial_->FixResponseHeaders(response_.headers.get(), true);
+    next_state_ = STATE_PARTIAL_HEADERS_RECEIVED;
+    return OK;
+  }
+
   target_state_ = STATE_TRUNCATE_CACHED_DATA;
   next_state_ = truncated_ ? STATE_CACHE_WRITE_TRUNCATED_RESPONSE :
                              STATE_CACHE_WRITE_RESPONSE;
@@ -1592,6 +1763,11 @@ int HttpCache::Transaction::DoOverwriteCachedResponse() {
 }
 
 int HttpCache::Transaction::DoTruncateCachedData() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoTruncateCachedData"));
+
   next_state_ = STATE_TRUNCATE_CACHED_DATA_COMPLETE;
   if (!entry_)
     return OK;
@@ -1602,6 +1778,11 @@ int HttpCache::Transaction::DoTruncateCachedData() {
 }
 
 int HttpCache::Transaction::DoTruncateCachedDataComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoTruncateCachedDataComplete"));
+
   if (entry_) {
     if (net_log_.IsLogging()) {
       net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_WRITE_DATA,
@@ -1614,6 +1795,11 @@ int HttpCache::Transaction::DoTruncateCachedDataComplete(int result) {
 }
 
 int HttpCache::Transaction::DoTruncateCachedMetadata() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoTruncateCachedMetadata"));
+
   next_state_ = STATE_TRUNCATE_CACHED_METADATA_COMPLETE;
   if (!entry_)
     return OK;
@@ -1624,6 +1810,11 @@ int HttpCache::Transaction::DoTruncateCachedMetadata() {
 }
 
 int HttpCache::Transaction::DoTruncateCachedMetadataComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoTruncateCachedMetadataComplete"));
+
   if (entry_) {
     if (net_log_.IsLogging()) {
       net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_WRITE_INFO,
@@ -1636,6 +1827,11 @@ int HttpCache::Transaction::DoTruncateCachedMetadataComplete(int result) {
 }
 
 int HttpCache::Transaction::DoPartialHeadersReceived() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoPartialHeadersReceived"));
+
   new_response_ = NULL;
   if (entry_ && !partial_.get() &&
       entry_->disk_entry->GetDataSize(kMetadataIndex))
@@ -1659,6 +1855,11 @@ int HttpCache::Transaction::DoPartialHeadersReceived() {
 }
 
 int HttpCache::Transaction::DoCacheReadResponse() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheReadResponse"));
+
   DCHECK(entry_);
   next_state_ = STATE_CACHE_READ_RESPONSE_COMPLETE;
 
@@ -1671,6 +1872,11 @@ int HttpCache::Transaction::DoCacheReadResponse() {
 }
 
 int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheReadResponseComplete"));
+
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_READ_INFO, result);
   if (result != io_buf_len_ ||
       !HttpCache::ParseResponseInfo(read_buf_->data(), io_buf_len_,
@@ -1687,6 +1893,22 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   if (response_.headers->GetContentLength() == current_size)
     truncated_ = false;
 
+  if ((response_.unused_since_prefetch &&
+       !(request_->load_flags & LOAD_PREFETCH)) ||
+      (!response_.unused_since_prefetch &&
+       (request_->load_flags & LOAD_PREFETCH))) {
+    // Either this is the first use of an entry since it was prefetched or
+    // this is a prefetch. The value of response.unused_since_prefetch is valid
+    // for this transaction but the bit needs to be flipped in storage.
+    next_state_ = STATE_TOGGLE_UNUSED_SINCE_PREFETCH;
+    return OK;
+  }
+
+  next_state_ = STATE_CACHE_DISPATCH_VALIDATION;
+  return OK;
+}
+
+int HttpCache::Transaction::DoCacheDispatchValidation() {
   // We now have access to the cache entry.
   //
   //  o if we are a reader for the transaction, then we can start reading the
@@ -1700,6 +1922,7 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   //    conditionalized request (if-modified-since / if-none-match). We check
   //    if the request headers define a validation request.
   //
+  int result = ERR_FAILED;
   switch (mode_) {
     case READ:
       UpdateTransactionPattern(PATTERN_ENTRY_USED);
@@ -1714,12 +1937,36 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
     case WRITE:
     default:
       NOTREACHED();
-      result = ERR_FAILED;
   }
   return result;
 }
 
+int HttpCache::Transaction::DoCacheToggleUnusedSincePrefetch() {
+  // Write back the toggled value for the next use of this entry.
+  response_.unused_since_prefetch = !response_.unused_since_prefetch;
+
+  // TODO(jkarlin): If DoUpdateCachedResponse is also called for this
+  // transaction then metadata will be written to cache twice. If prefetching
+  // becomes more common, consider combining the writes.
+  target_state_ = STATE_TOGGLE_UNUSED_SINCE_PREFETCH_COMPLETE;
+  next_state_ = STATE_CACHE_WRITE_RESPONSE;
+  return OK;
+}
+
+int HttpCache::Transaction::DoCacheToggleUnusedSincePrefetchComplete(
+    int result) {
+  // Restore the original value for this transaction.
+  response_.unused_since_prefetch = !response_.unused_since_prefetch;
+  next_state_ = STATE_CACHE_DISPATCH_VALIDATION;
+  return OK;
+}
+
 int HttpCache::Transaction::DoCacheWriteResponse() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheWriteResponse"));
+
   if (entry_) {
     if (net_log_.IsLogging())
       net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_WRITE_INFO);
@@ -1728,6 +1975,11 @@ int HttpCache::Transaction::DoCacheWriteResponse() {
 }
 
 int HttpCache::Transaction::DoCacheWriteTruncatedResponse() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheWriteTruncatedResponse"));
+
   if (entry_) {
     if (net_log_.IsLogging())
       net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_WRITE_INFO);
@@ -1736,6 +1988,11 @@ int HttpCache::Transaction::DoCacheWriteTruncatedResponse() {
 }
 
 int HttpCache::Transaction::DoCacheWriteResponseComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheWriteResponseComplete"));
+
   next_state_ = target_state_;
   target_state_ = STATE_NONE;
   if (!entry_)
@@ -1754,6 +2011,11 @@ int HttpCache::Transaction::DoCacheWriteResponseComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCacheReadMetadata() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheReadMetadata"));
+
   DCHECK(entry_);
   DCHECK(!response_.metadata.get());
   next_state_ = STATE_CACHE_READ_METADATA_COMPLETE;
@@ -1769,6 +2031,11 @@ int HttpCache::Transaction::DoCacheReadMetadata() {
 }
 
 int HttpCache::Transaction::DoCacheReadMetadataComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheReadMetadataComplete"));
+
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_READ_INFO, result);
   if (result != response_.metadata->size())
     return OnCacheReadError(result, false);
@@ -1776,17 +2043,21 @@ int HttpCache::Transaction::DoCacheReadMetadataComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCacheQueryData() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheQueryData"));
+
   next_state_ = STATE_CACHE_QUERY_DATA_COMPLETE;
   return entry_->disk_entry->ReadyForSparseIO(io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheQueryDataComplete(int result) {
-  if (result == ERR_NOT_IMPLEMENTED) {
-    // Restart the request overwriting the cache entry.
-    // TODO(pasko): remove this workaround as soon as the SimpleBackendImpl
-    // supports Sparse IO.
-    return DoRestartPartialRequest();
-  }
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheQueryDataComplete"));
+
   DCHECK_EQ(OK, result);
   if (!cache_.get())
     return ERR_UNEXPECTED;
@@ -1795,6 +2066,11 @@ int HttpCache::Transaction::DoCacheQueryDataComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCacheReadData() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheReadData"));
+
   DCHECK(entry_);
   next_state_ = STATE_CACHE_READ_DATA_COMPLETE;
 
@@ -1811,6 +2087,11 @@ int HttpCache::Transaction::DoCacheReadData() {
 }
 
 int HttpCache::Transaction::DoCacheReadDataComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheReadDataComplete"));
+
   if (net_log_.IsLogging()) {
     net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_READ_DATA,
                                       result);
@@ -1839,6 +2120,11 @@ int HttpCache::Transaction::DoCacheReadDataComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCacheWriteData(int num_bytes) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheWriteData"));
+
   next_state_ = STATE_CACHE_WRITE_DATA_COMPLETE;
   write_len_ = num_bytes;
   if (entry_) {
@@ -1850,6 +2136,11 @@ int HttpCache::Transaction::DoCacheWriteData(int num_bytes) {
 }
 
 int HttpCache::Transaction::DoCacheWriteDataComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 HttpCache::Transaction::DoCacheWriteDataComplete"));
+
   if (entry_) {
     if (net_log_.IsLogging()) {
       net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_WRITE_DATA,
@@ -1996,13 +2287,15 @@ void HttpCache::Transaction::SetRequest(const BoundNetLog& net_log,
 
   bool range_found = false;
   bool external_validation_error = false;
+  bool special_headers = false;
 
   if (request_->extra_headers.HasHeader(HttpRequestHeaders::kRange))
     range_found = true;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSpecialHeaders); ++i) {
+  for (size_t i = 0; i < arraysize(kSpecialHeaders); ++i) {
     if (HeaderMatches(request_->extra_headers, kSpecialHeaders[i].search)) {
       effective_load_flags_ |= kSpecialHeaders[i].load_flag;
+      special_headers = true;
       break;
     }
   }
@@ -2021,6 +2314,15 @@ void HttpCache::Transaction::SetRequest(const BoundNetLog& net_log,
       external_validation_.values[i] = validation_value;
       external_validation_.initialized = true;
     }
+  }
+
+  if (range_found || special_headers || external_validation_.initialized) {
+    // Log the headers before request_ is modified.
+    std::string empty;
+    net_log_.AddEvent(
+        NetLog::TYPE_HTTP_CACHE_CALLER_REQUEST_HEADERS,
+        base::Bind(&HttpRequestHeaders::NetLogCallback,
+                   base::Unretained(&request_->extra_headers), &empty));
   }
 
   // We don't support ranges and validation headers.
@@ -2110,7 +2412,16 @@ int HttpCache::Transaction::BeginCacheRead() {
 int HttpCache::Transaction::BeginCacheValidation() {
   DCHECK(mode_ == READ_WRITE);
 
-  bool skip_validation = !RequiresValidation();
+  ValidationType required_validation = RequiresValidation();
+
+  bool skip_validation = (required_validation == VALIDATION_NONE);
+
+  if (required_validation == VALIDATION_ASYNCHRONOUS &&
+      !(request_->method == "GET" && (truncated_ || partial_)) && cache_ &&
+      cache_->use_stale_while_revalidate()) {
+    TriggerAsyncValidation();
+    skip_validation = true;
+  }
 
   if (request_->method == "HEAD" &&
       (truncated_ || response_.headers->response_code() == 206)) {
@@ -2140,6 +2451,7 @@ int HttpCache::Transaction::BeginCacheValidation() {
   }
 
   if (skip_validation) {
+    // TODO(ricea): Is this pattern okay for asynchronous revalidations?
     UpdateTransactionPattern(PATTERN_ENTRY_USED);
     RecordOfflineStatus(effective_load_flags_, OFFLINE_STATUS_FRESH_CACHE);
     return SetupEntryForRead();
@@ -2295,37 +2607,53 @@ int HttpCache::Transaction::RestartNetworkRequestWithAuth(
   return rv;
 }
 
-bool HttpCache::Transaction::RequiresValidation() {
+ValidationType HttpCache::Transaction::RequiresValidation() {
   // TODO(darin): need to do more work here:
   //  - make sure we have a matching request method
   //  - watch out for cached responses that depend on authentication
 
   // In playback mode, nothing requires validation.
   if (cache_->mode() == net::HttpCache::PLAYBACK)
-    return false;
+    return VALIDATION_NONE;
 
   if (response_.vary_data.is_valid() &&
       !response_.vary_data.MatchesRequest(*request_,
                                           *response_.headers.get())) {
     vary_mismatch_ = true;
-    return true;
+    return VALIDATION_SYNCHRONOUS;
   }
 
   if (effective_load_flags_ & LOAD_PREFERRING_CACHE)
-    return false;
+    return VALIDATION_NONE;
 
-  if (effective_load_flags_ & LOAD_VALIDATE_CACHE)
-    return true;
-
-  if (request_->method == "PUT" || request_->method == "DELETE")
-    return true;
-
-  if (response_.headers->RequiresValidation(
-          response_.request_time, response_.response_time, Time::Now())) {
-    return true;
+  if (response_.unused_since_prefetch &&
+      !(effective_load_flags_ & LOAD_PREFETCH) &&
+      response_.headers->GetCurrentAge(
+          response_.request_time, response_.response_time,
+          cache_->clock_->Now()) < TimeDelta::FromMinutes(kPrefetchReuseMins)) {
+    // The first use of a resource after prefetch within a short window skips
+    // validation.
+    return VALIDATION_NONE;
   }
 
-  return false;
+  if (effective_load_flags_ & (LOAD_VALIDATE_CACHE | LOAD_ASYNC_REVALIDATION))
+    return VALIDATION_SYNCHRONOUS;
+
+  if (request_->method == "PUT" || request_->method == "DELETE")
+    return VALIDATION_SYNCHRONOUS;
+
+  ValidationType validation_required_by_headers =
+      response_.headers->RequiresValidation(response_.request_time,
+                                            response_.response_time,
+                                            cache_->clock_->Now());
+
+  if (validation_required_by_headers == VALIDATION_ASYNCHRONOUS) {
+    // Asynchronous revalidation is only supported for GET and HEAD methods.
+    if (request_->method != "GET" && request_->method != "HEAD")
+      return VALIDATION_SYNCHRONOUS;
+  }
+
+  return validation_required_by_headers;
 }
 
 bool HttpCache::Transaction::ConditionalizeRequest() {
@@ -2340,10 +2668,11 @@ bool HttpCache::Transaction::ConditionalizeRequest() {
     return false;
   }
 
-  if (response_.headers->response_code() == 206 &&
-      !response_.headers->HasStrongValidators()) {
+  if (fail_conditionalization_for_test_)
     return false;
-  }
+
+  DCHECK(response_.headers->response_code() != 206 ||
+         response_.headers->HasStrongValidators());
 
   // Just use the first available ETag and/or Last-Modified header value.
   // TODO(darin): Or should we use the last?
@@ -2374,21 +2703,19 @@ bool HttpCache::Transaction::ConditionalizeRequest() {
   if (!use_if_range) {
     // stale-while-revalidate is not useful when we only have a partial response
     // cached, so don't set the header in that case.
-    TimeDelta stale_while_revalidate;
-    if (response_.headers->GetStaleWhileRevalidateValue(
-            &stale_while_revalidate) &&
-        stale_while_revalidate > TimeDelta()) {
-      TimeDelta max_age =
-          response_.headers->GetFreshnessLifetime(response_.response_time);
+    HttpResponseHeaders::FreshnessLifetimes lifetimes =
+        response_.headers->GetFreshnessLifetimes(response_.response_time);
+    if (lifetimes.staleness > TimeDelta()) {
       TimeDelta current_age = response_.headers->GetCurrentAge(
-          response_.request_time, response_.response_time, Time::Now());
+          response_.request_time, response_.response_time,
+          cache_->clock_->Now());
 
       custom_request_->extra_headers.SetHeader(
           kFreshnessHeader,
           base::StringPrintf("max-age=%" PRId64
                              ",stale-while-revalidate=%" PRId64 ",age=%" PRId64,
-                             max_age.InSeconds(),
-                             stale_while_revalidate.InSeconds(),
+                             lifetimes.freshness.InSeconds(),
+                             lifetimes.staleness.InSeconds(),
                              current_age.InSeconds()));
     }
   }
@@ -2485,9 +2812,13 @@ bool HttpCache::Transaction::ValidatePartialResponse() {
       return true;
   } else {
     // We asked for "If-Range: " so a 206 means just another range.
-    if (partial_response && partial_->ResponseHeadersOK(headers)) {
-      handling_206_ = true;
-      return true;
+    if (partial_response) {
+      if (partial_->ResponseHeadersOK(headers)) {
+        handling_206_ = true;
+        return true;
+      } else {
+        failure = true;
+      }
     }
 
     if (!reading_ && !is_sparse_ && !partial_response) {
@@ -2514,18 +2845,21 @@ bool HttpCache::Transaction::ValidatePartialResponse() {
   if (failure) {
     // We cannot truncate this entry, it has to be deleted.
     UpdateTransactionPattern(PATTERN_NOT_COVERED);
-    DoomPartialEntry(false);
     mode_ = NONE;
-    if (!reading_ && !partial_->IsLastRange()) {
-      // We'll attempt to issue another network request, this time without us
-      // messing up the headers.
-      partial_->RestoreHeaders(&custom_request_->extra_headers);
-      partial_.reset();
-      truncated_ = false;
-      return false;
+    if (is_sparse_ || truncated_) {
+      // There was something cached to start with, either sparsed data (206), or
+      // a truncated 200, which means that we probably modified the request,
+      // adding a byte range or modifying the range requested by the caller.
+      if (!reading_ && !partial_->IsLastRange()) {
+        // We have not returned anything to the caller yet so it should be safe
+        // to issue another network request, this time without us messing up the
+        // headers.
+        ResetPartialState(true);
+        return false;
+      }
+      LOG(WARNING) << "Failed to revalidate partial entry";
     }
-    LOG(WARNING) << "Failed to revalidate partial entry";
-    partial_.reset();
+    DoomPartialEntry(true);
     return true;
   }
 
@@ -2551,10 +2885,28 @@ void HttpCache::Transaction::IgnoreRangeRequest() {
 
 void HttpCache::Transaction::FixHeadersForHead() {
   if (response_.headers->response_code() == 206) {
-    response_.headers->RemoveHeader("Content-Length");
     response_.headers->RemoveHeader("Content-Range");
     response_.headers->ReplaceStatusLine("HTTP/1.1 200 OK");
   }
+}
+
+void HttpCache::Transaction::TriggerAsyncValidation() {
+  DCHECK(!request_->upload_data_stream);
+  BoundNetLog async_revalidation_net_log(
+      BoundNetLog::Make(net_log_.net_log(), NetLog::SOURCE_ASYNC_REVALIDATION));
+  net_log_.AddEvent(
+      NetLog::TYPE_HTTP_CACHE_VALIDATE_RESOURCE_ASYNC,
+      async_revalidation_net_log.source().ToEventParametersCallback());
+  async_revalidation_net_log.BeginEvent(
+      NetLog::TYPE_ASYNC_REVALIDATION,
+      base::Bind(
+          &NetLogAsyncRevalidationInfoCallback, net_log_.source(), request_));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&HttpCache::PerformAsyncValidation,
+                 cache_,  // cache_ is a weak pointer.
+                 *request_,
+                 async_revalidation_net_log));
 }
 
 void HttpCache::Transaction::FailRangeRequest() {
@@ -2733,6 +3085,7 @@ void HttpCache::Transaction::DoomPartialEntry(bool delete_object) {
   cache_->DoneWithEntry(entry_, this, false);
   entry_ = NULL;
   is_sparse_ = false;
+  truncated_ = false;
   if (delete_object)
     partial_.reset(NULL);
 }
@@ -2762,12 +3115,28 @@ int HttpCache::Transaction::DoPartialCacheReadCompleted(int result) {
 
 int HttpCache::Transaction::DoRestartPartialRequest() {
   // The stored data cannot be used. Get rid of it and restart this request.
-  // We need to also reset the |truncated_| flag as a new entry is created.
-  DoomPartialEntry(!range_requested_);
+  net_log_.AddEvent(NetLog::TYPE_HTTP_CACHE_RESTART_PARTIAL_REQUEST);
+
+  // WRITE + Doom + STATE_INIT_ENTRY == STATE_CREATE_ENTRY (without an attempt
+  // to Doom the entry again).
   mode_ = WRITE;
-  truncated_ = false;
-  next_state_ = STATE_INIT_ENTRY;
+  ResetPartialState(!range_requested_);
+  next_state_ = STATE_CREATE_ENTRY;
   return OK;
+}
+
+void HttpCache::Transaction::ResetPartialState(bool delete_object) {
+  partial_->RestoreHeaders(&custom_request_->extra_headers);
+  DoomPartialEntry(delete_object);
+
+  if (!delete_object) {
+    // The simplest way to re-initialize partial_ is to create a new object.
+    partial_.reset(new PartialData());
+    if (partial_->Init(request_->extra_headers))
+      partial_->SetHeaders(custom_request_->extra_headers);
+    else
+      partial_.reset();
+  }
 }
 
 void HttpCache::Transaction::ResetNetworkTransaction() {
@@ -2855,15 +3224,16 @@ void HttpCache::Transaction::RecordHistograms() {
   }
 
   TimeDelta before_send_time = send_request_since_ - first_cache_access_since_;
-  int before_send_percent =
-      total_time.ToInternalValue() == 0 ? 0
-                                        : before_send_time * 100 / total_time;
-  DCHECK_LE(0, before_send_percent);
-  DCHECK_GE(100, before_send_percent);
+  int64 before_send_percent = (total_time.ToInternalValue() == 0) ?
+      0 : before_send_time * 100 / total_time;
+  DCHECK_GE(before_send_percent, 0);
+  DCHECK_LE(before_send_percent, 100);
+  base::HistogramBase::Sample before_send_sample =
+      static_cast<base::HistogramBase::Sample>(before_send_percent);
 
   UMA_HISTOGRAM_TIMES("HttpCache.AccessToDone.SentRequest", total_time);
   UMA_HISTOGRAM_TIMES("HttpCache.BeforeSend", before_send_time);
-  UMA_HISTOGRAM_PERCENTAGE("HttpCache.PercentBeforeSend", before_send_percent);
+  UMA_HISTOGRAM_PERCENTAGE("HttpCache.PercentBeforeSend", before_send_sample);
 
   // TODO(gavinp): Remove or minimize these histograms, particularly the ones
   // below this comment after we have received initial data.
@@ -2872,25 +3242,25 @@ void HttpCache::Transaction::RecordHistograms() {
       UMA_HISTOGRAM_TIMES("HttpCache.BeforeSend.CantConditionalize",
                           before_send_time);
       UMA_HISTOGRAM_PERCENTAGE("HttpCache.PercentBeforeSend.CantConditionalize",
-                               before_send_percent);
+                               before_send_sample);
       break;
     }
     case PATTERN_ENTRY_NOT_CACHED: {
       UMA_HISTOGRAM_TIMES("HttpCache.BeforeSend.NotCached", before_send_time);
       UMA_HISTOGRAM_PERCENTAGE("HttpCache.PercentBeforeSend.NotCached",
-                               before_send_percent);
+                               before_send_sample);
       break;
     }
     case PATTERN_ENTRY_VALIDATED: {
       UMA_HISTOGRAM_TIMES("HttpCache.BeforeSend.Validated", before_send_time);
       UMA_HISTOGRAM_PERCENTAGE("HttpCache.PercentBeforeSend.Validated",
-                               before_send_percent);
+                               before_send_sample);
       break;
     }
     case PATTERN_ENTRY_UPDATED: {
       UMA_HISTOGRAM_TIMES("HttpCache.BeforeSend.Updated", before_send_time);
       UMA_HISTOGRAM_PERCENTAGE("HttpCache.PercentBeforeSend.Updated",
-                               before_send_percent);
+                               before_send_sample);
       break;
     }
     default:
@@ -2899,6 +3269,10 @@ void HttpCache::Transaction::RecordHistograms() {
 }
 
 void HttpCache::Transaction::OnIOComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("422516 Transaction::OnIOComplete"));
+
   DoLoop(result);
 }
 

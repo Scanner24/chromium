@@ -8,29 +8,25 @@
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/layer.h"
 #include "cc/output/begin_frame_args.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "cc/trees/layer_tree_host.h"
 #include "mojo/cc/context_provider_mojo.h"
 #include "mojo/cc/output_surface_mojo.h"
-#include "mojo/services/public/cpp/surfaces/surfaces_type_converters.h"
-#include "mojo/services/public/cpp/view_manager/view.h"
+#include "mojo/converters/surfaces/surfaces_type_converters.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
+#include "third_party/mojo_services/src/view_manager/public/cpp/view.h"
 
-namespace mojo {
+namespace html_viewer {
 
 WebLayerTreeViewImpl::WebLayerTreeViewImpl(
     scoped_refptr<base::MessageLoopProxy> compositor_message_loop_proxy,
-    SurfacesServicePtr surfaces_service,
-    GpuPtr gpu_service)
+    mojo::SurfacePtr surface,
+    mojo::GpuPtr gpu_service)
     : widget_(NULL),
       view_(NULL),
-      surfaces_service_(surfaces_service.Pass()),
-      gpu_service_(gpu_service.Pass()),
       main_thread_compositor_task_runner_(base::MessageLoopProxy::current()),
       weak_factory_(this) {
   main_thread_bound_weak_ptr_ = weak_factory_.GetWeakPtr();
-  surfaces_service_->CreateSurfaceConnection(
-      base::Bind(&WebLayerTreeViewImpl::OnSurfaceConnectionCreated,
-                 main_thread_bound_weak_ptr_));
 
   cc::LayerTreeSettings settings;
 
@@ -39,23 +35,37 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   settings.layer_transforms_should_scale_layer_contents = true;
 
   cc::SharedBitmapManager* shared_bitmap_manager = NULL;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = NULL;
 
   layer_tree_host_ =
       cc::LayerTreeHost::CreateThreaded(this,
                                         shared_bitmap_manager,
+                                        gpu_memory_buffer_manager,
                                         settings,
                                         base::MessageLoopProxy::current(),
-                                        compositor_message_loop_proxy);
+                                        compositor_message_loop_proxy,
+                                        nullptr);
   DCHECK(layer_tree_host_);
+
+  mojo::CommandBufferPtr cb;
+  gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
+  scoped_refptr<cc::ContextProvider> context_provider(
+      new mojo::ContextProviderMojo(cb.PassMessagePipe()));
+  output_surface_.reset(
+      new mojo::OutputSurfaceMojo(this, context_provider, surface.Pass()));
+  layer_tree_host_->SetLayerTreeHostClientReady();
 }
 
 WebLayerTreeViewImpl::~WebLayerTreeViewImpl() {
 }
 
-void WebLayerTreeViewImpl::WillBeginMainFrame(int frame_id) {
+void WebLayerTreeViewImpl::WillBeginMainFrame() {
 }
 
 void WebLayerTreeViewImpl::DidBeginMainFrame() {
+}
+
+void WebLayerTreeViewImpl::BeginMainFrameNotExpectedSoon() {
 }
 
 void WebLayerTreeViewImpl::BeginMainFrame(const cc::BeginFrameArgs& args) {
@@ -73,14 +83,33 @@ void WebLayerTreeViewImpl::Layout() {
 }
 
 void WebLayerTreeViewImpl::ApplyViewportDeltas(
+    const gfx::Vector2dF& inner_delta,
+    const gfx::Vector2dF& outer_delta,
+    const gfx::Vector2dF& elastic_overscroll_delta,
+    float page_scale,
+    float top_controls_delta) {
+  widget_->applyViewportDeltas(
+      inner_delta,
+      outer_delta,
+      elastic_overscroll_delta,
+      page_scale,
+      top_controls_delta);
+}
+
+void WebLayerTreeViewImpl::ApplyViewportDeltas(
     const gfx::Vector2d& scroll_delta,
     float page_scale,
     float top_controls_delta) {
   widget_->applyViewportDeltas(scroll_delta, page_scale, top_controls_delta);
 }
 
-void WebLayerTreeViewImpl::RequestNewOutputSurface(bool fallback) {
-  layer_tree_host_->SetOutputSurface(output_surface_.Pass());
+void WebLayerTreeViewImpl::RequestNewOutputSurface() {
+  if (output_surface_.get())
+    layer_tree_host_->SetOutputSurface(output_surface_.Pass());
+}
+
+void WebLayerTreeViewImpl::DidFailToInitializeOutputSurface() {
+  RequestNewOutputSurface();
 }
 
 void WebLayerTreeViewImpl::DidInitializeOutputSurface() {
@@ -90,16 +119,12 @@ void WebLayerTreeViewImpl::WillCommit() {
 }
 
 void WebLayerTreeViewImpl::DidCommit() {
-  widget_->didCommitFrameToCompositor();
 }
 
 void WebLayerTreeViewImpl::DidCommitAndDrawFrame() {
 }
 
 void WebLayerTreeViewImpl::DidCompleteSwapBuffers() {
-}
-
-void WebLayerTreeViewImpl::setSurfaceReady() {
 }
 
 void WebLayerTreeViewImpl::setRootLayer(const blink::WebLayer& layer) {
@@ -137,10 +162,6 @@ void WebLayerTreeViewImpl::setHasTransparentBackground(
   layer_tree_host_->set_has_transparent_background(has_transparent_background);
 }
 
-void WebLayerTreeViewImpl::setOverhangBitmap(const SkBitmap& bitmap) {
-  layer_tree_host_->SetOverhangBitmap(bitmap);
-}
-
 void WebLayerTreeViewImpl::setVisible(bool visible) {
   layer_tree_host_->SetVisible(visible);
 }
@@ -159,22 +180,31 @@ void WebLayerTreeViewImpl::registerForAnimations(blink::WebLayer* layer) {
 }
 
 void WebLayerTreeViewImpl::registerViewportLayers(
+    const blink::WebLayer* overscrollElasticityLayer,
     const blink::WebLayer* pageScaleLayer,
     const blink::WebLayer* innerViewportScrollLayer,
     const blink::WebLayer* outerViewportScrollLayer) {
   layer_tree_host_->RegisterViewportLayers(
+      // The scroll elasticity layer will only exist when using pinch virtual
+      // viewports.
+      overscrollElasticityLayer
+          ? static_cast<const cc_blink::WebLayerImpl*>(
+                overscrollElasticityLayer)->layer()
+          : NULL,
       static_cast<const cc_blink::WebLayerImpl*>(pageScaleLayer)->layer(),
       static_cast<const cc_blink::WebLayerImpl*>(innerViewportScrollLayer)
           ->layer(),
       // The outer viewport layer will only exist when using pinch virtual
       // viewports.
-      outerViewportScrollLayer ? static_cast<const cc_blink::WebLayerImpl*>(
-                                     outerViewportScrollLayer)->layer()
-                               : NULL);
+      outerViewportScrollLayer
+          ? static_cast<const cc_blink::WebLayerImpl*>(outerViewportScrollLayer)
+                ->layer()
+          : NULL);
 }
 
 void WebLayerTreeViewImpl::clearViewportLayers() {
   layer_tree_host_->RegisterViewportLayers(scoped_refptr<cc::Layer>(),
+                                           scoped_refptr<cc::Layer>(),
                                            scoped_refptr<cc::Layer>(),
                                            scoped_refptr<cc::Layer>());
 }
@@ -205,17 +235,6 @@ void WebLayerTreeViewImpl::finishAllRendering() {
   layer_tree_host_->FinishAllRendering();
 }
 
-void WebLayerTreeViewImpl::OnSurfaceConnectionCreated(SurfacePtr surface,
-                                                      uint32_t id_namespace) {
-  CommandBufferPtr cb;
-  gpu_service_->CreateOffscreenGLES2Context(Get(&cb));
-  scoped_refptr<cc::ContextProvider> context_provider(
-      new ContextProviderMojo(cb.PassMessagePipe()));
-  output_surface_.reset(new OutputSurfaceMojo(
-      this, context_provider, surface.Pass(), id_namespace));
-  layer_tree_host_->SetLayerTreeHostClientReady();
-}
-
 void WebLayerTreeViewImpl::DidCreateSurface(cc::SurfaceId id) {
   main_thread_compositor_task_runner_->PostTask(
       FROM_HERE,
@@ -225,7 +244,7 @@ void WebLayerTreeViewImpl::DidCreateSurface(cc::SurfaceId id) {
 }
 
 void WebLayerTreeViewImpl::DidCreateSurfaceOnMainThread(cc::SurfaceId id) {
-  view_->SetSurfaceId(SurfaceId::From(id));
+  view_->SetSurfaceId(mojo::SurfaceId::From(id));
 }
 
-}  // namespace mojo
+}  // namespace html_viewer

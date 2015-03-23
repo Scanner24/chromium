@@ -12,6 +12,7 @@ from telemetry.core import platform as platform_module
 from telemetry.core import possible_browser
 from telemetry.core import util
 from telemetry.core.backends.webdriver import webdriver_ie_backend
+from telemetry.core.platform import desktop_device
 from telemetry.util import support_binaries
 
 # Try to import the selenium python lib which may be not available.
@@ -29,12 +30,12 @@ class PossibleWebDriverBrowser(possible_browser.PossibleBrowser):
   def __init__(self, browser_type, finder_options):
     target_os = sys.platform.lower()
     super(PossibleWebDriverBrowser, self).__init__(browser_type, target_os,
-        finder_options, False)
+          supports_tab_control=False)
     assert browser_type in FindAllBrowserTypes(finder_options), \
         ('Please add %s to webdriver_desktop_browser_finder.FindAllBrowserTypes'
          % browser_type)
 
-  def CreateWebDriverBackend(self, platform_backend):
+  def CreateWebDriverBackend(self, platform_backend, finder_options):
     raise NotImplementedError()
 
   def _InitPlatformIfNeeded(self):
@@ -46,14 +47,11 @@ class PossibleWebDriverBrowser(possible_browser.PossibleBrowser):
     # pylint: disable=W0212
     self._platform_backend = self._platform._platform_backend
 
-  def Create(self):
+  def Create(self, finder_options):
     self._InitPlatformIfNeeded()
-    backend = self.CreateWebDriverBackend(self._platform_backend)
-    return browser.Browser(backend,
-                           self._platform_backend,
-                           self._archive_path,
-                           self._append_to_existing_wpr,
-                           self._make_javascript_deterministic,
+    backend = self.CreateWebDriverBackend(
+        self._platform_backend, finder_options)
+    return browser.Browser(backend, self._platform_backend,
                            self._credentials_path)
 
   def SupportsOptions(self, finder_options):
@@ -74,14 +72,16 @@ class PossibleDesktopIE(PossibleWebDriverBrowser):
     super(PossibleDesktopIE, self).__init__(browser_type, finder_options)
     self._architecture = architecture
 
-  def CreateWebDriverBackend(self, platform_backend):
+  def CreateWebDriverBackend(self, platform_backend, finder_options):
     assert webdriver
     def DriverCreator():
       ie_driver_exe = support_binaries.FindPath(
-          'IEDriverServer_%s' % self._architecture, 'win')
+          'IEDriverServer_%s' % self._architecture,
+          'AMD64',
+          'win')
       return webdriver.Ie(executable_path=ie_driver_exe)
     return webdriver_ie_backend.WebDriverIEBackend(
-        platform_backend, DriverCreator, self.finder_options.browser_options)
+        platform_backend, DriverCreator, finder_options.browser_options)
 
 def SelectDefaultBrowser(_):
   return None
@@ -97,8 +97,11 @@ def FindAllBrowserTypes(_):
                     'https://code.google.com/p/selenium/wiki/PythonBindings.')
   return []
 
-def FindAllAvailableBrowsers(finder_options):
+def FindAllAvailableBrowsers(finder_options, device):
   """Finds all the desktop browsers available on this machine."""
+  if not isinstance(device, desktop_device.DesktopDevice):
+    return []
+
   browsers = []
   if not webdriver:
     return browsers

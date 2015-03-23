@@ -20,10 +20,13 @@ class HighResolutionTimerManager;
 class MessageLoop;
 class PowerMonitor;
 class SystemMonitor;
-namespace debug {
+#if defined(OS_CHROMEOS)
+class MemoryPressureObserverChromeOS;
+#endif
+namespace trace_event {
 class TraceMemoryController;
 class TraceEventSystemStatsMonitor;
-}  // namespace debug
+}  // namespace trace_event
 }  // namespace base
 
 namespace media {
@@ -48,7 +51,9 @@ class StartupTaskRunner;
 class TimeZoneMonitor;
 struct MainFunctionParams;
 
-#if defined(OS_LINUX)
+#if defined(OS_ANDROID)
+class ScreenOrientationDelegate;
+#elif defined(OS_LINUX)
 class DeviceMonitorLinux;
 #elif defined(OS_MACOSX)
 class DeviceMonitorMac;
@@ -113,6 +118,12 @@ class CONTENT_EXPORT BrowserMainLoop {
     return device_monitor_mac_.get();
   }
 #endif
+#if defined(OS_CHROMEOS)
+  // Return the MemoryPressureObserver which might be NULL.
+  base::MemoryPressureObserverChromeOS* memory_pressure_observer() {
+    return memory_pressure_observer_.get();
+  }
+#endif
 
  private:
   class MemoryObserver;
@@ -138,6 +149,9 @@ class CONTENT_EXPORT BrowserMainLoop {
       const base::CommandLine& command_line) const;
   void InitStartupTracing(const base::CommandLine& command_line);
   void EndStartupTracing();
+
+  bool UsingInProcessGpu() const;
+  void InitializeGpuDataManager();
 
   // Members initialized on construction ---------------------------------------
   const MainFunctionParams& parameters_;
@@ -166,6 +180,13 @@ class CONTENT_EXPORT BrowserMainLoop {
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
   scoped_ptr<DeviceMonitorMac> device_monitor_mac_;
 #endif
+#if defined(OS_ANDROID)
+  // Android implementation of ScreenOrientationDelegate
+  scoped_ptr<ScreenOrientationDelegate> screen_orientation_delegate_;
+#endif
+#if defined(OS_CHROMEOS)
+  scoped_ptr<base::MemoryPressureObserverChromeOS> memory_pressure_observer_;
+#endif
   // The startup task runner is created by CreateStartupTasks()
   scoped_ptr<StartupTaskRunner> startup_task_runner_;
 
@@ -191,8 +212,9 @@ class CONTENT_EXPORT BrowserMainLoop {
   scoped_ptr<BrowserProcessSubThread> io_thread_;
   scoped_ptr<base::Thread> indexed_db_thread_;
   scoped_ptr<MemoryObserver> memory_observer_;
-  scoped_ptr<base::debug::TraceMemoryController> trace_memory_controller_;
-  scoped_ptr<base::debug::TraceEventSystemStatsMonitor> system_stats_monitor_;
+  scoped_ptr<base::trace_event::TraceMemoryController> trace_memory_controller_;
+  scoped_ptr<base::trace_event::TraceEventSystemStatsMonitor>
+      system_stats_monitor_;
 
   bool is_tracing_startup_;
   base::FilePath startup_trace_file_;

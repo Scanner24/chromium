@@ -8,11 +8,17 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/host_zoom_map.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
 #include "ui/gfx/font_render_params.h"
+#endif
+
+#if !defined(OS_ANDROID)
+#include "components/ui/zoom/zoom_controller.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -25,16 +31,43 @@
 #include "ui/views/linux_ui/linux_ui.h"
 #endif
 
+#if defined(OS_WIN)
+#include "base/win/win_util.h"
+#include "ui/gfx/platform_font_win.h"
+#endif
+
 namespace renderer_preferences_util {
 
-void UpdateFromSystemSettings(
-    content::RendererPreferences* prefs, Profile* profile) {
+void UpdateFromSystemSettings(content::RendererPreferences* prefs,
+                              Profile* profile,
+                              content::WebContents* web_contents) {
   const PrefService* pref_service = profile->GetPrefs();
   prefs->accept_languages = pref_service->GetString(prefs::kAcceptLanguages);
   prefs->enable_referrers = pref_service->GetBoolean(prefs::kEnableReferrers);
   prefs->enable_do_not_track =
       pref_service->GetBoolean(prefs::kEnableDoNotTrack);
-  prefs->default_zoom_level = pref_service->GetDouble(prefs::kDefaultZoomLevel);
+#if defined(ENABLE_WEBRTC)
+  prefs->enable_webrtc_multiple_routes =
+      pref_service->GetBoolean(prefs::kWebRTCMultipleRoutesEnabled);
+#endif
+
+  double default_zoom_level = 0;
+  bool default_zoom_level_set = false;
+#if !defined(OS_ANDROID)
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(web_contents);
+  if (zoom_controller) {
+    default_zoom_level = zoom_controller->GetDefaultZoomLevel();
+    default_zoom_level_set = true;
+  }
+#endif
+
+  if (!default_zoom_level_set) {
+    default_zoom_level =
+        content::HostZoomMap::Get(web_contents->GetSiteInstance())
+            ->GetDefaultZoomLevel();
+  }
+  prefs->default_zoom_level = default_zoom_level;
 
 #if defined(USE_DEFAULT_RENDER_THEME)
   prefs->focus_ring_color = SkColorSetRGB(0x4D, 0x90, 0xFE);
@@ -87,6 +120,31 @@ void UpdateFromSystemSettings(
 #if !defined(OS_MACOSX)
   prefs->plugin_fullscreen_allowed =
       pref_service->GetBoolean(prefs::kFullscreenAllowed);
+#endif
+
+#if defined(OS_WIN)
+  NONCLIENTMETRICS_XP metrics = {0};
+  base::win::GetNonClientMetrics(&metrics);
+
+  prefs->caption_font_family_name = metrics.lfCaptionFont.lfFaceName;
+  prefs->caption_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfCaptionFont);
+
+  prefs->small_caption_font_family_name = metrics.lfSmCaptionFont.lfFaceName;
+  prefs->small_caption_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfSmCaptionFont);
+
+  prefs->menu_font_family_name = metrics.lfMenuFont.lfFaceName;
+  prefs->menu_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfMenuFont);
+
+  prefs->status_font_family_name = metrics.lfStatusFont.lfFaceName;
+  prefs->status_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfStatusFont);
+
+  prefs->message_font_family_name = metrics.lfMessageFont.lfFaceName;
+  prefs->message_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfMessageFont);
 #endif
 }
 

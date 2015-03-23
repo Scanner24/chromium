@@ -10,55 +10,63 @@
 chrome.test.runTests([
   // Tests whether mounting succeeds, when a non-empty name is provided.
   function goodDisplayName() {
-    var onTestSuccess = chrome.test.callbackPass();
     chrome.fileSystemProvider.mount(
         {fileSystemId: 'file-system-id', displayName: 'file-system-name'},
-        function() {
-          onTestSuccess();
-        },
-        function(error) {
-          chrome.test.fail();
-        });
+        chrome.test.callbackPass());
   },
 
   // Verifies that mounting fails, when an empty string is provided as a name.
   function emptyDisplayName() {
-    var onTestSuccess = chrome.test.callbackPass();
     chrome.fileSystemProvider.mount(
-        {fileSystemId: 'file-system-id', displayName: ''},
-        function() {
-          chrome.test.fail();
-        },
-        function(error) {
-          chrome.test.assertEq('SecurityError', error.name);
-          onTestSuccess();
-        });
+        {fileSystemId: 'file-system-id-2', displayName: ''},
+        chrome.test.callbackFail('INVALID_OPERATION'));
   },
 
   // Verifies that mounting fails, when an empty string is provided as an Id
   function emptyFileSystemId() {
-    var onTestSuccess = chrome.test.callbackPass();
     chrome.fileSystemProvider.mount(
         {fileSystemId: '', displayName: 'File System Name'},
-        function() {
-          chrome.test.fail();
-        },
-        function(error) {
-          chrome.test.assertEq('SecurityError', error.name);
-          onTestSuccess();
-        }
-      );
+        chrome.test.callbackFail('INVALID_OPERATION'));
+  },
+
+  // Verifies that mounting succeeds, when a positive limit for opened files is
+  // provided.
+  function goodOpenedFilesLimit() {
+    chrome.fileSystemProvider.mount({
+      fileSystemId: 'file-system-id-3',
+      displayName: 'File System Name',
+      openedFilesLimit: 10
+    }, chrome.test.callbackPass());
+  },
+
+  // Verifies that mounting succeeds, when limit for number of opened files is
+  // set to 0. It means no limit.
+  function goodOpenedFilesLimit() {
+    chrome.fileSystemProvider.mount({
+      fileSystemId: 'file-system-id-4',
+      displayName: 'File System Name',
+      openedFilesLimit: 0
+    }, chrome.test.callbackPass());
+  },
+
+  // Verifies that mounting fails, when a negative limit for opened files is
+  // provided.
+  function illegalOpenedFilesLimit() {
+    chrome.fileSystemProvider.mount({
+      fileSystemId: 'file-system-id-5',
+      displayName: 'File System Name',
+      openedFilesLimit: -1
+    }, chrome.test.callbackFail('INVALID_OPERATION'));
   },
 
   // End to end test. Mounts a volume using fileSystemProvider.mount(), then
   // checks if the mounted volume is added to VolumeManager, by querying
   // fileManagerPrivate.getVolumeMetadataList().
   function successfulMount() {
-    var onTestSuccess = chrome.test.callbackPass();
     var fileSystemId = 'caramel-candy';
     chrome.fileSystemProvider.mount(
         {fileSystemId: fileSystemId, displayName: 'caramel-candy.zip'},
-        function() {
+        chrome.test.callbackPass(function() {
           chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeList) {
             var volumeInfo;
             volumeList.forEach(function(inVolumeInfo) {
@@ -69,18 +77,13 @@ chrome.test.runTests([
             });
             chrome.test.assertTrue(!!volumeInfo);
             chrome.test.assertTrue(volumeInfo.isReadOnly);
-            onTestSuccess();
           });
-        },
-        function(error) {
-          chrome.test.fail();
-        });
+        }));
   },
 
   // Checks whether mounting a file system in writable mode ends up on filling
   // out the volume info properly.
   function successfulWritableMount() {
-    var onTestSuccess = chrome.test.callbackPass();
     var fileSystemId = 'caramel-fudges';
     chrome.fileSystemProvider.mount(
         {
@@ -88,7 +91,7 @@ chrome.test.runTests([
           displayName: 'caramel-fudges.zip',
           writable: true
         },
-        function() {
+        chrome.test.callbackPass(function() {
           chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeList) {
             var volumeInfo;
             volumeList.forEach(function(inVolumeInfo) {
@@ -99,12 +102,8 @@ chrome.test.runTests([
             });
             chrome.test.assertTrue(!!volumeInfo);
             chrome.test.assertFalse(volumeInfo.isReadOnly);
-            onTestSuccess();
           });
-        },
-        function(error) {
-          chrome.test.fail();
-        });
+        }));
   },
 
   // Checks is limit for mounted file systems per profile works correctly.
@@ -112,8 +111,7 @@ chrome.test.runTests([
   // requests should succeed, except the last one which should fail with a
   // security error.
   function stressMountTest() {
-    var onTestSuccess = chrome.test.callbackPass();
-    var ALREADY_MOUNTED_FILE_SYSTEMS = 3;  // By previous tests.
+    var ALREADY_MOUNTED_FILE_SYSTEMS = 5;  // By previous tests.
     var MAX_FILE_SYSTEMS = 16;
     var index = 0;
     var tryNextOne = function() {
@@ -122,25 +120,14 @@ chrome.test.runTests([
         var fileSystemId = index + '-stress-test';
         chrome.fileSystemProvider.mount(
             {fileSystemId: fileSystemId, displayName: index + 'th File System'},
-            function() {
-              tryNextOne();
-            },
-            function(error) {
-              chrome.test.fail(error.name);
-            });
+            chrome.test.callbackPass(tryNextOne));
       } else {
         chrome.fileSystemProvider.mount(
             {
               fileSystemId: 'over-the-limit-fs-id',
               displayName: 'Over The Limit File System'
             },
-            function() {
-              chrome.test.fail();
-            },
-            function(error) {
-              chrome.test.assertEq('SecurityError', error.name);
-              onTestSuccess();
-            });
+            chrome.test.callbackFail('TOO_MANY_OPENED'));
       }
     };
     tryNextOne();

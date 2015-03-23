@@ -5,7 +5,9 @@
 package org.chromium.android_webview.test;
 
 import android.graphics.Picture;
+import android.net.http.SslError;
 import android.webkit.ConsoleMessage;
+import android.webkit.ValueCallback;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
@@ -19,9 +21,11 @@ import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnRece
  */
 public class TestAwContentsClient extends NullContentsClient {
     private String mUpdatedTitle;
+    private boolean mAllowSslError;
     private final OnPageStartedHelper mOnPageStartedHelper;
     private final OnPageFinishedHelper mOnPageFinishedHelper;
     private final OnReceivedErrorHelper mOnReceivedErrorHelper;
+    private final CallbackHelper mOnReceivedSslErrorHelper;
     private final OnDownloadStartHelper mOnDownloadStartHelper;
     private final OnReceivedLoginRequestHelper mOnReceivedLoginRequestHelper;
     private final OnEvaluateJavaScriptResultHelper mOnEvaluateJavaScriptResultHelper;
@@ -30,12 +34,14 @@ public class TestAwContentsClient extends NullContentsClient {
     private final PictureListenerHelper mPictureListenerHelper;
     private final ShouldOverrideUrlLoadingHelper mShouldOverrideUrlLoadingHelper;
     private final DoUpdateVisitedHistoryHelper mDoUpdateVisitedHistoryHelper;
+    private final OnCreateWindowHelper mOnCreateWindowHelper;
 
     public TestAwContentsClient() {
         super(ThreadUtils.getUiThreadLooper());
         mOnPageStartedHelper = new OnPageStartedHelper();
         mOnPageFinishedHelper = new OnPageFinishedHelper();
         mOnReceivedErrorHelper = new OnReceivedErrorHelper();
+        mOnReceivedSslErrorHelper = new CallbackHelper();
         mOnDownloadStartHelper = new OnDownloadStartHelper();
         mOnReceivedLoginRequestHelper = new OnReceivedLoginRequestHelper();
         mOnEvaluateJavaScriptResultHelper = new OnEvaluateJavaScriptResultHelper();
@@ -44,6 +50,8 @@ public class TestAwContentsClient extends NullContentsClient {
         mPictureListenerHelper = new PictureListenerHelper();
         mShouldOverrideUrlLoadingHelper = new ShouldOverrideUrlLoadingHelper();
         mDoUpdateVisitedHistoryHelper = new DoUpdateVisitedHistoryHelper();
+        mOnCreateWindowHelper = new OnCreateWindowHelper();
+        mAllowSslError = true;
     }
 
     public OnPageStartedHelper getOnPageStartedHelper() {
@@ -56,6 +64,10 @@ public class TestAwContentsClient extends NullContentsClient {
 
     public OnReceivedErrorHelper getOnReceivedErrorHelper() {
         return mOnReceivedErrorHelper;
+    }
+
+    public CallbackHelper getOnReceivedSslErrorHelper() {
+        return mOnReceivedSslErrorHelper;
     }
 
     public OnDownloadStartHelper getOnDownloadStartHelper() {
@@ -80,6 +92,10 @@ public class TestAwContentsClient extends NullContentsClient {
 
     public DoUpdateVisitedHistoryHelper getDoUpdateVisitedHistoryHelper() {
         return mDoUpdateVisitedHistoryHelper;
+    }
+
+    public OnCreateWindowHelper getOnCreateWindowHelper() {
+        return mOnCreateWindowHelper;
     }
 
     /**
@@ -140,6 +156,16 @@ public class TestAwContentsClient extends NullContentsClient {
         mOnReceivedErrorHelper.notifyCalled(errorCode, description, failingUrl);
     }
 
+    @Override
+    public void onReceivedSslError(ValueCallback<Boolean> callback, SslError error) {
+        callback.onReceiveValue(mAllowSslError);
+        mOnReceivedSslErrorHelper.notifyCalled();
+    }
+
+    public void setAllowSslError(boolean allow) {
+        mAllowSslError = allow;
+    }
+
     /**
      * CallbackHelper for OnDownloadStart.
      */
@@ -197,6 +223,42 @@ public class TestAwContentsClient extends NullContentsClient {
     }
 
     /**
+     * Callback helper for onCreateWindow.
+     */
+    public static class OnCreateWindowHelper extends CallbackHelper {
+        private boolean mIsDialog;
+        private boolean mIsUserGesture;
+        private boolean mReturnValue;
+
+        public boolean getIsDialog() {
+            assert getCallCount() > 0;
+            return mIsDialog;
+        }
+
+        public boolean getUserAgent() {
+            assert getCallCount() > 0;
+            return mIsUserGesture;
+        }
+
+        public void setReturnValue(boolean returnValue) {
+            mReturnValue = returnValue;
+        }
+
+        public boolean notifyCalled(boolean isDialog, boolean isUserGesture) {
+            mIsDialog = isDialog;
+            mIsUserGesture = isUserGesture;
+            boolean returnValue = mReturnValue;
+            notifyCalled();
+            return returnValue;
+        }
+    }
+
+    @Override
+    public boolean onCreateWindow(boolean isDialog, boolean isUserGesture) {
+        return mOnCreateWindowHelper.notifyCalled(isDialog, isUserGesture);
+    }
+
+    /**
      * CallbackHelper for OnReceivedLoginRequest.
      */
     public static class OnReceivedLoginRequestHelper extends CallbackHelper {
@@ -240,7 +302,7 @@ public class TestAwContentsClient extends NullContentsClient {
     }
 
     /**
-     * Callback helper for onScaleChangedScaled.
+     * Callback helper for AddMessageToConsole.
      */
     public static class AddMessageToConsoleHelper extends CallbackHelper {
         private int mLevel;
@@ -283,7 +345,7 @@ public class TestAwContentsClient extends NullContentsClient {
     }
 
     /**
-     * Callback helper for onScaleChangedScaled.
+     * Callback helper for PictureListener.
      */
     public static class PictureListenerHelper extends CallbackHelper {
         // Generally null, depending on |invalidationOnly| in enableOnNewPicture()
@@ -306,7 +368,7 @@ public class TestAwContentsClient extends NullContentsClient {
     }
 
     /**
-     * Callback helper for onScaleChangedScaled.
+     * Callback helper for ShouldOverrideUrlLoading.
      */
     public static class ShouldOverrideUrlLoadingHelper extends CallbackHelper {
         private String mShouldOverrideUrlLoadingUrl;
@@ -343,7 +405,7 @@ public class TestAwContentsClient extends NullContentsClient {
     public boolean shouldOverrideUrlLoading(String url) {
         super.shouldOverrideUrlLoading(url);
         boolean returnValue =
-            mShouldOverrideUrlLoadingHelper.getShouldOverrideUrlLoadingReturnValue();
+                mShouldOverrideUrlLoadingHelper.getShouldOverrideUrlLoadingReturnValue();
         mShouldOverrideUrlLoadingHelper.notifyCalled(url);
         return returnValue;
     }

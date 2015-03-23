@@ -42,20 +42,25 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/download_row.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_db_task.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_unittest_base.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/tools/profiles/thumbnail-inl.h"
+#include "components/history/content/browser/download_constants_utils.h"
+#include "components/history/content/browser/history_database_helper.h"
+#include "components/history/core/browser/download_constants.h"
+#include "components/history/core/browser/download_row.h"
+#include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/page_usage_data.h"
 #include "components/history/core/common/thumbnail_score.h"
+#include "components/history/core/test/history_unittest_base.h"
+#include "components/history/core/test/test_history_database.h"
+#include "components/history/core/test/thumbnail-inl.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -93,16 +98,25 @@ class BackendDelegate : public HistoryBackend::Delegate {
       : history_test_(history_test) {
   }
 
-  virtual void NotifyProfileError(sql::InitStatus init_status) OVERRIDE {}
-  virtual void SetInMemoryBackend(
-      scoped_ptr<InMemoryHistoryBackend> backend) OVERRIDE;
-  virtual void NotifyFaviconChanged(const std::set<GURL>& url) OVERRIDE {}
-  virtual void BroadcastNotifications(
-      int type,
-      scoped_ptr<HistoryDetails> details) OVERRIDE;
-  virtual void DBLoaded() OVERRIDE {}
-  virtual void NotifyVisitDBObserversOnAddVisit(
-      const BriefVisitInfo& info) OVERRIDE {}
+  void NotifyProfileError(sql::InitStatus init_status) override {}
+  void SetInMemoryBackend(scoped_ptr<InMemoryHistoryBackend> backend) override;
+  void NotifyAddVisit(const BriefVisitInfo& info) override {}
+  void NotifyFaviconChanged(const std::set<GURL>& url) override {}
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const URLRow& row,
+                        const RedirectList& redirects,
+                        base::Time visit_time) override {}
+  void NotifyURLsModified(const URLRows& changed_urls) override {}
+  void NotifyURLsDeleted(bool all_history,
+                         bool expired,
+                         const URLRows& deleted_rows,
+                         const std::set<GURL>& favicon_urls) override {}
+  void NotifyKeywordSearchTermUpdated(const URLRow& row,
+                                      KeywordID keyword_id,
+                                      const base::string16& term) override {}
+  void NotifyKeywordSearchTermDeleted(URLID url_id) override {}
+  void DBLoaded() override {}
+
  private:
   HistoryBackendDBTest* history_test_;
 };
@@ -114,8 +128,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
   HistoryBackendDBTest() : db_(NULL) {
   }
 
-  virtual ~HistoryBackendDBTest() {
-  }
+  ~HistoryBackendDBTest() override {}
 
  protected:
   friend class BackendDelegate;
@@ -125,7 +138,8 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
   void CreateBackendAndDatabase() {
     backend_ =
         new HistoryBackend(history_dir_, new BackendDelegate(this), NULL);
-    backend_->Init(std::string(), false);
+    backend_->Init(std::string(), false,
+                   HistoryDatabaseParamsForPath(history_dir_));
     db_ = backend_->db_.get();
     DCHECK(in_mem_backend_) << "Mem backend should have been set by "
         "HistoryBackend::Init";
@@ -138,8 +152,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
     data_path =
           data_path.AppendASCII(base::StringPrintf("history.%d.sql", version));
     ASSERT_NO_FATAL_FAILURE(
-        ExecuteSQLScript(data_path, history_dir_.Append(
-            chrome::kHistoryFilename)));
+        ExecuteSQLScript(data_path, history_dir_.Append(kHistoryFilename)));
   }
 
   void CreateArchivedDB() {
@@ -147,13 +160,12 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
     data_path = data_path.AppendASCII("History");
     data_path = data_path.AppendASCII("archived_history.4.sql");
-    ASSERT_NO_FATAL_FAILURE(
-        ExecuteSQLScript(data_path, history_dir_.Append(
-            chrome::kArchivedHistoryFilename)));
+    ASSERT_NO_FATAL_FAILURE(ExecuteSQLScript(
+        data_path, history_dir_.Append(kArchivedHistoryFilename)));
   }
 
   // testing::Test
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryBackendDBTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
@@ -166,7 +178,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     DeleteBackend();
 
     // Make sure we don't have any event pending that could disrupt the next
@@ -176,9 +188,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
     base::MessageLoop::current()->Run();
   }
 
-  bool AddDownload(uint32 id,
-                   DownloadItem::DownloadState state,
-                   const Time& time) {
+  bool AddDownload(uint32 id, DownloadState state, const Time& time) {
     std::vector<GURL> url_chain;
     url_chain.push_back(GURL("foo-url"));
 
@@ -195,8 +205,9 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
                          0,
                          512,
                          state,
-                         content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-                         content::DOWNLOAD_INTERRUPT_REASON_NONE,
+                         DownloadDangerType::NOT_DANGEROUS,
+                         ToHistoryDownloadInterruptReason(
+                            content::DOWNLOAD_INTERRUPT_REASON_NONE),
                          id,
                          false,
                          "by_ext_id",
@@ -224,16 +235,6 @@ void BackendDelegate::SetInMemoryBackend(
   history_test_->in_mem_backend_.swap(backend);
 }
 
-void BackendDelegate::BroadcastNotifications(
-    int type,
-    scoped_ptr<HistoryDetails> details) {
-  // Currently, just send the notifications directly to the in-memory database.
-  // We may want do do something more fancy in the future.
-  content::Details<HistoryDetails> det(details.get());
-  history_test_->in_mem_backend_->Observe(type,
-      content::Source<HistoryBackendDBTest>(NULL), det);
-}
-
 TEST_F(HistoryBackendDBTest, ClearBrowsingData_Downloads) {
   CreateBackendAndDatabase();
 
@@ -246,7 +247,7 @@ TEST_F(HistoryBackendDBTest, ClearBrowsingData_Downloads) {
   // was removed.
   Time now = Time();
   uint32 id = 1;
-  EXPECT_TRUE(AddDownload(id, DownloadItem::COMPLETE, Time()));
+  EXPECT_TRUE(AddDownload(id, DownloadState::COMPLETE, Time()));
   db_->QueryDownloads(&downloads);
   EXPECT_EQ(1U, downloads.size());
 
@@ -262,9 +263,8 @@ TEST_F(HistoryBackendDBTest, ClearBrowsingData_Downloads) {
   EXPECT_EQ(now, downloads[0].end_time);
   EXPECT_EQ(0, downloads[0].received_bytes);
   EXPECT_EQ(512, downloads[0].total_bytes);
-  EXPECT_EQ(DownloadItem::COMPLETE, downloads[0].state);
-  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-            downloads[0].danger_type);
+  EXPECT_EQ(DownloadState::COMPLETE, downloads[0].state);
+  EXPECT_EQ(DownloadDangerType::NOT_DANGEROUS, downloads[0].danger_type);
   EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NONE,
             downloads[0].interrupt_reason);
   EXPECT_FALSE(downloads[0].opened);
@@ -286,7 +286,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadsState) {
   {
     // Open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
 
     // Manually insert corrupted rows; there's infrastructure in place now to
     // make this impossible, at least according to the test above.
@@ -316,7 +316,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadsState) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       // The version should have been updated.
       int cur_version = HistoryDatabase::GetCurrentVersion();
@@ -354,7 +354,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadsReasonPathsAndDangerType) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
 
     // Manually insert some rows.
     sql::Statement s(db.GetUniqueStatement(
@@ -397,7 +397,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadsReasonPathsAndDangerType) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       // The version should have been updated.
       int cur_version = HistoryDatabase::GetCurrentVersion();
@@ -464,7 +464,7 @@ TEST_F(HistoryBackendDBTest, MigrateReferrer) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(22));
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     sql::Statement s(db.GetUniqueStatement(
         "INSERT INTO downloads (id, full_path, url, start_time, "
         "received_bytes, total_bytes, state, end_time, opened) VALUES "
@@ -488,7 +488,7 @@ TEST_F(HistoryBackendDBTest, MigrateReferrer) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     // The version should have been updated.
     int cur_version = HistoryDatabase::GetCurrentVersion();
     ASSERT_LE(26, cur_version);
@@ -512,7 +512,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadedByExtension) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(26));
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       sql::Statement s(db.GetUniqueStatement(
           "INSERT INTO downloads (id, current_path, target_path, start_time, "
@@ -550,7 +550,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadedByExtension) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     // The version should have been updated.
     int cur_version = HistoryDatabase::GetCurrentVersion();
     ASSERT_LE(27, cur_version);
@@ -575,7 +575,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadValidators) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(27));
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       sql::Statement s(db.GetUniqueStatement(
           "INSERT INTO downloads (id, current_path, target_path, start_time, "
@@ -615,7 +615,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadValidators) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     // The version should have been updated.
     int cur_version = HistoryDatabase::GetCurrentVersion();
     ASSERT_LE(28, cur_version);
@@ -639,16 +639,14 @@ TEST_F(HistoryBackendDBTest, PurgeArchivedDatabase) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(27));
   ASSERT_NO_FATAL_FAILURE(CreateArchivedDB());
 
-  ASSERT_TRUE(base::PathExists(
-      history_dir_.Append(chrome::kArchivedHistoryFilename)));
+  ASSERT_TRUE(base::PathExists(history_dir_.Append(kArchivedHistoryFilename)));
 
   CreateBackendAndDatabase();
   DeleteBackend();
 
   // We do not retain expired history entries in an archived database as of M37.
   // Verify that any legacy archived database is deleted on start-up.
-  ASSERT_FALSE(base::PathExists(
-      history_dir_.Append(chrome::kArchivedHistoryFilename)));
+  ASSERT_FALSE(base::PathExists(history_dir_.Append(kArchivedHistoryFilename)));
 }
 
 TEST_F(HistoryBackendDBTest, MigrateDownloadMimeType) {
@@ -656,7 +654,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadMimeType) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(28));
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       sql::Statement s(db.GetUniqueStatement(
           "INSERT INTO downloads (id, current_path, target_path, start_time, "
@@ -699,7 +697,7 @@ TEST_F(HistoryBackendDBTest, MigrateDownloadMimeType) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     // The version should have been updated.
     int cur_version = HistoryDatabase::GetCurrentVersion();
     ASSERT_LE(29, cur_version);
@@ -727,15 +725,15 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadRowCreateAndDelete) {
 
   // Add some downloads.
   uint32 id1 = 1, id2 = 2, id3 = 3;
-  AddDownload(id1, DownloadItem::COMPLETE, now);
-  AddDownload(id2, DownloadItem::COMPLETE, now + base::TimeDelta::FromDays(2));
-  AddDownload(id3, DownloadItem::COMPLETE, now - base::TimeDelta::FromDays(2));
+  AddDownload(id1, DownloadState::COMPLETE, now);
+  AddDownload(id2, DownloadState::COMPLETE, now + base::TimeDelta::FromDays(2));
+  AddDownload(id3, DownloadState::COMPLETE, now - base::TimeDelta::FromDays(2));
 
   // Confirm that resulted in the correct number of rows in the DB.
   DeleteBackend();
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     sql::Statement statement(db.GetUniqueStatement(
         "Select Count(*) from downloads"));
     EXPECT_TRUE(statement.Step());
@@ -754,7 +752,7 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadRowCreateAndDelete) {
   DeleteBackend();
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     sql::Statement statement(db.GetUniqueStatement(
         "Select Count(*) from downloads"));
     EXPECT_TRUE(statement.Step());
@@ -783,9 +781,10 @@ TEST_F(HistoryBackendDBTest, DownloadNukeRecordsMissingURLs) {
                        std::string(),
                        0,
                        512,
-                       DownloadItem::COMPLETE,
-                       content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-                       content::DOWNLOAD_INTERRUPT_REASON_NONE,
+                       DownloadState::COMPLETE,
+                       DownloadDangerType::NOT_DANGEROUS,
+                       ToHistoryDownloadInterruptReason(
+                          content::DOWNLOAD_INTERRUPT_REASON_NONE),
                        1,
                        0,
                        "by_ext_id",
@@ -801,7 +800,7 @@ TEST_F(HistoryBackendDBTest, DownloadNukeRecordsMissingURLs) {
   DeleteBackend();
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     sql::Statement statement(db.GetUniqueStatement(
         "DELETE FROM downloads_url_chains WHERE id=1"));
     ASSERT_TRUE(statement.Run());
@@ -815,7 +814,7 @@ TEST_F(HistoryBackendDBTest, DownloadNukeRecordsMissingURLs) {
   DeleteBackend();
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       sql::Statement statement(db.GetUniqueStatement(
             "SELECT count(*) from downloads"));
@@ -832,13 +831,13 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
   base::Time now(base::Time::Now());
 
   // Put an IN_PROGRESS download in the DB.
-  AddDownload(1, DownloadItem::IN_PROGRESS, now);
+  AddDownload(1, DownloadState::IN_PROGRESS, now);
 
   // Confirm that they made it into the DB unchanged.
   DeleteBackend();
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     sql::Statement statement(db.GetUniqueStatement(
         "Select Count(*) from downloads"));
     EXPECT_TRUE(statement.Step());
@@ -847,7 +846,8 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
     sql::Statement statement1(db.GetUniqueStatement(
         "Select state, interrupt_reason from downloads"));
     EXPECT_TRUE(statement1.Step());
-    EXPECT_EQ(DownloadDatabase::kStateInProgress, statement1.ColumnInt(0));
+    EXPECT_EQ(DownloadStateToInt(DownloadState::IN_PROGRESS),
+              statement1.ColumnInt(0));
     EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NONE, statement1.ColumnInt(1));
     EXPECT_FALSE(statement1.Step());
   }
@@ -858,7 +858,7 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
   std::vector<DownloadRow> results;
   db_->QueryDownloads(&results);
   ASSERT_EQ(1u, results.size());
-  EXPECT_EQ(content::DownloadItem::INTERRUPTED, results[0].state);
+  EXPECT_EQ(DownloadState::INTERRUPTED, results[0].state);
   EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_CRASH,
             results[0].interrupt_reason);
 
@@ -868,7 +868,7 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
   DeleteBackend();
   {
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     sql::Statement statement(db.GetUniqueStatement(
         "Select Count(*) from downloads"));
     EXPECT_TRUE(statement.Step());
@@ -877,7 +877,8 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
     sql::Statement statement1(db.GetUniqueStatement(
         "Select state, interrupt_reason from downloads"));
     EXPECT_TRUE(statement1.Step());
-    EXPECT_EQ(DownloadDatabase::kStateInterrupted, statement1.ColumnInt(0));
+    EXPECT_EQ(DownloadStateToInt(DownloadState::INTERRUPTED),
+              statement1.ColumnInt(0));
     EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_CRASH,
               statement1.ColumnInt(1));
     EXPECT_FALSE(statement1.Step());
@@ -983,8 +984,7 @@ class HistoryTest : public testing::Test {
         query_url_success_(false) {
   }
 
-  virtual ~HistoryTest() {
-  }
+  ~HistoryTest() override {}
 
   void OnMostVisitedURLsAvailable(const MostVisitedURLList* url_list) {
     most_visited_urls_ = *url_list;
@@ -995,18 +995,19 @@ class HistoryTest : public testing::Test {
   friend class BackendDelegate;
 
   // testing::Test
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
     history_service_.reset(new HistoryService);
-    if (!history_service_->Init(history_dir_)) {
+    if (!history_service_->Init(std::string(),
+                                HistoryDatabaseParamsForPath(history_dir_))) {
       history_service_.reset();
       ADD_FAILURE();
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (history_service_)
       CleanupHistoryService();
 
@@ -1503,12 +1504,11 @@ class HistoryDBTaskImpl : public HistoryDBTask {
   HistoryDBTaskImpl(int* invoke_count, bool* done_invoked)
       : invoke_count_(invoke_count), done_invoked_(done_invoked) {}
 
-  virtual bool RunOnDBThread(HistoryBackend* backend,
-                             HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(HistoryBackend* backend, HistoryDatabase* db) override {
     return (++*invoke_count_ == kWantInvokeCount);
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
+  void DoneRunOnMainThread() override {
     *done_invoked_ = true;
     base::MessageLoop::current()->Quit();
   }
@@ -1517,7 +1517,7 @@ class HistoryDBTaskImpl : public HistoryDBTask {
   bool* done_invoked_;
 
  private:
-  virtual ~HistoryDBTaskImpl() {}
+  ~HistoryDBTaskImpl() override {}
 
   DISALLOW_COPY_AND_ASSIGN(HistoryDBTaskImpl);
 };
@@ -1818,7 +1818,7 @@ TEST_F(HistoryBackendDBTest, MigratePresentations) {
   {
     // Re-open the db for manual manipulation.
     sql::Connection db;
-    ASSERT_TRUE(db.Open(history_dir_.Append(chrome::kHistoryFilename)));
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
 
     // Add an entry to urls.
     {

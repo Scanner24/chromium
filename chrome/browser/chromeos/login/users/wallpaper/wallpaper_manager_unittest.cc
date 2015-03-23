@@ -19,7 +19,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -39,18 +39,15 @@ namespace chromeos {
 class WallpaperManagerCacheTest : public test::AshTestBase {
  public:
   WallpaperManagerCacheTest()
-      : fake_user_manager_(new FakeUserManager()),
-        scoped_user_manager_(fake_user_manager_) {
-  }
+      : fake_user_manager_(new FakeChromeUserManager()),
+        scoped_user_manager_(fake_user_manager_) {}
 
  protected:
-  virtual ~WallpaperManagerCacheTest() {}
+  ~WallpaperManagerCacheTest() override {}
 
-  FakeUserManager* fake_user_manager() { return fake_user_manager_; }
+  FakeChromeUserManager* fake_user_manager() { return fake_user_manager_; }
 
-  virtual void SetUp() OVERRIDE {
-    test::AshTestBase::SetUp();
-  }
+  void SetUp() override { test::AshTestBase::SetUp(); }
 
   // Creates a test image of size 1x1.
   gfx::ImageSkia CreateTestImage(SkColor color) {
@@ -61,7 +58,7 @@ class WallpaperManagerCacheTest : public test::AshTestBase {
   }
 
  private:
-  FakeUserManager* fake_user_manager_;
+  FakeChromeUserManager* fake_user_manager_;
   ScopedUserManagerEnabler scoped_user_manager_;
 };
 

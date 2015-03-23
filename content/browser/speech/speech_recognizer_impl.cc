@@ -13,7 +13,6 @@
 #include "content/browser/speech/google_one_shot_remote_engine.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
 #include "media/base/audio_converter.h"
-#include "net/url_request/url_request_context_getter.h"
 
 #if defined(OS_WIN)
 #include "media/audio/win/core_audio_util_win.h"
@@ -36,7 +35,7 @@ class SpeechRecognizerImpl::OnDataConverter
  public:
   OnDataConverter(const AudioParameters& input_params,
                   const AudioParameters& output_params);
-  virtual ~OnDataConverter();
+  ~OnDataConverter() override;
 
   // Converts input audio |data| bus into an AudioChunk where the input format
   // is given by |input_parameters_| and the output format by
@@ -45,8 +44,7 @@ class SpeechRecognizerImpl::OnDataConverter
 
  private:
   // media::AudioConverter::InputCallback implementation.
-  virtual double ProvideInput(AudioBus* dest,
-                              base::TimeDelta buffer_delay) OVERRIDE;
+  double ProvideInput(AudioBus* dest, base::TimeDelta buffer_delay) override;
 
   // Handles resampling, buffering, and channel mixing between input and output
   // parameters.
@@ -57,7 +55,6 @@ class SpeechRecognizerImpl::OnDataConverter
   const AudioParameters input_parameters_;
   const AudioParameters output_parameters_;
   bool waiting_for_input_;
-  scoped_ptr<uint8[]> converted_data_;
 
   DISALLOW_COPY_AND_ASSIGN(OnDataConverter);
 };
@@ -109,20 +106,20 @@ const int SpeechRecognizerImpl::kNoSpeechTimeoutMs = 8000;
 const int SpeechRecognizerImpl::kEndpointerEstimationTimeMs = 300;
 media::AudioManager* SpeechRecognizerImpl::audio_manager_for_tests_ = NULL;
 
-COMPILE_ASSERT(SpeechRecognizerImpl::kNumBitsPerAudioSample % 8 == 0,
-               kNumBitsPerAudioSample_must_be_a_multiple_of_8);
+static_assert(SpeechRecognizerImpl::kNumBitsPerAudioSample % 8 == 0,
+              "kNumBitsPerAudioSample must be a multiple of 8");
 
 // SpeechRecognizerImpl::OnDataConverter implementation
 
 SpeechRecognizerImpl::OnDataConverter::OnDataConverter(
-    const AudioParameters& input_params, const AudioParameters& output_params)
+    const AudioParameters& input_params,
+    const AudioParameters& output_params)
     : audio_converter_(input_params, output_params, false),
       input_bus_(AudioBus::Create(input_params)),
       output_bus_(AudioBus::Create(output_params)),
       input_parameters_(input_params),
       output_parameters_(output_params),
-      waiting_for_input_(false),
-      converted_data_(new uint8[output_parameters_.GetBytesPerBuffer()]) {
+      waiting_for_input_(false) {
   audio_converter_.AddInput(this);
 }
 
@@ -141,16 +138,13 @@ scoped_refptr<AudioChunk> SpeechRecognizerImpl::OnDataConverter::Convert(
   waiting_for_input_ = true;
   audio_converter_.Convert(output_bus_.get());
 
-  output_bus_->ToInterleaved(
-      output_bus_->frames(), output_parameters_.bits_per_sample() / 8,
-      converted_data_.get());
-
-  // TODO(primiano): Refactor AudioChunk to avoid the extra-copy here
-  // (see http://crbug.com/249316 for details).
-  return scoped_refptr<AudioChunk>(new AudioChunk(
-      converted_data_.get(),
-      output_parameters_.GetBytesPerBuffer(),
-      output_parameters_.bits_per_sample() / 8));
+  scoped_refptr<AudioChunk> chunk(
+      new AudioChunk(output_parameters_.GetBytesPerBuffer(),
+                     output_parameters_.bits_per_sample() / 8));
+  output_bus_->ToInterleaved(output_bus_->frames(),
+                             output_parameters_.bits_per_sample() / 8,
+                             chunk->writable_data());
+  return chunk;
 }
 
 double SpeechRecognizerImpl::OnDataConverter::ProvideInput(

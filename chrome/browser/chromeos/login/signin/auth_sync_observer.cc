@@ -12,7 +12,6 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/common/pref_names.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/user_metrics.h"
@@ -45,11 +44,12 @@ void AuthSyncObserver::Shutdown() {
 }
 
 void AuthSyncObserver::OnStateChanged() {
-  DCHECK(user_manager::UserManager::Get()->IsLoggedInAsRegularUser() ||
+  DCHECK(user_manager::UserManager::Get()->IsLoggedInAsUserWithGaiaAccount() ||
          user_manager::UserManager::Get()->IsLoggedInAsSupervisedUser());
   ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile_);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile_);
   GoogleServiceAuthError::State state =
       sync_service->GetAuthError().state();
   if (state != GoogleServiceAuthError::NONE &&

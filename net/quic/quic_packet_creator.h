@@ -34,11 +34,11 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
                     QuicFramer* framer,
                     QuicRandom* random_generator);
 
-  virtual ~QuicPacketCreator();
+  ~QuicPacketCreator() override;
 
   // QuicFecBuilderInterface
-  virtual void OnBuiltFecProtectedPayload(const QuicPacketHeader& header,
-                                          base::StringPiece payload) OVERRIDE;
+  void OnBuiltFecProtectedPayload(const QuicPacketHeader& header,
+                                  base::StringPiece payload) override;
 
   // Turn on FEC protection for subsequently created packets. FEC should be
   // enabled first (max_packets_per_fec_group should be non-zero) for FEC
@@ -65,7 +65,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // can be safely changed.
   void UpdateSequenceNumberLength(
       QuicPacketSequenceNumber least_packet_awaited_by_peer,
-      QuicByteCount congestion_window);
+      QuicPacketCount max_packets_in_flight);
 
   // The overhead the framing will add for a packet with one frame.
   static size_t StreamFramePacketOverhead(
@@ -87,17 +87,6 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
                            bool fin,
                            QuicFrame* frame);
 
-  // As above, but keeps track of an QuicAckNotifier that should be called when
-  // the packet that contains this stream frame is ACKed.
-  // The |notifier| is not owned by the QuicPacketGenerator and must outlive the
-  // generated packet.
-  size_t CreateStreamFrameWithNotifier(QuicStreamId id,
-                                       const IOVector& data,
-                                       QuicStreamOffset offset,
-                                       bool fin,
-                                       QuicAckNotifier* notifier,
-                                       QuicFrame* frame);
-
   // Serializes all frames into a single packet. All frames must fit into a
   // single packet. Also, sets the entropy hash of the serialized packet to a
   // random bool and returns that value as a member of SerializedPacket.
@@ -109,7 +98,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // Caller must ensure that any open FEC group is closed before calling this
   // method.
   SerializedPacket ReserializeAllFrames(
-      const QuicFrames& frames,
+      const RetransmittableFrames& frames,
       QuicSequenceNumberLength original_length);
 
   // Returns true if there are frames pending to be serialized.
@@ -118,6 +107,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // Returns true if there are retransmittable frames pending to be serialized.
   bool HasPendingRetransmittableFrames() const;
 
+  // TODO(jri): Remove this method.
   // Returns whether FEC protection is currently enabled. Note: Enabled does not
   // mean that an FEC group is currently active; i.e., IsFecProtected() may
   // still return false.
@@ -125,7 +115,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
 
   // Returns true if subsequent packets will be FEC protected. Note: True does
   // not mean that an FEC packet is currently under construction; i.e.,
-  // fec_group_.get() may still be NULL, until MaybeStartFec() is called.
+  // fec_group_.get() may still be nullptr, until MaybeStartFec() is called.
   bool IsFecProtected() const;
 
   // Returns the number of bytes which are available to be used by additional
@@ -155,11 +145,11 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   bool AddSavedFrame(const QuicFrame& frame);
 
   // Serializes all frames which have been added and adds any which should be
-  // retransmitted to |retransmittable_frames| if it's not NULL. All frames must
-  // fit into a single packet. Sets the entropy hash of the serialized
+  // retransmitted to |retransmittable_frames| if it's not nullptr. All frames
+  // must fit into a single packet. Sets the entropy hash of the serialized
   // packet to a random bool and returns that value as a member of
-  // SerializedPacket. Also, sets |serialized_frames| in the SerializedPacket
-  // to the corresponding RetransmittableFrames if any frames are to be
+  // SerializedPacket. Also, sets |serialized_frames| in the SerializedPacket to
+  // the corresponding RetransmittableFrames if any frames are to be
   // retransmitted.
   SerializedPacket SerializePacket();
 
@@ -200,6 +190,10 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
     return connection_id_length_;
   }
 
+  void set_connection_id_length(QuicConnectionIdLength length) {
+    connection_id_length_ = length;
+  }
+
   QuicSequenceNumberLength next_sequence_number_length() const {
     return next_sequence_number_length_;
   }
@@ -208,13 +202,13 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
     next_sequence_number_length_ = length;
   }
 
-  size_t max_packet_length() const {
+  QuicByteCount max_packet_length() const {
     return max_packet_length_;
   }
 
-  void set_max_packet_length(size_t length) {
+  void set_max_packet_length(QuicByteCount length) {
     // |max_packet_length_| should not be changed mid-packet or mid-FEC group.
-    DCHECK(fec_group_.get() == NULL && queued_frames_.empty());
+    DCHECK(fec_group_.get() == nullptr && queued_frames_.empty());
     max_packet_length_ = length;
   }
 
@@ -228,6 +222,11 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // this setter enforces a min value of kLowestMaxPacketsPerFecGroup.
   // To turn off FEC protection, use StopFecProtectingPackets().
   void set_max_packets_per_fec_group(size_t max_packets_per_fec_group);
+
+  // Returns the currently open FEC group's number. If there isn't an open FEC
+  // group, returns the last closed FEC group number. Returns 0 when FEC is
+  // disabled or no FEC group has been created yet.
+  QuicFecGroupNumber fec_group_number() { return fec_group_number_; }
 
  private:
   friend class test::QuicPacketCreatorPeer;
@@ -268,7 +267,7 @@ class NET_EXPORT_PRIVATE QuicPacketCreator : public QuicFecBuilderInterface {
   // packet.
   bool send_version_in_packet_;
   // Maximum length including headers and encryption (UDP payload length.)
-  size_t max_packet_length_;
+  QuicByteCount max_packet_length_;
   // 0 indicates FEC is disabled.
   size_t max_packets_per_fec_group_;
   // Length of connection_id to send over the wire.

@@ -61,7 +61,7 @@ class AwSettingsUserData : public base::SupportsUserData::Data {
   static AwSettings* GetSettings(content::WebContents* web_contents) {
     if (!web_contents)
       return NULL;
-    AwSettingsUserData* data = reinterpret_cast<AwSettingsUserData*>(
+    AwSettingsUserData* data = static_cast<AwSettingsUserData*>(
         web_contents->GetUserData(kAwSettingsUserDataKey));
     return data ? data->settings_ : NULL;
   }
@@ -70,13 +70,14 @@ class AwSettingsUserData : public base::SupportsUserData::Data {
   AwSettings* settings_;
 };
 
-AwSettings::AwSettings(JNIEnv* env, jobject obj, jlong web_contents)
-    : WebContentsObserver(
-          reinterpret_cast<content::WebContents*>(web_contents)),
+AwSettings::AwSettings(JNIEnv* env,
+                       jobject obj,
+                       content::WebContents* web_contents)
+    : WebContentsObserver(web_contents),
       renderer_prefs_initialized_(false),
       aw_settings_(env, obj) {
-  reinterpret_cast<content::WebContents*>(web_contents)->
-      SetUserData(kAwSettingsUserDataKey, new AwSettingsUserData(this));
+  web_contents->SetUserData(kAwSettingsUserDataKey,
+                            new AwSettingsUserData(this));
 }
 
 AwSettings::~AwSettings() {
@@ -401,15 +402,16 @@ void AwSettings::PopulateWebPreferencesLocked(
   web_prefs->allow_running_insecure_content =
       Java_AwSettings_getAllowRunningInsecureContentLocked(env, obj);
 
-  web_prefs->disallow_fullscreen_for_non_media_elements = true;
   web_prefs->fullscreen_supported =
       Java_AwSettings_getFullscreenSupportedLocked(env, obj);
 }
 
 static jlong Init(JNIEnv* env,
                   jobject obj,
-                  jlong web_contents) {
-  AwSettings* settings = new AwSettings(env, obj, web_contents);
+                  jobject web_contents) {
+  content::WebContents* contents = content::WebContents::FromJavaWebContents(
+      web_contents);
+  AwSettings* settings = new AwSettings(env, obj, contents);
   return reinterpret_cast<intptr_t>(settings);
 }
 

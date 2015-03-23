@@ -25,7 +25,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
             "PROXY bad:99; PROXY maybe:80; DIRECT"));
     Init();
   }
-  virtual ~MyTestURLRequestContext() {}
+  ~MyTestURLRequestContext() override {}
 };
 
 }  // namespace
@@ -40,9 +40,9 @@ class ProxyResolvingClientSocketTest : public testing::Test {
             scoped_ptr<net::TestURLRequestContext>(
                 new MyTestURLRequestContext))) {}
 
-  virtual ~ProxyResolvingClientSocketTest() {}
+  ~ProxyResolvingClientSocketTest() override {}
 
-  virtual void TearDown() {
+  void TearDown() override {
     // Clear out any messages posted by ProxyResolvingClientSocket's
     // destructor.
     message_loop_.RunUntilIdle();

@@ -8,7 +8,7 @@
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
 #include "base/strings/string16.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/bubble/bubble_border.h"
 
 namespace views {
@@ -69,12 +69,8 @@ class ASH_EXPORT PopupMessage {
   MessageBubble* view_;
   views::Widget* widget_;
 
-  // Variables of the construction time.
-  views::View* anchor_;
   base::string16 caption_;
   base::string16 message_;
-  IconType message_type_;
-  views::BubbleBorder::Arrow arrow_orientation_;
 
   DISALLOW_COPY_AND_ASSIGN(PopupMessage);
 };

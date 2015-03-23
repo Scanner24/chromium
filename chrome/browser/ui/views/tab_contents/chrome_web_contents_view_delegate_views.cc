@@ -6,6 +6,9 @@
 
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/ui/aura/tab_contents/web_drag_bookmark_handler_aura.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/views/renderer_context_menu/render_view_context_menu_views.h"
@@ -42,6 +45,11 @@ ChromeWebContentsViewDelegateViews::~ChromeWebContentsViewDelegateViews() {
   views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
+}
+
+gfx::NativeWindow ChromeWebContentsViewDelegateViews::GetNativeWindow() {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
+  return browser ? browser->window()->GetNativeWindow() : nullptr;
 }
 
 content::WebDragDestDelegate*
@@ -112,10 +120,11 @@ void ChromeWebContentsViewDelegateViews::RestoreFocus() {
   }
 }
 
-scoped_ptr<RenderViewContextMenu> ChromeWebContentsViewDelegateViews::BuildMenu(
+scoped_ptr<RenderViewContextMenuBase>
+ChromeWebContentsViewDelegateViews::BuildMenu(
     content::WebContents* web_contents,
     const content::ContextMenuParams& params) {
-  scoped_ptr<RenderViewContextMenu> menu;
+  scoped_ptr<RenderViewContextMenuBase> menu;
   content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame();
   // If the frame tree does not have a focused frame at this point, do not
   // bother creating RenderViewContextMenuViews.
@@ -129,38 +138,12 @@ scoped_ptr<RenderViewContextMenu> ChromeWebContentsViewDelegateViews::BuildMenu(
 }
 
 void ChromeWebContentsViewDelegateViews::ShowMenu(
-    scoped_ptr<RenderViewContextMenu> menu) {
-  context_menu_.reset(static_cast<RenderViewContextMenuViews*>(menu.release()));
-  if (!context_menu_.get())
+    scoped_ptr<RenderViewContextMenuBase> menu) {
+  context_menu_ = menu.Pass();
+  if (!context_menu_)
     return;
 
-  // Menus need a Widget to work. If we're not the active tab we won't
-  // necessarily be in a widget.
-  views::Widget* top_level_widget = GetTopLevelWidget();
-  if (!top_level_widget)
-    return;
-
-  const content::ContextMenuParams& params = context_menu_->params();
-  // Don't show empty menus.
-  if (context_menu_->menu_model().GetItemCount() == 0)
-    return;
-
-  gfx::Point screen_point(params.x, params.y);
-
-  // Convert from target window coordinates to root window coordinates.
-  aura::Window* target_window = GetActiveNativeView();
-  aura::Window* root_window = target_window->GetRootWindow();
-  aura::client::ScreenPositionClient* screen_position_client =
-      aura::client::GetScreenPositionClient(root_window);
-  if (screen_position_client) {
-    screen_position_client->ConvertPointToScreen(target_window,
-                                                 &screen_point);
-  }
-  // Enable recursive tasks on the message loop so we can get updates while
-  // the context menu is being displayed.
-  base::MessageLoop::ScopedNestableTaskAllower allow(
-      base::MessageLoop::current());
-  context_menu_->RunMenuAt(top_level_widget, screen_point, params.source_type);
+  context_menu_->Show();
 }
 
 void ChromeWebContentsViewDelegateViews::ShowContextMenu(
@@ -178,9 +161,22 @@ void ChromeWebContentsViewDelegateViews::ShowDisambiguationPopup(
     const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
     const base::Callback<void(ui::MouseEvent*)>& mouse_cb) {
 #if defined(USE_AURA)
+  // If we are attempting to show a link disambiguation popup while already
+  // showing one this means that the popup itself received an ambiguous touch.
+  // Don't show another popup in this case.
+  if (link_disambiguation_popup_) {
+    link_disambiguation_popup_.reset();
+    return;
+  }
+
   link_disambiguation_popup_.reset(new LinkDisambiguationPopup);
   link_disambiguation_popup_->Show(
-      zoomed_bitmap, target_rect, content, gesture_cb, mouse_cb);
+      views::Widget::GetTopLevelWidgetForNativeView(GetActiveNativeView()),
+      zoomed_bitmap,
+      target_rect,
+      content,
+      gesture_cb,
+      mouse_cb);
 #endif
 }
 

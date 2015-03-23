@@ -5,7 +5,8 @@
 package org.chromium.net;
 
 import android.content.Context;
-import android.os.ConditionVariable;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
 
@@ -27,21 +28,33 @@ public class ChromiumUrlRequestContext {
      */
     private long mChromiumUrlRequestContextAdapter;
 
-    private final ConditionVariable mStarted = new ConditionVariable();
-
     /**
      * Constructor.
-     *
      */
-    protected ChromiumUrlRequestContext(Context context, String userAgent,
+    protected ChromiumUrlRequestContext(final Context context, String userAgent,
             String config) {
         mChromiumUrlRequestContextAdapter = nativeCreateRequestContextAdapter(
                 context, userAgent, getLoggingLevel(), config);
-        if (mChromiumUrlRequestContextAdapter == 0)
+        if (mChromiumUrlRequestContextAdapter == 0) {
             throw new NullPointerException("Context Adapter creation failed");
-
-        // TODO(mef): Revisit the need of block here.
-        mStarted.block(2000);
+        }
+        // Post a task to UI thread to init native Chromium URLRequestContext.
+        // TODO(xunjieli): This constructor is not supposed to be invoked on
+        // the main thread. Consider making the following code into a blocking
+        // API to handle the case where we are already on main thread.
+        Runnable task = new Runnable() {
+            public void run() {
+                NetworkChangeNotifier.init(context);
+                // Registers to always receive network notifications. Note that
+                // this call is fine for Cronet because Cronet embedders do not
+                // have API access to create network change observers. Existing
+                // observers in the net stack do not perform expensive work.
+                NetworkChangeNotifier.registerToReceiveNotificationsAlways();
+                nativeInitRequestContextOnMainThread(
+                        mChromiumUrlRequestContextAdapter);
+            }
+        };
+        new Handler(Looper.getMainLooper()).post(task);
     }
 
     /**
@@ -69,10 +82,11 @@ public class ChromiumUrlRequestContext {
     }
 
     /**
-     * Starts NetLog logging to a file named |fileName| in the
-     * application temporary directory. |fileName| must not be empty. Log level
-     * is LOG_ALL_BUT_BYTES. If the file exists it is truncated before starting.
-     * If actively logging the call is ignored.
+     * Starts NetLog logging to a file. The NetLog log level used is
+     * LOG_ALL_BUT_BYTES.
+     * @param fileName The complete file path. It must not be empty. If file
+     *            exists, it is truncated before starting. If actively logging,
+     *            this method is ignored.
      */
     public void startNetLogToFile(String fileName) {
         nativeStartNetLogToFile(mChromiumUrlRequestContextAdapter, fileName);
@@ -80,7 +94,7 @@ public class ChromiumUrlRequestContext {
 
     /**
      * Stops NetLog logging and flushes file to disk. If a logging session is
-     * not in progress this call is ignored.
+     * not in progress, this call is ignored.
      */
     public void stopNetLog() {
         nativeStopNetLog(mChromiumUrlRequestContextAdapter);
@@ -90,7 +104,6 @@ public class ChromiumUrlRequestContext {
     private void initNetworkThread() {
         Thread.currentThread().setName("ChromiumNet");
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
-        mStarted.open();
     }
 
     @Override
@@ -135,4 +148,7 @@ public class ChromiumUrlRequestContext {
             long chromiumUrlRequestContextAdapter, String fileName);
 
     private native void nativeStopNetLog(long chromiumUrlRequestContextAdapter);
+
+    private native void nativeInitRequestContextOnMainThread(
+            long chromiumUrlRequestContextAdapter);
 }

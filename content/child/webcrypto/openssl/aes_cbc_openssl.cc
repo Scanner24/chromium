@@ -9,7 +9,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/openssl/aes_key_openssl.h"
+#include "content/child/webcrypto/openssl/aes_algorithm_openssl.h"
 #include "content/child/webcrypto/openssl/key_openssl.h"
 #include "content/child/webcrypto/openssl/util_openssl.h"
 #include "content/child/webcrypto/status.h"
@@ -65,7 +65,7 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt cipher_operation,
     return Status::ErrorDataTooLarge();
 
   // Note: PKCS padding is enabled by default
-  crypto::ScopedOpenSSL<EVP_CIPHER_CTX, EVP_CIPHER_CTX_free>::Type context(
+  crypto::ScopedOpenSSL<EVP_CIPHER_CTX, EVP_CIPHER_CTX_free> context(
       EVP_CIPHER_CTX_new());
 
   if (!context.get())
@@ -74,12 +74,8 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt cipher_operation,
   const EVP_CIPHER* const cipher = GetAESCipherByKeyLength(raw_key.size());
   DCHECK(cipher);
 
-  if (!EVP_CipherInit_ex(context.get(),
-                         cipher,
-                         NULL,
-                         &raw_key[0],
-                         params->iv().data(),
-                         cipher_operation)) {
+  if (!EVP_CipherInit_ex(context.get(), cipher, NULL, &raw_key[0],
+                         params->iv().data(), cipher_operation)) {
     return Status::OperationError();
   }
 
@@ -88,15 +84,13 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt cipher_operation,
   unsigned char* const buffer_data = vector_as_array(buffer);
 
   int output_len = 0;
-  if (!EVP_CipherUpdate(context.get(),
-                        buffer_data,
-                        &output_len,
-                        data.bytes(),
-                        data.byte_length()))
+  if (!EVP_CipherUpdate(context.get(), buffer_data, &output_len, data.bytes(),
+                        data.byte_length())) {
     return Status::OperationError();
+  }
   int final_output_chunk_len = 0;
-  if (!EVP_CipherFinal_ex(
-          context.get(), buffer_data + output_len, &final_output_chunk_len)) {
+  if (!EVP_CipherFinal_ex(context.get(), buffer_data + output_len,
+                          &final_output_chunk_len)) {
     return Status::OperationError();
   }
 
@@ -113,17 +107,17 @@ class AesCbcImplementation : public AesAlgorithm {
  public:
   AesCbcImplementation() : AesAlgorithm("CBC") {}
 
-  virtual Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     return AesCbcEncryptDecrypt(ENCRYPT, algorithm, key, data, buffer);
   }
 
-  virtual Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     return AesCbcEncryptDecrypt(DECRYPT, algorithm, key, data, buffer);
   }
 };

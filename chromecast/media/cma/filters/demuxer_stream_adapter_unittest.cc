@@ -41,15 +41,15 @@ class DummyDemuxerStream : public ::media::DemuxerStream {
   DummyDemuxerStream(int cycle_count,
                      int delayed_frame_count,
                      const std::list<int>& config_idx);
-  virtual ~DummyDemuxerStream();
+  ~DummyDemuxerStream() override;
 
   // ::media::DemuxerStream implementation.
-  virtual void Read(const ReadCB& read_cb) OVERRIDE;
-  virtual ::media::AudioDecoderConfig audio_decoder_config() OVERRIDE;
-  virtual ::media::VideoDecoderConfig video_decoder_config() OVERRIDE;
-  virtual Type type() OVERRIDE;
-  virtual bool SupportsConfigChanges() OVERRIDE;
-  virtual ::media::VideoRotation video_rotation() OVERRIDE;
+  void Read(const ReadCB& read_cb) override;
+  ::media::AudioDecoderConfig audio_decoder_config() override;
+  ::media::VideoDecoderConfig video_decoder_config() override;
+  Type type() const override;
+  bool SupportsConfigChanges() override;
+  ::media::VideoRotation video_rotation() override;
 
   bool has_pending_read() const {
     return has_pending_read_;
@@ -127,7 +127,7 @@ void DummyDemuxerStream::Read(const ReadCB& read_cb) {
       false);
 }
 
-::media::DemuxerStream::Type DummyDemuxerStream::type() {
+::media::DemuxerStream::Type DummyDemuxerStream::type() const {
   return VIDEO;
 }
 
@@ -153,7 +153,7 @@ void DummyDemuxerStream::DoRead(const ReadCB& read_cb) {
 class DemuxerStreamAdapterTest : public testing::Test {
  public:
   DemuxerStreamAdapterTest();
-  virtual ~DemuxerStreamAdapterTest();
+  ~DemuxerStreamAdapterTest() override;
 
   void Initialize(::media::DemuxerStream* demuxer_stream);
   void Start();

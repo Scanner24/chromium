@@ -14,6 +14,8 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/message_filter.h"
 
+struct ResourceMsg_RequestCompleteData;
+
 namespace blink {
 class WebThreadedDataReceiver;
 }
@@ -23,6 +25,7 @@ class SyncChannel;
 }
 
 namespace content {
+class ResourceDispatcher;
 class WebThreadImpl;
 
 class ThreadedDataProvider {
@@ -31,9 +34,11 @@ class ThreadedDataProvider {
       int request_id,
       blink::WebThreadedDataReceiver* threaded_data_receiver,
       linked_ptr<base::SharedMemory> shm_buffer,
-      int shm_size);
-  virtual ~ThreadedDataProvider();
+      int shm_size,
+      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_);
 
+  // Any destruction of this class has to bounce via the background thread to
+  // ensure all data is flushed; call Stop() to start this process.
   void Stop();
   void OnReceivedDataOnBackgroundThread(int data_offset,
                                         int data_length,
@@ -44,11 +49,28 @@ class ThreadedDataProvider {
                                         int encoded_data_length);
 
   void OnResourceMessageFilterAddedMainThread();
+  void OnRequestCompleteForegroundThread(
+      base::WeakPtr<ResourceDispatcher> resource_dispatcher,
+      const ResourceMsg_RequestCompleteData& request_complete_data,
+      const base::TimeTicks& renderer_completion_time);
 
  private:
+  ~ThreadedDataProvider();
+  void DestructOnMainThread();
+
   void StopOnBackgroundThread();
   void OnResourceMessageFilterAddedBackgroundThread();
-  void ForwardAndACKData(const char* data, int data_length);
+  void OnRequestCompleteBackgroundThread(
+      base::WeakPtr<ResourceDispatcher> resource_dispatcher,
+      const ResourceMsg_RequestCompleteData& request_complete_data,
+      const base::TimeTicks& renderer_completion_time);
+  void ForwardAndACKData(const char* data,
+                         int data_length,
+                         int encoded_data_length);
+  void DataNotifyForegroundThread(
+      scoped_ptr<std::vector<char> > data_copy,
+      int data_length,
+      int encoded_data_length);
 
   scoped_refptr<IPC::MessageFilter> filter_;
   int request_id_;
@@ -60,11 +82,12 @@ class ThreadedDataProvider {
   IPC::SyncChannel* ipc_channel_;
   blink::WebThreadedDataReceiver* threaded_data_receiver_;
   bool resource_filter_active_;
-  base::MessageLoop* main_thread_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
   struct QueuedSharedMemoryData {
     const char* data;
     int length;
+    int encoded_length;
   };
   std::vector<QueuedSharedMemoryData> queued_data_;
 

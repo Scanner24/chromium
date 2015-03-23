@@ -7,15 +7,17 @@
  * to VolumeManager. This class also filters Drive related data/events if
  * driveEnabled is set to false.
  *
+ * @constructor
+ * @extends {cr.EventTarget}
+ * @implements {VolumeManagerCommon.VolumeInfoProvider}
+ *
  * @param {VolumeManagerWrapper.DriveEnabledStatus} driveEnabled DRIVE_ENABLED
  *     if drive should be available. DRIVE_DISABLED if drive related
  *     data/events should be hidden.
- * @param {DOMWindow=} opt_backgroundPage Window object of the background
+ * @param {Window=} opt_backgroundPage Window object of the background
  *     page. If this is specified, the class skips to get background page.
  *     TOOD(hirono): Let all clients of the class pass the background page and
  *     make the argument not optional.
- * @constructor
- * @extends {cr.EventTarget}
  */
 function VolumeManagerWrapper(driveEnabled, opt_backgroundPage) {
   cr.EventTarget.call(this);
@@ -38,10 +40,11 @@ function VolumeManagerWrapper(driveEnabled, opt_backgroundPage) {
     this.backgroundPage_ = opt_backgroundPage;
   } else {
     queue.run(function(callNextStep) {
-      chrome.runtime.getBackgroundPage(function(backgroundPage) {
-        this.backgroundPage_ = backgroundPage;
-        callNextStep();
-      }.bind(this));
+      chrome.runtime.getBackgroundPage(/** @type {function(Window=)} */(
+          function(opt_backgroundPage) {
+            this.backgroundPage_ = opt_backgroundPage;
+            callNextStep();
+          }.bind(this)));
     }.bind(this));
   }
 
@@ -130,7 +133,7 @@ VolumeManagerWrapper.prototype.dispose = function() {
 /**
  * Called on events sent from VolumeManager. This has responsibility to
  * re-dispatch the event to the listeners.
- * @param {Event} event Event object sent from VolumeManager.
+ * @param {!Event} event Event object sent from VolumeManager.
  * @private
  */
 VolumeManagerWrapper.prototype.onEvent_ = function(event) {
@@ -187,13 +190,21 @@ VolumeManagerWrapper.prototype.onVolumeInfoListUpdated_ = function(event) {
 };
 
 /**
+ * Returns whether the VolumeManager is initialized or not.
+ * @return {boolean} True if the VolumeManager is initialized.
+ */
+VolumeManagerWrapper.prototype.isInitialized = function() {
+  return this.pendingTasks_ === null;
+};
+
+/**
  * Ensures the VolumeManager is initialized, and then invokes callback.
  * If the VolumeManager is already initialized, callback will be called
  * immediately.
  * @param {function()} callback Called on initialization completion.
  */
 VolumeManagerWrapper.prototype.ensureInitialized = function(callback) {
-  if (this.pendingTasks_) {
+  if (!this.isInitialized()) {
     this.pendingTasks_.push(this.ensureInitialized.bind(this, callback));
     return;
   }
@@ -202,7 +213,7 @@ VolumeManagerWrapper.prototype.ensureInitialized = function(callback) {
 };
 
 /**
- * @return {VolumeManagerCommon.DriveConnectionType} Current drive connection
+ * @return {VolumeManagerCommon.DriveConnectionState} Current drive connection
  *     state.
  */
 VolumeManagerWrapper.prototype.getDriveConnectionState = function() {
@@ -216,11 +227,7 @@ VolumeManagerWrapper.prototype.getDriveConnectionState = function() {
   return this.volumeManager_.getDriveConnectionState();
 };
 
-/**
- * Obtains a volume info containing the passed entry.
- * @param {Entry} entry Entry on the volume to be returned.
- * @return {VolumeInfo} The VolumeInfo instance or null if not found.
- */
+/** @override */
 VolumeManagerWrapper.prototype.getVolumeInfo = function(entry) {
   return this.filterDisabledDriveVolume_(
       this.volumeManager_ && this.volumeManager_.getVolumeInfo(entry));
@@ -258,7 +265,7 @@ VolumeManagerWrapper.prototype.getDefaultDisplayRoot =
 /**
  * Obtains location information from an entry.
  *
- * @param {Entry} entry File or directory entry.
+ * @param {(!Entry|!Object)} entry File or directory entry.
  * @return {EntryLocation} Location information.
  */
 VolumeManagerWrapper.prototype.getLocationInfo = function(entry) {
@@ -321,4 +328,24 @@ VolumeManagerWrapper.prototype.filterDisabledDriveVolume_ =
   var isDrive = volumeInfo && volumeInfo.volumeType ===
       VolumeManagerCommon.VolumeType.DRIVE;
   return this.driveEnabled_ || !isDrive ? volumeInfo : null;
+};
+
+/**
+ * Returns current state of VolumeManagerWrapper.
+ * @return {string} Current state of VolumeManagerWrapper.
+ */
+VolumeManagerWrapper.prototype.toString = function() {
+  var initialized = this.isInitialized();
+  var volumeManager = initialized ?
+      this.volumeManager_ :
+      this.backgroundPage_.VolumeManager.getInstanceForDebug();
+
+  var str = 'VolumeManagerWrapper\n' +
+      '- Initialized: ' + initialized + '\n';
+
+  if (!initialized)
+    str += '- PendingTasksCount: ' + this.pendingTasks_.length + '\n';
+
+  return str + '- VolumeManager:\n' +
+      '  ' + volumeManager.toString().replace(/\n/g, '\n  ');
 };

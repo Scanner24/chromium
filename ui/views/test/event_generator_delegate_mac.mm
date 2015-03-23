@@ -4,12 +4,14 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
 #include "base/memory/singleton.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_target.h"
 #include "ui/events/event_target_iterator.h"
 #include "ui/events/event_targeter.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
 
@@ -28,6 +30,9 @@ ui::test::EventGenerator* g_active_generator = NULL;
 // Donate +[NSEvent pressedMouseButtons] by retrieving the flags from the
 // active generator.
 + (NSUInteger)pressedMouseButtons {
+  if (!g_active_generator)
+    return [NSEventDonor pressedMouseButtons];  // Call original implementation.
+
   int flags = g_active_generator->flags();
   NSUInteger bitmask = 0;
   if (flags & ui::EF_LEFT_MOUSE_BUTTON)
@@ -197,10 +202,10 @@ void EmulateSendEvent(NSWindow* window, NSEvent* event) {
   }
 }
 
-void DispatchMouseEventInWindow(NSWindow* window,
-                                ui::EventType event_type,
-                                const gfx::Point& point_in_root,
-                                int flags) {
+NSEvent* CreateMouseEventInWindow(NSWindow* window,
+                                  ui::EventType event_type,
+                                  const gfx::Point& point_in_root,
+                                  int flags) {
   NSUInteger click_count = 0;
   if (event_type == ui::ET_MOUSE_PRESSED ||
       event_type == ui::ET_MOUSE_RELEASED) {
@@ -214,19 +219,15 @@ void DispatchMouseEventInWindow(NSWindow* window,
   NSPoint point = ConvertRootPointToTarget(window, point_in_root);
   NSUInteger modifiers = 0;
   NSEventType type = EventTypeToNative(event_type, flags, &modifiers);
-  NSEvent* event = [NSEvent mouseEventWithType:type
-                                      location:point
-                                 modifierFlags:modifiers
-                                     timestamp:0
-                                  windowNumber:[window windowNumber]
-                                       context:nil
-                                   eventNumber:0
-                                    clickCount:click_count
-                                      pressure:1.0];
-
-  // Typically events go through NSApplication. For tests, dispatch the event
-  // directly to make things more predicatble.
-  EmulateSendEvent(window, event);
+  return [NSEvent mouseEventWithType:type
+                            location:point
+                       modifierFlags:modifiers
+                           timestamp:0
+                        windowNumber:[window windowNumber]
+                             context:nil
+                         eventNumber:0
+                          clickCount:click_count
+                            pressure:1.0];
 }
 
 // Implementation of ui::test::EventGeneratorDelegate for Mac. Everything
@@ -243,57 +244,54 @@ class EventGeneratorDelegateMac : public ui::EventTarget,
   }
 
   // Overridden from ui::EventTarget:
-  virtual bool CanAcceptEvent(const ui::Event& event) OVERRIDE { return true; }
-  virtual ui::EventTarget* GetParentTarget()  OVERRIDE { return NULL; }
-  virtual scoped_ptr<ui::EventTargetIterator> GetChildIterator() const OVERRIDE;
-  virtual ui::EventTargeter* GetEventTargeter() OVERRIDE {
-    return this;
-  }
+  bool CanAcceptEvent(const ui::Event& event) override { return true; }
+  ui::EventTarget* GetParentTarget() override { return NULL; }
+  scoped_ptr<ui::EventTargetIterator> GetChildIterator() const override;
+  ui::EventTargeter* GetEventTargeter() override { return this; }
 
   // Overridden from ui::EventHandler (via ui::EventTarget):
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnKeyEvent(ui::KeyEvent* event) override;
 
   // Overridden from ui::EventSource:
-  virtual ui::EventProcessor* GetEventProcessor() OVERRIDE { return this; }
+  ui::EventProcessor* GetEventProcessor() override { return this; }
 
   // Overridden from ui::EventProcessor:
-  virtual ui::EventTarget* GetRootTarget() OVERRIDE { return this; }
+  ui::EventTarget* GetRootTarget() override { return this; }
 
   // Overridden from ui::EventDispatcherDelegate (via ui::EventProcessor):
-  virtual bool CanDispatchToTarget(EventTarget* target) OVERRIDE {
-    return true;
-  }
+  bool CanDispatchToTarget(EventTarget* target) override { return true; }
 
   // Overridden from ui::test::EventGeneratorDelegate:
-  virtual void SetContext(ui::test::EventGenerator* owner,
-                          gfx::NativeWindow root_window,
-                          gfx::NativeWindow window) OVERRIDE;
-  virtual ui::EventTarget* GetTargetAt(const gfx::Point& location) OVERRIDE {
+  void SetContext(ui::test::EventGenerator* owner,
+                  gfx::NativeWindow root_window,
+                  gfx::NativeWindow window) override;
+  ui::EventTarget* GetTargetAt(const gfx::Point& location) override {
     return this;
   }
-  virtual ui::EventSource* GetEventSource(ui::EventTarget* target) OVERRIDE {
+  ui::EventSource* GetEventSource(ui::EventTarget* target) override {
     return this;
   }
-  virtual gfx::Point CenterOfTarget(
-      const ui::EventTarget* target) const OVERRIDE;
-  virtual gfx::Point CenterOfWindow(gfx::NativeWindow window) const OVERRIDE;
+  gfx::Point CenterOfTarget(const ui::EventTarget* target) const override;
+  gfx::Point CenterOfWindow(gfx::NativeWindow window) const override;
 
-  virtual void ConvertPointFromTarget(const ui::EventTarget* target,
-                                      gfx::Point* point) const OVERRIDE {}
-  virtual void ConvertPointToTarget(const ui::EventTarget* target,
-                                    gfx::Point* point) const OVERRIDE {}
-  virtual void ConvertPointFromHost(const ui::EventTarget* hosted_target,
-                                    gfx::Point* point) const OVERRIDE {}
+  void ConvertPointFromTarget(const ui::EventTarget* target,
+                              gfx::Point* point) const override {}
+  void ConvertPointToTarget(const ui::EventTarget* target,
+                            gfx::Point* point) const override {}
+  void ConvertPointFromHost(const ui::EventTarget* hosted_target,
+                            gfx::Point* point) const override {}
 
  private:
   friend struct DefaultSingletonTraits<EventGeneratorDelegateMac>;
 
   EventGeneratorDelegateMac();
-  virtual ~EventGeneratorDelegateMac();
+  ~EventGeneratorDelegateMac() override;
 
   ui::test::EventGenerator* owner_;
   NSWindow* window_;
   scoped_ptr<base::mac::ScopedObjCClassSwizzler> swizzle_pressed_;
+  base::scoped_nsobject<NSMenu> fake_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(EventGeneratorDelegateMac);
 };
@@ -303,6 +301,27 @@ EventGeneratorDelegateMac::EventGeneratorDelegateMac()
       window_(NULL) {
   DCHECK(!ui::test::EventGenerator::default_delegate);
   ui::test::EventGenerator::default_delegate = this;
+  // Install a fake "edit" menu. This is normally provided by Chrome's
+  // MainMenu.xib, but src/ui shouldn't depend on that.
+  fake_menu_.reset([[NSMenu alloc] initWithTitle:@"Edit"]);
+  struct {
+    NSString* title;
+    SEL action;
+    NSString* key_equivalent;
+  } fake_menu_item[] = {
+      {@"Undo", @selector(undo:), @"z"},
+      {@"Redo", @selector(redo:), @"Z"},
+      {@"Copy", @selector(copy:), @"c"},
+      {@"Cut", @selector(cut:), @"x"},
+      {@"Paste", @selector(paste:), @"v"},
+      {@"Select All", @selector(selectAll:), @"a"},
+  };
+  for (size_t i = 0; i < arraysize(fake_menu_item); ++i) {
+    [fake_menu_ insertItemWithTitle:fake_menu_item[i].title
+                             action:fake_menu_item[i].action
+                      keyEquivalent:fake_menu_item[i].key_equivalent
+                            atIndex:i];
+  }
 }
 
 EventGeneratorDelegateMac::~EventGeneratorDelegateMac() {
@@ -313,16 +332,36 @@ EventGeneratorDelegateMac::~EventGeneratorDelegateMac() {
 scoped_ptr<ui::EventTargetIterator>
 EventGeneratorDelegateMac::GetChildIterator() const {
   // Return NULL to dispatch all events to the result of GetRootTarget().
-  return scoped_ptr<ui::EventTargetIterator>();
+  return nullptr;
 }
 
 void EventGeneratorDelegateMac::OnMouseEvent(ui::MouseEvent* event) {
   // For mouse drag events, ensure the swizzled methods return the right flags.
   base::AutoReset<ui::test::EventGenerator*> reset(&g_active_generator, owner_);
-  DispatchMouseEventInWindow(window_,
-                             event->type(),
-                             event->location(),
-                             event->changed_button_flags());
+  NSEvent* ns_event = CreateMouseEventInWindow(window_,
+                                               event->type(),
+                                               event->location(),
+                                               event->changed_button_flags());
+  if (owner_->targeting_application())
+    [NSApp sendEvent:ns_event];
+  else
+    EmulateSendEvent(window_, ns_event);
+}
+
+void EventGeneratorDelegateMac::OnKeyEvent(ui::KeyEvent* event) {
+  NSUInteger modifiers = EventFlagsToModifiers(event->flags());
+  NSEvent* ns_event = cocoa_test_event_utils::SynthesizeKeyEvent(
+      window_, event->type() == ui::ET_KEY_PRESSED, event->key_code(),
+      modifiers);
+  if (owner_->targeting_application()) {
+    [NSApp sendEvent:ns_event];
+    return;
+  }
+
+  if ([fake_menu_ performKeyEquivalent:ns_event])
+    return;
+
+  EmulateSendEvent(window_, ns_event);
 }
 
 void EventGeneratorDelegateMac::SetContext(ui::test::EventGenerator* owner,
@@ -331,6 +370,15 @@ void EventGeneratorDelegateMac::SetContext(ui::test::EventGenerator* owner,
   swizzle_pressed_.reset();
   owner_ = owner;
   window_ = window;
+
+  // Normally, edit menu items have a `nil` target. This results in -[NSMenu
+  // performKeyEquivalent:] relying on -[NSApplication targetForAction:to:from:]
+  // to find a target starting at the first responder of the key window. Since
+  // non-interactive tests have no key window, that won't work. So set (or
+  // clear) the target explicitly on all menu items.
+  [[fake_menu_ itemArray] makeObjectsPerformSelector:@selector(setTarget:)
+                                          withObject:[window firstResponder]];
+
   if (owner_) {
     swizzle_pressed_.reset(new base::mac::ScopedObjCClassSwizzler(
         [NSEvent class],

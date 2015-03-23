@@ -7,7 +7,7 @@
 
 #include "content/common/content_export.h"
 #include "content/common/input/synthetic_gesture_params.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace content {
 
@@ -16,9 +16,9 @@ struct CONTENT_EXPORT SyntheticTapGestureParams
  public:
   SyntheticTapGestureParams();
   SyntheticTapGestureParams(const SyntheticTapGestureParams& other);
-  virtual ~SyntheticTapGestureParams();
+  ~SyntheticTapGestureParams() override;
 
-  virtual GestureType GetGestureType() const OVERRIDE;
+  GestureType GetGestureType() const override;
 
   gfx::Point position;
   int duration_ms;

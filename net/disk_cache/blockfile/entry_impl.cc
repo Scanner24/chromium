@@ -44,9 +44,9 @@ class SyncCallback: public disk_cache::FileIOCallback {
     entry->AddRef();
     entry->IncrementIoCount();
   }
-  virtual ~SyncCallback() {}
+  ~SyncCallback() override {}
 
-  virtual void OnFileIOComplete(int bytes_copied) OVERRIDE;
+  void OnFileIOComplete(int bytes_copied) override;
   void Discard();
 
  private:
@@ -776,7 +776,7 @@ std::string EntryImpl::GetKey() const {
   if (address.is_block_file())
     offset = address.start_block() * address.BlockSize() + kBlockHeaderSize;
 
-  COMPILE_ASSERT(kNumStreams == kKeyFileIndex, invalid_key_index);
+  static_assert(kNumStreams == kKeyFileIndex, "invalid key index");
   File* key_file = const_cast<EntryImpl*>(this)->GetBackingFile(address,
                                                                 kKeyFileIndex);
   if (!key_file)

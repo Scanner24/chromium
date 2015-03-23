@@ -44,7 +44,7 @@ scoped_ptr<base::DictionaryValue> ReadValue(const base::win::RegKey& key,
   if (result != ERROR_SUCCESS) {
     SetLastError(result);
     PLOG(ERROR) << "Cannot read value '" << value_name << "'";
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
   // Parse the value.
@@ -57,16 +57,15 @@ scoped_ptr<base::DictionaryValue> ReadValue(const base::win::RegKey& key,
   if (!value) {
     LOG(ERROR) << "Failed to parse '" << value_name << "': " << error_message
                << " (" << error_code << ").";
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
-  if (value->GetType() != base::Value::TYPE_DICTIONARY) {
+  if (!value->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Failed to parse '" << value_name << "': not a dictionary.";
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
-  return scoped_ptr<base::DictionaryValue>(
-      static_cast<base::DictionaryValue*>(value.release()));
+  return make_scoped_ptr(static_cast<base::DictionaryValue*>(value.release()));
 }
 
 // Serializes |value| into a JSON string and writes it as value |value_name|
@@ -207,7 +206,7 @@ PairingRegistry::Pairing PairingRegistryDelegateWin::Load(
 bool PairingRegistryDelegateWin::Save(const PairingRegistry::Pairing& pairing) {
   if (!privileged_.Valid()) {
     LOG(ERROR) << "Cannot save pairing entry '" << pairing.client_id()
-                << "': the delegate is read-only.";
+                << "': the pairing registry privileged key is invalid.";
     return false;
   }
 
@@ -263,8 +262,7 @@ bool PairingRegistryDelegateWin::Delete(const std::string& client_id) {
 }
 
 scoped_ptr<PairingRegistry::Delegate> CreatePairingRegistryDelegate() {
-  return scoped_ptr<PairingRegistry::Delegate>(
-      new PairingRegistryDelegateWin());
+  return make_scoped_ptr(new PairingRegistryDelegateWin());
 }
 
 }  // namespace remoting

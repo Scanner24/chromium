@@ -15,11 +15,13 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "tools/gn/build_settings.h"
+#include "tools/gn/err.h"
 #include "tools/gn/escape.h"
 #include "tools/gn/filesystem_utils.h"
 #include "tools/gn/input_file_manager.h"
 #include "tools/gn/ninja_utils.h"
 #include "tools/gn/scheduler.h"
+#include "tools/gn/switches.h"
 #include "tools/gn/target.h"
 #include "tools/gn/trace.h"
 
@@ -33,11 +35,13 @@ std::string GetSelfInvocationCommand(const BuildSettings* build_settings) {
   base::FilePath executable;
   PathService::Get(base::FILE_EXE, &executable);
 
-  CommandLine cmdline(executable.NormalizePathSeparatorsTo('/'));
+  base::CommandLine cmdline(executable.NormalizePathSeparatorsTo('/'));
   cmdline.AppendArg("gen");
   cmdline.AppendArg(build_settings->build_dir().value());
-  cmdline.AppendSwitchPath("--root", build_settings->root_path());
-  cmdline.AppendSwitch("-q");  // Don't write output.
+  cmdline.AppendSwitchPath(std::string("--") + switches::kRoot,
+                           build_settings->root_path());
+  // Successful automatic invocations shouldn't print output.
+  cmdline.AppendSwitch(std::string("-") + switches::kQuiet);
 
   EscapeOptions escape_shell;
   escape_shell.mode = ESCAPE_NINJA_COMMAND;
@@ -48,17 +52,20 @@ std::string GetSelfInvocationCommand(const BuildSettings* build_settings) {
   escape_shell.inhibit_quoting = true;
 #endif
 
-  const CommandLine& our_cmdline = *CommandLine::ForCurrentProcess();
-  const CommandLine::SwitchMap& switches = our_cmdline.GetSwitches();
-  for (CommandLine::SwitchMap::const_iterator i = switches.begin();
+  const base::CommandLine& our_cmdline =
+      *base::CommandLine::ForCurrentProcess();
+  const base::CommandLine::SwitchMap& switches = our_cmdline.GetSwitches();
+  for (base::CommandLine::SwitchMap::const_iterator i = switches.begin();
        i != switches.end(); ++i) {
     // Only write arguments we haven't already written. Always skip "args"
     // since those will have been written to the file and will be used
     // implicitly in the future. Keeping --args would mean changes to the file
     // would be ignored.
-    if (i->first != "q" && i->first != "root" && i->first != "args") {
+    if (i->first != switches::kQuiet &&
+        i->first != switches::kRoot &&
+        i->first != switches::kArgs) {
       std::string escaped_value =
-          EscapeString(FilePathToUTF8(i->second), escape_shell, NULL);
+          EscapeString(FilePathToUTF8(i->second), escape_shell, nullptr);
       cmdline.AppendSwitchASCII(i->first, escaped_value);
     }
   }
@@ -85,17 +92,18 @@ NinjaBuildWriter::NinjaBuildWriter(
       default_toolchain_targets_(default_toolchain_targets),
       out_(out),
       dep_out_(dep_out),
-      path_output_(build_settings->build_dir(), ESCAPE_NINJA) {
+      path_output_(build_settings->build_dir(),
+                   build_settings->root_path_utf8(), ESCAPE_NINJA) {
 }
 
 NinjaBuildWriter::~NinjaBuildWriter() {
 }
 
-void NinjaBuildWriter::Run() {
+bool NinjaBuildWriter::Run(Err* err) {
   WriteNinjaRules();
   WriteLinkPool();
   WriteSubninjas();
-  WritePhonyAndAllRules();
+  return WritePhonyAndAllRules(err);
 }
 
 // static
@@ -103,7 +111,8 @@ bool NinjaBuildWriter::RunAndWriteFile(
     const BuildSettings* build_settings,
     const std::vector<const Settings*>& all_settings,
     const Toolchain* default_toolchain,
-    const std::vector<const Target*>& default_toolchain_targets) {
+    const std::vector<const Target*>& default_toolchain_targets,
+    Err* err) {
   ScopedTrace trace(TraceItem::TRACE_FILE_WRITE, "build.ninja");
 
   base::FilePath ninja_file(build_settings->GetFullPath(
@@ -113,19 +122,22 @@ bool NinjaBuildWriter::RunAndWriteFile(
   std::ofstream file;
   file.open(FilePathToUTF8(ninja_file).c_str(),
             std::ios_base::out | std::ios_base::binary);
-  if (file.fail())
+  if (file.fail()) {
+    *err = Err(Location(), "Couldn't open build.ninja for writing");
     return false;
+  }
 
   std::ofstream depfile;
   depfile.open((FilePathToUTF8(ninja_file) + ".d").c_str(),
                std::ios_base::out | std::ios_base::binary);
-  if (depfile.fail())
+  if (depfile.fail()) {
+    *err = Err(Location(), "Couldn't open depfile for writing");
     return false;
+  }
 
   NinjaBuildWriter gen(build_settings, all_settings, default_toolchain,
                        default_toolchain_targets, file, depfile);
-  gen.Run();
-  return true;
+  return gen.Run(err);
 }
 
 void NinjaBuildWriter::WriteNinjaRules() {
@@ -171,7 +183,7 @@ void NinjaBuildWriter::WriteSubninjas() {
   out_ << std::endl;
 }
 
-void NinjaBuildWriter::WritePhonyAndAllRules() {
+bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
   std::string all_rules;
 
   // Write phony rules for all uniquely-named targets in the default toolchain.
@@ -180,6 +192,7 @@ void NinjaBuildWriter::WritePhonyAndAllRules() {
   // which we also find.
   std::map<std::string, int> small_name_count;
   std::vector<const Target*> toplevel_targets;
+  base::hash_set<std::string> target_files;
   for (size_t i = 0; i < default_toolchain_targets_.size(); i++) {
     const Target* target = default_toolchain_targets_[i];
     const Label& label = target->label();
@@ -204,6 +217,10 @@ void NinjaBuildWriter::WritePhonyAndAllRules() {
     OutputFile target_file(target->dependency_output_file());
     // The output files may have leading "./" so normalize those away.
     NormalizePath(&target_file.value());
+    if (!target_files.insert(target_file.value()).second) {
+      *err = Err(Location(), "Duplicate rules for " + target_file.value());
+      return false;
+    }
 
     // Write the long name "foo/bar:baz" for the target "//foo/bar:baz".
     std::string long_name = label.GetUserVisibleName(false);
@@ -240,10 +257,27 @@ void NinjaBuildWriter::WritePhonyAndAllRules() {
     }
   }
 
+  // Figure out if the BUILD file wants to declare a custom "default"
+  // target (rather than building 'all' by default). By convention
+  // we use group("default") but it doesn't have to be a group.
+  bool default_target_exists = false;
+  for (size_t i = 0; i < default_toolchain_targets_.size(); i++) {
+    const Label& label = default_toolchain_targets_[i]->label();
+    if (label.dir().value() == "//" && label.name() == "default")
+      default_target_exists = true;
+  }
+
   if (!all_rules.empty()) {
     out_ << "\nbuild all: phony " << all_rules << std::endl;
+  }
+
+  if (default_target_exists) {
+    out_ << "default default" << std::endl;
+  } else if (!all_rules.empty()) {
     out_ << "default all" << std::endl;
   }
+
+  return true;
 }
 
 void NinjaBuildWriter::WritePhonyRule(const Target* target,
@@ -256,7 +290,7 @@ void NinjaBuildWriter::WritePhonyRule(const Target* target,
   ninja_escape.mode = ESCAPE_NINJA;
 
   // Escape for special chars Ninja will handle.
-  std::string escaped = EscapeString(phony_name, ninja_escape, NULL);
+  std::string escaped = EscapeString(phony_name, ninja_escape, nullptr);
 
   out_ << "build " << escaped << ": phony ";
   path_output_.WriteFile(out_, target_file);

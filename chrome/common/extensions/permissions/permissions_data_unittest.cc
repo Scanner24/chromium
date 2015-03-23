@@ -42,7 +42,7 @@ bool CheckSocketPermission(
     scoped_refptr<Extension> extension,
     SocketPermissionRequest::OperationType type,
     const char* host,
-    int port) {
+    uint16 port) {
   SocketPermission::CheckParam param(type, host, port);
   return extension->permissions_data()->CheckAPIPermissionWithParam(
       APIPermission::kSocket, &param);
@@ -215,6 +215,22 @@ TEST(PermissionsDataTest, EffectiveHostPermissions) {
   EXPECT_TRUE(hosts.MatchesURL(GURL("https://test/")));
   EXPECT_TRUE(hosts.MatchesURL(GURL("http://www.google.com")));
   EXPECT_TRUE(extension->permissions_data()->HasEffectiveAccessToAllHosts());
+
+  // Tab-specific permissions should be included in the effective hosts.
+  GURL tab_url("http://www.example.com/");
+  URLPatternSet new_hosts;
+  new_hosts.AddOrigin(URLPattern::SCHEME_ALL, tab_url);
+  extension->permissions_data()->UpdateTabSpecificPermissions(
+      1,
+      new PermissionSet(APIPermissionSet(),
+                        ManifestPermissionSet(),
+                        new_hosts,
+                        URLPatternSet()));
+  EXPECT_TRUE(extension->permissions_data()->GetEffectiveHostPermissions().
+      MatchesURL(tab_url));
+  extension->permissions_data()->ClearTabSpecificPermissions(1);
+  EXPECT_FALSE(extension->permissions_data()->GetEffectiveHostPermissions().
+      MatchesURL(tab_url));
 }
 
 TEST(PermissionsDataTest, SocketPermissions) {
@@ -300,7 +316,7 @@ TEST(PermissionsDataTest, GetPermissionMessages_ManyHostsPermissions) {
   ASSERT_EQ(1u, warnings_details.size());
   EXPECT_EQ("Read and change your data on a number of websites",
             UTF16ToUTF8(warnings[0]));
-  EXPECT_EQ("- www.a.com\n- www.b.com\n- www.c.com\n- www.d.com\n- www.e.com",
+  EXPECT_EQ("www.a.com\nwww.b.com\nwww.c.com\nwww.d.com\nwww.e.com",
             UTF16ToUTF8(warnings_details[0]));
 }
 
@@ -343,6 +359,23 @@ TEST(PermissionsDataTest, GetPermissionMessages_Plugins) {
       "visit",
       UTF16ToUTF8(warnings[0]));
 #endif
+}
+
+TEST(PermissionsDataTest, ExternalFiles) {
+  GURL external_file("externalfile:abc");
+  scoped_refptr<const Extension> extension;
+
+  // A regular extension shouldn't get access to externalfile: scheme URLs
+  // even with <all_urls> specified.
+  extension = GetExtensionWithHostPermission(
+      "regular_extension", "<all_urls>", Manifest::UNPACKED);
+  ASSERT_FALSE(extension->permissions_data()->HasHostPermission(external_file));
+
+  // Component extensions should get access to externalfile: scheme URLs when
+  // <all_urls> is specified.
+  extension = GetExtensionWithHostPermission(
+      "component_extension", "<all_urls>", Manifest::COMPONENT);
+  ASSERT_TRUE(extension->permissions_data()->HasHostPermission(external_file));
 }
 
 // Base class for testing the CanAccessPage and CanCaptureVisiblePage
@@ -562,7 +595,7 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, Permissions) {
 }
 
 TEST_F(ExtensionScriptAndCaptureVisibleTest, PermissionsWithChromeURLsEnabled) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kExtensionsOnChromeURLs);
 
   scoped_refptr<Extension> extension;

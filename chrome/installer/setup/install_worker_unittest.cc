@@ -119,7 +119,7 @@ class MockProductState : public ProductState {
   }
   void clear_oem_install() { has_oem_install_ = false; }
   void SetUninstallProgram(const base::FilePath& setup_exe) {
-    uninstall_command_ = CommandLine(setup_exe);
+    uninstall_command_ = base::CommandLine(setup_exe);
   }
   void AddUninstallSwitch(const std::string& option) {
     uninstall_command_.AppendSwitch(option);
@@ -491,7 +491,7 @@ const wchar_t old_elevation_key[] =
 class OldIELowRightsTests : public InstallWorkerTest,
   public ::testing::WithParamInterface<std::tr1::tuple<bool, bool> > {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     InstallWorkerTest::SetUp();
 
     const ParamType& param = GetParam();

@@ -27,6 +27,19 @@
 
 namespace content {
 
+namespace {
+
+bool AllowWhitelistedPaths(const std::vector<base::FilePath>& allowed_paths,
+                           const base::FilePath& candidate_path) {
+  for (const base::FilePath& allowed_path : allowed_paths) {
+    if (allowed_path.IsParent(candidate_path))
+      return true;
+  }
+  return false;
+}
+
+}  // namespace
+
 IndexedDBInternalsUI::IndexedDBInternalsUI(WebUI* web_ui)
     : WebUIController(web_ui) {
   web_ui->RegisterMessageCallback(
@@ -44,7 +57,6 @@ IndexedDBInternalsUI::IndexedDBInternalsUI(WebUI* web_ui)
 
   WebUIDataSource* source =
       WebUIDataSource::Create(kChromeUIIndexedDBInternalsHost);
-  source->SetUseJsonJSFormatV2();
   source->SetJsonPath("strings.js");
   source->AddResourcePath("indexeddb_internals.js",
                           IDR_INDEXED_DB_INTERNALS_JS);
@@ -224,7 +236,9 @@ void IndexedDBInternalsUI::DownloadOriginDataOnIndexedDBThread(
   // This happens on the "webkit" thread (which is really just the IndexedDB
   // thread) as a simple way to avoid another script reopening the origin
   // while we are zipping.
-  zip::Zip(context->GetFilePath(origin_url), zip_path, true);
+  std::vector<base::FilePath> paths = context->GetStoragePaths(origin_url);
+  zip::ZipWithFilterCallback(context->data_path(), zip_path,
+                             base::Bind(AllowWhitelistedPaths, paths));
 
   BrowserThread::PostTask(BrowserThread::UI,
                           FROM_HERE,
@@ -285,8 +299,8 @@ void IndexedDBInternalsUI::OnDownloadDataReady(
   DownloadManager* dlm = BrowserContext::GetDownloadManager(browser_context);
 
   const GURL referrer(web_ui()->GetWebContents()->GetLastCommittedURL());
-  dl_params->set_referrer(
-      content::Referrer(referrer, blink::WebReferrerPolicyDefault));
+  dl_params->set_referrer(content::Referrer::SanitizeForRequest(
+      url, content::Referrer(referrer, blink::WebReferrerPolicyDefault)));
 
   // This is how to watch for the download to finish: first wait for it
   // to start, then attach a DownloadItem::Observer to observe the
@@ -305,12 +319,12 @@ void IndexedDBInternalsUI::OnDownloadDataReady(
 class FileDeleter : public DownloadItem::Observer {
  public:
   explicit FileDeleter(const base::FilePath& temp_dir) : temp_dir_(temp_dir) {}
-  virtual ~FileDeleter();
+  ~FileDeleter() override;
 
-  virtual void OnDownloadUpdated(DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadOpened(DownloadItem* item) OVERRIDE {}
-  virtual void OnDownloadRemoved(DownloadItem* item) OVERRIDE {}
-  virtual void OnDownloadDestroyed(DownloadItem* item) OVERRIDE {}
+  void OnDownloadUpdated(DownloadItem* download) override;
+  void OnDownloadOpened(DownloadItem* item) override {}
+  void OnDownloadRemoved(DownloadItem* item) override {}
+  void OnDownloadDestroyed(DownloadItem* item) override {}
 
  private:
   const base::FilePath temp_dir_;
@@ -336,7 +350,7 @@ void FileDeleter::OnDownloadUpdated(DownloadItem* item) {
 
 FileDeleter::~FileDeleter() {
   base::ScopedTempDir path;
-  bool will_delete ALLOW_UNUSED = path.Set(temp_dir_);
+  bool will_delete = path.Set(temp_dir_);
   DCHECK(will_delete);
 }
 

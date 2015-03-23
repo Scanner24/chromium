@@ -6,8 +6,6 @@
  * @fileoverview Oobe signin screen implementation.
  */
 
-<include src="../../gaia_auth_host/gaia_auth_host.js">
-
 login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
   // Gaia loading time after which error message must be displayed and
   // lazy portal check should be fired.
@@ -22,10 +20,10 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     EXTERNAL_API: [
       'loadAuthExtension',
       'updateAuthExtension',
-      'setAuthenticatedUserEmail',
       'doReload',
       'onFrameError',
-      'updateCancelButtonState'
+      'updateCancelButtonState',
+      'switchToFullTab'
     ],
 
     /**
@@ -48,6 +46,12 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * @private
      */
     isLocal_: false,
+
+    /**
+     * Whether MinuteMaid flow is active.
+     * @type {boolean}
+     */
+    isMinuteMaid: false,
 
     /**
      * Email of the user, which is logging in using offline mode.
@@ -89,27 +93,61 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     samlPasswordConfirmAttempt_: 0,
 
+    /**
+     * Whether we should show webview based signin.
+     * @type {boolean}
+     * @private
+     */
+    isWebviewSignin: false,
+
+    /**
+     * Whether screen is shown.
+     * @type {boolean}
+     * @private
+     */
+    isShown_: false,
+
     /** @override */
     decorate: function() {
-      this.gaiaAuthHost_ = new cr.login.GaiaAuthHost($('signin-frame'));
+      this.isWebviewSignin = loadTimeData.getValue('isWebviewSignin');
+      if (this.isWebviewSignin) {
+        // Replace iframe with webview.
+        var webview = this.ownerDocument.createElement('webview');
+        webview.id = 'signin-frame';
+        webview.name = 'signin-frame';
+        // TODO(dpolukhin): webview doesn't load page in hidden state,
+        // use curtain instead.
+        $('signin-frame').parentNode.replaceChild(webview, $('signin-frame'));
+        this.gaiaAuthHost_ = new cr.login.GaiaAuthHost(webview);
+      } else {
+        this.gaiaAuthHost_ = new cr.login.GaiaAuthHost($('signin-frame'));
+      }
       this.gaiaAuthHost_.addEventListener(
           'ready', this.onAuthReady_.bind(this));
-      this.gaiaAuthHost_.retrieveAuthenticatedUserEmailCallback =
-          this.onRetrieveAuthenticatedUserEmail_.bind(this);
       this.gaiaAuthHost_.confirmPasswordCallback =
           this.onAuthConfirmPassword_.bind(this);
       this.gaiaAuthHost_.noPasswordCallback =
           this.onAuthNoPassword_.bind(this);
       this.gaiaAuthHost_.insecureContentBlockedCallback =
           this.onInsecureContentBlocked_.bind(this);
+      this.gaiaAuthHost_.missingGaiaInfoCallback =
+          this.missingGaiaInfo_.bind(this);
+      this.gaiaAuthHost_.samlApiUsedCallback =
+          this.samlApiUsed_.bind(this);
       this.gaiaAuthHost_.addEventListener('authFlowChange',
           this.onAuthFlowChange_.bind(this));
+      this.gaiaAuthHost_.addEventListener('authCompleted',
+          this.onAuthCompletedMessage_.bind(this));
 
       $('enterprise-info-hint-link').addEventListener('click', function(e) {
         chrome.send('launchHelpApp', [HELP_TOPIC_ENTERPRISE_REPORTING]);
         e.preventDefault();
       });
 
+      $('close-button-item').addEventListener('click', function(e) {
+        this.cancel();
+        e.preventDefault();
+      }.bind(this));
 
       this.updateLocalizedContent();
     },
@@ -146,7 +184,10 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     showLoadingUI_: function(show) {
       $('gaia-loading').hidden = !show;
-      this.gaiaAuthHost_.frame.hidden = show;
+      if (!this.isWebviewSignin) {
+        // TODO(dpolukhin): proper implement curtain for webview signin.
+        this.gaiaAuthHost_.frame.hidden = show;
+      }
       $('signin-right').hidden = show;
       $('enterprise-info-container').hidden = show;
       $('gaia-signin-divider').hidden = show;
@@ -231,6 +272,9 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       // Button header is always visible when sign in is presented.
       // Header is hidden once GAIA reports on successful sign in.
       Oobe.getInstance().headerHidden = false;
+      this.isShown_ = true;
+      if (this.isWebviewSignin && !this.loading)
+        this.gaiaAuthHost_.setFocus();
     },
 
     /**
@@ -239,6 +283,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     onBeforeHide: function() {
       chrome.send('loginUIStateChanged', ['gaia-signin', false]);
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
+      this.isShown_ = false;
     },
 
     /**
@@ -251,7 +296,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       this.email = '';
 
       // Reset SAML
-      this.classList.toggle('saml', false);
+      this.classList.toggle('full-width', false);
       this.samlPasswordConfirmAttempt_ = 0;
 
       this.updateAuthExtension(data);
@@ -265,6 +310,20 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
 
       if (data.localizedStrings)
         params.localizedStrings = data.localizedStrings;
+
+      if (data.useMinuteMaid) {
+        this.isMinuteMaid = true;
+        $('inner-container').classList.add('minute-maid');
+        $('progress-dots').hidden = true;
+        data.useEmbedded = false;
+        $('login-header-bar').showGuestButton = true;
+      }
+
+      if (data.gaiaEndpoint)
+        params.gaiaPath = data.gaiaEndpoint;
+
+      $('login-header-bar').minuteMaid = this.isMinuteMaid;
+
 
       if (data.useEmbedded)
         params.gaiaPath = 'EmbeddedSignIn';
@@ -307,16 +366,21 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
         reasonLabel.hidden = true;
       }
 
-      $('createAccount').hidden = !data.createAccount;
-      $('guestSignin').hidden = !data.guestSignin;
-      $('createSupervisedUserPane').hidden = !data.supervisedUsersEnabled;
+      if (this.isMinuteMaid) {
+        $('login-header-bar').showCreateSupervisedButton =
+            data.supervisedUsersCanCreate;
+      } else {
+        $('createAccount').hidden = !data.createAccount;
+        $('guestSignin').hidden = !data.guestSignin;
+        $('createSupervisedUserPane').hidden = !data.supervisedUsersEnabled;
 
-      $('createSupervisedUserLinkPlaceholder').hidden =
-          !data.supervisedUsersCanCreate;
-      $('createSupervisedUserNoManagerText').hidden =
-          data.supervisedUsersCanCreate;
-      $('createSupervisedUserNoManagerText').textContent =
-          data.supervisedUsersRestrictionReason;
+        $('createSupervisedUserLinkPlaceholder').hidden =
+            !data.supervisedUsersCanCreate;
+        $('createSupervisedUserNoManagerText').hidden =
+            data.supervisedUsersCanCreate;
+        $('createSupervisedUserNoManagerText').textContent =
+            data.supervisedUsersRestrictionReason;
+      }
 
       var isEnrollingConsumerManagement = data.isEnrollingConsumerManagement;
       $('consumerManagementEnrollment').hidden = !isEnrollingConsumerManagement;
@@ -333,23 +397,9 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
                          $('createSupervisedUserPane').hidden &&
                          $('consumerManagementEnrollment').hidden;
       this.classList.toggle('no-right-panel', noRightPanel);
+      this.classList.toggle('full-width', false);
       if (Oobe.getInstance().currentScreen === this)
         Oobe.getInstance().updateScreenSize(this);
-    },
-
-    /**
-     * Sends the authenticated user's e-mail address to the auth extension.
-     * @param {number} attemptToken The opaque token provided to
-     *     onRetrieveAuthenticatedUserEmail_.
-     * @param {string} email The authenticated user's e-mail address.
-     */
-    setAuthenticatedUserEmail: function(attemptToken, email) {
-      if (!email) {
-        this.showFatalAuthError(
-            loadTimeData.getString('fatalErrorMessageNoEmail'));
-      } else {
-        this.gaiaAuthHost_.setAuthenticatedUserEmail(attemptToken, email);
-      }
     },
 
     /**
@@ -359,6 +409,12 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     updateCancelButtonState: function() {
       this.cancelAllowed_ = this.isShowUsers_ && $('pod-row').pods.length;
       $('login-header-bar').allowCancel = this.cancelAllowed_;
+      $('close-button-item').hidden = !this.cancelAllowed_;
+    },
+
+    switchToFullTab: function() {
+      this.classList.toggle('no-right-panel', true);
+      this.classList.toggle('full-width', true);
     },
 
     /**
@@ -382,12 +438,14 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
             this.gaiaAuthHost_.authDomain);
       }
 
-      this.classList.toggle('saml', isSAML);
+      this.classList.toggle('no-right-panel', isSAML);
+      this.classList.toggle('full-width', isSAML);
       $('saml-notice-container').hidden = !isSAML;
 
       if (Oobe.getInstance().currentScreen === this) {
         Oobe.getInstance().updateScreenSize(this);
         $('login-header-bar').allowCancel = isSAML || this.cancelAllowed_;
+        $('close-button-item').hidden = !(isSAML || this.cancelAllowed_);
       }
     },
 
@@ -397,6 +455,8 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     onAuthReady_: function() {
       this.loading = false;
+      if (this.isWebviewSignin && this.isShown_)
+        this.gaiaAuthHost_.setFocus();
       this.clearLoadingTimer_();
 
       // Show deferred error bubble.
@@ -410,27 +470,6 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
 
       // Warm up the user images screen.
       Oobe.getInstance().preloadScreen({id: SCREEN_USER_IMAGE_PICKER});
-    },
-
-    /**
-     * Invoked when the user has successfully authenticated via SAML and the
-     * auth host needs to retrieve the user's e-mail.
-     * @param {number} attemptToken Opaque token to be passed to
-     *     setAuthenticatedUserEmail along with the e-mail address.
-     * @param {boolean} apiUsed Whether the principals API was used during
-     *     authentication.
-     * @private
-     */
-    onRetrieveAuthenticatedUserEmail_: function(attemptToken, apiUsed) {
-      if (apiUsed) {
-        // If the principals API was used, report this to the C++ backend so
-        // that statistics can be kept. If password scraping was used instead,
-        // there is no need to inform the C++ backend at this point: Either
-        // onAuthNoPassword_ or onAuthConfirmPassword_ will be called in a
-        // moment, both of which imply to the backend that the API was not used.
-        chrome.send('usingSAMLAPI');
-      }
-      chrome.send('retrieveAuthenticatedUserEmail', [attemptToken]);
     },
 
     /**
@@ -503,6 +542,21 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     },
 
     /**
+     * Show fatal auth error when information is missing from GAIA.
+     */
+    missingGaiaInfo_: function() {
+      this.showFatalAuthError(
+          loadTimeData.getString('fatalErrorMessageNoAccountDetails'));
+    },
+
+    /**
+     * Record that SAML API was used during sign-in.
+     */
+    samlApiUsed_: function() {
+      chrome.send('usingSAMLAPI');
+    },
+
+    /**
      * Invoked when auth is completed successfully.
      * @param {!Object} credentials Credentials of the completed authentication.
      * @private
@@ -511,15 +565,18 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       if (credentials.useOffline) {
         this.email = credentials.email;
         chrome.send('authenticateUser',
-                    [credentials.email, credentials.password]);
+                    [credentials.email,
+                     credentials.password]);
       } else if (credentials.authCode) {
         chrome.send('completeAuthentication',
-                    [credentials.email,
+                    [credentials.gaiaId,
+                     credentials.email,
                      credentials.password,
                      credentials.authCode]);
       } else {
         chrome.send('completeLogin',
-                    [credentials.email,
+                    [credentials.gaiaId,
+                     credentials.email,
                      credentials.password,
                      credentials.usingSAML]);
       }
@@ -529,6 +586,15 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       Oobe.getInstance().headerHidden = true;
       // Clear any error messages that were shown before login.
       Oobe.clearErrors();
+    },
+
+    /**
+     * Invoked when onAuthCompleted message received.
+     * @param {!Object} e Payload of the received HTML5 message.
+     * @private
+     */
+    onAuthCompletedMessage_: function(e) {
+      this.onAuthCompleted_(e.detail);
     },
 
     /**

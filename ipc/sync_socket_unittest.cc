@@ -58,7 +58,7 @@ class SyncSocketServerListener : public IPC::Listener {
     chan_ = chan;
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& msg) override {
     if (msg.routing_id() == MSG_ROUTING_CONTROL) {
       IPC_BEGIN_MESSAGE_MAP(SyncSocketServerListener, msg)
         IPC_MESSAGE_HANDLER(MsgClassSetHandle, OnMsgClassSetHandle)
@@ -129,7 +129,7 @@ class SyncSocketClientListener : public IPC::Listener {
     chan_ = chan;
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& msg) override {
     if (msg.routing_id() == MSG_ROUTING_CONTROL) {
       IPC_BEGIN_MESSAGE_MAP(SyncSocketClientListener, msg)
         IPC_MESSAGE_HANDLER(MsgClassResponse, OnMsgClassResponse)
@@ -184,7 +184,7 @@ TEST_F(SyncSocketTest, SanityTest) {
 #if defined(OS_WIN)
   // On windows we need to duplicate the handle into the server process.
   BOOL retval = DuplicateHandle(GetCurrentProcess(), pair[1].handle(),
-                                client_process(), &target_handle,
+                                client_process().Handle(), &target_handle,
                                 0, FALSE, DUPLICATE_SAME_ACCESS);
   EXPECT_TRUE(retval);
   // Set up a message to pass the handle to the server.

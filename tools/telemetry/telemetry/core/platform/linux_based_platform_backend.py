@@ -14,7 +14,9 @@ from telemetry.core.platform import platform_backend
 
 class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
 
-  """Abstract platform containing functionality shared by all linux based OSes.
+  """Abstract platform containing functionality shared by all Linux based OSes.
+
+  This includes Android and ChromeOS.
 
   Subclasses must implement RunCommand, GetFileContents, GetPsOutput, and
   ParseCStateSample."""
@@ -38,19 +40,23 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
     return self._ConvertKbToByte(meminfo['MemTotal'])
 
   def GetCpuStats(self, pid):
+    results = {}
     stats = self._GetProcFileForPid(pid, 'stat')
     if not stats:
-      return {}
+      return results
     stats = stats.split()
     utime = float(stats[13])
     stime = float(stats[14])
     cpu_process_jiffies = utime + stime
-    return {'CpuProcessTime': cpu_process_jiffies}
+    clock_ticks = self.GetClockTicks()
+    results.update({'CpuProcessTime': cpu_process_jiffies / clock_ticks})
+    return results
 
   def GetCpuTimestamp(self):
     timer_list = self.GetFileContents('/proc/timer_list')
     total_jiffies = float(self._GetProcJiffies(timer_list))
-    return {'TotalTime': total_jiffies}
+    clock_ticks = self.GetClockTicks()
+    return {'TotalTime': total_jiffies / clock_ticks}
 
   def GetMemoryStats(self, pid):
     status_contents = self._GetProcFileForPid(pid, 'status')
@@ -76,13 +82,15 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
             'WorkingSetSize': wss,
             'WorkingSetSizePeak': wss_peak}
 
-  def GetIOStats(self, pid):
-    io_contents = self._GetProcFileForPid(pid, 'io')
-    io = self._GetProcFileDict(io_contents)
-    return {'ReadOperationCount': int(io['syscr']),
-            'WriteOperationCount': int(io['syscw']),
-            'ReadTransferCount': int(io['rchar']),
-            'WriteTransferCount': int(io['wchar'])}
+  @decorators.Cache
+  def GetClockTicks(self):
+    """Returns the number of clock ticks per second.
+
+    The proper way is to call os.sysconf('SC_CLK_TCK') but that is not easy to
+    do on Android/CrOS. In practice, nearly all Linux machines have a USER_HZ
+    of 100, so just return that.
+    """
+    return 100
 
   def GetFileContents(self, filename):
     raise NotImplementedError()
@@ -91,6 +99,13 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
     raise NotImplementedError()
 
   def RunCommand(self, cmd):
+    """Runs the specified command.
+
+    Args:
+        cmd: A list of program arguments or the path string of the program.
+    Returns:
+        A string whose content is the output of the command.
+    """
     raise NotImplementedError()
 
   @staticmethod
@@ -122,7 +137,7 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
       raise
 
   def _ConvertKbToByte(self, value):
-    return int(value.replace('kB','')) * 1024
+    return int(value.replace('kB', '')) * 1024
 
   def _GetProcFileDict(self, contents):
     retval = {}

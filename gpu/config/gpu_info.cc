@@ -19,7 +19,7 @@ void EnumerateGPUDevice(gpu::GPUInfo::Enumerator* enumerator,
 
 void EnumerateVideoEncodeAcceleratorSupportedProfile(
     gpu::GPUInfo::Enumerator* enumerator,
-    const media::VideoEncodeAccelerator::SupportedProfile profile) {
+    const gpu::VideoEncodeAcceleratorSupportedProfile profile) {
   enumerator->BeginVideoEncodeAcceleratorSupportedProfile();
   enumerator->AddInt("profile", profile.profile);
   enumerator->AddInt("maxResolutionWidth", profile.max_resolution.width());
@@ -101,16 +101,16 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     CollectInfoResult dx_diagnostics_info_state;
     DxDiagNode dx_diagnostics;
 #endif
-    std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+    std::vector<VideoEncodeAcceleratorSupportedProfile>
         video_encode_accelerator_supported_profiles;
   };
 
   // If this assert fails then most likely something below needs to be updated.
   // Note that this assert is only approximate. If a new field is added to
   // GPUInfo which fits within the current padding then it will not be caught.
-  COMPILE_ASSERT(
+  static_assert(
       sizeof(GPUInfo) == sizeof(GPUInfoKnownFields),
-      Fields_Have_Changed_In_GPUInfo_So_Update_Below);
+      "fields have changed in GPUInfo, GPUInfoKnownFields must be updated");
 
   // Required fields (according to DevTools protocol) first.
   enumerator->AddString("machineModelName", machine_model_name);

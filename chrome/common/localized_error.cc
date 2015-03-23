@@ -11,12 +11,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/net/net_error_info.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "extensions/common/constants.h"
-#include "extensions/common/extension_icon_set.h"
-#include "extensions/common/manifest_handlers/icons_handler.h"
+#include "components/error_page/common/error_page_params.h"
+#include "components/error_page/common/net_error_info.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -26,6 +24,12 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/common/constants.h"
+#include "extensions/common/extension_icon_set.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #endif
 
 using blink::WebURLError;
@@ -301,6 +305,20 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_BLOCKED_ENROLLMENT_CHECK_PENDING,
    SUGGEST_CHECK_CONNECTION,
   },
+  {net::ERR_SSL_FALLBACK_BEYOND_MINIMUM_VERSION,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_SSL_FALLBACK_BEYOND_MINIMUM_VERSION,
+   IDS_ERRORPAGES_SUMMARY_SSL_FALLBACK_BEYOND_MINIMUM_VERSION,
+   IDS_ERRORPAGES_DETAILS_SSL_FALLBACK_BEYOND_MINIMUM_VERSION,
+   SUGGEST_NONE,
+  },
+  {net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_SSL_VERSION_OR_CIPHER_MISMATCH,
+   IDS_ERRORPAGES_SUMMARY_SSL_VERSION_OR_CIPHER_MISMATCH,
+   IDS_ERRORPAGES_DETAILS_SSL_VERSION_OR_CIPHER_MISMATCH,
+   SUGGEST_NONE,
+  },
 };
 
 // Special error page to be used in the case of navigating back to a page
@@ -459,10 +477,6 @@ const LocalizedErrorMap* LookupErrorMap(const std::string& error_domain,
   }
 }
 
-bool LocaleIsRTL() {
-  return base::i18n::IsRTL();
-}
-
 // Returns a dictionary containing the strings for the settings menu under the
 // wrench, and the advanced settings button.
 base::DictionaryValue* GetStandardMenuItemsText() {
@@ -490,15 +504,6 @@ const char* GetIconClassForError(const std::string& error_domain,
 
 const char LocalizedError::kHttpErrorDomain[] = "http";
 
-LocalizedError::ErrorPageParams::ErrorPageParams()
-    : suggest_reload(false),
-      reload_tracking_id(-1),
-      search_tracking_id(-1) {
-}
-
-LocalizedError::ErrorPageParams::~ErrorPageParams() {
-}
-
 void LocalizedError::GetStrings(int error_code,
                                 const std::string& error_domain,
                                 const GURL& failed_url,
@@ -506,11 +511,9 @@ void LocalizedError::GetStrings(int error_code,
                                 bool show_stale_load_button,
                                 const std::string& locale,
                                 const std::string& accept_languages,
-                                scoped_ptr<ErrorPageParams> params,
+                                scoped_ptr<error_page::ErrorPageParams> params,
                                 base::DictionaryValue* error_strings) {
-  bool rtl = LocaleIsRTL();
-  error_strings->SetString("textdirection", rtl ? "rtl" : "ltr");
-  webui::SetFontAndTextDirection(error_strings);
+  webui::SetLoadTimeDataDefaults(locale, error_strings);
 
   // Grab the strings and settings that depend on the error type.  Init
   // options with default values.
@@ -546,7 +549,7 @@ void LocalizedError::GetStrings(int error_code,
       failed_url, accept_languages, net::kFormatUrlOmitNothing,
       net::UnescapeRule::NORMAL, NULL, NULL, NULL));
   // URLs are always LTR.
-  if (rtl)
+  if (base::i18n::IsRTL())
     base::i18n::WrapStringWithLTRFormatting(&failed_url_string);
   error_strings->SetString("title",
       l10n_util::GetStringFUTF16(options.title_resource_id, failed_url_string));
@@ -631,7 +634,7 @@ void LocalizedError::GetStrings(int error_code,
 
   // If no parameters were provided, use the defaults.
   if (!params) {
-    params.reset(new ErrorPageParams());
+    params.reset(new error_page::ErrorPageParams());
     params->suggest_reload = !!(options.suggestions & SUGGEST_RELOAD);
   }
 
@@ -843,18 +846,19 @@ bool LocalizedError::HasStrings(const std::string& error_domain,
   return LookupErrorMap(error_domain, error_code, /*is_post=*/false) != NULL;
 }
 
+#if defined(ENABLE_EXTENSIONS)
 void LocalizedError::GetAppErrorStrings(
     const GURL& display_url,
     const extensions::Extension* app,
+    const std::string& locale,
     base::DictionaryValue* error_strings) {
   DCHECK(app);
 
-  bool rtl = LocaleIsRTL();
-  error_strings->SetString("textdirection", rtl ? "rtl" : "ltr");
+  webui::SetLoadTimeDataDefaults(locale, error_strings);
 
   base::string16 failed_url(base::ASCIIToUTF16(display_url.spec()));
   // URLs are always LTR.
-  if (rtl)
+  if (base::i18n::IsRTL())
     base::i18n::WrapStringWithLTRFormatting(&failed_url);
   error_strings->SetString(
      "url", l10n_util::GetStringFUTF16(IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
@@ -882,3 +886,4 @@ void LocalizedError::GetAppErrorStrings(
   error_strings->Set("suggestionsLearnMore", suggest_learn_more);
 #endif  // defined(OS_CHROMEOS)
 }
+#endif

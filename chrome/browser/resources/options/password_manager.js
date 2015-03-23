@@ -59,12 +59,21 @@ cr.define('options', function() {
     initializePage: function() {
       Page.prototype.initializePage.call(this);
 
+      $('auto-signin-block').hidden =
+          !loadTimeData.getBoolean('enableCredentialManagerAPI');
+
       $('password-manager-confirm').onclick = function() {
         PageManager.closeOverlay();
       };
 
       $('password-search-box').addEventListener('search',
           this.handleSearchQueryChange_.bind(this));
+
+      $('exceptions-learn-more').onclick = function() {
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_PasswordManagerExceptionsLearnMore']);
+        return true;  // Always follow the href
+      };
 
       this.createSavedPasswordsList_();
       this.createPasswordExceptionsList_();
@@ -122,6 +131,9 @@ cr.define('options', function() {
       // snappier since users will expect that it's "less work."
       this.queryDelayTimerId_ = window.setTimeout(
           this.searchPasswords_.bind(this), 250);
+
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_PasswordManagerSearch']);
     },
 
     /**
@@ -213,6 +225,14 @@ cr.define('options', function() {
       var item = this.savedPasswordsList_.getListItemByIndex(index);
       item.showPassword(password);
     },
+
+    /**
+     * @param {boolean} visible Whether the link should be visible.
+     * @private
+     */
+    setManageAccountLinkVisibility_: function(visible) {
+      $('manage-passwords-span').hidden = !visible;
+    },
   };
 
   /**
@@ -221,6 +241,8 @@ cr.define('options', function() {
    */
   PasswordManager.removeSavedPassword = function(rowIndex) {
       chrome.send('removeSavedPassword', [String(rowIndex)]);
+      chrome.send('coreOptionsUserMetricsAction',
+                  ['Options_PasswordManagerDeletePassword']);
   };
 
   /**
@@ -237,6 +259,7 @@ cr.define('options', function() {
 
   // Forward public APIs to private implementations on the singleton instance.
   cr.makePublic(PasswordManager, [
+    'setManageAccountLinkVisibility',
     'setSavedPasswordsList',
     'setPasswordExceptionsList',
     'showPassword'

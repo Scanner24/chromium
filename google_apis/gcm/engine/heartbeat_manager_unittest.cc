@@ -4,8 +4,12 @@
 
 #include "google_apis/gcm/engine/heartbeat_manager.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,16 +30,23 @@ class TestHeartbeatManager : public HeartbeatManager {
 
   // Bypass the heartbeat timer, and send the heartbeat now.
   void TriggerHearbeat();
+
+  // Check for a missed heartbeat now.
+  void TriggerMissedHeartbeatCheck();
 };
 
 void TestHeartbeatManager::TriggerHearbeat() {
   OnHeartbeatTriggered();
 }
 
+void TestHeartbeatManager::TriggerMissedHeartbeatCheck() {
+  CheckForMissedHeartbeat();
+}
+
 class HeartbeatManagerTest : public testing::Test {
  public:
   HeartbeatManagerTest();
-  virtual ~HeartbeatManagerTest() {}
+  ~HeartbeatManagerTest() override {}
 
   TestHeartbeatManager* manager() const { return manager_.get(); }
   int heartbeats_sent() const { return heartbeats_sent_; }
@@ -162,6 +173,26 @@ TEST_F(HeartbeatManagerTest, StartThenUpdateInterval) {
   EXPECT_NE(heartbeat, manager()->GetNextHeartbeatTime());
 }
 
+// Updating the timer used for heartbeats before starting should not start the
+// timer.
+TEST_F(HeartbeatManagerTest, UpdateTimerBeforeStart) {
+  manager()->UpdateHeartbeatTimer(
+      make_scoped_ptr(new base::Timer(true, false)));
+  EXPECT_TRUE(manager()->GetNextHeartbeatTime().is_null());
+}
+
+// Updating the timer used for heartbeats after starting should restart the
+// timer but not increase the heartbeat time by more than a millisecond.
+TEST_F(HeartbeatManagerTest, UpdateTimerAfterStart) {
+  StartManager();
+  base::TimeTicks heartbeat = manager()->GetNextHeartbeatTime();
+
+  manager()->UpdateHeartbeatTimer(
+      make_scoped_ptr(new base::Timer(true, false)));
+  EXPECT_LT(manager()->GetNextHeartbeatTime() - heartbeat,
+            base::TimeDelta::FromMilliseconds(5));
+}
+
 // Stopping the manager should reset the heartbeat timer.
 TEST_F(HeartbeatManagerTest, Stop) {
   StartManager();
@@ -169,6 +200,20 @@ TEST_F(HeartbeatManagerTest, Stop) {
 
   manager()->Stop();
   EXPECT_TRUE(manager()->GetNextHeartbeatTime().is_null());
+}
+
+// Simulate missing a heartbeat by manually invoking the check method. The
+// heartbeat should only be triggered once, and only if the heartbeat timer
+// is running. Because the period is several minutes, none should fire.
+TEST_F(HeartbeatManagerTest, MissedHeartbeat) {
+  // Do nothing while stopped.
+  manager()->TriggerMissedHeartbeatCheck();
+  StartManager();
+  EXPECT_EQ(0, heartbeats_sent());
+
+  // Do nothing before the period is reached.
+  manager()->TriggerMissedHeartbeatCheck();
+  EXPECT_EQ(0, heartbeats_sent());
 }
 
 }  // namespace

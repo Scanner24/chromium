@@ -10,13 +10,18 @@
 #include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/webdata/token_web_data.h"
+#include "net/cookies/cookie_store.h"
+#include "url/gurl.h"
 
 class PrefService;
 class SigninManagerBase;
 class TokenWebData;
 
+namespace content_settings {
+class Observer;
+}
+
 namespace net {
-class CanonicalCookie;
 class URLRequestContextGetter;
 }
 
@@ -32,13 +37,13 @@ class ProfileOAuth2TokenServiceIOSProvider;
 // embedder.
 class SigninClient : public KeyedService {
  public:
-  typedef base::Callback<void(const net::CanonicalCookie* cookie)>
-      CookieChangedCallback;
+  // The subcription for cookie changed notifications.
+  class CookieChangedSubscription {
+   public:
+    virtual ~CookieChangedSubscription() {};
+  };
 
-  typedef base::CallbackList<void(const net::CanonicalCookie* cookie)>
-      CookieChangedCallbackList;
-
-  virtual ~SigninClient() {}
+  ~SigninClient() override {}
 
   // Gets the preferences associated with the client.
   virtual PrefService* GetPrefs() = 0;
@@ -55,9 +60,9 @@ class SigninClient : public KeyedService {
   // this device id.
   virtual std::string GetSigninScopedDeviceId() = 0;
 
-  // Clears signin scoped device id. This happens when user signs out or about
+  // Perform Chrome-specific sign out. This happens when user signs out or about
   // to sign in.
-  virtual void ClearSigninScopedDeviceId() = 0;
+  virtual void OnSignedOut() = 0;
 
   // Returns the URL request context information associated with the client.
   virtual net::URLRequestContextGetter* GetURLRequestContext() = 0;
@@ -70,17 +75,24 @@ class SigninClient : public KeyedService {
   // Signin component is being used.
   virtual std::string GetProductVersion() = 0;
 
-  // Adds or removes a callback that should be called when a cookie changes.
-  // TODO(blundell): Eliminate this interface in favor of having core signin
-  // code observe cookie changes once //chrome/browser/net has been
-  // componentized.
-  virtual scoped_ptr<CookieChangedCallbackList::Subscription>
-      AddCookieChangedCallback(const CookieChangedCallback& callback) = 0;
+  // Adds a callback to be called each time a cookie for |url| with name |name|
+  // changes.
+  // Note that |callback| will always be called on the thread that
+  // |AddCookieChangedCallback| was called on.
+  virtual scoped_ptr<CookieChangedSubscription> AddCookieChangedCallback(
+      const GURL& url,
+      const std::string& name,
+      const net::CookieStore::CookieChangedCallback& callback) = 0;
 
-  // Called when Google signin has succeeded.
-  virtual void GoogleSigninSucceeded(const std::string& account_id,
-                                     const std::string& username,
-                                     const std::string& password) {}
+  // Called after Google signin has succeeded.
+  virtual void OnSignedIn(const std::string& account_id,
+                          const std::string& username,
+                          const std::string& password) {}
+
+  // Called after Google signin has succeeded and GetUserInfo has returned.
+  virtual void PostSignedIn(const std::string& account_id,
+                            const std::string& username,
+                            const std::string& password) {}
 
   virtual void SetSigninProcess(int host_id) = 0;
   virtual void ClearSigninProcess() = 0;
@@ -89,6 +101,16 @@ class SigninClient : public KeyedService {
 
   virtual bool IsFirstRun() const = 0;
   virtual base::Time GetInstallDate() = 0;
+
+  // Returns true if GAIA cookies are allowed in the content area.
+  virtual bool AreSigninCookiesAllowed() = 0;
+
+  // Adds an observer to listen for changes to the state of sign in cookie
+  // settings.
+  virtual void AddContentSettingsObserver(
+      content_settings::Observer* observer) = 0;
+  virtual void RemoveContentSettingsObserver(
+      content_settings::Observer* observer) = 0;
 
 #if defined(OS_IOS)
   // TODO(msarda): http://crbug.com/358544 Remove this iOS specific code from

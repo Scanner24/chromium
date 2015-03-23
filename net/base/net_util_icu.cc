@@ -491,9 +491,9 @@ class HostComponentTransform : public AppendComponentTransform {
   }
 
  private:
-  virtual base::string16 Execute(
+  base::string16 Execute(
       const std::string& component_text,
-      base::OffsetAdjuster::Adjustments* adjustments) const OVERRIDE {
+      base::OffsetAdjuster::Adjustments* adjustments) const override {
     return IDNToUnicodeWithAdjustments(component_text, languages_,
                                        adjustments);
   }
@@ -508,9 +508,9 @@ class NonHostComponentTransform : public AppendComponentTransform {
   }
 
  private:
-  virtual base::string16 Execute(
+  base::string16 Execute(
       const std::string& component_text,
-      base::OffsetAdjuster::Adjustments* adjustments) const OVERRIDE {
+      base::OffsetAdjuster::Adjustments* adjustments) const override {
     return (unescape_rules_ == UnescapeRule::NONE) ?
         base::UTF8ToUTF16WithAdjustments(component_text, adjustments) :
         UnescapeAndDecodeUTF8URLComponentWithAdjustments(component_text,
@@ -670,9 +670,9 @@ base::string16 FormatUrlWithAdjustments(
 
   // Special handling for view-source:.  Don't use content::kViewSourceScheme
   // because this library shouldn't depend on chrome.
-  const char* const kViewSource = "view-source";
+  const char kViewSource[] = "view-source";
   // Reject "view-source:view-source:..." to avoid deep recursion.
-  const char* const kViewSourceTwice = "view-source:view-source:";
+  const char kViewSourceTwice[] = "view-source:view-source:";
   if (url.SchemeIs(kViewSource) &&
       !StartsWithASCII(url.possibly_invalid_spec(), kViewSourceTwice, false)) {
     return FormatViewSourceUrl(url, languages, format_types,

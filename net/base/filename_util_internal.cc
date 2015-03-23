@@ -6,7 +6,6 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -203,8 +202,8 @@ void EnsureSafeExtension(const std::string& mime_type,
 
 bool FilePathToString16(const base::FilePath& path, base::string16* converted) {
 #if defined(OS_WIN)
-  return base::WideToUTF16(
-      path.value().c_str(), path.value().size(), converted);
+  *converted = path.value();
+  return true;
 #elif defined(OS_POSIX)
   std::string component8 = path.AsUTF8Unsafe();
   return !component8.empty() &&
@@ -229,11 +228,13 @@ base::string16 GetSuggestedFilenameImpl(
       FILE_PATH_LITERAL("download");
   std::string filename;  // In UTF-8
   bool overwrite_extension = false;
-
+  bool is_name_from_content_disposition = false;
   // Try to extract a filename from content-disposition first.
   if (!content_disposition.empty()) {
     HttpContentDisposition header(content_disposition, referrer_charset);
     filename = header.filename();
+    if (!filename.empty())
+      is_name_from_content_disposition = true;
   }
 
   // Then try to use the suggested name.
@@ -275,7 +276,13 @@ base::string16 GetSuggestedFilenameImpl(
   }
   replace_illegal_characters_callback.Run(&result_str, '-');
   base::FilePath result(result_str);
-  GenerateSafeFileName(mime_type, overwrite_extension, &result);
+  // extension should not appended to filename derived from
+  // content-disposition, if it does not have one.
+  // Hence mimetype and overwrite_extension values are not used.
+  if (is_name_from_content_disposition)
+    GenerateSafeFileName("", false, &result);
+  else
+    GenerateSafeFileName(mime_type, overwrite_extension, &result);
 
   base::string16 result16;
   if (!FilePathToString16(result, &result16)) {

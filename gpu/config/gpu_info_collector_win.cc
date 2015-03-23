@@ -8,13 +8,13 @@
 #include "third_party/re2/re2/re2.h"
 
 #include <windows.h>
+#include <cfgmgr32.h>
 #include <d3d9.h>
 #include <d3d11.h>
 #include <dxgi.h>
 #include <setupapi.h>
 
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -30,6 +30,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
@@ -154,12 +155,17 @@ GpuPerformanceStats RetrieveGpuPerformanceStatsWithHistograms() {
 
   UMA_HISTOGRAM_TIMES("GPU.WinSAT.ReadResultsFileTime",
                       base::TimeTicks::Now() - start_time);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.OverallScore2",
-                              stats.overall * 10, 10, 200, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GraphicsScore2",
-                              stats.graphics * 10, 10, 200, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GamingScore2",
-                              stats.gaming * 10, 10, 200, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "GPU.WinSAT.OverallScore2",
+      static_cast<base::HistogramBase::Sample>(stats.overall * 10), 10, 200,
+      50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "GPU.WinSAT.GraphicsScore2",
+      static_cast<base::HistogramBase::Sample>(stats.graphics * 10), 10, 200,
+      50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "GPU.WinSAT.GamingScore2",
+      static_cast<base::HistogramBase::Sample>(stats.gaming * 10), 10, 200, 50);
   UMA_HISTOGRAM_BOOLEAN(
       "GPU.WinSAT.HasResults",
       stats.overall != 0.0 && stats.graphics != 0.0 && stats.gaming != 0.0);
@@ -358,6 +364,24 @@ void CollectD3D11Support() {
       base::Bind(CollectD3D11SupportOnWorkerThread),
       false);
 }
+
+void DeviceIDToVendorAndDevice(const std::wstring& id,
+                               uint32* vendor_id,
+                               uint32* device_id) {
+  *vendor_id = 0;
+  *device_id = 0;
+  if (id.length() < 21)
+    return;
+  base::string16 vendor_id_string = id.substr(8, 4);
+  base::string16 device_id_string = id.substr(17, 4);
+  int vendor = 0;
+  int device = 0;
+  base::HexStringToInt(base::UTF16ToASCII(vendor_id_string), &vendor);
+  base::HexStringToInt(base::UTF16ToASCII(device_id_string), &device);
+  *vendor_id = vendor;
+  *device_id = device;
+}
+
 }  // namespace anonymous
 
 #if defined(GOOGLE_CHROME_BUILD) && defined(OFFICIAL_BUILD)
@@ -375,17 +399,45 @@ CollectInfoResult CollectDriverInfoD3D(const std::wstring& device_id,
                                        GPUInfo* gpu_info) {
   TRACE_EVENT0("gpu", "CollectDriverInfoD3D");
 
+  // Display adapter class GUID from
+  // https://msdn.microsoft.com/en-us/library/windows/hardware/ff553426%28v=vs.85%29.aspx
+  GUID display_class = {0x4d36e968,
+                        0xe325,
+                        0x11ce,
+                        {0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18}};
+
   // create device info for the display device
-  HDEVINFO device_info = SetupDiGetClassDevsW(
-      NULL, device_id.c_str(), NULL,
-      DIGCF_PRESENT | DIGCF_PROFILE | DIGCF_ALLCLASSES);
+  HDEVINFO device_info;
+  if (base::win::GetVersion() <= base::win::VERSION_XP) {
+    // Collection of information on all adapters is much slower on XP (almost
+    // 100ms), and not very useful (as it's not going to use the GPU anyway), so
+    // just collect information on the current device. http://crbug.com/456178
+    device_info =
+        SetupDiGetClassDevsW(NULL, device_id.c_str(), NULL,
+                             DIGCF_PRESENT | DIGCF_PROFILE | DIGCF_ALLCLASSES);
+  } else {
+    device_info =
+        SetupDiGetClassDevsW(&display_class, NULL, NULL, DIGCF_PRESENT);
+  }
   if (device_info == INVALID_HANDLE_VALUE) {
     LOG(ERROR) << "Creating device info failed";
     return kCollectInfoNonFatalFailure;
   }
 
+  struct GPUDriver {
+    GPUInfo::GPUDevice device;
+    std::string driver_vendor;
+    std::string driver_version;
+    std::string driver_date;
+  };
+
+  std::vector<GPUDriver> drivers;
+
+  int primary_device = -1;
+  bool found_amd = false;
+  bool found_intel = false;
+
   DWORD index = 0;
-  bool found = false;
   SP_DEVINFO_DATA device_info_data;
   device_info_data.cbSize = sizeof(device_info_data);
   while (SetupDiEnumDeviceInfo(device_info, index++, &device_info_data)) {
@@ -424,35 +476,85 @@ CollectInfoResult CollectDriverInfoD3D(const std::wstring& device_id,
         result = RegQueryValueExW(
             key, L"ProviderName", NULL, NULL,
             reinterpret_cast<LPBYTE>(value), &dwcb_data);
-        if (result == ERROR_SUCCESS) {
+        if (result == ERROR_SUCCESS)
           driver_vendor = base::UTF16ToASCII(std::wstring(value));
-          if (driver_vendor == "Advanced Micro Devices, Inc." ||
-              driver_vendor == "ATI Technologies Inc.") {
-            // We are conservative and assume that in the absence of a clear
-            // signal the videocard is assumed to be switchable. Additionally,
-            // some switchable systems with Intel GPUs aren't correctly
-            // detected, so always count them.
-            GetAMDVideocardInfo(gpu_info);
-            if (!gpu_info->amd_switchable &&
-                gpu_info->gpu.vendor_id == 0x8086) {
-              gpu_info->amd_switchable = true;
-              gpu_info->secondary_gpus.push_back(gpu_info->gpu);
-              gpu_info->gpu.vendor_id = 0x1002;
-              gpu_info->gpu.device_id = 0;  // Unknown discrete AMD GPU.
-            }
-          }
+
+        wchar_t new_device_id[MAX_DEVICE_ID_LEN];
+        CONFIGRET status = CM_Get_Device_ID(
+            device_info_data.DevInst, new_device_id, MAX_DEVICE_ID_LEN, 0);
+
+        if (status == CR_SUCCESS) {
+          GPUDriver driver;
+
+          driver.driver_vendor = driver_vendor;
+          driver.driver_version = driver_version;
+          driver.driver_date = driver_date;
+          std::wstring id = new_device_id;
+
+          if (id.compare(0, device_id.size(), device_id) == 0)
+            primary_device = drivers.size();
+
+          uint32 vendor_id = 0, device_id = 0;
+          DeviceIDToVendorAndDevice(id, &vendor_id, &device_id);
+          driver.device.vendor_id = vendor_id;
+          driver.device.device_id = device_id;
+          drivers.push_back(driver);
+
+          if (vendor_id == 0x8086)
+            found_intel = true;
+          if (vendor_id == 0x1002)
+            found_amd = true;
         }
 
-        gpu_info->driver_vendor = driver_vendor;
-        gpu_info->driver_version = driver_version;
-        gpu_info->driver_date = driver_date;
-        found = true;
         RegCloseKey(key);
-        break;
       }
     }
   }
   SetupDiDestroyDeviceInfoList(device_info);
+  bool found = false;
+  if (found_amd && found_intel) {
+    // AMD Switchable system found.
+    for (const auto& driver : drivers) {
+      if (driver.device.vendor_id == 0x8086) {
+        gpu_info->gpu = driver.device;
+      }
+
+      if (driver.device.vendor_id == 0x1002) {
+        gpu_info->driver_vendor = driver.driver_vendor;
+        gpu_info->driver_version = driver.driver_version;
+        gpu_info->driver_date = driver.driver_date;
+      }
+    }
+    GetAMDVideocardInfo(gpu_info);
+
+    if (!gpu_info->amd_switchable) {
+      // Some machines aren't properly detected as AMD switchable, but count
+      // them anyway.
+      gpu_info->amd_switchable = true;
+      for (const auto& driver : drivers) {
+        if (driver.device.vendor_id == 0x1002) {
+          gpu_info->gpu = driver.device;
+        } else {
+          gpu_info->secondary_gpus.push_back(driver.device);
+        }
+      }
+    }
+    found = true;
+  } else {
+    for (size_t i = 0; i < drivers.size(); ++i) {
+      const GPUDriver& driver = drivers[i];
+      if (static_cast<int>(i) == primary_device) {
+        found = true;
+        gpu_info->gpu = driver.device;
+        gpu_info->driver_vendor = driver.driver_vendor;
+        gpu_info->driver_version = driver.driver_version;
+        gpu_info->driver_date = driver.driver_date;
+      } else {
+        gpu_info->secondary_gpus.push_back(driver.device);
+      }
+    }
+  }
+
   return found ? kCollectInfoSuccess : kCollectInfoNonFatalFailure;
 }
 
@@ -461,9 +563,10 @@ CollectInfoResult CollectContextGraphicsInfo(GPUInfo* gpu_info) {
 
   DCHECK(gpu_info);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
     std::string requested_implementation_name =
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(switches::kUseGL);
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kUseGL);
     if (requested_implementation_name == "swiftshader") {
       gpu_info->software_rendering = true;
       gpu_info->context_info_state = kCollectInfoNonFatalFailure;
@@ -545,13 +648,7 @@ CollectInfoResult CollectGpuID(uint32* vendor_id, uint32* device_id) {
   }
 
   if (id.length() > 20) {
-    int vendor = 0, device = 0;
-    std::wstring vendor_string = id.substr(8, 4);
-    std::wstring device_string = id.substr(17, 4);
-    base::HexStringToInt(base::UTF16ToASCII(vendor_string), &vendor);
-    base::HexStringToInt(base::UTF16ToASCII(device_string), &device);
-    *vendor_id = vendor;
-    *device_id = device;
+    DeviceIDToVendorAndDevice(id, vendor_id, device_id);
     if (*vendor_id != 0 && *device_id != 0)
       return kCollectInfoSuccess;
   }
@@ -603,13 +700,8 @@ CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
     return kCollectInfoNonFatalFailure;
   }
 
-  int vendor_id = 0, device_id = 0;
-  base::string16 vendor_id_string = id.substr(8, 4);
-  base::string16 device_id_string = id.substr(17, 4);
-  base::HexStringToInt(base::UTF16ToASCII(vendor_id_string), &vendor_id);
-  base::HexStringToInt(base::UTF16ToASCII(device_id_string), &device_id);
-  gpu_info->gpu.vendor_id = vendor_id;
-  gpu_info->gpu.device_id = device_id;
+  DeviceIDToVendorAndDevice(id, &gpu_info->gpu.vendor_id,
+                            &gpu_info->gpu.device_id);
   // TODO(zmo): we only need to call CollectDriverInfoD3D() if we use ANGLE.
   if (!CollectDriverInfoD3D(id, gpu_info)) {
     gpu_info->basic_info_state = kCollectInfoNonFatalFailure;
@@ -658,6 +750,45 @@ void MergeGPUInfo(GPUInfo* basic_gpu_info,
   if (context_gpu_info.software_rendering) {
     basic_gpu_info->software_rendering = true;
     return;
+  }
+
+  // Track D3D Shader Model (if available)
+  const std::string& shader_version =
+      context_gpu_info.vertex_shader_version;
+
+  // Only gather if this is the first time we're seeing
+  // a non-empty shader version string.
+  if (!shader_version.empty() &&
+      basic_gpu_info->vertex_shader_version.empty()) {
+
+    // Note: do not reorder, used by UMA_HISTOGRAM below
+    enum ShaderModel {
+      SHADER_MODEL_UNKNOWN,
+      SHADER_MODEL_2_0,
+      SHADER_MODEL_3_0,
+      SHADER_MODEL_4_0,
+      SHADER_MODEL_4_1,
+      SHADER_MODEL_5_0,
+      NUM_SHADER_MODELS
+    };
+
+    ShaderModel shader_model = SHADER_MODEL_UNKNOWN;
+
+    if (shader_version == "5.0") {
+      shader_model = SHADER_MODEL_5_0;
+    } else if (shader_version == "4.1") {
+      shader_model = SHADER_MODEL_4_1;
+    } else if (shader_version == "4.0") {
+      shader_model = SHADER_MODEL_4_0;
+    } else if (shader_version == "3.0") {
+      shader_model = SHADER_MODEL_3_0;
+    } else if (shader_version == "2.0") {
+      shader_model = SHADER_MODEL_2_0;
+    }
+
+    UMA_HISTOGRAM_ENUMERATION("GPU.D3DShaderModel",
+                              shader_model,
+                              NUM_SHADER_MODELS);
   }
 
   MergeGPUInfoGL(basic_gpu_info, context_gpu_info);

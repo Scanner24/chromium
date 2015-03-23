@@ -32,8 +32,11 @@ def _StripLineNumbers(current_warnings):
 
 
 def _DiffKnownWarnings(current_warnings_set, known_bugs_file):
-  with open(known_bugs_file, 'r') as known_bugs:
-    known_bugs_set = set(known_bugs.read().splitlines())
+  if os.path.exists(known_bugs_file):
+    with open(known_bugs_file, 'r') as known_bugs:
+      known_bugs_set = set(known_bugs.read().splitlines())
+  else:
+    known_bugs_set = set()
 
   new_warnings = current_warnings_set - known_bugs_set
   _PrintMessage(sorted(new_warnings), 'New', 'Please fix, or perhaps add to',
@@ -143,6 +146,13 @@ def _Run(exclude, known_bugs, classes_to_analyze, auxiliary_classes,
   if not chrome_classes:
     return 1
   cmd = '%s %s ' % (cmd, chrome_classes)
+
+  print
+  print '*' * 80
+  print 'Command used to run findbugs:'
+  print cmd
+  print '*' * 80
+  print
 
   proc = subprocess.Popen(shlex.split(cmd),
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)

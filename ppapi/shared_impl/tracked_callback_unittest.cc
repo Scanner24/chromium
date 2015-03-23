@@ -25,12 +25,11 @@ class TrackedCallbackTest : public testing::Test {
 
   PP_Instance pp_instance() const { return pp_instance_; }
 
-  virtual void SetUp() OVERRIDE {
-    ProxyLock::EnableLockingOnThreadForTest();
+  virtual void SetUp() override {
     ProxyAutoLock lock;
     globals_.GetResourceTracker()->DidCreateInstance(pp_instance_);
   }
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     ProxyAutoLock lock;
     globals_.GetResourceTracker()->DidDeleteInstance(pp_instance_);
   }

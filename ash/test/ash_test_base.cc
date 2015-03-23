@@ -27,9 +27,9 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method_initializer.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/screen.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
@@ -59,19 +59,19 @@ class AshEventGeneratorDelegate
     : public aura::test::EventGeneratorDelegateAura {
  public:
   AshEventGeneratorDelegate() {}
-  virtual ~AshEventGeneratorDelegate() {}
+  ~AshEventGeneratorDelegate() override {}
 
   // aura::test::EventGeneratorDelegateAura overrides:
-  virtual aura::WindowTreeHost* GetHostAt(
-      const gfx::Point& point_in_screen) const OVERRIDE {
+  aura::WindowTreeHost* GetHostAt(
+      const gfx::Point& point_in_screen) const override {
     gfx::Screen* screen = Shell::GetScreen();
     gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
     return Shell::GetInstance()->display_controller()->
         GetRootWindowForDisplayId(display.id())->GetHost();
   }
 
-  virtual aura::client::ScreenPositionClient* GetScreenPositionClient(
-      const aura::Window* window) const OVERRIDE {
+  aura::client::ScreenPositionClient* GetScreenPositionClient(
+      const aura::Window* window) const override {
     return aura::client::GetScreenPositionClient(window->GetRootWindow());
   }
 
@@ -117,7 +117,7 @@ void AshTestBase::SetUp() {
   // TODO(jamescook): Can we do this without changing command line?
   // Use the origin (1,1) so that it doesn't over
   // lap with the native mouse cursor.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!command_line->HasSwitch(switches::kAshHostWindowBounds)) {
     command_line->AppendSwitchASCII(
         switches::kAshHostWindowBounds, "1+1-800x600");
@@ -135,7 +135,8 @@ void AshTestBase::SetUp() {
   ash::Shell::GetInstance()->cursor_manager()->EnableMouseEvents();
 
   // Changing GestureConfiguration shouldn't make tests fail.
-  ui::GestureConfiguration::set_max_touch_move_in_pixels_for_click(5);
+  ui::GestureConfiguration::GetInstance()
+      ->set_max_touch_move_in_pixels_for_click(5);
 
 #if defined(OS_WIN)
   if (!command_line->HasSwitch(ash::switches::kForceAshToDesktop)) {
@@ -159,12 +160,13 @@ void AshTestBase::SetUp() {
 
 void AshTestBase::TearDown() {
   teardown_called_ = true;
+  Shell::GetInstance()->OnAppTerminating();
   // Flush the message loop to finish pending release tasks.
   RunAllPendingInMessageLoop();
 
 #if defined(OS_WIN)
   if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
           ash::switches::kForceAshToDesktop)) {
     // Check that our viewer connection is still established.
     CHECK(!metro_viewer_host_->closed_unexpectedly());
@@ -204,9 +206,11 @@ bool AshTestBase::SupportsHostWindowResize() {
 }
 
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {
-  DisplayManagerTestApi display_manager_test_api(
-      Shell::GetInstance()->display_manager());
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+  DisplayManagerTestApi display_manager_test_api(display_manager);
   display_manager_test_api.UpdateDisplay(display_specs);
+  if (display_manager->HasSoftwareMirroringDisplay())
+    RunAllPendingInMessageLoop();
 }
 
 aura::Window* AshTestBase::CurrentContext() {
@@ -261,6 +265,7 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
     aura::client::ParentWindowWithContext(window, root, bounds);
   }
   window->SetProperty(aura::client::kCanMaximizeKey, true);
+  window->SetProperty(aura::client::kCanMinimizeKey, true);
   return window;
 }
 
@@ -285,6 +290,12 @@ TestSystemTrayDelegate* AshTestBase::GetSystemTrayDelegate() {
 void AshTestBase::SetSessionStarted(bool session_started) {
   ash_test_helper_->test_shell_delegate()->test_session_state_delegate()->
       SetActiveUserSessionStarted(session_started);
+}
+
+void AshTestBase::SetSessionStarting() {
+  ash_test_helper_->test_shell_delegate()
+      ->test_session_state_delegate()
+      ->set_session_state(SessionStateDelegate::SESSION_STATE_ACTIVE);
 }
 
 void AshTestBase::SetUserLoggedIn(bool user_logged_in) {
@@ -313,6 +324,7 @@ void AshTestBase::BlockUserSession(UserSessionBlockReason block_reason) {
       SetSessionStarted(true);
       SetUserAddingScreenRunning(false);
       Shell::GetInstance()->session_state_delegate()->LockScreen();
+      Shell::GetInstance()->OnLockStateChanged(true);
       break;
     case BLOCKED_BY_LOGIN_SCREEN:
       SetUserAddingScreenRunning(false);

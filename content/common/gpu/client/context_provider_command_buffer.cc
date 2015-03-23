@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "cc/output/managed_memory_policy.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
+#include "third_party/skia/include/gpu/GrContext.h"
 #include "webkit/common/gpu/grcontext_for_webgraphicscontext3d.h"
 
 namespace content {
@@ -64,6 +65,7 @@ ContextProviderCommandBuffer::~ContextProviderCommandBuffer() {
 
   // Destroy references to the context3d_ before leaking it.
   if (context3d_->GetCommandBufferProxy()) {
+    context3d_->GetCommandBufferProxy()->SetLock(nullptr);
     context3d_->GetCommandBufferProxy()->SetMemoryAllocationChangedCallback(
         CommandBufferProxyImpl::MemoryAllocationChangedCallback());
   }
@@ -98,13 +100,17 @@ bool ContextProviderCommandBuffer::BindToCurrentThread() {
 
   std::string unique_context_name =
       base::StringPrintf("%s-%p", debug_name_.c_str(), context3d_.get());
-  context3d_->pushGroupMarkerEXT(unique_context_name.c_str());
+  context3d_->traceBeginCHROMIUM("gpu_toplevel", unique_context_name.c_str());
 
   lost_context_callback_proxy_.reset(new LostContextCallbackProxy(this));
   context3d_->GetCommandBufferProxy()->SetMemoryAllocationChangedCallback(
       base::Bind(&ContextProviderCommandBuffer::OnMemoryAllocationChanged,
                  base::Unretained(this)));
   return true;
+}
+
+void ContextProviderCommandBuffer::DetachFromThread() {
+  context_thread_checker_.DetachFromThread();
 }
 
 gpu::gles2::GLES2Interface* ContextProviderCommandBuffer::ContextGL() {
@@ -128,7 +134,21 @@ class GrContext* ContextProviderCommandBuffer::GrContext() {
 
   gr_context_.reset(
       new webkit::gpu::GrContextForWebGraphicsContext3D(context3d_.get()));
+
+  // If GlContext is already lost, also abandon the new GrContext.
+  if (IsContextLost())
+    gr_context_->get()->abandonContext();
+
   return gr_context_->get();
+}
+
+void ContextProviderCommandBuffer::SetupLock() {
+  DCHECK(context3d_);
+  context3d_->GetCommandBufferProxy()->SetLock(&context_lock_);
+}
+
+base::Lock* ContextProviderCommandBuffer::GetLock() {
+  return &context_lock_;
 }
 
 cc::ContextProvider::Capabilities

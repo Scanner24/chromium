@@ -18,18 +18,17 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/chrome_favicon_client_factory.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
+#include "chrome/browser/history/content_visit_delegate.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
+#include "chrome/browser/history/top_sites_impl.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
@@ -44,6 +43,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
+#include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -51,13 +51,21 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_constants.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/history/content/browser/history_database_helper.h"
+#include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/user_prefs/user_prefs.h"
+#include "components/webdata_services/web_data_service_wrapper.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
@@ -83,6 +91,7 @@
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/test_extension_system.h"
@@ -94,12 +103,14 @@
 #include "chrome/browser/signin/android_profile_oauth2_token_service.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
 #endif
 
 using base::Time;
+using bookmarks::BookmarkModel;
 using content::BrowserThread;
 using content::DownloadManagerDelegate;
 using testing::NiceMock;
@@ -107,15 +118,29 @@ using testing::Return;
 
 namespace {
 
+// TopSitesImpl::Shutdown schedules some tasks (from TopSitesBackend) that
+// need to be run to properly shutdown. Run all pending tasks now. This is
+// normally handled by browser_process shutdown.
+
+void CleanupAfterTopSitesDestroyed() {
+  if (base::MessageLoop::current())
+    base::MessageLoop::current()->RunUntilIdle();
+}
+
+// Returns true if a TopSites service has been registered for |profile|.
+bool HasTopSites(Profile* profile) {
+  return !!TopSitesFactory::GetInstance()->GetForProfileIfExists(profile);
+}
+
 // Used to make sure TopSites has finished loading
 class WaitTopSitesLoadedObserver : public history::TopSitesObserver {
  public:
   explicit WaitTopSitesLoadedObserver(content::MessageLoopRunner* runner)
       : runner_(runner) {}
-  virtual void TopSitesLoaded(history::TopSites* top_sites) OVERRIDE {
+  void TopSitesLoaded(history::TopSites* top_sites) override {
     runner_->Quit();
   }
-  virtual void TopSitesChanged(history::TopSites* top_sites) OVERRIDE {}
+  void TopSitesChanged(history::TopSites* top_sites) override {}
 
  private:
   // weak
@@ -129,17 +154,15 @@ class QuittingHistoryDBTask : public history::HistoryDBTask {
  public:
   QuittingHistoryDBTask() {}
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
-    base::MessageLoop::current()->Quit();
-  }
+  void DoneRunOnMainThread() override { base::MessageLoop::current()->Quit(); }
 
  private:
-  virtual ~QuittingHistoryDBTask() {}
+  ~QuittingHistoryDBTask() override {}
 
   DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
 };
@@ -155,26 +178,24 @@ class TestExtensionURLRequestContext : public net::URLRequestContext {
     set_cookie_store(cookie_monster);
   }
 
-  virtual ~TestExtensionURLRequestContext() {
-    AssertNoURLRequests();
-  }
+  ~TestExtensionURLRequestContext() override { AssertNoURLRequests(); }
 };
 
 class TestExtensionURLRequestContextGetter
     : public net::URLRequestContextGetter {
  public:
-  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE {
+  net::URLRequestContext* GetURLRequestContext() override {
     if (!context_.get())
       context_.reset(new TestExtensionURLRequestContext());
     return context_.get();
   }
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetNetworkTaskRunner() const OVERRIDE {
+  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
+      const override {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
  protected:
-  virtual ~TestExtensionURLRequestContextGetter() {}
+  ~TestExtensionURLRequestContextGetter() override {}
 
  private:
   scoped_ptr<net::URLRequestContext> context_;
@@ -186,6 +207,71 @@ KeyedService* CreateTestDesktopNotificationService(
   return new DesktopNotificationService(static_cast<Profile*>(profile));
 }
 #endif
+
+KeyedService* BuildFaviconService(content::BrowserContext* profile) {
+  FaviconClient* favicon_client =
+      ChromeFaviconClientFactory::GetForProfile(static_cast<Profile*>(profile));
+  return new FaviconService(static_cast<Profile*>(profile), favicon_client);
+}
+
+KeyedService* BuildHistoryService(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  HistoryService* history_service = new HistoryService(
+      ChromeHistoryClientFactory::GetForProfile(profile),
+      scoped_ptr<history::VisitDelegate>(new ContentVisitDelegate(profile)));
+  return history_service;
+}
+
+KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
+  Profile* profile = static_cast<Profile*>(context);
+  ChromeBookmarkClient* bookmark_client =
+      ChromeBookmarkClientFactory::GetForProfile(profile);
+  BookmarkModel* bookmark_model = new BookmarkModel(bookmark_client);
+  bookmark_client->Init(bookmark_model);
+  bookmark_model->Load(profile->GetPrefs(),
+                       profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
+                       profile->GetPath(),
+                       profile->GetIOTaskRunner(),
+                       content::BrowserThread::GetMessageLoopProxyForThread(
+                           content::BrowserThread::UI));
+  return bookmark_model;
+}
+
+KeyedService* BuildChromeBookmarkClient(
+    content::BrowserContext* context) {
+  return new ChromeBookmarkClient(static_cast<Profile*>(context));
+}
+
+KeyedService* BuildChromeHistoryClient(
+    content::BrowserContext* context) {
+  Profile* profile = static_cast<Profile*>(context);
+  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile));
+}
+
+void TestProfileErrorCallback(WebDataServiceWrapper::ErrorType error_type,
+                              sql::InitStatus status) {
+  NOTREACHED();
+}
+
+KeyedService* BuildWebDataService(content::BrowserContext* context) {
+  const base::FilePath& context_path = context->GetPath();
+  return new WebDataServiceWrapper(
+      context_path, g_browser_process->GetApplicationLocale(),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
+      sync_start_util::GetFlareForSyncableService(context_path),
+      &TestProfileErrorCallback);
+}
+
+scoped_refptr<RefcountedKeyedService> BuildTopSites(
+    content::BrowserContext* profile) {
+  history::TopSitesImpl* top_sites = new history::TopSitesImpl(
+      static_cast<Profile*>(profile), history::PrepopulatedPageList());
+  top_sites->Init(
+      profile->GetPath().Append(chrome::kTopSitesFilename),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB));
+  return make_scoped_refptr(top_sites);
+}
 
 }  // namespace
 
@@ -346,6 +432,8 @@ void TestingProfile::Init() {
              content::BrowserThread::UI) ||
          content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
+  set_is_guest_profile(guest_session_);
+
 #if defined(OS_ANDROID)
   // Make sure token service knows its running in tests.
   AndroidProfileOAuth2TokenService::set_is_testing_profile();
@@ -397,7 +485,7 @@ void TestingProfile::Init() {
       this, CreateTestDesktopNotificationService);
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   if (!IsOffTheRecord()) {
     SupervisedUserSettingsService* settings_service =
         SupervisedUserSettingsServiceFactory::GetForProfile(this);
@@ -437,12 +525,19 @@ TestingProfile::~TestingProfile() {
 
   MaybeSendDestroyedNotification();
 
+  // Remember whether a TopSites has been created for the current profile,
+  // so that we can run cleanup after destroying all services.
+  bool had_top_sites = HasTopSites(this);
+
   browser_context_dependency_manager_->DestroyBrowserContextServices(this);
 
   if (host_content_settings_map_.get())
     host_content_settings_map_->ShutdownOnUIThread();
 
-  DestroyTopSites();
+  // Wait until TopSites shutdown tasks have completed if a TopSites has
+  // been created for the current profile.
+  if (had_top_sites)
+    CleanupAfterTopSitesDestroyed();
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
@@ -456,29 +551,17 @@ TestingProfile::~TestingProfile() {
   }
 }
 
-static KeyedService* BuildFaviconService(content::BrowserContext* profile) {
-  FaviconClient* favicon_client =
-      ChromeFaviconClientFactory::GetForProfile(static_cast<Profile*>(profile));
-  return new FaviconService(static_cast<Profile*>(profile), favicon_client);
-}
-
 void TestingProfile::CreateFaviconService() {
   // It is up to the caller to create the history service if one is needed.
   FaviconServiceFactory::GetInstance()->SetTestingFactory(
       this, BuildFaviconService);
 }
 
-static KeyedService* BuildHistoryService(content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
-  return new HistoryService(ChromeHistoryClientFactory::GetForProfile(profile),
-                            profile);
-}
-
 bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   DestroyHistoryService();
   if (delete_file) {
     base::FilePath path = GetPath();
-    path = path.Append(chrome::kHistoryFilename);
+    path = path.Append(history::kHistoryFilename);
     if (!base::DeleteFile(path, false) || base::PathExists(path))
       return false;
   }
@@ -486,11 +569,14 @@ bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   HistoryService* history_service = static_cast<HistoryService*>(
       HistoryServiceFactory::GetInstance()->SetTestingFactoryAndUse(
           this, BuildHistoryService));
-  if (!history_service->Init(this->GetPath(), no_db)) {
-    HistoryServiceFactory::GetInstance()->SetTestingFactoryAndUse(this, NULL);
+  if (!history_service->Init(
+          no_db, GetPrefs()->GetString(prefs::kAcceptLanguages),
+          history::HistoryDatabaseParamsForPath(GetPath()))) {
+    HistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
+    return false;
   }
   // Disable WebHistoryService by default, since it makes network requests.
-  WebHistoryServiceFactory::GetInstance()->SetTestingFactory(this, NULL);
+  WebHistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
   return true;
 }
 
@@ -520,48 +606,18 @@ void TestingProfile::DestroyHistoryService() {
 
 void TestingProfile::CreateTopSites() {
   DestroyTopSites();
-  top_sites_ = history::TopSites::Create(
-      this, GetPath().Append(chrome::kTopSitesFilename));
+  TopSitesFactory::GetInstance()->SetTestingFactoryAndUse(this, BuildTopSites);
 }
 
 void TestingProfile::DestroyTopSites() {
-  if (top_sites_.get()) {
-    top_sites_->Shutdown();
-    top_sites_ = NULL;
-    // TopSitesImpl::Shutdown schedules some tasks (from TopSitesBackend) that
-    // need to be run to properly shutdown. Run all pending tasks now. This is
-    // normally handled by browser_process shutdown.
-    if (base::MessageLoop::current())
-      base::MessageLoop::current()->RunUntilIdle();
+  TopSitesFactory* top_sites_factory = TopSitesFactory::GetInstance();
+  if (top_sites_factory->GetForProfileIfExists(this)) {
+    // BrowserContextKeyedServiceFactory will destroy the previous service when
+    // registering a new testing factory so use this to ensure that destroy the
+    // old service.
+    top_sites_factory->SetTestingFactory(this, nullptr);
+    CleanupAfterTopSitesDestroyed();
   }
-}
-
-static KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
-  ChromeBookmarkClient* bookmark_client =
-      ChromeBookmarkClientFactory::GetForProfile(profile);
-  BookmarkModel* bookmark_model = new BookmarkModel(bookmark_client);
-  bookmark_client->Init(bookmark_model);
-  bookmark_model->Load(profile->GetPrefs(),
-                       profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
-                       profile->GetPath(),
-                       profile->GetIOTaskRunner(),
-                       content::BrowserThread::GetMessageLoopProxyForThread(
-                           content::BrowserThread::UI));
-  return bookmark_model;
-}
-
-static KeyedService* BuildChromeBookmarkClient(
-    content::BrowserContext* context) {
-  return new ChromeBookmarkClient(static_cast<Profile*>(context));
-}
-
-static KeyedService* BuildChromeHistoryClient(
-    content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
-  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile),
-                                 profile,
-                                 profile->GetTopSites());
 }
 
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
@@ -576,10 +632,6 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
   // This creates the BookmarkModel.
   ignore_result(BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
       this, BuildBookmarkModel));
-}
-
-static KeyedService* BuildWebDataService(content::BrowserContext* profile) {
-  return new WebDataServiceWrapper(static_cast<Profile*>(profile));
 }
 
 void TestingProfile::CreateWebDataService() {
@@ -610,9 +662,11 @@ void TestingProfile::BlockUntilTopSitesLoaded() {
   scoped_refptr<content::MessageLoopRunner> runner =
       new content::MessageLoopRunner;
   WaitTopSitesLoadedObserver observer(runner.get());
-  top_sites_->AddObserver(&observer);
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(this);
+  top_sites->AddObserver(&observer);
   runner->Run();
-  top_sites_->RemoveObserver(&observer);
+  top_sites->RemoveObserver(&observer);
 }
 
 void TestingProfile::SetGuestSession(bool guest) {
@@ -621,6 +675,11 @@ void TestingProfile::SetGuestSession(bool guest) {
 
 base::FilePath TestingProfile::GetPath() const {
   return profile_path_;
+}
+
+scoped_ptr<content::ZoomLevelDelegate> TestingProfile::CreateZoomLevelDelegate(
+    const base::FilePath& partition_path) {
+  return nullptr;
 }
 
 scoped_refptr<base::SequencedTaskRunner> TestingProfile::GetIOTaskRunner() {
@@ -637,7 +696,7 @@ TestingProfile* TestingProfile::AsTestingProfile() {
   return this;
 }
 
-std::string TestingProfile::GetProfileName() {
+std::string TestingProfile::GetProfileUserName() const {
   return profile_name_;
 }
 
@@ -679,6 +738,18 @@ Profile* TestingProfile::GetOriginalProfile() {
 
 bool TestingProfile::IsSupervised() {
   return !supervised_user_id_.empty();
+}
+
+bool TestingProfile::IsChild() {
+#if defined(ENABLE_SUPERVISED_USERS)
+  return supervised_user_id_ == supervised_users::kChildAccountSUID;
+#else
+  return false;
+#endif
+}
+
+bool TestingProfile::IsLegacySupervised() {
+  return IsSupervised() && !IsChild();
 }
 
 #if defined(ENABLE_EXTENSIONS)
@@ -745,7 +816,7 @@ if (!policy_service_) {
   policy::ProfilePolicyConnectorFactory::GetInstance()->SetServiceForTesting(
       this, profile_policy_connector_.get());
   CHECK_EQ(profile_policy_connector_.get(),
-           policy::ProfilePolicyConnectorFactory::GetForProfile(this));
+           policy::ProfilePolicyConnectorFactory::GetForBrowserContext(this));
 }
 
 PrefService* TestingProfile::GetPrefs() {
@@ -753,12 +824,9 @@ PrefService* TestingProfile::GetPrefs() {
   return prefs_.get();
 }
 
-history::TopSites* TestingProfile::GetTopSites() {
-  return top_sites_.get();
-}
-
-history::TopSites* TestingProfile::GetTopSitesWithoutCreating() {
-  return top_sites_.get();
+const PrefService* TestingProfile::GetPrefs() const {
+  DCHECK(prefs_);
+  return prefs_.get();
 }
 
 DownloadManagerDelegate* TestingProfile::GetDownloadManagerDelegate() {
@@ -830,6 +898,7 @@ content::ResourceContext* TestingProfile::GetResourceContext() {
 }
 
 HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), false);
 #if defined(ENABLE_EXTENSIONS)
@@ -883,8 +952,8 @@ PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
-  HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(this, Profile::EXPLICIT_ACCESS);
+  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+      this, ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   DCHECK(base::MessageLoop::current());
 

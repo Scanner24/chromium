@@ -7,7 +7,10 @@ config("cld_config") {
   include_dirs = [ "." ]
 }
 
-static_library("cld") {
+source_set("cld") {
+  # The /win/ directory is used on all platforms.
+  set_sources_assignment_filter([])
+
   # This target includes its own copy of "base" which confuses the header
   # checker.
   check_includes = false
@@ -99,7 +102,6 @@ static_library("cld") {
       "/wd4005",  # Macro defined twice.
       "/wd4006",  # #undef expected an identifier.
       "/wd4309",  # Truncation of constant value.
-      "/wd4267",  # TODO(jschuh): C4267: http://crbug.com/167187 size_t -> int
     ]
   } else {
     defines = [ "COMPILER_GCC" ]

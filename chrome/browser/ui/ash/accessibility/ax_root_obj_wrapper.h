@@ -5,26 +5,37 @@
 #ifndef CHROME_BROWSER_UI_ASH_ACCESSIBILITY_AX_ROOT_OBJ_WRAPPER_H_
 #define CHROME_BROWSER_UI_ASH_ACCESSIBILITY_AX_ROOT_OBJ_WRAPPER_H_
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
+
+namespace aura {
+class Window;
+}  // namespace aura
 
 class AXRootObjWrapper : public views::AXAuraObjWrapper {
  public:
   explicit AXRootObjWrapper(int32 id);
-  virtual ~AXRootObjWrapper();
+  ~AXRootObjWrapper() override;
+
+  // Returns an AXAuraObjWrapper for an alert window with title set to |text|.
+  views::AXAuraObjWrapper* GetAlertForText(const std::string& text);
 
   // Convenience method to check for existence of a child.
   bool HasChild(views::AXAuraObjWrapper* child);
 
   // views::AXAuraObjWrapper overrides.
-  virtual views::AXAuraObjWrapper* GetParent() OVERRIDE;
-  virtual void GetChildren(
-      std::vector<views::AXAuraObjWrapper*>* out_children) OVERRIDE;
-  virtual void Serialize(ui::AXNodeData* out_node_data) OVERRIDE;
-  virtual int32 GetID() OVERRIDE;
+  views::AXAuraObjWrapper* GetParent() override;
+  void GetChildren(
+      std::vector<views::AXAuraObjWrapper*>* out_children) override;
+  void Serialize(ui::AXNodeData* out_node_data) override;
+  int32 GetID() override;
 
  private:
   int32 id_;
+
+  aura::Window* alert_window_;
 
   DISALLOW_COPY_AND_ASSIGN(AXRootObjWrapper);
 };

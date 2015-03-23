@@ -8,6 +8,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/threading/thread_checker.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_error_controller.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_data_service_consumer.h"
 
@@ -20,17 +21,16 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
                                          public WebDataServiceConsumer  {
  public:
   // ProfileOAuth2TokenService overrides.
-  virtual void Shutdown() OVERRIDE;
-  virtual std::vector<std::string> GetAccounts() OVERRIDE;
+  void Shutdown() override;
+  std::vector<std::string> GetAccounts() override;
 
   // The below three methods should be called only on the thread on which this
   // object was created.
-  virtual void LoadCredentials(const std::string& primary_account_id) OVERRIDE;
-  virtual void UpdateCredentials(const std::string& account_id,
-                                 const std::string& refresh_token) OVERRIDE;
-  virtual void RevokeAllCredentials() OVERRIDE;
-  virtual bool RefreshTokenIsAvailable(const std::string& account_id) const
-      OVERRIDE;
+  void LoadCredentials(const std::string& primary_account_id) override;
+  void UpdateCredentials(const std::string& account_id,
+                         const std::string& refresh_token) override;
+  void RevokeAllCredentials() override;
+  bool RefreshTokenIsAvailable(const std::string& account_id) const override;
 
   // Revokes credentials related to |account_id|.
   void RevokeCredentials(const std::string& account_id);
@@ -38,10 +38,10 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
  protected:
   class AccountInfo : public SigninErrorController::AuthStatusProvider {
    public:
-    AccountInfo(ProfileOAuth2TokenService* token_service,
+    AccountInfo(SigninErrorController* signin_error_controller,
                 const std::string& account_id,
                 const std::string& refresh_token);
-    virtual ~AccountInfo();
+    ~AccountInfo() override;
 
     const std::string& refresh_token() const { return refresh_token_; }
     void set_refresh_token(const std::string& token) {
@@ -51,12 +51,12 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
     void SetLastAuthError(const GoogleServiceAuthError& error);
 
     // SigninErrorController::AuthStatusProvider implementation.
-    virtual std::string GetAccountId() const OVERRIDE;
-    virtual std::string GetUsername() const OVERRIDE;
-    virtual GoogleServiceAuthError GetAuthStatus() const OVERRIDE;
+    std::string GetAccountId() const override;
+    std::string GetUsername() const override;
+    GoogleServiceAuthError GetAuthStatus() const override;
 
    private:
-    ProfileOAuth2TokenService* token_service_;
+    SigninErrorController* signin_error_controller_;
     std::string account_id_;
     std::string refresh_token_;
     GoogleServiceAuthError last_auth_error_;
@@ -72,19 +72,19 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
   friend class MutableProfileOAuth2TokenServiceTest;
 
   MutableProfileOAuth2TokenService();
-  virtual ~MutableProfileOAuth2TokenService();
+  ~MutableProfileOAuth2TokenService() override;
 
   // OAuth2TokenService implementation.
-  virtual OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
+  OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
       const std::string& account_id,
       net::URLRequestContextGetter* getter,
-      OAuth2AccessTokenConsumer* consumer) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+      OAuth2AccessTokenConsumer* consumer) override;
+  net::URLRequestContextGetter* GetRequestContext() override;
 
   // Updates the internal cache of the result from the most-recently-completed
   // auth request (used for reporting errors to the user).
-  virtual void UpdateAuthError(const std::string& account_id,
-                               const GoogleServiceAuthError& error) OVERRIDE;
+  void UpdateAuthError(const std::string& account_id,
+                       const GoogleServiceAuthError& error) override;
 
   virtual std::string GetRefreshToken(const std::string& account_id) const;
 
@@ -99,11 +99,12 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
                            PersistenceDBUpgrade);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceTest,
                            PersistenceLoadCredentials);
+  FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceTest,
+                           CanonicalizeAccountId);
 
   // WebDataServiceConsumer implementation:
-  virtual void OnWebDataServiceRequestDone(
-      WebDataServiceBase::Handle handle,
-      const WDTypedResult* result) OVERRIDE;
+  void OnWebDataServiceRequestDone(WebDataServiceBase::Handle handle,
+                                   const WDTypedResult* result) override;
 
   // Loads credentials into in memory stucture.
   void LoadAllCredentialsIntoMemory(

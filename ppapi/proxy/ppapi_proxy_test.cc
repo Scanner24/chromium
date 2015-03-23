@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/observer_list.h"
+#include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/message_filter.h"
@@ -17,7 +18,6 @@
 #include "ppapi/c/private/ppb_proxy_private.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_message_loop_proxy.h"
-#include "ppapi/shared_impl/proxy_lock.h"
 
 namespace ppapi {
 namespace proxy {
@@ -141,7 +141,7 @@ bool ProxyTestHarnessBase::SupportsInterface(const char* name) {
       reply_msg, &reply_data));
 
   sink().ClearMessages();
-  return reply_data.a;
+  return get<0>(reply_data);
 }
 
 // PluginProxyTestHarness ------------------------------------------------------
@@ -228,12 +228,8 @@ void PluginProxyTestHarness::CreatePluginGlobals() {
   if (globals_config_ == PER_THREAD_GLOBALS) {
     plugin_globals_.reset(new PluginGlobals(PpapiGlobals::PerThreadForTest()));
     PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
-    // Enable locking in case some other unit test ran before us and disabled
-    // locking.
-    ProxyLock::EnableLockingOnThreadForTest();
   } else {
     plugin_globals_.reset(new PluginGlobals());
-    ProxyLock::EnableLockingOnThreadForTest();
   }
 }
 
@@ -253,7 +249,7 @@ PluginProxyTestHarness::PluginDelegateMock::ShareHandleWithRemote(
     base::ProcessId /* remote_pid */,
     bool should_close_source) {
   return IPC::GetFileHandleForProcess(handle,
-                                      base::Process::Current().handle(),
+                                      base::GetCurrentProcessHandle(),
                                       should_close_source);
 }
 
@@ -463,13 +459,11 @@ void HostProxyTestHarness::TearDownHarness() {
 }
 
 void HostProxyTestHarness::CreateHostGlobals() {
+  disable_locking_.reset(new ProxyLock::LockingDisablerForTest);
   if (globals_config_ == PER_THREAD_GLOBALS) {
     host_globals_.reset(new TestGlobals(PpapiGlobals::PerThreadForTest()));
     PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
-    // The host side of the proxy does not lock.
-    ProxyLock::DisableLockingOnThreadForTest();
   } else {
-    ProxyLock::DisableLockingOnThreadForTest();
     host_globals_.reset(new TestGlobals());
   }
 }
@@ -489,7 +483,7 @@ HostProxyTestHarness::DelegateMock::ShareHandleWithRemote(
     base::ProcessId /* remote_pid */,
     bool should_close_source) {
   return IPC::GetFileHandleForProcess(handle,
-                                      base::Process::Current().handle(),
+                                      base::GetCurrentProcessHandle(),
                                       should_close_source);
 }
 

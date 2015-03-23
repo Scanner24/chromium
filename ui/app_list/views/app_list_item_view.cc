@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/app_list/app_list_constants.h"
@@ -17,13 +18,14 @@
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_list.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/image/image_skia_operations.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/strings/grit/ui_strings.h"
@@ -37,8 +39,8 @@ namespace app_list {
 
 namespace {
 
-const int kTopPadding = 20;
-const int kIconTitleSpacing = 7;
+const int kTopPadding = 18;
+const int kIconTitleSpacing = 6;
 const int kProgressBarHorizontalPadding = 12;
 
 // Radius of the folder dropping preview circle.
@@ -99,6 +101,7 @@ AppListItemView::AppListItemView(AppsGridView* apps_grid_view,
   title_->SetBackgroundColor(0);
   title_->SetAutoColorReadabilityEnabled(false);
   title_->SetEnabledColor(kGridTitleColor);
+  title_->SetHandlesTooltips(false);
 
   static const gfx::FontList font_list = GetFontList();
   title_->SetFontList(font_list);
@@ -193,6 +196,7 @@ void AppListItemView::SetTouchDragging(bool touch_dragging) {
     return;
 
   touch_dragging_ = touch_dragging;
+  SetState(STATE_NORMAL);
   SetUIState(touch_dragging_ ? UI_STATE_DRAGGING : UI_STATE_NORMAL);
 }
 
@@ -213,9 +217,9 @@ void AppListItemView::SetTitleSubpixelAA() {
     return;
 
   if (enable_aa) {
-    title_->SetBackgroundColor(app_list::kContentsBackgroundColor);
+    title_->SetBackgroundColor(app_list::kLabelBackgroundColor);
     title_->set_background(views::Background::CreateSolidBackground(
-        app_list::kContentsBackgroundColor));
+        app_list::kLabelBackgroundColor));
   } else {
     // In other cases, keep the background transparent to ensure correct
     // interactions with animations. This will temporarily disable subpixel AA.
@@ -261,8 +265,7 @@ void AppListItemView::SetItemName(const base::string16& display_name,
   title_->SetText(display_name);
   title_->Invalidate();
 
-  title_->SetTooltipText(display_name == full_name ? base::string16()
-                                                   : full_name);
+  tooltip_text_ = display_name == full_name ? base::string16() : full_name;
 
   // Use full name for accessibility.
   SetAccessibleName(
@@ -274,15 +277,11 @@ void AppListItemView::SetItemName(const base::string16& display_name,
 
 void AppListItemView::SetItemIsHighlighted(bool is_highlighted) {
   is_highlighted_ = is_highlighted;
-  apps_grid_view_->EnsureViewVisible(this);
   SchedulePaint();
 }
 
 void AppListItemView::SetItemIsInstalling(bool is_installing) {
   is_installing_ = is_installing;
-  if (is_installing_)
-    apps_grid_view_->EnsureViewVisible(this);
-
   if (ui_state_ == UI_STATE_NORMAL) {
     title_->SetVisible(!is_installing);
     progress_bar_->SetVisible(is_installing);
@@ -304,6 +303,10 @@ const char* AppListItemView::GetClassName() const {
 }
 
 void AppListItemView::Layout() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 AppListItemView::Layout1"));
+
   gfx::Rect rect(GetContentsBounds());
 
   const int left_right_padding =
@@ -312,7 +315,17 @@ void AppListItemView::Layout() {
   const int y = rect.y();
 
   icon_->SetBoundsRect(GetIconBoundsForTargetViewBounds(GetContentsBounds()));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 AppListItemView::Layout2"));
+
   const gfx::Size title_size = title_->GetPreferredSize();
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 AppListItemView::Layout3"));
+
   gfx::Rect title_bounds(rect.x() + (rect.width() - title_size.width()) / 2,
                          y + kGridIconDimension + kIconTitleSpacing,
                          title_size.width(),
@@ -337,12 +350,12 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
     return;
 
   gfx::Rect rect(GetContentsBounds());
-  if (is_highlighted_ && !is_installing_) {
+  if (apps_grid_view_->IsSelectedView(this)) {
+    canvas->FillRect(rect, kSelectedColor);
+  } else if (is_highlighted_ && !is_installing_) {
     canvas->FillRect(rect, kHighlightedColor);
     return;
   }
-  if (apps_grid_view_->IsSelectedView(this))
-    canvas->FillRect(rect, kSelectedColor);
 
   if (ui_state_ == UI_STATE_DROPPING_IN_FOLDER) {
     DCHECK(apps_grid_view_->model()->folders_enabled());
@@ -366,6 +379,8 @@ void AppListItemView::ShowContextMenuForView(views::View* source,
   if (!menu_model)
     return;
 
+  if (!apps_grid_view_->IsSelectedView(this))
+    apps_grid_view_->ClearAnySelectedView();
   context_menu_runner_.reset(
       new views::MenuRunner(menu_model, views::MenuRunner::HAS_MNEMONICS));
   if (context_menu_runner_->RunMenuAt(GetWidget(),
@@ -379,20 +394,16 @@ void AppListItemView::ShowContextMenuForView(views::View* source,
 }
 
 void AppListItemView::StateChanged() {
-  const bool is_folder_ui_enabled = apps_grid_view_->model()->folders_enabled();
-  if (is_folder_ui_enabled)
-    apps_grid_view_->ClearAnySelectedView();
-
   if (state() == STATE_HOVERED || state() == STATE_PRESSED) {
-    if (!is_folder_ui_enabled)
-      apps_grid_view_->SetSelectedView(this);
+    // Show the hover/tap highlight: for tap, lighter highlight replaces darker
+    // keyboard selection; for mouse hover, keyboard selection takes precedence.
+    if (!apps_grid_view_->IsSelectedView(this) || state() == STATE_PRESSED)
+      SetItemIsHighlighted(true);
     title_->SetEnabledColor(kGridTitleHoverColor);
   } else {
-    if (!is_folder_ui_enabled)
-      apps_grid_view_->ClearSelectedView(this);
-    is_highlighted_ = false;
+    SetItemIsHighlighted(false);
     if (item_weak_)
-      item_weak_->SetHighlighted(false);
+      item_weak_->set_highlighted(false);
     title_->SetEnabledColor(kGridTitleColor);
   }
   title_->Invalidate();
@@ -460,6 +471,9 @@ bool AppListItemView::OnMouseDragged(const ui::MouseEvent& event) {
       return true;
   }
 
+  if (!apps_grid_view_->IsSelectedView(this))
+    apps_grid_view_->ClearAnySelectedView();
+
   // Shows dragging UI when it's confirmed without waiting for the timer.
   if (ui_state_ != UI_STATE_DRAGGING &&
       apps_grid_view_->dragging() &&
@@ -492,6 +506,17 @@ void AppListItemView::OnGestureEvent(ui::GestureEvent* event) {
         event->SetHandled();
       }
       break;
+    case ui::ET_GESTURE_TAP_DOWN:
+      if (switches::IsTouchFeedbackEnabled() && state_ != STATE_DISABLED) {
+        SetState(STATE_PRESSED);
+        event->SetHandled();
+      }
+      break;
+    case ui::ET_GESTURE_TAP:
+    case ui::ET_GESTURE_TAP_CANCEL:
+      if (switches::IsTouchFeedbackEnabled() && state_ != STATE_DISABLED)
+        SetState(STATE_NORMAL);
+      break;
     case ui::ET_GESTURE_LONG_PRESS:
       if (!apps_grid_view_->has_dragged_view())
         SetTouchDragging(true);
@@ -507,6 +532,19 @@ void AppListItemView::OnGestureEvent(ui::GestureEvent* event) {
   }
   if (!event->handled())
     CustomButton::OnGestureEvent(event);
+}
+
+bool AppListItemView::GetTooltipText(const gfx::Point& p,
+                                     base::string16* tooltip) const {
+  // Use the label to generate a tooltip, so that it will consider its text
+  // truncation in making the tooltip. We do not want the label itself to have a
+  // tooltip, so we only temporarily enable it to get the tooltip text from the
+  // label, then disable it again.
+  title_->SetHandlesTooltips(true);
+  title_->SetTooltipText(tooltip_text_);
+  bool handled = title_->GetTooltipText(p, tooltip);
+  title_->SetHandlesTooltips(false);
+  return handled;
 }
 
 void AppListItemView::OnSyncDragEnd() {
@@ -541,10 +579,6 @@ void AppListItemView::ItemIconChanged() {
 void AppListItemView::ItemNameChanged() {
   SetItemName(base::UTF8ToUTF16(item_weak_->GetDisplayName()),
               base::UTF8ToUTF16(item_weak_->name()));
-}
-
-void AppListItemView::ItemHighlightedChanged() {
-  SetItemIsHighlighted(item_weak_->highlighted());
 }
 
 void AppListItemView::ItemIsInstallingChanged() {

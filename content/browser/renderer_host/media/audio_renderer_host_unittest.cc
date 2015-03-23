@@ -154,10 +154,10 @@ class AudioRendererHostTest : public testing::Test {
                                       media_stream_manager_.get());
 
     // Simulate IPC channel connected.
-    host_->set_peer_pid_for_testing(base::GetCurrentProcId());
+    host_->set_peer_process_for_testing(base::Process::Current());
   }
 
-  virtual ~AudioRendererHostTest() {
+  ~AudioRendererHostTest() override {
     // Simulate closing the IPC channel and give the audio thread time to close
     // the underlying streams.
     host_->OnChannelClosing();

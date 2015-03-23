@@ -43,12 +43,13 @@ class RendererImplTest : public ::testing::Test {
     CallbackHelper() {}
     virtual ~CallbackHelper() {}
 
-    MOCK_METHOD0(OnInitialize, void());
+    MOCK_METHOD1(OnInitialize, void(PipelineStatus));
     MOCK_METHOD0(OnFlushed, void());
     MOCK_METHOD0(OnEnded, void());
     MOCK_METHOD1(OnError, void(PipelineStatus));
     MOCK_METHOD1(OnUpdateStatistics, void(const PipelineStatistics&));
     MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
+    MOCK_METHOD1(OnVideoFramePaint, void(const scoped_refptr<VideoFrame>&));
 
    private:
     DISALLOW_COPY_AND_ASSIGN(CallbackHelper);
@@ -60,7 +61,6 @@ class RendererImplTest : public ::testing::Test {
         audio_renderer_(new StrictMock<MockAudioRenderer>()),
         renderer_impl_(
             new RendererImpl(message_loop_.message_loop_proxy(),
-                             demuxer_.get(),
                              scoped_ptr<AudioRenderer>(audio_renderer_),
                              scoped_ptr<VideoRenderer>(video_renderer_))) {
     // SetDemuxerExpectations() adds overriding expectations for expected
@@ -68,8 +68,6 @@ class RendererImplTest : public ::testing::Test {
     DemuxerStream* null_pointer = NULL;
     EXPECT_CALL(*demuxer_, GetStream(_))
         .WillRepeatedly(Return(null_pointer));
-    EXPECT_CALL(*demuxer_, GetLiveness())
-        .WillRepeatedly(Return(Demuxer::LIVENESS_UNKNOWN));
   }
 
   virtual ~RendererImplTest() {
@@ -90,27 +88,22 @@ class RendererImplTest : public ::testing::Test {
   // Sets up expectations to allow the audio renderer to initialize.
   void SetAudioRendererInitializeExpectations(PipelineStatus status) {
     EXPECT_CALL(*audio_renderer_,
-                Initialize(audio_stream_.get(), _,  _, _, _, _))
-        .WillOnce(DoAll(SaveArg<3>(&audio_buffering_state_cb_),
-                        SaveArg<4>(&audio_ended_cb_),
-                        SaveArg<5>(&audio_error_cb_),
-                        RunCallback<1>(status)));
+                Initialize(audio_stream_.get(), _, _, _, _, _, _))
+        .WillOnce(DoAll(SaveArg<4>(&audio_buffering_state_cb_),
+                        SaveArg<5>(&audio_ended_cb_),
+                        SaveArg<6>(&audio_error_cb_), RunCallback<1>(status)));
   }
 
   // Sets up expectations to allow the video renderer to initialize.
   void SetVideoRendererInitializeExpectations(PipelineStatus status) {
     EXPECT_CALL(*video_renderer_,
-                Initialize(video_stream_.get(), _, _, _, _, _, _, _))
+                Initialize(video_stream_.get(), _, _, _, _, _, _, _, _))
         .WillOnce(DoAll(SaveArg<4>(&video_buffering_state_cb_),
-                        SaveArg<5>(&video_ended_cb_),
-                        RunCallback<2>(status)));
+                        SaveArg<6>(&video_ended_cb_), RunCallback<1>(status)));
   }
 
   void InitializeAndExpect(PipelineStatus start_status) {
-    if (start_status != PIPELINE_OK)
-      EXPECT_CALL(callbacks_, OnError(start_status));
-
-    EXPECT_CALL(callbacks_, OnInitialize());
+    EXPECT_CALL(callbacks_, OnInitialize(start_status));
 
     if (start_status == PIPELINE_OK && audio_stream_) {
       EXPECT_CALL(*audio_renderer_, GetTimeSource())
@@ -118,14 +111,17 @@ class RendererImplTest : public ::testing::Test {
     }
 
     renderer_impl_->Initialize(
+        demuxer_.get(),
         base::Bind(&CallbackHelper::OnInitialize,
                    base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnUpdateStatistics,
                    base::Unretained(&callbacks_)),
-        base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
-        base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnBufferingStateChange,
-                   base::Unretained(&callbacks_)));
+                   base::Unretained(&callbacks_)),
+        base::Bind(&CallbackHelper::OnVideoFramePaint,
+                   base::Unretained(&callbacks_)),
+        base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
+        base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -429,6 +425,21 @@ TEST_F(RendererImplTest, ErrorAfterFlush) {
   EXPECT_CALL(callbacks_, OnError(PIPELINE_ERROR_DECODE));
   audio_error_cb_.Run(PIPELINE_ERROR_DECODE);
   base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(RendererImplTest, ErrorDuringInitialize) {
+  CreateAudioAndVideoStream();
+  SetAudioRendererInitializeExpectations(PIPELINE_OK);
+
+  // Force an audio error to occur during video renderer initialization.
+  EXPECT_CALL(*video_renderer_,
+              Initialize(video_stream_.get(), _, _, _, _, _, _, _, _))
+      .WillOnce(DoAll(AudioError(&audio_error_cb_, PIPELINE_ERROR_DECODE),
+                      SaveArg<4>(&video_buffering_state_cb_),
+                      SaveArg<6>(&video_ended_cb_),
+                      RunCallback<1>(PIPELINE_OK)));
+
+  InitializeAndExpect(PIPELINE_ERROR_DECODE);
 }
 
 }  // namespace media

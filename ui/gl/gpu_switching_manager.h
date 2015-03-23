@@ -8,12 +8,10 @@
 #include <vector>
 
 #include "base/memory/singleton.h"
+#include "base/observer_list.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gpu_preference.h"
-
-#if defined(OS_MACOSX)
-#include <OpenGL/OpenGL.h>
-#endif  // OS_MACOSX
+#include "ui/gl/gpu_switching_observer.h"
 
 namespace ui {
 
@@ -40,6 +38,16 @@ class GL_EXPORT GpuSwitchingManager {
 
   void SetGpuCount(size_t gpu_count);
 
+  void AddObserver(GpuSwitchingObserver* observer);
+  void RemoveObserver(GpuSwitchingObserver* observer);
+
+  // Called when a GPU switch is noticed by the system. In the browser process
+  // this is occurs as a result of a system observer. In the GPU process, this
+  // occurs as a result of an IPC from the browser. The system observer is kept
+  // in the browser process only so that any workarounds or blacklisting can
+  // be applied there.
+  void NotifyGpuSwitched();
+
  private:
   friend struct DefaultSingletonTraits<GpuSwitchingManager>;
 
@@ -48,8 +56,6 @@ class GL_EXPORT GpuSwitchingManager {
 
 #if defined(OS_MACOSX)
   void SwitchToDiscreteGpuMac();
-
-  CGLPixelFormatObj discrete_pixel_format_;
 #endif  // OS_MACOSX
 
   gfx::GpuPreference gpu_switching_option_;
@@ -59,6 +65,11 @@ class GL_EXPORT GpuSwitchingManager {
   bool supports_dual_gpus_set_;
 
   size_t gpu_count_;
+
+  struct PlatformSpecific;
+  scoped_ptr<PlatformSpecific> platform_specific_;
+
+  ObserverList<GpuSwitchingObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuSwitchingManager);
 };

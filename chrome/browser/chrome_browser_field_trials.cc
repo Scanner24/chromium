@@ -13,7 +13,6 @@
 #include "base/time/time.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/variations/uniformity_field_trials.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/omnibox/omnibox_field_trial.h"
 
@@ -24,7 +23,7 @@
 #endif
 
 ChromeBrowserFieldTrials::ChromeBrowserFieldTrials(
-    const CommandLine& parsed_command_line)
+    const base::CommandLine& parsed_command_line)
     : parsed_command_line_(parsed_command_line) {
 }
 
@@ -36,7 +35,6 @@ void ChromeBrowserFieldTrials::SetupFieldTrials(const base::Time& install_time,
   DCHECK(!install_time.is_null());
 
   // Field trials that are shared by all platforms.
-  chrome_variations::SetupUniformityFieldTrials(install_time);
   InstantiateDynamicTrials();
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
@@ -52,9 +50,7 @@ void ChromeBrowserFieldTrials::InstantiateDynamicTrials() {
   // Mark here so they will be sync-ed.
   base::FieldTrialList::FindValue("CLD1VsCLD2");
   base::FieldTrialList::FindValue("MouseEventPreconnect");
-  base::FieldTrialList::FindValue("UnauthorizedPluginInfoBar");
   base::FieldTrialList::FindValue("DisplayList2dCanvas");
-  base::FieldTrialList::FindValue("V8ScriptStreaming");
   // Activate the autocomplete dynamic field trials.
   OmniboxFieldTrial::ActivateDynamicTrials();
 }

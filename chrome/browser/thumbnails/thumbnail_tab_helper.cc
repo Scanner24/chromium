@@ -10,13 +10,14 @@
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnailing_algorithm.h"
 #include "chrome/browser/thumbnails/thumbnailing_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/scrollbar_size.h"
 #include "ui/gfx/skbitmap_operations.h"
@@ -57,15 +58,15 @@ void UpdateThumbnail(const ThumbnailingContext& context,
                      const SkBitmap& thumbnail) {
   gfx::Image image = gfx::Image::CreateFrom1xBitmap(thumbnail);
   context.service->SetPageThumbnail(context, image);
-  VLOG(1) << "Thumbnail taken for " << context.url << ": "
-          << context.score.ToString();
+  DVLOG(1) << "Thumbnail taken for " << context.url << ": "
+           << context.score.ToString();
 }
 
 void ProcessCapturedBitmap(scoped_refptr<ThumbnailingContext> context,
                            scoped_refptr<ThumbnailingAlgorithm> algorithm,
-                           bool succeeded,
-                           const SkBitmap& bitmap) {
-  if (!succeeded)
+                           const SkBitmap& bitmap,
+                           content::ReadbackResponse response) {
+  if (response != content::READBACK_SUCCESS)
     return;
 
   // On success, we must be on the UI thread (on failure because of shutdown we

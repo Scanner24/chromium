@@ -11,8 +11,8 @@
 
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/values.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
@@ -24,11 +24,10 @@ namespace extensions {
 class SimpleFeature : public Feature {
  public:
   SimpleFeature();
-  virtual ~SimpleFeature();
+  ~SimpleFeature() override;
 
   // Similar to Manifest::Location, these are the classes of locations
-  // supported in feature files; "component" implies
-  // COMPONENT/EXTERNAL_COMPONENT manifest location types, etc.
+  // supported in feature files.
   //
   // This is only public for testing. Production code should never access it,
   // nor should it really have any reason to access the SimpleFeature class
@@ -36,11 +35,22 @@ class SimpleFeature : public Feature {
   enum Location {
     UNSPECIFIED_LOCATION,
     COMPONENT_LOCATION,
+    EXTERNAL_COMPONENT_LOCATION,
     POLICY_LOCATION,
   };
 
   // Accessors defined for testing. See comment above about not directly using
   // SimpleFeature in production code.
+  std::set<std::string>* blacklist() { return &blacklist_; }
+  const std::set<std::string>* blacklist() const { return &blacklist_; }
+  std::set<std::string>* whitelist() { return &whitelist_; }
+  const std::set<std::string>* whitelist() const { return &whitelist_; }
+  std::set<Manifest::Type>* extension_types() { return &extension_types_; }
+  const std::set<Manifest::Type>* extension_types() const {
+    return &extension_types_;
+  }
+  std::set<Context>* contexts() { return &contexts_; }
+  const std::set<Context>* contexts() const { return &contexts_; }
   Location location() const { return location_; }
   void set_location(Location location) { location_ = location; }
   int min_manifest_version() const { return min_manifest_version_; }
@@ -51,16 +61,17 @@ class SimpleFeature : public Feature {
   void set_max_manifest_version(int max_manifest_version) {
     max_manifest_version_ = max_manifest_version;
   }
-
-  std::set<std::string>* blacklist() { return &blacklist_; }
-  std::set<std::string>* whitelist() { return &whitelist_; }
-  std::set<Manifest::Type>* extension_types() { return &extension_types_; }
-  std::set<Context>* contexts() { return &contexts_; }
+  const std::string& command_line_switch() const {
+    return command_line_switch_;
+  }
+  void set_command_line_switch(const std::string& command_line_switch) {
+    command_line_switch_ = command_line_switch;
+  }
 
   // Dependency resolution is a property of Features that is preferrably
   // handled internally to avoid temptation, but FeatureFilters may need
   // to know if there are any at all.
-  bool HasDependencies();
+  bool HasDependencies() const;
 
   // Adds a filter to this feature. The feature takes ownership of the filter.
   void AddFilter(scoped_ptr<SimpleFeatureFilter> filter);
@@ -89,26 +100,26 @@ class SimpleFeature : public Feature {
   }
 
   // extension::Feature:
-  virtual Availability IsAvailableToManifest(const std::string& extension_id,
-                                             Manifest::Type type,
-                                             Manifest::Location location,
-                                             int manifest_version,
-                                             Platform platform) const OVERRIDE;
+  Availability IsAvailableToManifest(const std::string& extension_id,
+                                     Manifest::Type type,
+                                     Manifest::Location location,
+                                     int manifest_version,
+                                     Platform platform) const override;
 
-  virtual Availability IsAvailableToContext(const Extension* extension,
-                                            Context context,
-                                            const GURL& url,
-                                            Platform platform) const OVERRIDE;
+  Availability IsAvailableToContext(const Extension* extension,
+                                    Context context,
+                                    const GURL& url,
+                                    Platform platform) const override;
 
-  virtual std::string GetAvailabilityMessage(AvailabilityResult result,
-                                             Manifest::Type type,
-                                             const GURL& url,
-                                             Context context) const OVERRIDE;
+  std::string GetAvailabilityMessage(AvailabilityResult result,
+                                     Manifest::Type type,
+                                     const GURL& url,
+                                     Context context) const override;
 
-  virtual bool IsInternal() const OVERRIDE;
+  bool IsInternal() const override;
 
-  virtual bool IsIdInBlacklist(const std::string& extension_id) const OVERRIDE;
-  virtual bool IsIdInWhitelist(const std::string& extension_id) const OVERRIDE;
+  bool IsIdInBlacklist(const std::string& extension_id) const override;
+  bool IsIdInWhitelist(const std::string& extension_id) const override;
   static bool IsIdInList(const std::string& extension_id,
                          const std::set<std::string>& list);
 
@@ -141,11 +152,10 @@ class SimpleFeature : public Feature {
   std::set<Platform> platforms_;
   int min_manifest_version_;
   int max_manifest_version_;
-  bool has_parent_;
   bool component_extensions_auto_granted_;
+  std::string command_line_switch_;
 
-  typedef std::vector<linked_ptr<SimpleFeatureFilter> > FilterList;
-  FilterList filters_;
+  ScopedVector<SimpleFeatureFilter> filters_;;
 
   DISALLOW_COPY_AND_ASSIGN(SimpleFeature);
 };

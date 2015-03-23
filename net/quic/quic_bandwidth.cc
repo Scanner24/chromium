@@ -96,10 +96,13 @@ QuicBandwidth QuicBandwidth::Subtract(const QuicBandwidth& delta) const {
 }
 
 QuicBandwidth QuicBandwidth::Scale(float scale_factor) const {
-  return QuicBandwidth(bits_per_second_ * scale_factor);
+  return QuicBandwidth(static_cast<int64>(bits_per_second_ * scale_factor));
 }
 
 QuicTime::Delta QuicBandwidth::TransferTime(QuicByteCount bytes) const {
+  if (bits_per_second_ == 0) {
+    return QuicTime::Delta::Zero();
+  }
   return QuicTime::Delta::FromMicroseconds(
       bytes * 8 * base::Time::kMicrosecondsPerSecond / bits_per_second_);
 }

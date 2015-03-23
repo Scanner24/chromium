@@ -66,7 +66,7 @@ class GpuRasterizationTestsPage(page_module.Page):
     self.test_rect = [0, 0, 220, 220]
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(GpuRasterizationTestsPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
         'domAutomationController._finished', timeout_in_seconds=30)
 
@@ -78,4 +78,4 @@ class GpuRasterizationTestsPageSet(page_set_module.PageSet):
   def __init__(self):
     super(GpuRasterizationTestsPageSet, self).__init__()
 
-    self.AddPage(GpuRasterizationTestsPage(self))
+    self.AddUserStory(GpuRasterizationTestsPage(self))

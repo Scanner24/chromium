@@ -38,7 +38,7 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
       int process_type,
       BrowserChildProcessHostDelegate* delegate);
 
-  virtual ~BrowserChildProcessHost() {}
+  ~BrowserChildProcessHost() override {}
 
   // Derived classes call this to launch the child process asynchronously.
   // Takes ownership of |cmd_line| and |delegate|.
@@ -54,7 +54,7 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   // Returns the termination status of a child.  |exit_code| is the
   // status returned when the process exited (for posix, as returned
   // from waitpid(), for Windows, as returned from
-  // GetExitCodeProcess()).  |exit_code| may be NULL.
+  // GetExitCodeProcess()).  |exit_code| may be nullptr.
   // |known_dead| indicates that the child is already dead. On Linux, this
   // information is necessary to retrieve accurate information. See
   // ChildProcessLauncher::GetChildTerminationStatus() for more details.

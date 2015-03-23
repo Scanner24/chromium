@@ -7,6 +7,7 @@
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/thread_checker.h"
 #include "content/common/media/video_capture.h"
@@ -19,12 +20,12 @@ namespace content {
 // and receive I420 frames from Chrome's video capture implementation.
 //
 // This is a render thread only object.
-class CONTENT_EXPORT VideoCapturerDelegate
-    : public base::RefCountedThreadSafe<VideoCapturerDelegate> {
+class CONTENT_EXPORT VideoCapturerDelegate {
  public:
   typedef base::Callback<void(MediaStreamRequestResult result)> RunningCallback;
 
   explicit VideoCapturerDelegate(const StreamDeviceInfo& device_info);
+  virtual ~VideoCapturerDelegate();
 
   // Collects the formats that can currently be used.
   // |max_requested_height|, |max_requested_width|, and
@@ -57,8 +58,6 @@ class CONTENT_EXPORT VideoCapturerDelegate
   friend class base::RefCountedThreadSafe<VideoCapturerDelegate>;
   friend class MockVideoCapturerDelegate;
 
-  virtual ~VideoCapturerDelegate();
-
   void OnStateUpdateOnRenderThread(VideoCaptureState state);
   void OnDeviceFormatsInUseReceived(const media::VideoCaptureFormats& formats);
   void OnDeviceSupportedFormatsEnumerated(
@@ -81,6 +80,8 @@ class CONTENT_EXPORT VideoCapturerDelegate
   // Bound to the render thread.
   base::ThreadChecker thread_checker_;
 
+  base::WeakPtrFactory<VideoCapturerDelegate> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(VideoCapturerDelegate);
 };
 
@@ -94,27 +95,27 @@ class CONTENT_EXPORT MediaStreamVideoCapturerSource
   MediaStreamVideoCapturerSource(
       const StreamDeviceInfo& device_info,
       const SourceStoppedCallback& stop_callback,
-      const scoped_refptr<VideoCapturerDelegate>& delegate);
+      scoped_ptr<VideoCapturerDelegate> delegate);
 
   virtual ~MediaStreamVideoCapturerSource();
 
  protected:
   // Implements MediaStreamVideoSource.
-  virtual void GetCurrentSupportedFormats(
+  void GetCurrentSupportedFormats(
       int max_requested_width,
       int max_requested_height,
       double max_requested_frame_rate,
-      const VideoCaptureDeviceFormatsCB& callback) OVERRIDE;
+      const VideoCaptureDeviceFormatsCB& callback) override;
 
-  virtual void StartSourceImpl(
+  void StartSourceImpl(
       const media::VideoCaptureFormat& format,
-      const VideoCaptureDeliverFrameCB& frame_callback) OVERRIDE;
+      const VideoCaptureDeliverFrameCB& frame_callback) override;
 
-  virtual void StopSourceImpl() OVERRIDE;
+  void StopSourceImpl() override;
 
  private:
   // The delegate that provides video frames.
-  scoped_refptr<VideoCapturerDelegate> delegate_;
+  scoped_ptr<VideoCapturerDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamVideoCapturerSource);
 };

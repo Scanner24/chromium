@@ -117,10 +117,9 @@ void TestURLRequestContext::Init() {
     context_storage_.set_cookie_store(new CookieMonster(NULL, NULL));
   // In-memory Channel ID service.
   if (!channel_id_service()) {
-    context_storage_.set_channel_id_service(
-        new ChannelIDService(
-            new DefaultChannelIDStore(NULL),
-            base::WorkerPool::GetTaskRunner(true)));
+    context_storage_.set_channel_id_service(make_scoped_ptr(
+        new ChannelIDService(new DefaultChannelIDStore(NULL),
+                             base::WorkerPool::GetTaskRunner(true))));
   }
   if (!http_user_agent_settings()) {
     context_storage_.set_http_user_agent_settings(
@@ -317,11 +316,14 @@ TestNetworkDelegate::TestNetworkDelegate()
       blocked_set_cookie_count_(0),
       set_cookie_count_(0),
       observed_before_proxy_headers_sent_callbacks_(0),
+      before_send_headers_count_(0),
+      headers_received_count_(0),
       has_load_timing_info_before_redirect_(false),
       has_load_timing_info_before_auth_(false),
       can_access_files_(true),
       can_throttle_requests_(true),
-      cancel_request_with_policy_violating_referrer_(false) {
+      cancel_request_with_policy_violating_referrer_(false),
+      will_be_intercepted_on_next_error_(false) {
 }
 
 TestNetworkDelegate::~TestNetworkDelegate() {
@@ -386,7 +388,7 @@ int TestNetworkDelegate::OnBeforeSendHeaders(
   next_states_[req_id] =
       kStageSendHeaders |
       kStageCompletedError;  // request canceled by delegate
-
+  before_send_headers_count_++;
   return OK;
 }
 
@@ -406,9 +408,11 @@ void TestNetworkDelegate::OnSendHeaders(
   event_order_[req_id] += "OnSendHeaders\n";
   EXPECT_TRUE(next_states_[req_id] & kStageSendHeaders) <<
       event_order_[req_id];
-  next_states_[req_id] =
-      kStageHeadersReceived |
-      kStageCompletedError;
+  if (!will_be_intercepted_on_next_error_)
+    next_states_[req_id] = kStageHeadersReceived | kStageCompletedError;
+  else
+    next_states_[req_id] = kStageResponseStarted;
+  will_be_intercepted_on_next_error_ = false;
 }
 
 int TestNetworkDelegate::OnHeadersReceived(
@@ -445,7 +449,7 @@ int TestNetworkDelegate::OnHeadersReceived(
     if (!allowed_unsafe_redirect_url_.is_empty())
       *allowed_unsafe_redirect_url = allowed_unsafe_redirect_url_;
   }
-
+  headers_received_count_++;
   return OK;
 }
 
@@ -597,12 +601,6 @@ bool TestNetworkDelegate::OnCanAccessFile(const URLRequest& request,
 bool TestNetworkDelegate::OnCanThrottleRequest(
     const URLRequest& request) const {
   return can_throttle_requests_;
-}
-
-int TestNetworkDelegate::OnBeforeSocketStreamConnect(
-    SocketStream* socket,
-    const CompletionCallback& callback) {
-  return OK;
 }
 
 bool TestNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(

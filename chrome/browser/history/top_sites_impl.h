@@ -15,16 +15,20 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/scoped_observer.h"
 #include "base/synchronization/lock.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/history/top_sites_backend.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/page_usage_data.h"
+#include "components/history/core/browser/top_sites.h"
+#include "components/history/core/browser/top_sites_backend.h"
 #include "components/history/core/common/thumbnail_score.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -35,6 +39,7 @@ namespace base {
 class FilePath;
 class RefCountedBytes;
 class RefCountedMemory;
+class SingleThreadTaskRunner;
 }
 
 namespace history {
@@ -46,51 +51,51 @@ class TopSitesImplTest;
 // thread. All other methods must be invoked on the UI thread. All mutations
 // to internal state happen on the UI thread and are scheduled to update the
 // db using TopSitesBackend.
-class TopSitesImpl : public TopSites {
+class TopSitesImpl : public TopSites,
+                     public HistoryServiceObserver,
+                     public content::NotificationObserver {
  public:
-  explicit TopSitesImpl(Profile* profile);
+  TopSitesImpl(Profile* profile,
+               const PrepopulatedPageList& prepopulated_pages);
 
   // Initializes TopSitesImpl.
-  void Init(const base::FilePath& db_name);
+  void Init(const base::FilePath& db_name,
+            const scoped_refptr<base::SingleThreadTaskRunner>& db_task_runner);
 
-  virtual bool SetPageThumbnail(const GURL& url,
-                                const gfx::Image& thumbnail,
-                                const ThumbnailScore& score) OVERRIDE;
-  virtual bool SetPageThumbnailToJPEGBytes(
-      const GURL& url,
-      const base::RefCountedMemory* memory,
-      const ThumbnailScore& score) OVERRIDE;
-  virtual void GetMostVisitedURLs(
-      const GetMostVisitedURLsCallback& callback,
-      bool include_forced_urls) OVERRIDE;
-  virtual bool GetPageThumbnail(
-      const GURL& url,
-      bool prefix_match,
-      scoped_refptr<base::RefCountedMemory>* bytes) OVERRIDE;
-  virtual bool GetPageThumbnailScore(const GURL& url,
-                                     ThumbnailScore* score) OVERRIDE;
-  virtual bool GetTemporaryPageThumbnailScore(const GURL& url,
-                                              ThumbnailScore* score) OVERRIDE;
-  virtual void SyncWithHistory() OVERRIDE;
-  virtual bool HasBlacklistedItems() const OVERRIDE;
-  virtual void AddBlacklistedURL(const GURL& url) OVERRIDE;
-  virtual void RemoveBlacklistedURL(const GURL& url) OVERRIDE;
-  virtual bool IsBlacklisted(const GURL& url) OVERRIDE;
-  virtual void ClearBlacklistedURLs() OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
-  virtual base::CancelableTaskTracker::TaskId StartQueryForMostVisited()
-      OVERRIDE;
-  virtual bool IsKnownURL(const GURL& url) OVERRIDE;
-  virtual const std::string& GetCanonicalURLString(
-      const GURL& url) const OVERRIDE;
-  virtual bool IsNonForcedFull() OVERRIDE;
-  virtual bool IsForcedFull() OVERRIDE;
-  virtual MostVisitedURLList GetPrepopulatePages() OVERRIDE;
-  virtual bool loaded() const OVERRIDE;
-  virtual bool AddForcedURL(const GURL& url, const base::Time& time) OVERRIDE;
+  bool SetPageThumbnail(const GURL& url,
+                        const gfx::Image& thumbnail,
+                        const ThumbnailScore& score) override;
+  bool SetPageThumbnailToJPEGBytes(const GURL& url,
+                                   const base::RefCountedMemory* memory,
+                                   const ThumbnailScore& score) override;
+  void GetMostVisitedURLs(const GetMostVisitedURLsCallback& callback,
+                          bool include_forced_urls) override;
+  bool GetPageThumbnail(const GURL& url,
+                        bool prefix_match,
+                        scoped_refptr<base::RefCountedMemory>* bytes) override;
+  bool GetPageThumbnailScore(const GURL& url, ThumbnailScore* score) override;
+  bool GetTemporaryPageThumbnailScore(const GURL& url,
+                                      ThumbnailScore* score) override;
+  void SyncWithHistory() override;
+  bool HasBlacklistedItems() const override;
+  void AddBlacklistedURL(const GURL& url) override;
+  void RemoveBlacklistedURL(const GURL& url) override;
+  bool IsBlacklisted(const GURL& url) override;
+  void ClearBlacklistedURLs() override;
+  base::CancelableTaskTracker::TaskId StartQueryForMostVisited() override;
+  bool IsKnownURL(const GURL& url) override;
+  const std::string& GetCanonicalURLString(const GURL& url) const override;
+  bool IsNonForcedFull() override;
+  bool IsForcedFull() override;
+  PrepopulatedPageList GetPrepopulatedPages() override;
+  bool loaded() const override;
+  bool AddForcedURL(const GURL& url, const base::Time& time) override;
+
+  // RefcountedKeyedService:
+  void ShutdownOnUIThread() override;
 
  protected:
-  virtual ~TopSitesImpl();
+  ~TopSitesImpl() override;
 
  private:
   friend class TopSitesImplTest;
@@ -180,9 +185,9 @@ class TopSitesImpl : public TopSites {
   base::TimeDelta GetUpdateDelay();
 
   // Implementation of content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Updates URLs in |cache_| and the db (in the background).
   // The non-forced URLs in |new_top_sites| replace those in |cache_|.
@@ -215,6 +220,14 @@ class TopSitesImpl : public TopSites {
 
   // Called when history service returns a list of top URLs.
   void OnTopSitesAvailableFromHistory(const MostVisitedURLList* data);
+
+  // history::HistoryServiceObserver:
+  void OnURLsDeleted(HistoryService* history_service,
+                     bool all_history,
+                     bool expired,
+                     const URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
+  void HistoryServiceBeingDeleted(HistoryService* history_service) override;
 
   scoped_refptr<TopSitesBackend> backend_;
 
@@ -258,10 +271,13 @@ class TopSitesImpl : public TopSites {
   TempImages temp_images_;
 
   // URL List of prepopulated page.
-  std::vector<GURL> prepopulated_page_urls_;
+  PrepopulatedPageList prepopulated_pages_;
 
   // Are we loaded?
   bool loaded_;
+
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(TopSitesImpl);
 };

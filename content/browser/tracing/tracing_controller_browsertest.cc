@@ -11,10 +11,10 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 
-using base::debug::CategoryFilter;
-using base::debug::TraceOptions;
-using base::debug::RECORD_CONTINUOUSLY;
-using base::debug::RECORD_UNTIL_FULL;
+using base::trace_event::CategoryFilter;
+using base::trace_event::TraceOptions;
+using base::trace_event::RECORD_CONTINUOUSLY;
+using base::trace_event::RECORD_UNTIL_FULL;
 
 namespace content {
 
@@ -22,7 +22,7 @@ class TracingControllerTest : public ContentBrowserTest {
  public:
   TracingControllerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     get_categories_done_callback_count_ = 0;
     enable_recording_done_callback_count_ = 0;
     disable_recording_done_callback_count_ = 0;
@@ -32,9 +32,7 @@ class TracingControllerTest : public ContentBrowserTest {
     ContentBrowserTest::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
-    ContentBrowserTest::TearDown();
-  }
+  void TearDown() override { ContentBrowserTest::TearDown(); }
 
   void Navigate(Shell* shell) {
     NavigateToURL(shell, GetTestUrl("", "title.html"));

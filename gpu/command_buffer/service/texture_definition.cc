@@ -29,24 +29,23 @@ class GLImageSync : public gfx::GLImage {
                        const gfx::Size& size);
 
   // Implement GLImage.
-  virtual void Destroy(bool have_context) OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual bool BindTexImage(unsigned target) OVERRIDE;
-  virtual void ReleaseTexImage(unsigned target) OVERRIDE;
-  virtual bool CopyTexImage(unsigned target) OVERRIDE;
-  virtual void WillUseTexImage() OVERRIDE;
-  virtual void WillModifyTexImage() OVERRIDE;
-  virtual void DidModifyTexImage() OVERRIDE;
-  virtual void DidUseTexImage() OVERRIDE;
-  virtual bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                                    int z_order,
-                                    gfx::OverlayTransform transform,
-                                    const gfx::Rect& bounds_rect,
-                                    const gfx::RectF& crop_rect) OVERRIDE;
-  virtual void SetReleaseAfterUse() OVERRIDE;
+  void Destroy(bool have_context) override;
+  gfx::Size GetSize() override;
+  bool BindTexImage(unsigned target) override;
+  void ReleaseTexImage(unsigned target) override;
+  bool CopyTexImage(unsigned target) override;
+  void WillUseTexImage() override;
+  void WillModifyTexImage() override;
+  void DidModifyTexImage() override;
+  void DidUseTexImage() override;
+  bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
+                            int z_order,
+                            gfx::OverlayTransform transform,
+                            const gfx::Rect& bounds_rect,
+                            const gfx::RectF& crop_rect) override;
 
  protected:
-  virtual ~GLImageSync();
+  ~GLImageSync() override;
 
  private:
   scoped_refptr<NativeImageBuffer> buffer_;
@@ -108,10 +107,6 @@ bool GLImageSync::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
   return false;
 }
 
-void GLImageSync::SetReleaseAfterUse() {
-  NOTREACHED();
-}
-
 #if !defined(OS_MACOSX)
 class NativeImageBufferEGL : public NativeImageBuffer {
  public:
@@ -119,11 +114,11 @@ class NativeImageBufferEGL : public NativeImageBuffer {
 
  private:
   NativeImageBufferEGL(EGLDisplay display, EGLImageKHR image);
-  virtual ~NativeImageBufferEGL();
-  virtual void AddClient(gfx::GLImage* client) OVERRIDE;
-  virtual void RemoveClient(gfx::GLImage* client) OVERRIDE;
-  virtual bool IsClient(gfx::GLImage* client) OVERRIDE;
-  virtual void BindToTexture(GLenum target) OVERRIDE;
+  ~NativeImageBufferEGL() override;
+  void AddClient(gfx::GLImage* client) override;
+  void RemoveClient(gfx::GLImage* client) override;
+  bool IsClient(gfx::GLImage* client) override;
+  void BindToTexture(GLenum target) override;
 
   EGLDisplay egl_display_;
   EGLImageKHR egl_image_;
@@ -164,8 +159,11 @@ scoped_refptr<NativeImageBufferEGL> NativeImageBufferEGL::Create(
   EGLImageKHR egl_image = eglCreateImageKHR(
       egl_display, egl_context, egl_target, egl_buffer, egl_attrib_list);
 
-  if (egl_image == EGL_NO_IMAGE_KHR)
+  if (egl_image == EGL_NO_IMAGE_KHR) {
+    LOG(ERROR) << "eglCreateImageKHR for cross-thread sharing failed: 0x"
+               << std::hex << eglGetError();
     return NULL;
+  }
 
   return new NativeImageBufferEGL(egl_display, egl_image);
 }
@@ -236,11 +234,11 @@ class NativeImageBufferStub : public NativeImageBuffer {
   NativeImageBufferStub() : NativeImageBuffer() {}
 
  private:
-  virtual ~NativeImageBufferStub() {}
-  virtual void AddClient(gfx::GLImage* client) OVERRIDE {}
-  virtual void RemoveClient(gfx::GLImage* client) OVERRIDE {}
-  virtual bool IsClient(gfx::GLImage* client) OVERRIDE { return true; }
-  virtual void BindToTexture(GLenum target) OVERRIDE {}
+  ~NativeImageBufferStub() override {}
+  void AddClient(gfx::GLImage* client) override {}
+  void RemoveClient(gfx::GLImage* client) override {}
+  bool IsClient(gfx::GLImage* client) override { return true; }
+  void BindToTexture(GLenum target) override {}
 
   DISALLOW_COPY_AND_ASSIGN(NativeImageBufferStub);
 };
@@ -260,6 +258,18 @@ scoped_refptr<NativeImageBuffer> NativeImageBuffer::Create(GLuint texture_id) {
       NOTREACHED();
       return NULL;
   }
+}
+
+TextureDefinition::LevelInfo::LevelInfo()
+    : target(0),
+      internal_format(0),
+      width(0),
+      height(0),
+      depth(0),
+      border(0),
+      format(0),
+      type(0),
+      cleared(false) {
 }
 
 TextureDefinition::LevelInfo::LevelInfo(GLenum target,
@@ -283,59 +293,56 @@ TextureDefinition::LevelInfo::LevelInfo(GLenum target,
 
 TextureDefinition::LevelInfo::~LevelInfo() {}
 
+TextureDefinition::TextureDefinition()
+    : version_(0),
+      target_(0),
+      min_filter_(0),
+      mag_filter_(0),
+      wrap_s_(0),
+      wrap_t_(0),
+      usage_(0),
+      immutable_(true) {
+}
+
 TextureDefinition::TextureDefinition(
-    GLenum target,
     Texture* texture,
     unsigned int version,
     const scoped_refptr<NativeImageBuffer>& image_buffer)
     : version_(version),
-      target_(target),
-      image_buffer_(image_buffer.get()
-                        ? image_buffer
-                        : NativeImageBuffer::Create(texture->service_id())),
+      target_(texture->target()),
+      image_buffer_(image_buffer),
       min_filter_(texture->min_filter()),
       mag_filter_(texture->mag_filter()),
       wrap_s_(texture->wrap_s()),
       wrap_t_(texture->wrap_t()),
       usage_(texture->usage()),
-      immutable_(texture->IsImmutable()) {
-  // TODO
-  DCHECK(!texture->level_infos_.empty());
-  DCHECK(!texture->level_infos_[0].empty());
-  DCHECK(!texture->NeedsMips());
-  DCHECK(texture->level_infos_[0][0].width);
-  DCHECK(texture->level_infos_[0][0].height);
+      immutable_(texture->IsImmutable()),
+      defined_(texture->IsDefined()) {
+  DCHECK_IMPLIES(image_buffer_.get(), defined_);
+  if (!image_buffer_.get() && defined_) {
+    image_buffer_ = NativeImageBuffer::Create(texture->service_id());
+    DCHECK(image_buffer_.get());
+  }
 
-  scoped_refptr<gfx::GLImage> gl_image(
-      new GLImageSync(image_buffer_,
-                      gfx::Size(texture->level_infos_[0][0].width,
-                                texture->level_infos_[0][0].height)));
-  texture->SetLevelImage(NULL, target, 0, gl_image.get());
+  const Texture::FaceInfo& first_face = texture->face_infos_[0];
+  if (image_buffer_.get()) {
+    scoped_refptr<gfx::GLImage> gl_image(
+        new GLImageSync(image_buffer_,
+                        gfx::Size(first_face.level_infos[0].width,
+                                  first_face.level_infos[0].height)));
+    texture->SetLevelImage(NULL, target_, 0, gl_image.get());
+  }
 
-  // TODO: all levels
-  level_infos_.clear();
-  const Texture::LevelInfo& level = texture->level_infos_[0][0];
-  LevelInfo info(level.target,
-                 level.internal_format,
-                 level.width,
-                 level.height,
-                 level.depth,
-                 level.border,
-                 level.format,
-                 level.type,
-                 level.cleared);
-  std::vector<LevelInfo> infos;
-  infos.push_back(info);
-  level_infos_.push_back(infos);
+  const Texture::LevelInfo& level = first_face.level_infos[0];
+  level_info_ = LevelInfo(level.target, level.internal_format, level.width,
+                          level.height, level.depth, level.border, level.format,
+                          level.type, level.cleared);
 }
 
 TextureDefinition::~TextureDefinition() {
 }
 
 Texture* TextureDefinition::CreateTexture() const {
-  if (!image_buffer_.get())
-    return NULL;
-
   GLuint texture_id;
   glGenTextures(1, &texture_id);
 
@@ -361,28 +368,16 @@ void TextureDefinition::UpdateTexture(Texture* texture) const {
   // though.
   glFlush();
 
-  texture->level_infos_.resize(1);
-  for (size_t i = 0; i < level_infos_.size(); i++) {
-    const LevelInfo& base_info = level_infos_[i][0];
-    const size_t levels_needed = TextureManager::ComputeMipMapCount(
-        base_info.target, base_info.width, base_info.height, base_info.depth);
-    DCHECK(level_infos_.size() <= levels_needed);
-    texture->level_infos_[0].resize(levels_needed);
-    for (size_t n = 0; n < level_infos_.size(); n++) {
-      const LevelInfo& info = level_infos_[i][n];
-      texture->SetLevelInfo(NULL,
-                            info.target,
-                            i,
-                            info.internal_format,
-                            info.width,
-                            info.height,
-                            info.depth,
-                            info.border,
-                            info.format,
-                            info.type,
-                            info.cleared);
-    }
+  if (defined_) {
+    texture->face_infos_.resize(1);
+    texture->face_infos_[0].level_infos.resize(1);
+    texture->SetLevelInfo(NULL, level_info_.target, 0,
+                          level_info_.internal_format, level_info_.width,
+                          level_info_.height, level_info_.depth,
+                          level_info_.border, level_info_.format,
+                          level_info_.type, level_info_.cleared);
   }
+
   if (image_buffer_.get()) {
     texture->SetLevelImage(
         NULL,
@@ -390,7 +385,7 @@ void TextureDefinition::UpdateTexture(Texture* texture) const {
         0,
         new GLImageSync(
             image_buffer_,
-            gfx::Size(level_infos_[0][0].width, level_infos_[0][0].height)));
+            gfx::Size(level_info_.width, level_info_.height)));
   }
 
   texture->target_ = target_;
@@ -407,15 +402,24 @@ bool TextureDefinition::Matches(const Texture* texture) const {
   if (texture->min_filter_ != min_filter_ ||
       texture->mag_filter_ != mag_filter_ ||
       texture->wrap_s_ != wrap_s_ ||
-      texture->wrap_t_ != wrap_t_) {
+      texture->wrap_t_ != wrap_t_ ||
+      texture->SafeToRenderFrom() != SafeToRenderFrom()) {
     return false;
   }
+
+  // Texture became defined.
+  if (!image_buffer_.get() && texture->IsDefined())
+    return false;
 
   // All structural changes should have orphaned the texture.
   if (image_buffer_.get() && !texture->GetLevelImage(texture->target(), 0))
     return false;
 
   return true;
+}
+
+bool TextureDefinition::SafeToRenderFrom() const {
+  return level_info_.cleared;
 }
 
 }  // namespace gles2

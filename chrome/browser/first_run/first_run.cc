@@ -86,13 +86,13 @@ bool g_should_do_autofill_personal_data_manager_first_run = false;
 class ImportEndedObserver : public importer::ImporterProgressObserver {
  public:
   ImportEndedObserver() : ended_(false) {}
-  virtual ~ImportEndedObserver() {}
+  ~ImportEndedObserver() override {}
 
   // importer::ImporterProgressObserver:
-  virtual void ImportStarted() OVERRIDE {}
-  virtual void ImportItemStarted(importer::ImportItem item) OVERRIDE {}
-  virtual void ImportItemEnded(importer::ImportItem item) OVERRIDE {}
-  virtual void ImportEnded() OVERRIDE {
+  void ImportStarted() override {}
+  void ImportItemStarted(importer::ImportItem item) override {}
+  void ImportItemEnded(importer::ImportItem item) override {}
+  void ImportEnded() override {
     ended_ = true;
     if (!callback_for_import_end_.is_null())
       callback_for_import_end_.Run();
@@ -134,9 +134,9 @@ class FirstRunDelayedTasks : public content::NotificationObserver {
                    content::NotificationService::AllSources());
   }
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     // After processing the notification we always delete ourselves.
     if (type == extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED) {
       Profile* profile = content::Source<Profile>(source).ptr();
@@ -149,7 +149,7 @@ class FirstRunDelayedTasks : public content::NotificationObserver {
 
  private:
   // Private ctor forces it to be created only in the heap.
-  virtual ~FirstRunDelayedTasks() {}
+  ~FirstRunDelayedTasks() override {}
 
   // The extension work is to basically trigger an extension update check.
   // If the extension specified in the master pref is older than the live
@@ -172,7 +172,7 @@ void DoDelayedInstallExtensionsIfNeeded(
     installer::MasterPreferences* install_prefs) {
   base::DictionaryValue* extensions = 0;
   if (install_prefs->GetExtensionsBlock(&extensions)) {
-    VLOG(1) << "Extensions block found in master preferences";
+    DVLOG(1) << "Extensions block found in master preferences";
     DoDelayedInstallExtensions();
   }
 }
@@ -311,12 +311,12 @@ class FirstRunBubbleLauncher : public content::NotificationObserver {
 
  private:
   FirstRunBubbleLauncher();
-  virtual ~FirstRunBubbleLauncher();
+  ~FirstRunBubbleLauncher() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   content::NotificationRegistrar registrar_;
 
@@ -542,6 +542,8 @@ void SetupMasterPrefsFromInstallPrefs(
       installer::master_preferences::kDistroImportBookmarksFromFilePref,
       &out_prefs->import_bookmarks_path);
 
+  out_prefs->compressed_variations_seed =
+      install_prefs.GetCompressedVariationsSeed();
   out_prefs->variations_seed = install_prefs.GetVariationsSeed();
   out_prefs->variations_seed_signature =
       install_prefs.GetVariationsSeedSignature();
@@ -591,7 +593,8 @@ MasterPrefs::~MasterPrefs() {}
 bool IsChromeFirstRun() {
   if (internal::g_first_run == internal::FIRST_RUN_UNKNOWN) {
     internal::g_first_run = internal::FIRST_RUN_FALSE;
-    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    const base::CommandLine* command_line =
+        base::CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kForceFirstRun) ||
         (!command_line->HasSwitch(switches::kNoFirstRun) &&
          !internal::IsFirstRunSentinelPresent())) {
@@ -602,7 +605,7 @@ bool IsChromeFirstRun() {
 }
 
 #if defined(OS_MACOSX)
-bool IsFirstRunSuppressed(const CommandLine& command_line) {
+bool IsFirstRunSuppressed(const base::CommandLine& command_line) {
   return command_line.HasSwitch(switches::kNoFirstRun);
 }
 #endif

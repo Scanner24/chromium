@@ -6,7 +6,6 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -18,7 +17,8 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #endif
 
-const std::string kGuestProfileName = "Guest";
+const char kGuestProfileName[] = "Guest";
+const char kSystemProfileName[] = "System";
 
 namespace testing {
 
@@ -28,8 +28,7 @@ class ProfileManager : public ::ProfileManagerWithoutInit {
       : ::ProfileManagerWithoutInit(user_data_dir) {}
 
  protected:
-  virtual Profile* CreateProfileHelper(
-      const base::FilePath& file_path) OVERRIDE {
+  Profile* CreateProfileHelper(const base::FilePath& file_path) override {
     return new TestingProfile(file_path);
   }
 };
@@ -138,6 +137,24 @@ TestingProfile* TestingProfileManager::CreateGuestProfile() {
   return profile;
 }
 
+TestingProfile* TestingProfileManager::CreateSystemProfile() {
+  DCHECK(called_set_up_);
+
+  // Create the profile and register it.
+  TestingProfile::Builder builder;
+  builder.SetPath(ProfileManager::GetSystemProfilePath());
+
+  // Add the system profile to the profile manager, but not to the info cache.
+  TestingProfile* profile = builder.Build().release();
+  profile->set_profile_name(kSystemProfileName);
+
+  profile_manager_->AddProfile(profile);  // Takes ownership.
+
+  testing_profiles_.insert(std::make_pair(kSystemProfileName, profile));
+
+  return profile;
+}
+
 void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
   DCHECK(called_set_up_);
 
@@ -150,6 +167,8 @@ void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
   cache.DeleteProfileFromCache(profile->GetPath());
 
   profile_manager_->profiles_info_.erase(profile->GetPath());
+
+  testing_profiles_.erase(it);
 }
 
 void TestingProfileManager::DeleteAllTestingProfiles() {
@@ -172,12 +191,28 @@ void TestingProfileManager::DeleteGuestProfile() {
   profile_manager_->profiles_info_.erase(ProfileManager::GetGuestProfilePath());
 }
 
+void TestingProfileManager::DeleteSystemProfile() {
+  DCHECK(called_set_up_);
+
+  TestingProfilesMap::iterator it = testing_profiles_.find(kSystemProfileName);
+  DCHECK(it != testing_profiles_.end());
+
+  profile_manager_->profiles_info_.erase(
+      ProfileManager::GetSystemProfilePath());
+}
+
 void TestingProfileManager::DeleteProfileInfoCache() {
   profile_manager_->profile_info_cache_.reset(NULL);
 }
 
 void TestingProfileManager::SetLoggedIn(bool logged_in) {
   profile_manager_->logged_in_ = logged_in;
+}
+
+void TestingProfileManager::UpdateLastUser(Profile* last_active) {
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  profile_manager_->UpdateLastUser(last_active);
+#endif
 }
 
 const base::FilePath& TestingProfileManager::profiles_dir() {

@@ -4,8 +4,8 @@
 
 #include "content/browser/gamepad/gamepad_platform_data_fetcher_win.h"
 
-#include "base/debug/trace_event.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
 #include "content/common/gamepad_hardware_buffer.h"
 #include "content/common/gamepad_messages.h"
@@ -123,6 +123,8 @@ void GamepadPlatformDataFetcherWin::EnumerateDevices(
         raw_input_fetcher_->EnumerateDevices();
     for (size_t i = 0; i < raw_inputs.size(); ++i) {
       RawGamepadInfo* gamepad = raw_inputs[i];
+      if (gamepad->buttons_length == 0 && gamepad->axes_length == 0)
+        continue;
       if (HasRawInputGamepad(gamepad->handle))
         continue;
       int pad_index = FirstAvailableGamepadId();

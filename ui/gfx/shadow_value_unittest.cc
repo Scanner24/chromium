@@ -4,7 +4,7 @@
 
 #include "base/basictypes.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/shadow_value.h"
 
 namespace gfx {
@@ -51,7 +51,7 @@ TEST(ShadowValueTest, GetMargin) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     Insets margin = ShadowValue::GetMargin(
         ShadowValues(kTestCases[i].shadows,
                      kTestCases[i].shadows + kTestCases[i].shadow_count));

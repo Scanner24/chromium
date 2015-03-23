@@ -19,8 +19,6 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/ime/ime_keyboard.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -28,6 +26,8 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 
 using chromeos::input_method::ModifierKey;
 using content::WebUIMessageHandler;
@@ -220,6 +220,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayToggleBookmarkBar",
     IDS_KEYBOARD_OVERLAY_TOGGLE_BOOKMARK_BAR },
   { "keyboardOverlayToggleCapsLock", IDS_KEYBOARD_OVERLAY_TOGGLE_CAPS_LOCK },
+  { "keyboardOverlayDisableCapsLock", IDS_KEYBOARD_OVERLAY_DISABLE_CAPS_LOCK },
   { "keyboardOverlayToggleChromevoxSpokenFeedback",
     IDS_KEYBOARD_OVERLAY_TOGGLE_CHROMEVOX_SPOKEN_FEEDBACK },
   { "keyboardOverlayToggleProjectionTouchHud",
@@ -258,14 +259,13 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
   source->AddString("keyboardOverlayLearnMoreURL",
                     base::UTF8ToUTF16(kLearnMoreURL));
   source->AddBoolean("keyboardOverlayHasChromeOSDiamondKey",
-                     CommandLine::ForCurrentProcess()->HasSwitch(
+                     base::CommandLine::ForCurrentProcess()->HasSwitch(
                          chromeos::switches::kHasChromeOSDiamondKey));
   ash::Shell* shell = ash::Shell::GetInstance();
   ash::DisplayManager* display_manager = shell->display_manager();
   source->AddBoolean("keyboardOverlayIsDisplayUIScalingEnabled",
                      display_manager->IsDisplayUIScalingEnabled());
   source->SetJsonPath("strings.js");
-  source->SetUseJsonJSFormatV2();
   source->AddResourcePath("keyboard_overlay.js", IDR_KEYBOARD_OVERLAY_JS);
   source->SetDefaultResource(IDR_KEYBOARD_OVERLAY_HTML);
   return source;
@@ -279,10 +279,10 @@ class KeyboardOverlayHandler
       public base::SupportsWeakPtr<KeyboardOverlayHandler> {
  public:
   explicit KeyboardOverlayHandler(Profile* profile);
-  virtual ~KeyboardOverlayHandler();
+  ~KeyboardOverlayHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // Called when the page requires the input method ID corresponding to the

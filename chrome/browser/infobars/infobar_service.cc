@@ -95,6 +95,9 @@ void InfoBarService::NotifyInfoBarRemoved(InfoBar* infobar, bool animate) {
       content::Details<InfoBar::RemovedDetails>(&removed_details));
 }
 
+// InfoBarService::CreateConfirmInfoBar() is implemented in platform-specific
+// files.
+
 void InfoBarService::RenderProcessGone(base::TerminationStatus status) {
   RemoveAllInfoBars(true);
 }
@@ -127,19 +130,11 @@ bool InfoBarService::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(InfoBarService, message)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DidBlockDisplayingInsecureContent,
                         OnDidBlockDisplayingInsecureContent)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DidBlockRunningInsecureContent,
-                        OnDidBlockRunningInsecureContent)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
 void InfoBarService::OnDidBlockDisplayingInsecureContent() {
-  InsecureContentInfoBarDelegate::Create(
-      this, InsecureContentInfoBarDelegate::DISPLAY);
-}
-
-void InfoBarService::OnDidBlockRunningInsecureContent() {
-  InsecureContentInfoBarDelegate::Create(this,
-                                         InsecureContentInfoBarDelegate::RUN);
+  InsecureContentInfoBarDelegate::Create(this);
 }

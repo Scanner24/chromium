@@ -149,28 +149,33 @@ class SafeBrowsingDatabaseManager
   // the hash prefix only (so there may be false positives).
   virtual bool CheckSideEffectFreeWhitelistUrl(const GURL& url);
 
-  // Check if the |url| matches any of the full-length hashes from the
-  // client-side phishing detection whitelist.  Returns true if there was a
-  // match and false otherwise.  To make sure we are conservative we will return
-  // true if an error occurs. This method is expected to be called on the IO
-  // thread.
+  // Check if the |url| matches any of the full-length hashes from the client-
+  // side phishing detection whitelist.  Returns true if there was a match and
+  // false otherwise.  To make sure we are conservative we will return true if
+  // an error occurs.  This method must be called on the IO thread.
   virtual bool MatchCsdWhitelistUrl(const GURL& url);
 
   // Check if the given IP address (either IPv4 or IPv6) matches the malware
   // IP blacklist.
   virtual bool MatchMalwareIP(const std::string& ip_address);
 
-  // Check if the |url| matches any of the full-length hashes from the
-  // download whitelist.  Returns true if there was a match and false otherwise.
-  // To make sure we are conservative we will return true if an error occurs.
-  // This method is expected to be called on the IO thread.
+  // Check if the |url| matches any of the full-length hashes from the download
+  // whitelist.  Returns true if there was a match and false otherwise. To make
+  // sure we are conservative we will return true if an error occurs.  This
+  // method must be called on the IO thread.
   virtual bool MatchDownloadWhitelistUrl(const GURL& url);
 
   // Check if |str| matches any of the full-length hashes from the download
-  // whitelist.  Returns true if there was a match and false otherwise.
-  // To make sure we are conservative we will return true if an error occurs.
-  // This method is expected to be called on the IO thread.
+  // whitelist.  Returns true if there was a match and false otherwise. To make
+  // sure we are conservative we will return true if an error occurs.  This
+  // method must be called on the IO thread.
   virtual bool MatchDownloadWhitelistString(const std::string& str);
+
+  // Check if the |url| matches any of the full-length hashes from the off-
+  // domain inclusion whitelist. Returns true if there was a match and false
+  // otherwise. To make sure we are conservative, we will return true if an
+  // error occurs.  This method must be called on the IO thread.
+  virtual bool MatchInclusionWhitelistUrl(const GURL& url);
 
   // Check if the CSD malware IP matching kill switch is turned on.
   virtual bool IsMalwareKillSwitchOn();
@@ -188,24 +193,18 @@ class SafeBrowsingDatabaseManager
                             const std::vector<SBFullHashResult>& full_hashes,
                             const base::TimeDelta& cache_lifetime);
 
-  // Log the user perceived delay caused by SafeBrowsing. This delay is the time
-  // delta starting from when we would have started reading data from the
-  // network, and ending when the SafeBrowsing check completes indicating that
-  // the current page is 'safe'.
-  void LogPauseDelay(base::TimeDelta time);
-
   // Called to initialize objects that are used on the io_thread.  This may be
-  // called multiple times during the life of the DatabaseManager. Should be
+  // called multiple times during the life of the DatabaseManager. Must be
   // called on IO thread.
   void StartOnIOThread();
 
   // Called to stop or shutdown operations on the io_thread. This may be called
-  // multiple times during the life of the DatabaseManager. Should be called
+  // multiple times during the life of the DatabaseManager. Must be called
   // on IO thread. If shutdown is true, the manager is disabled permanently.
   void StopOnIOThread(bool shutdown);
 
  protected:
-  virtual ~SafeBrowsingDatabaseManager();
+  ~SafeBrowsingDatabaseManager() override;
 
   // protected for tests.
   void NotifyDatabaseUpdateFinished(bool update_succeeded);
@@ -216,7 +215,8 @@ class SafeBrowsingDatabaseManager
   friend class SafeBrowsingServiceTest;
   friend class SafeBrowsingServiceTestHelper;
   friend class SafeBrowsingDatabaseManagerTest;
-  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingDatabaseManagerTest, GetUrlThreatType);
+  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingDatabaseManagerTest,
+                           GetUrlSeverestThreatType);
 
   typedef std::set<SafeBrowsingCheck*> CurrentChecks;
   typedef std::vector<SafeBrowsingCheck*> GetHashRequestors;
@@ -237,16 +237,16 @@ class SafeBrowsingDatabaseManager
     base::TimeTicks start;  // When check was queued.
   };
 
-  // Return the threat type from the first result in |full_hashes| which matches
+  // Return the threat type of the severest entry in |full_hashes| which matches
   // |hash|, or SAFE if none match.
-  static SBThreatType GetHashThreatType(
+  static SBThreatType GetHashSeverestThreatType(
       const SBFullHash& hash,
       const std::vector<SBFullHashResult>& full_hashes);
 
   // Given a URL, compare all the possible host + path full hashes to the set of
-  // provided full hashes.  Returns the threat type of the matching result from
-  // |full_hashes|, or SAFE if none match.
-  static SBThreatType GetUrlThreatType(
+  // provided full hashes.  Returns the threat type of the severest matching
+  // result from |full_hashes|, or SAFE if none match.
+  static SBThreatType GetUrlSeverestThreatType(
       const GURL& url,
       const std::vector<SBFullHashResult>& full_hashes,
       size_t* index);
@@ -341,15 +341,15 @@ class SafeBrowsingDatabaseManager
                               const base::Closure& task);
 
   // SafeBrowsingProtocolManageDelegate override
-  virtual void ResetDatabase() OVERRIDE;
-  virtual void UpdateStarted() OVERRIDE;
-  virtual void UpdateFinished(bool success) OVERRIDE;
-  virtual void GetChunks(GetChunksCallback callback) OVERRIDE;
-  virtual void AddChunks(const std::string& list,
-                         scoped_ptr<ScopedVector<SBChunkData> > chunks,
-                         AddChunksCallback callback) OVERRIDE;
-  virtual void DeleteChunks(
-      scoped_ptr<std::vector<SBChunkDelete> > chunk_deletes) OVERRIDE;
+  void ResetDatabase() override;
+  void UpdateStarted() override;
+  void UpdateFinished(bool success) override;
+  void GetChunks(GetChunksCallback callback) override;
+  void AddChunks(const std::string& list,
+                 scoped_ptr<ScopedVector<SBChunkData>> chunks,
+                 AddChunksCallback callback) override;
+  void DeleteChunks(
+      scoped_ptr<std::vector<SBChunkDelete>> chunk_deletes) override;
 
   scoped_refptr<SafeBrowsingService> sb_service_;
 
@@ -388,6 +388,9 @@ class SafeBrowsingDatabaseManager
 
   // Indicate if the csd malware IP blacklist should be enabled.
   bool enable_ip_blacklist_;
+
+  // Indicate if the unwanted software blacklist should be enabled.
+  bool enable_unwanted_software_blacklist_;
 
   // The SafeBrowsing thread that runs database operations.
   //

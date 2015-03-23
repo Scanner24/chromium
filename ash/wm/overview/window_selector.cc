@@ -5,6 +5,9 @@
 #include "ash/wm/overview/window_selector.h"
 
 #include <algorithm>
+#include <functional>
+#include <set>
+#include <vector>
 
 #include "ash/accessibility_delegate.h"
 #include "ash/ash_switches.h"
@@ -13,10 +16,12 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/switchable_windows.h"
+#include "ash/wm/overview/scoped_overview_animation_settings.h"
 #include "ash/wm/overview/scoped_transform_overview_window.h"
 #include "ash/wm/overview/window_grid.h"
 #include "ash/wm/overview/window_selector_delegate.h"
 #include "ash/wm/overview/window_selector_item.h"
+#include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
@@ -88,7 +93,7 @@ struct WindowSelectorItemTargetComparator
   }
 
   bool operator()(WindowSelectorItem* window) const {
-    return window->Contains(target);
+    return window->GetWindow() == target;
   }
 
   const aura::Window* target;
@@ -102,7 +107,7 @@ struct WindowSelectorItemForRoot
   }
 
   bool operator()(WindowSelectorItem* item) const {
-    return item->GetRootWindow() == root_window;
+    return item->root_window() == root_window;
   }
 
   const aura::Window* root_window;
@@ -119,9 +124,9 @@ class RoundedContainerView : public views::View {
         background_(background) {
   }
 
-  virtual ~RoundedContainerView() {}
+  ~RoundedContainerView() override {}
 
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {
     views::View::OnPaint(canvas);
 
     SkScalar radius = SkIntToScalar(corner_radius_);
@@ -164,8 +169,8 @@ views::Widget* CreateTextFilter(views::TextfieldController* controller,
   params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
-  params.parent =
-      Shell::GetContainer(root_window, ash::kShellWindowId_OverlayContainer);
+  params.parent = Shell::GetContainer(root_window,
+                                      kShellWindowId_OverlayContainer);
   params.accept_events = true;
   params.bounds = gfx::Rect(
       root_window->bounds().width() / 2 * (1 - kTextFilterScreenProportion),
@@ -213,8 +218,7 @@ views::Widget* CreateTextFilter(views::TextfieldController* controller,
 const int WindowSelector::kTextFilterBottomEdge =
     kTextFilterDistanceFromTop + kTextFilterHeight;
 
-WindowSelector::WindowSelector(const WindowList& windows,
-                               WindowSelectorDelegate* delegate)
+WindowSelector::WindowSelector(WindowSelectorDelegate* delegate)
     : delegate_(delegate),
       restore_focus_window_(aura::client::GetFocusClient(
           Shell::GetPrimaryRootWindow())->GetFocusedWindow()),
@@ -225,11 +229,19 @@ WindowSelector::WindowSelector(const WindowList& windows,
       num_items_(0),
       showing_selection_widget_(false),
       text_filter_string_length_(0),
-      num_times_textfield_cleared_(0) {
+      num_times_textfield_cleared_(0),
+      restoring_minimized_windows_(false) {
   DCHECK(delegate_);
-  Shell* shell = Shell::GetInstance();
-  shell->OnOverviewModeStarting();
+}
 
+WindowSelector::~WindowSelector() {
+  RemoveAllObservers();
+}
+
+// NOTE: The work done in Init() is not done in the constructor because it may
+// cause other, unrelated classes, (ie PanelLayoutManager) to make indirect
+// calls to restoring_minimized_windows() on a partially constructed object.
+void WindowSelector::Init(const WindowList& windows) {
   if (restore_focus_window_)
     restore_focus_window_->AddObserver(this);
 
@@ -244,6 +256,13 @@ WindowSelector::WindowSelector(const WindowList& windows,
       container->AddObserver(this);
       observed_windows_.insert(container);
     }
+
+    // Hide the callout widgets for panels. It is safe to call this for
+    // root windows that don't contain any panel windows.
+    static_cast<PanelLayoutManager*>(
+        Shell::GetContainer(*iter, kShellWindowId_PanelContainer)
+            ->layout_manager())->SetShowCalloutWidgets(false);
+
     scoped_ptr<WindowGrid> grid(new WindowGrid(*iter, windows, this));
     if (grid->empty())
       continue;
@@ -251,20 +270,33 @@ WindowSelector::WindowSelector(const WindowList& windows,
     grid_list_.push_back(grid.release());
   }
 
-  // Do not call PrepareForOverview until all items are added to window_list_ as
-  // we don't want to cause any window updates until all windows in overview
-  // are observed. See http://crbug.com/384495.
-  for (ScopedVector<WindowGrid>::iterator iter = grid_list_.begin();
-       iter != grid_list_.end(); ++iter) {
-    (*iter)->PrepareForOverview();
-    (*iter)->PositionWindows(true);
+  {
+    // The calls to WindowGrid::PrepareForOverview() and CreateTextFilter(...)
+    // requires some LayoutManagers (ie PanelLayoutManager) to perform layouts
+    // so that windows are correctly visible and properly animated in overview
+    // mode. Otherwise these layouts should be suppressed during overview mode
+    // so they don't conflict with overview mode animations. The
+    // |restoring_minimized_windows_| flag enables the PanelLayoutManager to
+    // make this decision.
+    base::AutoReset<bool> auto_restoring_minimized_windows(
+        &restoring_minimized_windows_, true);
+
+    // Do not call PrepareForOverview until all items are added to window_list_
+    // as we don't want to cause any window updates until all windows in
+    // overview are observed. See http://crbug.com/384495.
+    for (WindowGrid* window_grid : grid_list_) {
+      window_grid->PrepareForOverview();
+      window_grid->PositionWindows(true);
+    }
+
+    text_filter_widget_.reset(
+        CreateTextFilter(this, Shell::GetPrimaryRootWindow()));
   }
 
   DCHECK(!grid_list_.empty());
   UMA_HISTOGRAM_COUNTS_100("Ash.WindowSelector.Items", num_items_);
 
-  text_filter_widget_.reset(
-      CreateTextFilter(this, Shell::GetPrimaryRootWindow()));
+  Shell* shell = Shell::GetInstance();
 
   shell->activation_client()->AddObserver(this);
 
@@ -273,41 +305,43 @@ WindowSelector::WindowSelector(const WindowList& windows,
   HideAndTrackNonOverviewWindows();
   // Send an a11y alert.
   shell->accessibility_delegate()->TriggerAccessibilityAlert(
-      A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+      ui::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
 
   UpdateShelfVisibility();
 }
 
-WindowSelector::~WindowSelector() {
-  ash::Shell* shell = ash::Shell::GetInstance();
-
+// NOTE: The work done in Shutdown() is not done in the destructor because it
+// may cause other, unrelated classes, (ie PanelLayoutManager) to make indirect
+// calls to restoring_minimized_windows() on a partially destructed object.
+void WindowSelector::Shutdown() {
   ResetFocusRestoreWindow(true);
-  for (std::set<aura::Window*>::iterator iter = observed_windows_.begin();
-       iter != observed_windows_.end(); ++iter) {
-    (*iter)->RemoveObserver(this);
-  }
-  shell->activation_client()->RemoveObserver(this);
+  RemoveAllObservers();
+
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  for (aura::Window::Windows::const_iterator iter = root_windows.begin();
+       iter != root_windows.end(); iter++) {
+    // Un-hide the callout widgets for panels. It is safe to call this for
+    // root_windows that don't contain any panel windows.
+    static_cast<PanelLayoutManager*>(
+        Shell::GetContainer(*iter, kShellWindowId_PanelContainer)
+            ->layout_manager())->SetShowCalloutWidgets(true);
+  }
 
   const aura::WindowTracker::Windows hidden_windows(hidden_windows_.windows());
   for (aura::WindowTracker::Windows::const_iterator iter =
        hidden_windows.begin(); iter != hidden_windows.end(); ++iter) {
-    ui::ScopedLayerAnimationSettings settings(
-        (*iter)->layer()->GetAnimator());
-    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
-        ScopedTransformOverviewWindow::kTransitionMilliseconds));
-    settings.SetPreemptionStrategy(
-        ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
+    ScopedOverviewAnimationSettings animation_settings(
+        OverviewAnimationType::OVERVIEW_ANIMATION_LAY_OUT_SELECTOR_ITEMS,
+        *iter);
     (*iter)->layer()->SetOpacity(1);
     (*iter)->Show();
   }
 
-  shell->GetScreen()->RemoveObserver(this);
-
   size_t remaining_items = 0;
-  for (ScopedVector<WindowGrid>::iterator iter = grid_list_.begin();
-      iter != grid_list_.end(); iter++) {
-    remaining_items += (*iter)->size();
+  for (WindowGrid* window_grid : grid_list_) {
+    for (WindowSelectorItem* window_selector_item : window_grid->window_list())
+      window_selector_item->RestoreWindow();
+    remaining_items += window_grid->size();
   }
 
   DCHECK(num_items_ >= remaining_items);
@@ -330,13 +364,20 @@ WindowSelector::~WindowSelector() {
         remaining_items);
   }
 
-  // TODO(flackr): Change this to OnOverviewModeEnded and move it to when
-  // everything is done.
-  shell->OnOverviewModeEnding();
-
   // Clearing the window list resets the ignored_by_shelf flag on the windows.
   grid_list_.clear();
   UpdateShelfVisibility();
+}
+
+void WindowSelector::RemoveAllObservers() {
+  Shell* shell = Shell::GetInstance();
+  for (aura::Window* window : observed_windows_)
+    window->RemoveObserver(this);
+
+  shell->activation_client()->RemoveObserver(this);
+  shell->GetScreen()->RemoveObserver(this);
+  if (restore_focus_window_)
+    restore_focus_window_->RemoveObserver(this);
 }
 
 void WindowSelector::CancelSelection() {
@@ -392,7 +433,7 @@ bool WindowSelector::HandleKeyEvent(views::Textfield* sender,
       Shell::GetInstance()->metrics()->RecordUserMetricsAction(
           UMA_WINDOW_OVERVIEW_ENTER_KEY);
       wm::GetWindowState(grid_list_[selected_grid_index_]->
-                         SelectedWindow()->SelectionWindow())->Activate();
+                         SelectedWindow()->GetWindow())->Activate();
       break;
     default:
       // Not a key we are interested in, allow the textfield to handle it.
@@ -434,7 +475,7 @@ void WindowSelector::OnWindowDestroying(aura::Window* window) {
   window->RemoveObserver(this);
   observed_windows_.erase(window);
   if (window == restore_focus_window_)
-    restore_focus_window_ = NULL;
+    restore_focus_window_ = nullptr;
 }
 
 void WindowSelector::OnWindowActivated(aura::Window* gained_active,
@@ -457,7 +498,7 @@ void WindowSelector::OnWindowActivated(aura::Window* gained_active,
       WindowSelectorItemTargetComparator(gained_active));
 
   if (iter != windows.end())
-    (*iter)->RestoreWindowOnExit(gained_active);
+    (*iter)->ShowWindowOnExit();
 
   // Don't restore focus on exit if a window was just activated.
   ResetFocusRestoreWindow(false);
@@ -471,11 +512,6 @@ void WindowSelector::OnAttemptToReactivateWindow(aura::Window* request_active,
 
 void WindowSelector::ContentsChanged(views::Textfield* sender,
                                      const base::string16& new_contents) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAshDisableTextFilteringInOverviewMode)) {
-    return;
-  }
-
   text_filter_string_length_ = new_contents.length();
   if (!text_filter_string_length_)
     num_times_textfield_cleared_++;
@@ -545,12 +581,9 @@ void WindowSelector::HideAndTrackNonOverviewWindows() {
        hidden_windows.begin(); iter != hidden_windows.end(); ++iter) {
     if (!hidden_windows_.Contains(*iter))
       continue;
-    ui::ScopedLayerAnimationSettings settings(
-        (*iter)->layer()->GetAnimator());
-    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(
-        ScopedTransformOverviewWindow::kTransitionMilliseconds));
-    settings.SetPreemptionStrategy(
-        ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
+    ScopedOverviewAnimationSettings animation_settings(
+        OverviewAnimationType::OVERVIEW_ANIMATION_HIDE_WINDOW,
+        *iter);
     (*iter)->Hide();
     // Hiding the window can result in it being destroyed.
     if (!hidden_windows_.Contains(*iter))
@@ -572,7 +605,7 @@ void WindowSelector::ResetFocusRestoreWindow(bool focus) {
           observed_windows_.end()) {
     restore_focus_window_->RemoveObserver(this);
   }
-  restore_focus_window_ = NULL;
+  restore_focus_window_ = nullptr;
 }
 
 void WindowSelector::Move(Direction direction, bool animate) {

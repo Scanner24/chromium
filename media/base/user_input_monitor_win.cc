@@ -42,7 +42,7 @@ class UserInputMonitorWinCore
   ~UserInputMonitorWinCore();
 
   // DestructionObserver overrides.
-  virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
+  virtual void WillDestroyCurrentMessageLoop() override;
 
   size_t GetKeyPressCount() const;
   void StartMonitor(EventBitMask type);
@@ -78,14 +78,14 @@ class UserInputMonitorWin : public UserInputMonitor {
   virtual ~UserInputMonitorWin();
 
   // Public UserInputMonitor overrides.
-  virtual size_t GetKeyPressCount() const OVERRIDE;
+  virtual size_t GetKeyPressCount() const override;
 
  private:
   // Private UserInputMonitor overrides.
-  virtual void StartKeyboardMonitoring() OVERRIDE;
-  virtual void StopKeyboardMonitoring() OVERRIDE;
-  virtual void StartMouseMonitoring() OVERRIDE;
-  virtual void StopMouseMonitoring() OVERRIDE;
+  virtual void StartKeyboardMonitoring() override;
+  virtual void StopKeyboardMonitoring() override;
+  virtual void StartMouseMonitoring() override;
+  virtual void StopMouseMonitoring() override;
 
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   UserInputMonitorWinCore* core_;
@@ -205,7 +205,7 @@ LRESULT UserInputMonitorWinCore::OnInput(HRAWINPUT input_handle) {
       position.y = 0;
     }
     mouse_listeners_->Notify(
-        &UserInputMonitor::MouseEventListener::OnMouseMoved,
+        FROM_HERE, &UserInputMonitor::MouseEventListener::OnMouseMoved,
         SkIPoint::Make(position.x, position.y));
   } else if (input->header.dwType == RIM_TYPEKEYBOARD &&
              input->header.hDevice != NULL) {

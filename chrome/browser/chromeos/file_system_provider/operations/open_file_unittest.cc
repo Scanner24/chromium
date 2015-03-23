@@ -27,7 +27,8 @@ namespace {
 const char kExtensionId[] = "mbflcebpggnecokmikipoihdbecnjfoj";
 const char kFileSystemId[] = "testing-file-system";
 const int kRequestId = 2;
-const base::FilePath::CharType kFilePath[] = "/directory/blueberries.txt";
+const base::FilePath::CharType kFilePath[] =
+    FILE_PATH_LITERAL("/directory/blueberries.txt");
 
 // Callback invocation logger. Acts as a fileapi end-point.
 class CallbackLogger {
@@ -59,7 +60,6 @@ class CallbackLogger {
 
  private:
   ScopedVector<Event> events_;
-  bool dispatch_reply_;
 
   DISALLOW_COPY_AND_ASSIGN(CallbackLogger);
 };
@@ -69,15 +69,13 @@ class CallbackLogger {
 class FileSystemProviderOperationsOpenFileTest : public testing::Test {
  protected:
   FileSystemProviderOperationsOpenFileTest() {}
-  virtual ~FileSystemProviderOperationsOpenFileTest() {}
+  ~FileSystemProviderOperationsOpenFileTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               false /* writable */,
-                               base::FilePath() /* mount_path */);
+  void SetUp() override {
+    file_system_info_ = ProvidedFileSystemInfo(
+        kExtensionId,
+        MountOptions(kFileSystemId, "" /* display_name */),
+        base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;
@@ -89,10 +87,8 @@ TEST_F(FileSystemProviderOperationsOpenFileTest, Execute) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   CallbackLogger callback_logger;
 
-  OpenFile open_file(NULL,
-                     file_system_info_,
-                     base::FilePath::FromUTF8Unsafe(kFilePath),
-                     ProvidedFileSystemInterface::OPEN_FILE_MODE_READ,
+  OpenFile open_file(NULL, file_system_info_, base::FilePath(kFilePath),
+                     OPEN_FILE_MODE_READ,
                      base::Bind(&CallbackLogger::OnOpenFile,
                                 base::Unretained(&callback_logger)));
   open_file.SetDispatchEventImplForTesting(
@@ -125,10 +121,8 @@ TEST_F(FileSystemProviderOperationsOpenFileTest, Execute_NoListener) {
   util::LoggingDispatchEventImpl dispatcher(false /* dispatch_reply */);
   CallbackLogger callback_logger;
 
-  OpenFile open_file(NULL,
-                     file_system_info_,
-                     base::FilePath::FromUTF8Unsafe(kFilePath),
-                     ProvidedFileSystemInterface::OPEN_FILE_MODE_READ,
+  OpenFile open_file(NULL, file_system_info_, base::FilePath(kFilePath),
+                     OPEN_FILE_MODE_READ,
                      base::Bind(&CallbackLogger::OnOpenFile,
                                 base::Unretained(&callback_logger)));
   open_file.SetDispatchEventImplForTesting(
@@ -144,17 +138,13 @@ TEST_F(FileSystemProviderOperationsOpenFileTest, Execute_ReadOnly) {
 
   const ProvidedFileSystemInfo read_only_file_system_info(
       kExtensionId,
-      kFileSystemId,
-      "" /* file_system_name */,
-      false /* writable */,
+      MountOptions(kFileSystemId, "" /* display_name */),
       base::FilePath() /* mount_path */);
 
   // Opening for read on a read-only file system is allowed.
   {
-    OpenFile open_file(NULL,
-                       read_only_file_system_info,
-                       base::FilePath::FromUTF8Unsafe(kFilePath),
-                       ProvidedFileSystemInterface::OPEN_FILE_MODE_READ,
+    OpenFile open_file(NULL, read_only_file_system_info,
+                       base::FilePath(kFilePath), OPEN_FILE_MODE_READ,
                        base::Bind(&CallbackLogger::OnOpenFile,
                                   base::Unretained(&callback_logger)));
     open_file.SetDispatchEventImplForTesting(
@@ -166,10 +156,8 @@ TEST_F(FileSystemProviderOperationsOpenFileTest, Execute_ReadOnly) {
 
   // Opening for write on a read-only file system is forbidden and must fail.
   {
-    OpenFile open_file(NULL,
-                       read_only_file_system_info,
-                       base::FilePath::FromUTF8Unsafe(kFilePath),
-                       ProvidedFileSystemInterface::OPEN_FILE_MODE_WRITE,
+    OpenFile open_file(NULL, read_only_file_system_info,
+                       base::FilePath(kFilePath), OPEN_FILE_MODE_WRITE,
                        base::Bind(&CallbackLogger::OnOpenFile,
                                   base::Unretained(&callback_logger)));
     open_file.SetDispatchEventImplForTesting(
@@ -184,10 +172,8 @@ TEST_F(FileSystemProviderOperationsOpenFileTest, OnSuccess) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   CallbackLogger callback_logger;
 
-  OpenFile open_file(NULL,
-                     file_system_info_,
-                     base::FilePath::FromUTF8Unsafe(kFilePath),
-                     ProvidedFileSystemInterface::OPEN_FILE_MODE_READ,
+  OpenFile open_file(NULL, file_system_info_, base::FilePath(kFilePath),
+                     OPEN_FILE_MODE_READ,
                      base::Bind(&CallbackLogger::OnOpenFile,
                                 base::Unretained(&callback_logger)));
   open_file.SetDispatchEventImplForTesting(
@@ -209,10 +195,8 @@ TEST_F(FileSystemProviderOperationsOpenFileTest, OnError) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   CallbackLogger callback_logger;
 
-  OpenFile open_file(NULL,
-                     file_system_info_,
-                     base::FilePath::FromUTF8Unsafe(kFilePath),
-                     ProvidedFileSystemInterface::OPEN_FILE_MODE_READ,
+  OpenFile open_file(NULL, file_system_info_, base::FilePath(kFilePath),
+                     OPEN_FILE_MODE_READ,
                      base::Bind(&CallbackLogger::OnOpenFile,
                                 base::Unretained(&callback_logger)));
   open_file.SetDispatchEventImplForTesting(

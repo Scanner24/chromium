@@ -19,10 +19,10 @@ using content::BrowserThread;
 typedef std::pair<net::SSLCertRequestInfo*, net::X509Certificate*> CertDetails;
 
 SSLClientAuthObserver::SSLClientAuthObserver(
-    const net::HttpNetworkSession* network_session,
+    const content::BrowserContext* browser_context,
     const scoped_refptr<net::SSLCertRequestInfo>& cert_request_info,
     const base::Callback<void(net::X509Certificate*)>& callback)
-    : network_session_(network_session),
+    : browser_context_(browser_context),
       cert_request_info_(cert_request_info),
       callback_(callback) {
 }
@@ -44,7 +44,7 @@ void SSLClientAuthObserver::CertificateSelected(
   content::NotificationService* service =
       content::NotificationService::current();
   service->Notify(chrome::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-                  content::Source<net::HttpNetworkSession>(network_session_),
+                  content::Source<content::BrowserContext>(browser_context_),
                   content::Details<CertDetails>(&details));
 
   callback_.Run(certificate);
@@ -55,7 +55,7 @@ void SSLClientAuthObserver::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  VLOG(1) << "SSLClientAuthObserver::Observe " << this;
+  DVLOG(1) << "SSLClientAuthObserver::Observe " << this;
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(type == chrome::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED);
 
@@ -64,8 +64,8 @@ void SSLClientAuthObserver::Observe(
            cert_request_info_->host_and_port))
     return;
 
-  VLOG(1) << this << " got matching notification and selecting cert "
-          << cert_details->second;
+  DVLOG(1) << this << " got matching notification and selecting cert "
+           << cert_details->second;
   StopObserving();
   callback_.Run(cert_details->second);
   callback_.Reset();
@@ -76,7 +76,7 @@ void SSLClientAuthObserver::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-      content::Source<net::HttpNetworkSession>(network_session_));
+      content::Source<content::BrowserContext>(browser_context_));
 }
 
 void SSLClientAuthObserver::StopObserving() {

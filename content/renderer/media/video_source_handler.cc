@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "content/renderer/media/media_stream.h"
 #include "content/renderer/media/media_stream_registry_interface.h"
@@ -32,7 +33,7 @@ class PpFrameReceiver : public MediaStreamVideoSink {
       weak_factory_(this) {
   }
 
-  virtual ~PpFrameReceiver() {}
+  ~PpFrameReceiver() override {}
 
   void SetReader(FrameReaderInterface* reader) {
     if (reader) {
@@ -56,6 +57,7 @@ class PpFrameReceiver : public MediaStreamVideoSink {
       const scoped_refptr<media::VideoFrame>& frame,
       const media::VideoCaptureFormat& format,
       const base::TimeTicks& estimated_capture_time) {
+    TRACE_EVENT0("video", "PpFrameReceiver::OnVideoFrame");
     if (reader_) {
       reader_->GotFrame(frame);
     }

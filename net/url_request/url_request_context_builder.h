@@ -27,10 +27,13 @@
 #include "net/dns/host_resolver.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_service.h"
+#include "net/quic/quic_protocol.h"
 #include "net/socket/next_proto.h"
 
 namespace net {
 
+class ChannelIDService;
+class CookieStore;
 class FtpTransactionFactory;
 class HostMappingRules;
 class HttpAuthHandlerFactory;
@@ -72,6 +75,7 @@ class NET_EXPORT URLRequestContextBuilder {
     std::string trusted_spdy_proxy;
     bool use_alternate_protocols;
     bool enable_quic;
+    QuicTagVector quic_connection_options;
   };
 
   URLRequestContextBuilder();
@@ -162,9 +166,26 @@ class NET_EXPORT URLRequestContextBuilder {
   void SetSpdyAndQuicEnabled(bool spdy_enabled,
                              bool quic_enabled);
 
+  void set_quic_connection_options(
+      const QuicTagVector& quic_connection_options) {
+    http_network_session_params_.quic_connection_options =
+        quic_connection_options;
+  }
+
   void set_throttling_enabled(bool throttling_enabled) {
     throttling_enabled_ = throttling_enabled;
   }
+
+  // Override the default in-memory cookie store and channel id service.
+  // |cookie_store| must not be NULL. |channel_id_service| may be NULL to
+  // disable channel id for this context.
+  // Note that a persistent cookie store should not be used with an in-memory
+  // channel id service, and one cookie store should not be shared between
+  // multiple channel-id stores (or used both with and without a channel id
+  // store).
+  void SetCookieAndChannelIdStores(
+      const scoped_refptr<CookieStore>& cookie_store,
+      scoped_ptr<ChannelIDService> channel_id_service);
 
   URLRequestContext* Build();
 
@@ -198,9 +219,11 @@ class NET_EXPORT URLRequestContextBuilder {
   base::FilePath transport_security_persister_path_;
   scoped_ptr<NetLog> net_log_;
   scoped_ptr<HostResolver> host_resolver_;
+  scoped_ptr<ChannelIDService> channel_id_service_;
   scoped_ptr<ProxyConfigService> proxy_config_service_;
   scoped_ptr<ProxyService> proxy_service_;
   scoped_ptr<NetworkDelegate> network_delegate_;
+  scoped_refptr<CookieStore> cookie_store_;
   scoped_ptr<FtpTransactionFactory> ftp_transaction_factory_;
   std::vector<SchemeFactory> extra_http_auth_handlers_;
 

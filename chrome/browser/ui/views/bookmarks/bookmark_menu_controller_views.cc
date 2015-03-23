@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_observer.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
-#include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
@@ -22,6 +21,7 @@
 #include "ui/views/widget/widget.h"
 
 using base::UserMetricsAction;
+using bookmarks::BookmarkNode;
 using content::PageNavigator;
 using views::MenuItemView;
 

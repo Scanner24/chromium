@@ -29,6 +29,7 @@ class Value;
 
 namespace net {
 
+class CertPolicyEnforcer;
 class CertVerifier;
 class ChannelIDService;
 class ClientSocketFactory;
@@ -66,6 +67,7 @@ class NET_EXPORT HttpNetworkSession
     ClientSocketFactory* client_socket_factory;
     HostResolver* host_resolver;
     CertVerifier* cert_verifier;
+    CertPolicyEnforcer* cert_policy_enforcer;
     ChannelIDService* channel_id_service;
     TransportSecurityState* transport_security_state;
     CTVerifier* cert_transparency_verifier;
@@ -79,6 +81,7 @@ class NET_EXPORT HttpNetworkSession
     HostMappingRules* host_mapping_rules;
     bool enable_ssl_connect_job_waiting;
     bool ignore_certificate_errors;
+    bool use_stale_while_revalidate;
     uint16 testing_fixed_http_port;
     uint16 testing_fixed_https_port;
     bool enable_tcp_fast_open_for_ssl;
@@ -108,13 +111,17 @@ class NET_EXPORT HttpNetworkSession
     // trying SSL and then falling back to http.
     bool use_alternate_protocols;
     double alternate_protocol_probability_threshold;
-    bool enable_websocket_over_spdy;
 
     bool enable_quic;
+    bool enable_quic_for_proxies;
     bool enable_quic_port_selection;
-    bool enable_quic_time_based_loss_detection;
     bool quic_always_require_handshake_confirmation;
     bool quic_disable_connection_pooling;
+    int quic_load_server_info_timeout_ms;
+    float quic_load_server_info_timeout_srtt_multiplier;
+    bool quic_enable_truncated_connection_ids;
+    bool quic_enable_connection_racing;
+    bool quic_disable_disk_cache;
     HostPortPair origin_to_force_quic_on;
     QuicClock* quic_clock;  // Will be owned by QuicStreamFactory.
     QuicRandom* quic_random;
@@ -203,7 +210,8 @@ class NET_EXPORT HttpNetworkSession
 
   bool IsProtocolEnabled(AlternateProtocol protocol) const;
 
-  void GetNextProtos(std::vector<std::string>* next_protos) const;
+  // Populates |*next_protos| with protocols.
+  void GetNextProtos(NextProtoVector* next_protos) const;
 
   // Convenience function for searching through |params_| for
   // |forced_spdy_exclusions|.
@@ -240,7 +248,7 @@ class NET_EXPORT HttpNetworkSession
   // TODO(jgraettinger): Remove when Huffman collection is complete.
   scoped_ptr<HpackHuffmanAggregator> huffman_aggregator_;
 
-  std::vector<std::string> next_protos_;
+  NextProtoVector next_protos_;
   bool enabled_protocols_[NUM_VALID_ALTERNATE_PROTOCOLS];
 
   Params params_;

@@ -36,8 +36,6 @@ class XmlElement;
 
 namespace autofill {
 
-class AutofillMetrics;
-
 struct FormData;
 struct FormDataPredictions;
 
@@ -45,12 +43,12 @@ struct FormDataPredictions;
 // in the fields along with additional information needed by Autofill.
 class FormStructure {
  public:
-  FormStructure(const FormData& form);
+  explicit FormStructure(const FormData& form);
   virtual ~FormStructure();
 
   // Runs several heuristics against the form fields to determine their possible
   // types.
-  void DetermineHeuristicTypes(const AutofillMetrics& metric_logger);
+  void DetermineHeuristicTypes();
 
   // Encodes the XML upload request from this FormStructure.
   bool EncodeUploadRequest(const ServerFieldTypeSet& available_field_types,
@@ -75,16 +73,13 @@ class FormStructure {
 
   // Parses the field types from the server query response. |forms| must be the
   // same as the one passed to EncodeQueryRequest when constructing the query.
-  static void ParseQueryResponse(
-      const std::string& response_xml,
-      const std::vector<FormStructure*>& forms,
-      const AutofillMetrics& metric_logger);
+  static void ParseQueryResponse(const std::string& response_xml,
+                                 const std::vector<FormStructure*>& forms);
 
-  // Fills |forms| with the details from the given |form_structures| and their
-  // fields' predicted types.
-  static void GetFieldTypePredictions(
-      const std::vector<FormStructure*>& form_structures,
-      std::vector<FormDataPredictions>* forms);
+  // Returns predictions using the details from the given |form_structures| and
+  // their fields' predicted types.
+  static std::vector<FormDataPredictions> GetFieldTypePredictions(
+      const std::vector<FormStructure*>& form_structures);
 
   // The unique signature for this form, composed of the target url domain,
   // the form name, and the form field names in a 64-bit hash.
@@ -105,7 +100,11 @@ class FormStructure {
 
   // Returns true if we should query the crowdsourcing server to determine this
   // form's field types.  If the form includes author-specified types, this will
-  // return false.
+  // return false unless there are password fields in the form. If there are no
+  // password fields the assumption is that the author has expressed their
+  // intent and crowdsourced data should not be used to override this. Password
+  // fields are different because there is no way to specify password generation
+  // directly.
   bool ShouldBeCrowdsourced() const;
 
   // Sets the field types to be those set for |cached_form|.
@@ -116,8 +115,7 @@ class FormStructure {
   // set for each field.  |interaction_time| should be a timestamp corresponding
   // to the user's first interaction with the form.  |submission_time| should be
   // a timestamp corresponding to the form's submission.
-  void LogQualityMetrics(const AutofillMetrics& metric_logger,
-                         const base::TimeTicks& load_time,
+  void LogQualityMetrics(const base::TimeTicks& load_time,
                          const base::TimeTicks& interaction_time,
                          const base::TimeTicks& submission_time) const;
 
@@ -251,6 +249,12 @@ class FormStructure {
   // Whether the form includes any field types explicitly specified by the site
   // author, via the |autocompletetype| attribute.
   bool has_author_specified_types_;
+
+  // True if the form contains at least one password field.
+  bool has_password_field_;
+
+  // True if the form is a <form>.
+  bool is_form_tag_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

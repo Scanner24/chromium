@@ -9,10 +9,12 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/threading/platform_thread.h"
 #include "components/metrics/client_info.h"
 #include "components/metrics/compression_utils.h"
+#include "components/metrics/metrics_hashes.h"
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_state_manager.h"
@@ -31,16 +33,17 @@ scoped_ptr<ClientInfo> ReturnNoBackup() {
   return scoped_ptr<ClientInfo>();
 }
 
-class TestMetricsProvider : public metrics::MetricsProvider {
+class TestMetricsProvider : public MetricsProvider {
  public:
   explicit TestMetricsProvider(bool has_stability_metrics) :
       has_stability_metrics_(has_stability_metrics),
       provide_stability_metrics_called_(false) {
   }
 
-  virtual bool HasStabilityMetrics() OVERRIDE { return has_stability_metrics_; }
-  virtual void ProvideStabilityMetrics(
-      SystemProfileProto* system_profile_proto) OVERRIDE {
+  bool HasStabilityMetrics() override { return has_stability_metrics_; }
+  void ProvideStabilityMetrics(
+      SystemProfileProto* system_profile_proto) override {
+    UMA_STABILITY_HISTOGRAM_ENUMERATION("TestMetricsProvider.Metric", 1, 2);
     provide_stability_metrics_called_ = true;
   }
 
@@ -61,7 +64,7 @@ class TestMetricsService : public MetricsService {
                      MetricsServiceClient* client,
                      PrefService* local_state)
       : MetricsService(state_manager, client, local_state) {}
-  virtual ~TestMetricsService() {}
+  ~TestMetricsService() override {}
 
   using MetricsService::log_manager;
 
@@ -81,7 +84,7 @@ class TestMetricsLog : public MetricsLog {
                    client,
                    local_state) {}
 
-  virtual ~TestMetricsLog() {}
+  ~TestMetricsLog() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestMetricsLog);
@@ -99,7 +102,7 @@ class MetricsServiceTest : public testing::Test {
         base::Bind(&ReturnNoBackup));
   }
 
-  virtual ~MetricsServiceTest() {
+  ~MetricsServiceTest() override {
     MetricsService::SetExecutionPhase(MetricsService::UNINITIALIZED_PHASE,
                                       GetLocalState());
   }
@@ -131,13 +134,40 @@ class MetricsServiceTest : public testing::Test {
       const std::string& trial_group) {
     uint32 trial_name_hash = HashName(trial_name);
     uint32 trial_group_hash = HashName(trial_group);
-    for (std::vector<variations::ActiveGroupId>::const_iterator it =
-             synthetic_trials.begin();
-         it != synthetic_trials.end(); ++it) {
-      if ((*it).name == trial_name_hash && (*it).group == trial_group_hash)
+    for (const variations::ActiveGroupId& trial : synthetic_trials) {
+      if (trial.name == trial_name_hash && trial.group == trial_group_hash)
         return true;
     }
     return false;
+  }
+
+  // Finds a histogram with the specified |name_hash| in |histograms|.
+  const base::HistogramBase* FindHistogram(
+      const base::StatisticsRecorder::Histograms& histograms,
+      uint64 name_hash) {
+    for (const base::HistogramBase* histogram : histograms) {
+      if (name_hash == HashMetricName(histogram->histogram_name()))
+        return histogram;
+    }
+    return nullptr;
+  }
+
+  // Checks whether |uma_log| contains any histograms that are not flagged
+  // with kUmaStabilityHistogramFlag. Stability logs should only contain such
+  // histograms.
+  void CheckForNonStabilityHistograms(
+      const ChromeUserMetricsExtension& uma_log) {
+    const int kStabilityFlags = base::HistogramBase::kUmaStabilityHistogramFlag;
+    base::StatisticsRecorder::Histograms histograms;
+    base::StatisticsRecorder::GetHistograms(&histograms);
+    for (int i = 0; i < uma_log.histogram_event_size(); ++i) {
+      const uint64 hash = uma_log.histogram_event(i).name_hash();
+
+      const base::HistogramBase* histogram = FindHistogram(histograms, hash);
+      EXPECT_TRUE(histogram) << hash;
+
+      EXPECT_EQ(kStabilityFlags, histogram->flags() & kStabilityFlags) << hash;
+    }
   }
 
  private:
@@ -164,8 +194,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAfterCleanShutDown) {
       GetMetricsStateManager(), &client, GetLocalState());
 
   TestMetricsProvider* test_provider = new TestMetricsProvider(false);
-  service.RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(test_provider));
+  service.RegisterMetricsProvider(scoped_ptr<MetricsProvider>(test_provider));
 
   service.InitializeMetricsRecordingState();
   // No initial stability log should be generated.
@@ -184,7 +213,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAtProviderRequest) {
   // saved from a previous session.
   TestMetricsServiceClient client;
   TestMetricsLog log("client", 1, &client, GetLocalState());
-  log.RecordEnvironment(std::vector<metrics::MetricsProvider*>(),
+  log.RecordEnvironment(std::vector<MetricsProvider*>(),
                         std::vector<variations::ActiveGroupId>(),
                         0);
 
@@ -222,8 +251,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAtProviderRequest) {
   EXPECT_TRUE(log_manager->has_staged_log());
 
   std::string uncompressed_log;
-  EXPECT_TRUE(GzipUncompress(log_manager->staged_log(),
-                                      &uncompressed_log));
+  EXPECT_TRUE(GzipUncompress(log_manager->staged_log(), &uncompressed_log));
 
   ChromeUserMetricsExtension uma_log;
   EXPECT_TRUE(uma_log.ParseFromString(uncompressed_log));
@@ -233,9 +261,9 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAtProviderRequest) {
   EXPECT_TRUE(uma_log.has_system_profile());
   EXPECT_EQ(0, uma_log.user_action_event_size());
   EXPECT_EQ(0, uma_log.omnibox_event_size());
-  EXPECT_EQ(0, uma_log.histogram_event_size());
   EXPECT_EQ(0, uma_log.profiler_event_size());
   EXPECT_EQ(0, uma_log.perf_data_size());
+  CheckForNonStabilityHistograms(uma_log);
 
   // As there wasn't an unclean shutdown, this log has zero crash count.
   EXPECT_EQ(0, uma_log.system_profile().stability().crash_count());
@@ -278,10 +306,9 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
   EXPECT_TRUE(log_manager->has_staged_log());
 
   std::string uncompressed_log;
-  EXPECT_TRUE(metrics::GzipUncompress(log_manager->staged_log(),
-                                      &uncompressed_log));
+  EXPECT_TRUE(GzipUncompress(log_manager->staged_log(), &uncompressed_log));
 
-  metrics::ChromeUserMetricsExtension uma_log;
+  ChromeUserMetricsExtension uma_log;
   EXPECT_TRUE(uma_log.ParseFromString(uncompressed_log));
 
   EXPECT_TRUE(uma_log.has_client_id());
@@ -289,24 +316,22 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
   EXPECT_TRUE(uma_log.has_system_profile());
   EXPECT_EQ(0, uma_log.user_action_event_size());
   EXPECT_EQ(0, uma_log.omnibox_event_size());
-  EXPECT_EQ(0, uma_log.histogram_event_size());
   EXPECT_EQ(0, uma_log.profiler_event_size());
   EXPECT_EQ(0, uma_log.perf_data_size());
+  CheckForNonStabilityHistograms(uma_log);
 
   EXPECT_EQ(1, uma_log.system_profile().stability().crash_count());
 }
 
 TEST_F(MetricsServiceTest, RegisterSyntheticTrial) {
-  metrics::TestMetricsServiceClient client;
+  TestMetricsServiceClient client;
   MetricsService service(GetMetricsStateManager(), &client, GetLocalState());
 
   // Add two synthetic trials and confirm that they show up in the list.
-  SyntheticTrialGroup trial1(metrics::HashName("TestTrial1"),
-                             metrics::HashName("Group1"));
+  SyntheticTrialGroup trial1(HashName("TestTrial1"), HashName("Group1"));
   service.RegisterSyntheticFieldTrial(trial1);
 
-  SyntheticTrialGroup trial2(metrics::HashName("TestTrial2"),
-                             metrics::HashName("Group2"));
+  SyntheticTrialGroup trial2(HashName("TestTrial2"), HashName("Group2"));
   service.RegisterSyntheticFieldTrial(trial2);
   // Ensure that time has advanced by at least a tick before proceeding.
   WaitUntilTimeChanges(base::TimeTicks::Now());
@@ -332,16 +357,14 @@ TEST_F(MetricsServiceTest, RegisterSyntheticTrial) {
   WaitUntilTimeChanges(begin_log_time);
 
   // Change the group for the first trial after the log started.
-  SyntheticTrialGroup trial3(metrics::HashName("TestTrial1"),
-                             metrics::HashName("Group2"));
+  SyntheticTrialGroup trial3(HashName("TestTrial1"), HashName("Group2"));
   service.RegisterSyntheticFieldTrial(trial3);
   service.GetCurrentSyntheticFieldTrials(&synthetic_trials);
   EXPECT_EQ(1U, synthetic_trials.size());
   EXPECT_TRUE(HasSyntheticTrial(synthetic_trials, "TestTrial2", "Group2"));
 
   // Add a new trial after the log started and confirm that it doesn't show up.
-  SyntheticTrialGroup trial4(metrics::HashName("TestTrial3"),
-                             metrics::HashName("Group3"));
+  SyntheticTrialGroup trial4(HashName("TestTrial3"), HashName("Group3"));
   service.RegisterSyntheticFieldTrial(trial4);
   service.GetCurrentSyntheticFieldTrials(&synthetic_trials);
   EXPECT_EQ(1U, synthetic_trials.size());

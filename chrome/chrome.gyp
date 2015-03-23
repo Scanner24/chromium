@@ -32,6 +32,7 @@
           '../ppapi/ppapi_internal.gyp:ppapi_host',
         ],
         'chromium_child_dependencies': [
+          'child',
           'plugin',
           'renderer',
           'utility',
@@ -39,13 +40,31 @@
           '../content/content.gyp:content_ppapi_plugin',
           '../third_party/WebKit/public/blink_devtools.gyp:blink_devtools_frontend_resources',
         ],
+        'conditions': [
+          [ 'cld_version==0 or cld_version==2', {
+            'chromium_child_dependencies': [
+              # Use whatever CLD2 data access mode that the application
+              # embedder is using.
+              '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld2_platform_impl', ],
+          }],
+          ['enable_plugins==1 and disable_nacl==0', {
+            'chromium_child_dependencies': [
+              '<(DEPTH)/components/nacl/renderer/plugin/plugin.gyp:nacl_trusted_plugin',
+            ],
+          }],
+          ['remoting==1', {
+            'chromium_child_dependencies': [
+              '../remoting/remoting.gyp:remoting_client_plugin',
+            ],
+          }],
+        ],
       }],
-      ['enable_printing!=0', {
+      ['enable_basic_printing==1 or enable_print_preview==1', {
         'chromium_browser_dependencies': [
           '../printing/printing.gyp:printing',
         ],
       }],
-      ['enable_printing==1', {
+      ['enable_print_preview==1', {
         'chromium_browser_dependencies': [
           'service',
         ],
@@ -97,12 +116,13 @@
     'chrome_browser_ui.gypi',
     'chrome_common.gypi',
     'chrome_installer_util.gypi',
-    '../components/nacl/nacl_defines.gypi',
   ],
   'conditions': [
     ['OS!="ios"', {
       'includes': [
         '../apps/apps.gypi',
+        'app_installer/app_installer.gypi',
+        'chrome_child.gypi',
         'chrome_debugger.gypi',
         'chrome_dll.gypi',
         'chrome_exe.gypi',
@@ -241,12 +261,6 @@
                 # With mac_real_dsym set, strip_from_xcode won't be used.
                 # Specify CHROMIUM_STRIP_SAVE_FILE directly to Xcode.
                 'STRIPFLAGS': '-s $(CHROMIUM_STRIP_SAVE_FILE)',
-              },
-            }],
-            ['asan==1', {
-              'xcode_settings': {
-                # Override the outer definition of CHROMIUM_STRIP_SAVE_FILE.
-                'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
               },
             }],
             ['component=="shared_library"', {
@@ -390,7 +404,7 @@
             '../content/content_shell_and_tests.gyp:content_shell',
             '../content/content_shell_and_tests.gyp:content_unittests',
             '../net/net.gyp:net_unittests',
-            '../ui/base/ui_base_tests.gyp:ui_unittests',
+            '../ui/base/ui_base_tests.gyp:ui_base_unittests',
           ],
         },
         {
@@ -497,9 +511,11 @@
           'type': 'executable',
           'dependencies': [
             '../base/base.gyp:base',
+            '../crypto/crypto.gyp:crypto',
             'safe_browsing_proto',
           ],
           'sources': [
+            'browser/safe_browsing/binary_feature_extractor.cc',
             'browser/safe_browsing/binary_feature_extractor.h',
             'browser/safe_browsing/binary_feature_extractor_win.cc',
             'browser/safe_browsing/pe_image_reader_win.cc',
@@ -509,6 +525,8 @@
         },
       ],  # 'targets'
       'includes': [
+        'app_shim/app_shim_win.gypi',
+        'chrome_watcher/chrome_watcher.gypi',
         'chrome_process_finder.gypi',
         'metro_utils.gypi',
       ],
@@ -550,8 +568,8 @@
             '..',
           ],
           'sources': [
-            'tools/crash_service/main.cc',
             '../content/public/common/content_switches.cc',
+            'tools/crash_service/main.cc',
           ],
           'defines': [
             'COMPILE_CONTENT_STATICALLY',
@@ -576,13 +594,19 @@
       {
       'targets': [
         {
+          # GN: //chrome/android:chrome_java
           'target_name': 'chrome_java',
           'type': 'none',
           'dependencies': [
             'activity_type_ids_java',
-            'app_banner_metrics_ids_java',
             'chrome_resources.gyp:chrome_strings',
             'chrome_strings_grd',
+            'chrome_version_java',
+            'document_tab_model_info_proto_java',
+            'profile_account_management_metrics_java',
+            'content_setting_java',
+            'content_settings_type_java',
+            'page_info_connection_type_java',
             'profile_sync_service_model_type_selection_java',
             'resource_id_java',
             'toolbar_model_security_levels_java',
@@ -590,16 +614,19 @@
             '../base/base.gyp:base',
             '../components/components.gyp:bookmarks_java',
             '../components/components.gyp:dom_distiller_core_java',
+            '../components/components.gyp:enhanced_bookmarks_launch_location_srcjar',
             '../components/components.gyp:gcm_driver_java',
+            '../components/components.gyp:invalidation_java',
             '../components/components.gyp:navigation_interception_java',
-            '../components/components.gyp:sessions',
             '../components/components.gyp:variations_java',
             '../components/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
             '../printing/printing.gyp:printing_java',
             '../sync/sync.gyp:sync_java',
+            '../third_party/android_data_chart/android_data_chart.gyp:android_data_chart_java',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
+            '../third_party/android_tools/android_tools.gyp:google_play_services_javalib',
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
@@ -616,6 +643,7 @@
           ],
         },
         {
+          # GN: //chrome/android:chrome_strings_grd
           'target_name': 'chrome_strings_grd',
           'type': 'none',
           'variables': {
@@ -624,6 +652,33 @@
           'includes': [
             '../build/java_strings_grd.gypi',
           ],
+        },
+        {
+          # GN: //chrome:content_setting_javagen
+          'target_name': 'content_setting_java',
+          'type': 'none',
+          'variables': {
+            'source_file': '../components/content_settings/core/common/content_settings.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          # GN: //chrome:content_settings_type_javagen
+          'target_name': 'content_settings_type_java',
+          'type': 'none',
+          'variables': {
+            'source_file': '../components/content_settings/core/common/content_settings_types.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          # GN: //chrome:page_info_connection_type_javagen
+          'target_name': 'page_info_connection_type_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'browser/ui/android/website_settings_popup_android.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
       ], # 'targets'
       'includes': [
@@ -638,7 +693,7 @@
         'chrome_browser_extensions.gypi',
       ],
     }],
-    ['enable_printing==1', {
+    ['enable_print_preview==1', {
       'targets': [
         {
           # GN version: //chrome/service
@@ -725,6 +780,42 @@
               ],
             }],
           ],
+        },
+      ],
+    }],
+    ['syzyasan==1', {
+      'variables': {
+        'kasko_exe_dir': '<(DEPTH)/third_party/kasko',
+      },
+      'targets': [
+        {
+          'target_name': 'kasko_dll',
+          'type': 'none',
+          'outputs': [
+            '<(PRODUCT_DIR)/kasko.dll',
+            '<(PRODUCT_DIR)/kasko.dll.pdb',
+          ],
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)',
+              'files': [
+                '<(kasko_exe_dir)/kasko.dll',
+                '<(kasko_exe_dir)/kasko.dll.pdb',
+              ],
+            },
+          ],
+          'direct_dependent_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'AdditionalDependencies': [
+                  'kasko.dll.lib',
+                ],
+                'AdditionalLibraryDirectories': [
+                  '<(DEPTH)/third_party/kasko'
+                ],
+              },
+            },
+          },
         },
       ],
     }],

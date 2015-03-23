@@ -7,6 +7,8 @@
 #ifndef NET_QUIC_QUIC_UTILS_H_
 #define NET_QUIC_QUIC_UTILS_H_
 
+#include <string>
+
 #include "net/base/int128.h"
 #include "net/base/net_export.h"
 #include "net/quic/quic_protocol.h"
@@ -26,7 +28,18 @@ class NET_EXPORT_PRIVATE QuicUtils {
 
   // returns the 128 bit FNV1a hash of the data.  See
   // http://www.isthe.com/chongo/tech/comp/fnv/index.html#FNV-param
-  static uint128 FNV1a_128_Hash(const char* data, int len);
+  static uint128 FNV1a_128_Hash(const char* data1, int len1);
+
+  // returns the 128 bit FNV1a hash of the two sequences of data.  See
+  // http://www.isthe.com/chongo/tech/comp/fnv/index.html#FNV-param
+  static uint128 FNV1a_128_Hash_Two(const char* data1,
+                                    int len1,
+                                    const char* data2,
+                                    int len2);
+
+  // returns the 128 bit FNV1a hash of the |data|, starting with the
+  // previous hash.
+  static uint128 IncrementalHash(uint128 hash, const char* data, size_t len);
 
   // FindMutualTag sets |out_result| to the first tag in the priority list that
   // is also in the other list and returns true. If there is no intersection it
@@ -34,7 +47,7 @@ class NET_EXPORT_PRIVATE QuicUtils {
   //
   // Which list has priority is determined by |priority|.
   //
-  // If |out_index| is non-NULL and a match is found then the index of that
+  // If |out_index| is non-nullptr and a match is found then the index of that
   // match in |their_tags| is written to |out_index|.
   static bool FindMutualTag(const QuicTagVector& our_tags,
                             const QuicTag* their_tags,
@@ -67,6 +80,11 @@ class NET_EXPORT_PRIVATE QuicUtils {
   // name if possible (i.e. kABCD -> "ABCD"), or will just treat it as a number
   // if not.
   static std::string TagToString(QuicTag tag);
+
+  // Returns the list of QUIC tags represented by the comma separated
+  // string in |connection_options|.
+  static QuicTagVector ParseQuicConnectionOptions(
+      const std::string& connection_options);
 
   // Given a binary buffer, return a hex+ASCII dump in the style of
   // tcpdump's -X and -XX options:

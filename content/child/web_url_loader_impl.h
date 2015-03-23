@@ -8,19 +8,36 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "content/public/common/resource_response.h"
 #include "third_party/WebKit/public/platform/WebURLLoader.h"
+#include "url/gurl.h"
 
-class GURL;
+namespace base {
+
+class SingleThreadTaskRunner;
+
+}  // namespace base
 
 namespace content {
 
 class ResourceDispatcher;
 struct ResourceResponseInfo;
 
+// PlzNavigate: Used to override parameters of the navigation request.
+struct StreamOverrideParameters {
+ public:
+  // TODO(clamy): The browser should be made aware on destruction of this struct
+  // that it can release its associated stream handle.
+  GURL stream_url;
+  ResourceResponseHead response;
+};
+
 class CONTENT_EXPORT WebURLLoaderImpl
     : public NON_EXPORTED_BASE(blink::WebURLLoader) {
  public:
-  explicit WebURLLoaderImpl(ResourceDispatcher* resource_dispatcher);
+  explicit WebURLLoaderImpl(
+      ResourceDispatcher* resource_dispatcher,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   virtual ~WebURLLoaderImpl();
 
   static blink::WebURLError CreateError(const blink::WebURL& unreachable_url,
@@ -36,16 +53,16 @@ class CONTENT_EXPORT WebURLLoaderImpl
       const blink::WebURLRequest& request,
       blink::WebURLResponse& response,
       blink::WebURLError& error,
-      blink::WebData& data) OVERRIDE;
+      blink::WebData& data) override;
   virtual void loadAsynchronously(
       const blink::WebURLRequest& request,
-      blink::WebURLLoaderClient* client) OVERRIDE;
-  virtual void cancel() OVERRIDE;
-  virtual void setDefersLoading(bool value) OVERRIDE;
+      blink::WebURLLoaderClient* client) override;
+  virtual void cancel() override;
+  virtual void setDefersLoading(bool value) override;
   virtual void didChangePriority(blink::WebURLRequest::Priority new_priority,
-                                 int intra_priority_value) OVERRIDE;
+                                 int intra_priority_value) override;
   virtual bool attachThreadedDataReceiver(
-      blink::WebThreadedDataReceiver* threaded_data_receiver) OVERRIDE;
+      blink::WebThreadedDataReceiver* threaded_data_receiver) override;
 
  private:
   class Context;

@@ -18,9 +18,9 @@ namespace base {
 enum DiscardableMemoryType {
   DISCARDABLE_MEMORY_TYPE_NONE,
   DISCARDABLE_MEMORY_TYPE_ASHMEM,
-  DISCARDABLE_MEMORY_TYPE_MAC,
+  DISCARDABLE_MEMORY_TYPE_MACH,
   DISCARDABLE_MEMORY_TYPE_EMULATED,
-  DISCARDABLE_MEMORY_TYPE_MALLOC
+  DISCARDABLE_MEMORY_TYPE_SHMEM
 };
 
 enum DiscardableMemoryLockStatus {
@@ -114,12 +114,6 @@ class BASE_EXPORT DiscardableMemory {
   // Returns the memory address held by this object. The object must be locked
   // before calling this. Otherwise, this will cause a DCHECK error.
   virtual void* Memory() const = 0;
-
-  // Testing utility calls.
-
-  // Purge all discardable memory in the system. This call has global effects
-  // across all running processes, so it should only be used for testing!
-  static void PurgeForTesting();
 };
 
 }  // namespace base

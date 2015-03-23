@@ -24,6 +24,9 @@ KEYBOARD_EXPORT extern const char kEnableInputView[];
 // Enables experimental features for IME extensions.
 KEYBOARD_EXPORT extern const char kEnableExperimentalInputViewFeatures[];
 
+// Enables gesture typing for the virtual keyboard.
+KEYBOARD_EXPORT extern const char kEnableGestureTyping[];
+
 // Enables the virtual keyboard.
 KEYBOARD_EXPORT extern const char kEnableVirtualKeyboard[];
 
@@ -35,6 +38,10 @@ KEYBOARD_EXPORT extern const char kDisableVirtualKeyboardOverscroll[];
 // Enable overscrolling of web content when the virtual keyboard is displayed
 // to provide access to content that would otherwise be occluded.
 KEYBOARD_EXPORT extern const char kEnableVirtualKeyboardOverscroll[];
+
+// Disable automatic showing/hiding of the keyboard based on the devices plugged
+// in.
+KEYBOARD_EXPORT extern const char kDisableSmartVirtualKeyboard[];
 
 }  // namespace switches
 }  // namespace keyboard

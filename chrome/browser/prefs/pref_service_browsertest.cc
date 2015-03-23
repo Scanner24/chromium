@@ -22,7 +22,7 @@
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 typedef InProcessBrowserTest PreservedWindowPlacement;
 
@@ -40,7 +40,8 @@ IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, PRE_Test) {
 IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, MAYBE_Test) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -54,7 +55,7 @@ class PreferenceServiceTest : public InProcessBrowserTest {
   explicit PreferenceServiceTest(bool new_profile) : new_profile_(new_profile) {
   }
 
-  virtual bool SetUpUserDataDirectory() OVERRIDE {
+  bool SetUpUserDataDirectory() override {
     base::FilePath user_data_directory;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_directory);
 
@@ -114,7 +115,8 @@ class PreservedWindowPlacementIsLoaded : public PreferenceServiceTest {
 IN_PROC_BROWSER_TEST_F(PreservedWindowPlacementIsLoaded, Test) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -174,7 +176,8 @@ class PreservedWindowPlacementIsMigrated : public PreferenceServiceTest {
 IN_PROC_BROWSER_TEST_F(PreservedWindowPlacementIsMigrated, Test) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 

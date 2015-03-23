@@ -14,6 +14,7 @@ class Size;
 namespace ui {
 
 class DriWindowDelegate;
+class DrmDeviceManager;
 
 // In surfaceless mode drawing and displaying happens directly through
 // NativePixmap buffers. CC would call into SurfaceFactoryOzone to allocate the
@@ -21,17 +22,21 @@ class DriWindowDelegate;
 // presentation.
 class GbmSurfaceless : public SurfaceOzoneEGL {
  public:
-  GbmSurfaceless(DriWindowDelegate* window_delegate);
-  virtual ~GbmSurfaceless();
+  GbmSurfaceless(DriWindowDelegate* window_delegate,
+                 DrmDeviceManager* drm_device_manager);
+  ~GbmSurfaceless() override;
 
   // SurfaceOzoneEGL:
-  virtual intptr_t GetNativeWindow() OVERRIDE;
-  virtual bool ResizeNativeWindow(const gfx::Size& viewport_size) OVERRIDE;
-  virtual bool OnSwapBuffers() OVERRIDE;
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() OVERRIDE;
+  intptr_t GetNativeWindow() override;
+  bool ResizeNativeWindow(const gfx::Size& viewport_size) override;
+  bool OnSwapBuffers() override;
+  bool OnSwapBuffersAsync(const SwapCompletionCallback& callback) override;
+  scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
+  bool IsUniversalDisplayLinkDevice() override;
 
  protected:
   DriWindowDelegate* window_delegate_;
+  DrmDeviceManager* drm_device_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(GbmSurfaceless);
 };

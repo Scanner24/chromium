@@ -1,16 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/sessions/session_service.h"
-#include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/test/integration/sessions_helper.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/typed_urls_helper.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/sessions/session_types.h"
 #include "sync/util/time.h"
 
 using sessions_helper::CheckInitialState;
@@ -27,7 +27,7 @@ using typed_urls_helper::GetUrlFromClient;
 class SingleClientSessionsSyncTest : public SyncTest {
  public:
   SingleClientSessionsSyncTest() : SyncTest(SINGLE_CLIENT) {}
-  virtual ~SingleClientSessionsSyncTest() {}
+  ~SingleClientSessionsSyncTest() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SingleClientSessionsSyncTest);
@@ -69,8 +69,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, TimestampMatchesHistory) {
   ASSERT_TRUE(CheckInitialState(0));
 
   // We want a URL that doesn't 404 and has a non-empty title.
-  // about:version is simple to render, too.
-  const GURL url("about:version");
+  const GURL url("data:text/html,<html><title>Test</title></html>");
 
   ScopedWindowMap windows;
   ASSERT_TRUE(OpenTabAndGetLocalWindows(0, url, windows.GetMutable()));
@@ -78,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, TimestampMatchesHistory) {
   int found_navigations = 0;
   for (SessionWindowMap::const_iterator it = windows.Get()->begin();
        it != windows.Get()->end(); ++it) {
-    for (std::vector<SessionTab*>::const_iterator it2 =
+    for (std::vector<sessions::SessionTab*>::const_iterator it2 =
              it->second->tabs.begin(); it2 != it->second->tabs.end(); ++it2) {
       for (std::vector<sessions::SerializedNavigationEntry>::const_iterator
                it3 = (*it2)->navigations.begin();
@@ -103,8 +102,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, ResponseCodeIsPreserved) {
   ASSERT_TRUE(CheckInitialState(0));
 
   // We want a URL that doesn't 404 and has a non-empty title.
-  // about:version is simple to render, too.
-  const GURL url("about:version");
+  const GURL url("data:text/html,<html><title>Test</title></html>");
 
   ScopedWindowMap windows;
   ASSERT_TRUE(OpenTabAndGetLocalWindows(0, url, windows.GetMutable()));
@@ -112,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, ResponseCodeIsPreserved) {
   int found_navigations = 0;
   for (SessionWindowMap::const_iterator it = windows.Get()->begin();
        it != windows.Get()->end(); ++it) {
-    for (std::vector<SessionTab*>::const_iterator it2 =
+    for (std::vector<sessions::SessionTab*>::const_iterator it2 =
              it->second->tabs.begin(); it2 != it->second->tabs.end(); ++it2) {
       for (std::vector<sessions::SerializedNavigationEntry>::const_iterator
                it3 = (*it2)->navigations.begin();

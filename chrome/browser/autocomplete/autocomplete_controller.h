@@ -80,10 +80,11 @@ class AutocompleteController : public AutocompleteProviderListener {
   // If |clear_result| is true, the controller will also erase the result set.
   void Stop(bool clear_result);
 
-  // Begin asynchronous fetch of zero-suggest suggestions. The |input| should
-  // contain current omnibox input, the URL of the page we are on, and
-  // that page's classification.
-  void StartZeroSuggest(const AutocompleteInput& input);
+  // Called when the omnibox is focused while no existing user input is in
+  // progress.  This is used to call Start() on all providers with
+  // |called_due_to_focus| parameter set to check if they want to provide
+  // on focus matches.
+  void OnOmniboxFocused(const AutocompleteInput& input);
 
   // Asks the relevant provider to delete |match|, and ensures observers are
   // notified of resulting changes immediately.  This should only be called when
@@ -95,7 +96,7 @@ class AutocompleteController : public AutocompleteProviderListener {
   void ExpireCopiedEntries();
 
   // AutocompleteProviderListener:
-  virtual void OnProviderUpdate(bool updated_matches) OVERRIDE;
+  virtual void OnProviderUpdate(bool updated_matches) override;
 
   // Called when an omnibox event log entry is generated.
   // Populates provider_info with diagnostic information about the status

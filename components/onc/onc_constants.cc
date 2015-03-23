@@ -39,15 +39,17 @@ const char kDevice[] = "Device";
 const char kErrorState[] = "ErrorState";
 const char kEthernet[] = "Ethernet";
 const char kGUID[] = "GUID";
+const char kIPAddressConfigType[] = "IPAddressConfigType";
 const char kIPConfigs[] = "IPConfigs";
+const char kIPConfigTypeDHCP[] = "DHCP";
+const char kIPConfigTypeStatic[] = "Static";
 const char kMacAddress[] = "MacAddress";
-const char kNameServers[] = "NameServers";
+const char kNameServersConfigType[] = "NameServersConfigType";
 const char kName[] = "Name";
 const char kPriority[] = "Priority";
 const char kProxySettings[] = "ProxySettings";
 const char kRestrictedConnectivity[] = "RestrictedConnectivity";
 const char kSavedIPConfig[] = "SavedIPConfig";
-const char kSearchDomains[] = "SearchDomains";
 const char kSourceDevice[] = "Device";
 const char kSourceDevicePolicy[] = "DevicePolicy";
 const char kSourceNone[] = "None";
@@ -117,6 +119,7 @@ const char kRoamingState[] = "RoamingState";
 const char kHome[] = "Home";
 const char kRoaming[] = "Roaming";
 const char kServingOperator[] = "ServingOperator";
+const char kSignalStrength[] = "SignalStrength";
 const char kSIMLockStatus[] = "SIMLockStatus";
 const char kSIMPresent[] = "SIMPresent";
 const char kSupportedCarriers[] = "SupportedCarriers";
@@ -172,16 +175,19 @@ const char kIPv4[] = "IPv4";
 const char kIPv6[] = "IPv6";
 const char kNameServers[] = "NameServers";
 const char kRoutingPrefix[] = "RoutingPrefix";
+const char kSearchDomains[] = "SearchDomains";
 const char kType[] = "Type";
 const char kWebProxyAutoDiscoveryUrl[] = "WebProxyAutoDiscoveryUrl";
 }  // namespace ipconfig
 
 namespace wifi {
+const char kAllowGatewayARPPolling[] = "AllowGatewayARPPolling";
 const char kAutoConnect[] = "AutoConnect";
 const char kBSSID[] = "BSSID";
 const char kEAP[] = "EAP";
 const char kFrequency[] = "Frequency";
 const char kFrequencyList[] = "FrequencyList";
+const char kHexSSID[] = "HexSSID";
 const char kHiddenSSID[] = "HiddenSSID";
 const char kPassphrase[] = "Passphrase";
 const char kSSID[] = "SSID";
@@ -278,6 +284,7 @@ const char kL2TP[] = "L2TP";
 const char kOpenVPN[] = "OpenVPN";
 const char kPassword[] = "Password";
 const char kSaveCredentials[] = "SaveCredentials";
+const char kThirdPartyVpn[] = "ThirdPartyVPN";
 const char kTypeL2TP_IPsec[] = "L2TP-IPsec";
 const char kType[] = "Type";
 const char kUsername[] = "Username";
@@ -309,6 +316,8 @@ const char kKeyDirection[] = "KeyDirection";
 const char kNoInteract[] = "nointeract";
 const char kNone[] = "none";
 const char kNsCertType[] = "NsCertType";
+const char kOTP[] = "OTP";
+const char kPassword[] = "Password";
 const char kPort[] = "Port";
 const char kProto[] = "Proto";
 const char kPushPeerInfo[] = "PushPeerInfo";
@@ -327,10 +336,18 @@ const char kShaper[] = "Shaper";
 const char kStaticChallenge[] = "StaticChallenge";
 const char kTLSAuthContents[] = "TLSAuthContents";
 const char kTLSRemote[] = "TLSRemote";
+const char kUserAuthenticationType[] = "UserAuthenticationType";
 const char kVerb[] = "Verb";
 const char kVerifyHash[] = "VerifyHash";
 const char kVerifyX509[] = "VerifyX509";
 }  // namespace openvpn
+
+namespace openvpn_user_auth_type {
+const char kNone[] = "None";
+const char kOTP[] = "OTP";
+const char kPassword[] = "Password";
+const char kPasswordAndOTP[] = "PasswordAndOTP";
+}  // openvpn_user_auth_type
 
 namespace verify_x509 {
 const char kName[] = "Name";

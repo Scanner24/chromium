@@ -37,8 +37,6 @@ class SpdyNetworkTransactionTest;
 class SpdyProxyClientSocketTest;
 class SpdySessionTest;
 class SpdyStreamTest;
-class SpdyWebSocketStreamTest;
-class WebSocketJobTest;
 
 class SpdyFramer;
 class SpdyFrameBuilder;
@@ -237,7 +235,11 @@ class NET_EXPORT_PRIVATE SpdyFramerVisitorInterface {
   // Called when a HEADERS frame is received.
   // Note that header block data is not included. See
   // OnControlFrameHeaderData().
-  virtual void OnHeaders(SpdyStreamId stream_id, bool fin, bool end) = 0;
+  virtual void OnHeaders(SpdyStreamId stream_id,
+                         bool has_priority,
+                         SpdyPriority priority,
+                         bool fin,
+                         bool end) = 0;
 
   // Called when a WINDOW_UPDATE frame has been parsed.
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
@@ -336,7 +338,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
     SPDY_AUTO_RESET,
     SPDY_READING_COMMON_HEADER,
     SPDY_CONTROL_FRAME_PAYLOAD,
-    SPDY_READ_PADDING_LENGTH,
+    SPDY_READ_DATA_FRAME_PADDING_LENGTH,
     SPDY_CONSUME_PADDING,
     SPDY_IGNORE_REMAINING_PAYLOAD,
     SPDY_FORWARD_STREAM_FRAME,
@@ -492,7 +494,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
 
   // Serializes a PRIORITY frame. The PRIORITY frame advises a change in
   // the relative priority of the given stream.
-  SpdySerializedFrame* SerializePriority(const SpdyPriorityIR& priority);
+  SpdySerializedFrame* SerializePriority(const SpdyPriorityIR& priority) const;
 
   // Serialize a frame of unknown type.
   SpdySerializedFrame* SerializeFrame(const SpdyFrameIR& frame);
@@ -563,22 +565,22 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   static const char* StatusCodeToString(int status_code);
   static const char* FrameTypeToString(SpdyFrameType type);
 
-  SpdyMajorVersion protocol_version() const { return spdy_version_; }
+  SpdyMajorVersion protocol_version() const { return protocol_version_; }
 
   bool probable_http_response() const { return probable_http_response_; }
 
   SpdyStreamId expect_continuation() const { return expect_continuation_; }
 
   SpdyPriority GetLowestPriority() const {
-    return spdy_version_ < SPDY3 ? 3 : 7;
+    return protocol_version_ < SPDY3 ? 3 : 7;
   }
 
   SpdyPriority GetHighestPriority() const { return 0; }
 
   // Interpolates SpdyPriority values into SPDY4/HTTP2 priority weights,
   // and vice versa.
-  uint8 MapPriorityToWeight(SpdyPriority priority);
-  SpdyPriority MapWeightToPriority(uint8 weight);
+  static uint8 MapPriorityToWeight(SpdyPriority priority);
+  static SpdyPriority MapWeightToPriority(uint8 weight);
 
   // Deliver the given control frame's compressed headers block to the visitor
   // in decompressed form, in chunks. Returns true if the visitor has
@@ -601,6 +603,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
                            UnclosedStreamDataCompressorsOneByteAtATime);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
                            UncompressLargerThanFrameBufferInitialSize);
+  FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
+                           CreatePushPromiseThenContinuationUncompressed);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, ReadLargeSettingsFrame);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
                            ReadLargeSettingsFrameInSmallChunks);
@@ -610,16 +614,14 @@ class NET_EXPORT_PRIVATE SpdyFramer {
                            TooLargeHeadersFrameUsesContinuation);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
                            TooLargePushPromiseFrameUsesContinuation);
-  friend class net::HttpNetworkLayer;  // This is temporary for the server.
-  friend class net::HttpNetworkTransactionTest;
-  friend class net::HttpProxyClientSocketPoolTest;
-  friend class net::SpdyHttpStreamTest;
-  friend class net::SpdyNetworkTransactionTest;
-  friend class net::SpdyProxyClientSocketTest;
-  friend class net::SpdySessionTest;
-  friend class net::SpdyStreamTest;
-  friend class net::SpdyWebSocketStreamTest;
-  friend class net::WebSocketJobTest;
+  friend class HttpNetworkLayer;  // This is temporary for the server.
+  friend class HttpNetworkTransactionTest;
+  friend class HttpProxyClientSocketPoolTest;
+  friend class SpdyHttpStreamTest;
+  friend class SpdyNetworkTransactionTest;
+  friend class SpdyProxyClientSocketTest;
+  friend class SpdySessionTest;
+  friend class SpdyStreamTest;
   friend class test::TestSpdyVisitor;
 
  private:
@@ -634,7 +636,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   size_t ProcessControlFrameHeaderBlock(const char* data,
                                         size_t len,
                                         bool is_hpack_header_block);
-  size_t ProcessFramePaddingLength(const char* data, size_t len);
+  size_t ProcessDataFramePaddingLength(const char* data, size_t len);
   size_t ProcessFramePadding(const char* data, size_t len);
   size_t ProcessDataFramePayload(const char* data, size_t len);
   size_t ProcessGoAwayFramePayload(const char* data, size_t len);
@@ -651,7 +653,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   void DeliverHpackBlockAsSpdy3Block();
 
   // Helpers for above internal breakouts from ProcessInput.
-  void ProcessControlFrameHeader(uint16 control_frame_type_field);
+  void ProcessControlFrameHeader(int control_frame_type_field);
   // Always passed exactly 1 setting's worth of data.
   bool ProcessSetting(const char* data);
 
@@ -672,7 +674,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   void WritePayloadWithContinuation(SpdyFrameBuilder* builder,
                                     const std::string& hpack_encoding,
                                     SpdyStreamId stream_id,
-                                    SpdyFrameType type);
+                                    SpdyFrameType type,
+                                    int padding_payload_len);
 
  private:
   // Deliver the given control frame's uncompressed headers block to the
@@ -706,35 +709,17 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // Set the error code and moves the framer into the error state.
   void set_error(SpdyError error);
 
-  // The maximum size of the control frames that we support.
-  // This limit is arbitrary. We can enforce it here or at the application
-  // layer. We chose the framing layer, but this can be changed (or removed)
-  // if necessary later down the line.
-  size_t GetControlFrameBufferMaxSize() const {
-    // The theoretical maximum for SPDY3 and earlier is (2^24 - 1) +
-    // 8, since the length field does not count the size of the
-    // header.
-    if (spdy_version_ == SPDY2) {
-      return 64 * 1024;
-    }
-    if (spdy_version_ == SPDY3) {
-      return 16 * 1024 * 1024;
-    }
-    // Absolute maximum size of HTTP2 frame payload (section 4.2 "Frame size").
-    return (1<<14) - 1;
-  }
-
-  // TODO(jgraettinger): For h2-13 interop testing coverage,
-  // fragment at smaller payload boundaries.
-  size_t GetHeaderFragmentMaxSize() const {
-    return GetControlFrameBufferMaxSize() >> 4;  // 1023 bytes.
-  }
-
   // The size of the control frame buffer.
   // Since this is only used for control frame headers, the maximum control
   // frame header size (SYN_STREAM) is sufficient; all remaining control
   // frame data is streamed to the visitor.
   static const size_t kControlFrameBufferSize;
+
+  // The maximum size of the control frames that we support.
+  // This limit is arbitrary. We can enforce it here or at the application
+  // layer. We chose the framing layer, but this can be changed (or removed)
+  // if necessary later down the line.
+  static const size_t kMaxControlFrameSize;
 
   SpdyState state_;
   SpdyState previous_state_;
@@ -789,8 +774,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
 
   std::string display_protocol_;
 
-  // The major SPDY version to be spoken/understood by this framer.
-  const SpdyMajorVersion spdy_version_;
+  // The protocol version to be spoken/understood by this framer.
+  const SpdyMajorVersion protocol_version_;
 
   // Tracks if we've ever gotten far enough in framing to see a control frame of
   // type SYN_STREAM or SYN_REPLY.

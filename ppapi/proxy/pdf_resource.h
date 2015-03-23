@@ -33,30 +33,34 @@ class PPAPI_PROXY_EXPORT PDFResource
   }
 
   // Resource override.
-  virtual thunk::PPB_PDF_API* AsPPB_PDF_API() OVERRIDE;
+  virtual thunk::PPB_PDF_API* AsPPB_PDF_API() override;
 
   // PPB_PDF_API implementation.
-  PP_Var GetLocalizedString(PP_ResourceString string_id) OVERRIDE;
+  PP_Var GetLocalizedString(PP_ResourceString string_id) override;
   virtual void SearchString(const unsigned short* input_string,
                             const unsigned short* input_term,
                             bool case_sensitive,
                             PP_PrivateFindResult** results,
-                            int* count) OVERRIDE;
-  virtual void DidStartLoading() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
-  virtual void SetContentRestriction(int restrictions) OVERRIDE;
-  virtual void HistogramPDFPageCount(int count) OVERRIDE;
-  virtual void UserMetricsRecordAction(const PP_Var& action) OVERRIDE;
-  virtual void HasUnsupportedFeature() OVERRIDE;
-  virtual void Print() OVERRIDE;
-  virtual void SaveAs() OVERRIDE;
-  virtual PP_Bool IsFeatureEnabled(PP_PDFFeature feature) OVERRIDE;
+                            int* count) override;
+  virtual void DidStartLoading() override;
+  virtual void DidStopLoading() override;
+  virtual void SetContentRestriction(int restrictions) override;
+  virtual void HistogramPDFPageCount(int count) override;
+  virtual void UserMetricsRecordAction(const PP_Var& action) override;
+  virtual void HasUnsupportedFeature() override;
+  virtual void Print() override;
+  virtual void SaveAs() override;
+  virtual PP_Bool IsFeatureEnabled(PP_PDFFeature feature) override;
   virtual PP_Resource GetResourceImageForScale(PP_ResourceImage image_id,
-                                               float scale) OVERRIDE;
-  virtual PP_Resource GetResourceImage(PP_ResourceImage image_id) OVERRIDE;
-  virtual PP_Bool IsOutOfProcess() OVERRIDE;
-  virtual void SetSelectedText(const char* selected_text) OVERRIDE;
-  virtual void SetLinkUnderCursor(const char* url) OVERRIDE;
+                                               float scale) override;
+  virtual PP_Resource GetResourceImage(PP_ResourceImage image_id) override;
+  virtual PP_Bool IsOutOfProcess() override;
+  virtual void SetSelectedText(const char* selected_text) override;
+  virtual void SetLinkUnderCursor(const char* url) override;
+  virtual void GetV8ExternalSnapshotData(const char** natives_data_out,
+                                         int* natives_size_out,
+                                         const char** snapshot_data_out,
+                                         int* snapshot_size_out) override;
 
  private:
   std::string locale_;

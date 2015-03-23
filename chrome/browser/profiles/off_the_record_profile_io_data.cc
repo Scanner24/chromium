@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
@@ -27,17 +28,20 @@
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/resource_context.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/extension.h"
-#include "net/base/sdch_dictionary_fetcher.h"
 #include "net/base/sdch_manager.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/sdch/sdch_owner.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "storage/browser/database/database_tracker.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/common/extension.h"
+#endif
 
 using content::BrowserThread;
 
@@ -163,13 +167,6 @@ void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
   io_data_->safe_browsing_enabled()->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
 #endif
-  // TODO(kundaji): Remove data_reduction_proxy_enabled pref for incognito.
-  // Bug http://crbug/412873.
-  io_data_->data_reduction_proxy_enabled()->Init(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled,
-      profile_->GetPrefs());
-  io_data_->data_reduction_proxy_enabled()->MoveToThread(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
   io_data_->InitializeOnUIThread(profile_);
 }
 
@@ -200,9 +197,15 @@ OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
 }
 
 void OffTheRecordProfileIOData::InitializeInternal(
+    scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate,
     ProfileParams* profile_params,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 OffTheRecordProfileIOData::InitializeInternal"));
+
   net::URLRequestContext* main_context = main_request_context();
 
   IOThread* const io_thread = profile_params->io_thread;
@@ -214,7 +217,9 @@ void OffTheRecordProfileIOData::InitializeInternal(
 
   main_context->set_net_log(io_thread->net_log());
 
-  main_context->set_network_delegate(network_delegate());
+  main_context->set_network_delegate(chrome_network_delegate.get());
+
+  network_delegate_ = chrome_network_delegate.Pass();
 
   main_context->set_host_resolver(
       io_thread_globals->host_resolver.get());
@@ -270,15 +275,13 @@ void OffTheRecordProfileIOData::InitializeInternal(
       main_job_factory.Pass(),
       request_interceptors.Pass(),
       profile_params->protocol_handler_interceptor.Pass(),
-      network_delegate(),
+      main_context->network_delegate(),
       ftp_factory_.get());
   main_context->set_job_factory(main_job_factory_.get());
 
-  // Setup the SDCHManager for this profile.
+  // Setup SDCH for this profile.
   sdch_manager_.reset(new net::SdchManager);
-  sdch_manager_->set_sdch_fetcher(scoped_ptr<net::SdchFetcher>(
-      new net::SdchDictionaryFetcher(sdch_manager_.get(),
-                                     main_context)).Pass());
+  sdch_policy_.reset(new net::SdchOwner(sdch_manager_.get(), main_context));
   main_context->set_sdch_manager(sdch_manager_.get());
 
 #if defined(ENABLE_EXTENSIONS)
@@ -361,8 +364,7 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
   scoped_ptr<net::HttpCache> app_http_cache =
       CreateHttpFactory(main_network_session, app_backend);
 
-  context->SetHttpTransactionFactory(
-      app_http_cache.PassAs<net::HttpTransactionFactory>());
+  context->SetHttpTransactionFactory(app_http_cache.Pass());
 
   scoped_ptr<net::URLRequestJobFactoryImpl> job_factory(
       new net::URLRequestJobFactoryImpl());
@@ -371,7 +373,7 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
   top_job_factory = SetUpJobFactoryDefaults(job_factory.Pass(),
                                             request_interceptors.Pass(),
                                             protocol_handler_interceptor.Pass(),
-                                            network_delegate(),
+                                            main_context->network_delegate(),
                                             ftp_factory_.get());
   context->SetJobFactory(top_job_factory.Pass());
   return context;

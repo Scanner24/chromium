@@ -6,6 +6,9 @@
 
 #include <time.h>
 
+#include <limits>
+#include <string>
+
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
@@ -13,16 +16,16 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::Time;
-using base::TimeDelta;
-using base::TimeTicks;
+namespace base {
+
+namespace {
 
 // Specialized test fixture allowing time strings without timezones to be
 // tested by comparing them to a known time in the local zone.
 // See also pr_time_unittests.cc
 class TimeTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Use mktime to get a time_t, and turn it into a PRTime by converting
     // seconds to microseconds.  Use 15th Oct 2007 12:45:00 local.  This
     // must be a time guaranteed to be outside of a DST fallback hour in
@@ -640,12 +643,10 @@ TEST(TimeTicks, Deltas) {
 }
 
 static void HighResClockTest(TimeTicks (*GetTicks)()) {
-#if defined(OS_WIN)
-  // HighResNow doesn't work on some systems.  Since the product still works
-  // even if it doesn't work, it makes this entire test questionable.
-  if (!TimeTicks::IsHighResClockWorking())
+  // IsHighResolution() is false on some systems.  Since the product still works
+  // even if it's false, it makes this entire test questionable.
+  if (!TimeTicks::IsHighResolution())
     return;
-#endif
 
   // Why do we loop here?
   // We're trying to measure that intervals increment in a VERY small amount
@@ -678,8 +679,8 @@ static void HighResClockTest(TimeTicks (*GetTicks)()) {
   EXPECT_TRUE(success);
 }
 
-TEST(TimeTicks, HighResNow) {
-  HighResClockTest(&TimeTicks::HighResNow);
+TEST(TimeTicks, HighRes) {
+  HighResClockTest(&TimeTicks::Now);
 }
 
 // Fails frequently on Android http://crbug.com/352633 with:
@@ -710,8 +711,64 @@ TEST(TimeTicks, MAYBE_ThreadNow) {
 }
 
 TEST(TimeTicks, NowFromSystemTraceTime) {
-  // Re-use HighResNow test for now since clock properties are identical.
+  // Re-use HighRes test for now since clock properties are identical.
   HighResClockTest(&TimeTicks::NowFromSystemTraceTime);
+}
+
+TEST(TimeTicks, SnappedToNextTickBasic) {
+  base::TimeTicks phase = base::TimeTicks::FromInternalValue(4000);
+  base::TimeDelta interval = base::TimeDelta::FromInternalValue(1000);
+  base::TimeTicks timestamp;
+
+  // Timestamp in previous interval.
+  timestamp = base::TimeTicks::FromInternalValue(3500);
+  EXPECT_EQ(4000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+
+  // Timestamp in next interval.
+  timestamp = base::TimeTicks::FromInternalValue(4500);
+  EXPECT_EQ(5000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+
+  // Timestamp multiple intervals before.
+  timestamp = base::TimeTicks::FromInternalValue(2500);
+  EXPECT_EQ(3000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+
+  // Timestamp multiple intervals after.
+  timestamp = base::TimeTicks::FromInternalValue(6500);
+  EXPECT_EQ(7000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+
+  // Timestamp on previous interval.
+  timestamp = base::TimeTicks::FromInternalValue(3000);
+  EXPECT_EQ(3000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+
+  // Timestamp on next interval.
+  timestamp = base::TimeTicks::FromInternalValue(5000);
+  EXPECT_EQ(5000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+
+  // Timestamp equal to phase.
+  timestamp = base::TimeTicks::FromInternalValue(4000);
+  EXPECT_EQ(4000,
+            timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+}
+
+TEST(TimeTicks, SnappedToNextTickOverflow) {
+  // int(big_timestamp / interval) < 0, so this causes a crash if the number of
+  // intervals elapsed is attempted to be stored in an int.
+  base::TimeTicks phase = base::TimeTicks::FromInternalValue(0);
+  base::TimeDelta interval = base::TimeDelta::FromInternalValue(4000);
+  base::TimeTicks big_timestamp =
+      base::TimeTicks::FromInternalValue(8635916564000);
+
+  EXPECT_EQ(8635916564000,
+            big_timestamp.SnappedToNextTick(phase, interval).ToInternalValue());
+  EXPECT_EQ(8635916564000,
+            big_timestamp.SnappedToNextTick(big_timestamp, interval)
+                .ToInternalValue());
 }
 
 TEST(TimeDelta, FromAndIn) {
@@ -780,3 +837,129 @@ TEST(TimeDelta, WindowsEpoch) {
   // We can't test 1601 epoch, since the system time functions on Linux
   // only compute years starting from 1900.
 }
+
+// We could define this separately for Time, TimeTicks and TimeDelta but the
+// definitions would be identical anyway.
+template <class Any>
+std::string AnyToString(Any any) {
+  std::ostringstream oss;
+  oss << any;
+  return oss.str();
+}
+
+TEST(TimeDelta, Magnitude) {
+  const int64 zero = 0;
+  EXPECT_EQ(TimeDelta::FromMicroseconds(zero),
+            TimeDelta::FromMicroseconds(zero).magnitude());
+
+  const int64 one = 1;
+  const int64 negative_one = -1;
+  EXPECT_EQ(TimeDelta::FromMicroseconds(one),
+            TimeDelta::FromMicroseconds(one).magnitude());
+  EXPECT_EQ(TimeDelta::FromMicroseconds(one),
+            TimeDelta::FromMicroseconds(negative_one).magnitude());
+
+  const int64 max_int64_minus_one = std::numeric_limits<int64>::max() - 1;
+  const int64 min_int64_plus_two = std::numeric_limits<int64>::min() + 2;
+  EXPECT_EQ(TimeDelta::FromMicroseconds(max_int64_minus_one),
+            TimeDelta::FromMicroseconds(max_int64_minus_one).magnitude());
+  EXPECT_EQ(TimeDelta::FromMicroseconds(max_int64_minus_one),
+            TimeDelta::FromMicroseconds(min_int64_plus_two).magnitude());
+}
+
+
+TEST(TimeDelta, multiply_by) {
+  double d = 0.5;
+  EXPECT_EQ(TimeDelta::FromMilliseconds(500),
+            TimeDelta::FromMilliseconds(1000).multiply_by(d));
+  EXPECT_EQ(TimeDelta::FromMilliseconds(2000),
+            TimeDelta::FromMilliseconds(1000).divide_by(d));
+}
+
+TEST(TimeDeltaLogging, DCheckEqCompiles) {
+  DCHECK_EQ(TimeDelta(), TimeDelta());
+}
+
+TEST(TimeDeltaLogging, EmptyIsZero) {
+  TimeDelta zero;
+  EXPECT_EQ("0s", AnyToString(zero));
+}
+
+TEST(TimeDeltaLogging, FiveHundredMs) {
+  TimeDelta five_hundred_ms = TimeDelta::FromMilliseconds(500);
+  EXPECT_EQ("0.5s", AnyToString(five_hundred_ms));
+}
+
+TEST(TimeDeltaLogging, MinusTenSeconds) {
+  TimeDelta minus_ten_seconds = TimeDelta::FromSeconds(-10);
+  EXPECT_EQ("-10s", AnyToString(minus_ten_seconds));
+}
+
+TEST(TimeDeltaLogging, DoesNotMessUpFormattingFlags) {
+  std::ostringstream oss;
+  std::ios_base::fmtflags flags_before = oss.flags();
+  oss << TimeDelta();
+  EXPECT_EQ(flags_before, oss.flags());
+}
+
+TEST(TimeDeltaLogging, DoesNotMakeStreamBad) {
+  std::ostringstream oss;
+  oss << TimeDelta();
+  EXPECT_TRUE(oss.good());
+}
+
+TEST(TimeLogging, DCheckEqCompiles) {
+  DCHECK_EQ(Time(), Time());
+}
+
+TEST(TimeLogging, ChromeBirthdate) {
+  Time birthdate;
+  ASSERT_TRUE(Time::FromString("Tue, 02 Sep 2008 09:42:18 GMT", &birthdate));
+  EXPECT_EQ("2008-09-02 09:42:18.000 UTC", AnyToString(birthdate));
+}
+
+TEST(TimeLogging, DoesNotMessUpFormattingFlags) {
+  std::ostringstream oss;
+  std::ios_base::fmtflags flags_before = oss.flags();
+  oss << Time();
+  EXPECT_EQ(flags_before, oss.flags());
+}
+
+TEST(TimeLogging, DoesNotMakeStreamBad) {
+  std::ostringstream oss;
+  oss << Time();
+  EXPECT_TRUE(oss.good());
+}
+
+TEST(TimeTicksLogging, DCheckEqCompiles) {
+  DCHECK_EQ(TimeTicks(), TimeTicks());
+}
+
+TEST(TimeTicksLogging, ZeroTime) {
+  TimeTicks zero;
+  EXPECT_EQ("0 bogo-microseconds", AnyToString(zero));
+}
+
+TEST(TimeTicksLogging, FortyYearsLater) {
+  TimeTicks forty_years_later =
+      TimeTicks() + TimeDelta::FromDays(365.25 * 40);
+  EXPECT_EQ("1262304000000000 bogo-microseconds",
+            AnyToString(forty_years_later));
+}
+
+TEST(TimeTicksLogging, DoesNotMessUpFormattingFlags) {
+  std::ostringstream oss;
+  std::ios_base::fmtflags flags_before = oss.flags();
+  oss << TimeTicks();
+  EXPECT_EQ(flags_before, oss.flags());
+}
+
+TEST(TimeTicksLogging, DoesNotMakeStreamBad) {
+  std::ostringstream oss;
+  oss << TimeTicks();
+  EXPECT_TRUE(oss.good());
+}
+
+}  // namespace
+
+}  // namespace base

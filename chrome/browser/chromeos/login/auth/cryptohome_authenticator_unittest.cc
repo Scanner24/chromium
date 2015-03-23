@@ -16,7 +16,6 @@
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
@@ -44,6 +43,7 @@
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/login/login_state.h"
 #include "components/ownership/mock_owner_key_util.h"
+#include "components/user_manager/fake_user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_test_nss_chromeos_user.h"
@@ -131,7 +131,7 @@ class CryptohomeAuthenticatorTest : public testing::Test {
  public:
   CryptohomeAuthenticatorTest()
       : user_context_("me@nowhere.org"),
-        user_manager_(new FakeUserManager()),
+        user_manager_(new user_manager::FakeUserManager()),
         user_manager_enabler_(user_manager_),
         mock_caller_(NULL),
         mock_homedir_methods_(NULL),
@@ -151,10 +151,11 @@ class CryptohomeAuthenticatorTest : public testing::Test {
                              FakeCryptohomeClient::GetStubSystemSalt()));
   }
 
-  virtual ~CryptohomeAuthenticatorTest() {}
+  ~CryptohomeAuthenticatorTest() override {}
 
-  virtual void SetUp() {
-    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kLoginManager);
+  void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kLoginManager);
 
     mock_caller_ = new cryptohome::MockAsyncMethodCaller;
     cryptohome::AsyncMethodCaller::InitializeForTesting(mock_caller_);
@@ -173,7 +174,7 @@ class CryptohomeAuthenticatorTest : public testing::Test {
   }
 
   // Tears down the test fixture.
-  virtual void TearDown() {
+  void TearDown() override {
     SystemSaltGetter::Shutdown();
     DBusThreadManager::Shutdown();
 
@@ -205,13 +206,6 @@ class CryptohomeAuthenticatorTest : public testing::Test {
         .WillByDefault(Invoke(MockAuthStatusConsumer::OnFailQuitAndFail));
   }
 
-  // Allow test to fail and exit gracefully, even if
-  // OnRetailModeAuthSuccess() wasn't supposed to happen.
-  void FailOnRetailModeLoginSuccess() {
-    ON_CALL(consumer_, OnRetailModeAuthSuccess(_)).WillByDefault(
-        Invoke(MockAuthStatusConsumer::OnRetailModeSuccessQuitAndFail));
-  }
-
   // Allow test to fail and exit gracefully, even if OnAuthSuccess()
   // wasn't supposed to happen.
   void FailOnLoginSuccess() {
@@ -229,12 +223,6 @@ class CryptohomeAuthenticatorTest : public testing::Test {
   void ExpectLoginFailure(const AuthFailure& failure) {
     EXPECT_CALL(consumer_, OnAuthFailure(failure))
         .WillOnce(Invoke(MockAuthStatusConsumer::OnFailQuit))
-        .RetiresOnSaturation();
-  }
-
-  void ExpectRetailModeLoginSuccess() {
-    EXPECT_CALL(consumer_, OnRetailModeAuthSuccess(_))
-        .WillOnce(Invoke(MockAuthStatusConsumer::OnRetailModeSuccessQuit))
         .RetiresOnSaturation();
   }
 
@@ -337,7 +325,7 @@ class CryptohomeAuthenticatorTest : public testing::Test {
 
   TestingProfile profile_;
   scoped_ptr<TestingProfileManager> profile_manager_;
-  FakeUserManager* user_manager_;
+  user_manager::FakeUserManager* user_manager_;
   ScopedUserManagerEnabler user_manager_enabler_;
 
   cryptohome::MockAsyncMethodCaller* mock_caller_;
@@ -578,32 +566,6 @@ TEST_F(CryptohomeAuthenticatorTest, DriveGuestLoginButFail) {
   EXPECT_CALL(*mock_caller_, AsyncMountGuest(_)).Times(1).RetiresOnSaturation();
 
   auth_->LoginOffTheRecord();
-  base::MessageLoop::current()->Run();
-}
-
-TEST_F(CryptohomeAuthenticatorTest, DriveRetailModeUserLogin) {
-  ExpectRetailModeLoginSuccess();
-  FailOnLoginFailure();
-
-  // Set up mock async method caller to respond as though a tmpfs mount
-  // attempt has occurred and succeeded.
-  mock_caller_->SetUp(true, cryptohome::MOUNT_ERROR_NONE);
-  EXPECT_CALL(*mock_caller_, AsyncMountGuest(_)).Times(1).RetiresOnSaturation();
-
-  auth_->LoginRetailMode();
-  base::MessageLoop::current()->Run();
-}
-
-TEST_F(CryptohomeAuthenticatorTest, DriveRetailModeLoginButFail) {
-  FailOnRetailModeLoginSuccess();
-  ExpectLoginFailure(AuthFailure(AuthFailure::COULD_NOT_MOUNT_TMPFS));
-
-  // Set up mock async method caller to respond as though a tmpfs mount
-  // attempt has occurred and failed.
-  mock_caller_->SetUp(false, cryptohome::MOUNT_ERROR_NONE);
-  EXPECT_CALL(*mock_caller_, AsyncMountGuest(_)).Times(1).RetiresOnSaturation();
-
-  auth_->LoginRetailMode();
   base::MessageLoop::current()->Run();
 }
 

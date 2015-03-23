@@ -19,7 +19,7 @@ namespace base {
 class FilePath;
 }  // namespace base
 
-typedef std::vector<Tuple2<base::string16, base::string16> >
+typedef std::vector<Tuple<base::string16, base::string16>>
     GetOpenFileNameFilter;
 
 struct ChromeUtilityMsg_GetSaveFileName_Params;
@@ -33,7 +33,7 @@ class ShellHandler : public UtilityMessageHandler {
   virtual ~ShellHandler();
 
   // IPC::Listener implementation
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
   void OnOpenItemViaShell(const base::FilePath& full_path);

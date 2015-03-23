@@ -18,8 +18,8 @@
 #include "net/base/escape.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -29,7 +29,7 @@ const int kProxySettingsDialogReasonableHeight = 525;
 const float kProxySettingsDialogReasonableWidthRatio = 0.4f;
 const float kProxySettingsDialogReasonableHeightRatio = 0.4f;
 
-const char* kProxySettingsURLParam = "?network=%s";
+const char kProxySettingsURLParam[] = "?network=%s";
 
 int CalculateSize(int screen_size, int min_comfortable, float desired_ratio) {
   int desired_size = static_cast<int>(desired_ratio * screen_size);
@@ -61,8 +61,7 @@ ProxySettingsDialog::ProxySettingsDialog(
                      delegate,
                      window,
                      base::string16(),
-                     GetURLForProxySettings(network.path()),
-                     LoginWebDialog::STYLE_BUBBLE) {
+                     GetURLForProxySettings(network.path())) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   ++instance_count_;
 

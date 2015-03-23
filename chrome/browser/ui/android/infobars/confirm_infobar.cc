@@ -8,24 +8,25 @@
 #include "base/android/jni_string.h"
 #include "base/logging.h"
 #include "chrome/browser/android/resource_mapper.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "jni/ConfirmInfoBarDelegate_jni.h"
+#include "ui/gfx/android/java_bitmap.h"
+#include "ui/gfx/image/image.h"
 
+// InfoBarService -------------------------------------------------------------
 
-// ConfirmInfoBarDelegate -----------------------------------------------------
-
-// static
-scoped_ptr<infobars::InfoBar> ConfirmInfoBarDelegate::CreateInfoBar(
+scoped_ptr<infobars::InfoBar> InfoBarService::CreateConfirmInfoBar(
     scoped_ptr<ConfirmInfoBarDelegate> delegate) {
-  return scoped_ptr<infobars::InfoBar>(new ConfirmInfoBar(delegate.Pass()));
+  return make_scoped_ptr(new ConfirmInfoBar(delegate.Pass()));
 }
 
 
 // ConfirmInfoBar -------------------------------------------------------------
 
 ConfirmInfoBar::ConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate> delegate)
-    : InfoBarAndroid(delegate.PassAs<infobars::InfoBarDelegate>()),
-      java_confirm_delegate_() {}
+    : InfoBarAndroid(delegate.Pass()), java_confirm_delegate_() {
+}
 
 ConfirmInfoBar::~ConfirmInfoBar() {
 }
@@ -47,10 +48,15 @@ base::android::ScopedJavaLocalRef<jobject> ConfirmInfoBar::CreateRenderInfoBar(
       base::android::ConvertUTF16ToJavaString(
           env, delegate->GetLinkText());
 
+  ScopedJavaLocalRef<jobject> java_bitmap;
+  if (!delegate->GetIcon().IsEmpty()) {
+    java_bitmap = gfx::ConvertToJavaBitmap(delegate->GetIcon().ToSkBitmap());
+  }
+
   return Java_ConfirmInfoBarDelegate_showConfirmInfoBar(
       env, java_confirm_delegate_.obj(), reinterpret_cast<intptr_t>(this),
-      GetEnumeratedIconId(), message_text.obj(), link_text.obj(),
-      ok_button_text.obj(), cancel_button_text.obj());
+      GetEnumeratedIconId(), java_bitmap.obj(), message_text.obj(),
+      link_text.obj(), ok_button_text.obj(), cancel_button_text.obj());
 }
 
 void ConfirmInfoBar::OnLinkClicked(JNIEnv* env, jobject obj) {

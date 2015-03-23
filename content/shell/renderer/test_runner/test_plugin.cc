@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
 #include "base/strings/stringprintf.h"
+#include "cc/resources/shared_bitmap_manager.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/shell/renderer/test_runner/web_test_delegate.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -17,6 +18,8 @@
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebCompositorSupport.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/public/platform/WebThread.h"
+#include "third_party/WebKit/public/platform/WebTraceLocation.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebKit.h"
@@ -121,10 +124,15 @@ blink::WebPluginContainer::TouchEventRequestType ParseTouchEventRequestType(
   return blink::WebPluginContainer::TouchEventRequestTypeNone;
 }
 
-void DeferredDelete(void* context) {
-  TestPlugin* plugin = static_cast<TestPlugin*>(context);
-  delete plugin;
-}
+class DeferredDeleteTask : public blink::WebThread::Task {
+ public:
+  DeferredDeleteTask(scoped_ptr<TestPlugin> plugin) : plugin_(plugin.Pass()) {}
+
+  void run() override {}
+
+ private:
+  scoped_ptr<TestPlugin> plugin_;
+};
 
 }  // namespace
 
@@ -238,7 +246,9 @@ void TestPlugin::destroy() {
   container_ = 0;
   frame_ = 0;
 
-  blink::Platform::current()->callOnMainThread(DeferredDelete, this);
+  blink::Platform::current()->mainThread()->postTask(
+      blink::WebTraceLocation(__FUNCTION__, __FILE__),
+      new DeferredDeleteTask(make_scoped_ptr(this)));
 }
 
 NPObject* TestPlugin::scriptableObject() {
@@ -290,13 +300,13 @@ void TestPlugin::updateGeometry(
     uint32 sync_point = context_->insertSyncPoint();
     texture_mailbox_ = cc::TextureMailbox(mailbox, GL_TEXTURE_2D, sync_point);
   } else {
-    size_t bytes = 4 * rect_.width * rect_.height;
-    scoped_ptr<base::SharedMemory> bitmap =
-        RenderThread::Get()->HostAllocateSharedMemoryBuffer(bytes);
-    if (!bitmap->Map(bytes)) {
+    scoped_ptr<cc::SharedBitmap> bitmap =
+        RenderThread::Get()->GetSharedBitmapManager()->AllocateSharedBitmap(
+            gfx::Rect(rect_).size());
+    if (!bitmap) {
       texture_mailbox_ = cc::TextureMailbox();
     } else {
-      DrawSceneSoftware(bitmap->memory(), bytes);
+      DrawSceneSoftware(bitmap->pixels());
       texture_mailbox_ = cc::TextureMailbox(
           bitmap.get(), gfx::Size(rect_.width, rect_.height));
       shared_bitmap_ = bitmap.Pass();
@@ -318,7 +328,7 @@ bool TestPlugin::isPlaceholder() {
 static void IgnoreReleaseCallback(uint32 sync_point, bool lost) {
 }
 
-static void ReleaseSharedMemory(scoped_ptr<base::SharedMemory> bitmap,
+static void ReleaseSharedMemory(scoped_ptr<cc::SharedBitmap> bitmap,
                                 uint32 sync_point,
                                 bool lost) {
 }
@@ -414,9 +424,7 @@ void TestPlugin::DrawSceneGL() {
     DrawPrimitive();
 }
 
-void TestPlugin::DrawSceneSoftware(void* memory, size_t bytes) {
-  DCHECK_EQ(bytes, rect_.width * rect_.height * 4u);
-
+void TestPlugin::DrawSceneSoftware(void* memory) {
   SkColor background_color =
       SkColorSetARGB(static_cast<uint8>(scene_.opacity * 255),
                      scene_.background_color[0],
@@ -620,7 +628,6 @@ bool TestPlugin::handleInputEvent(const blink::WebInputEvent& event,
     case blink::WebInputEvent::GestureScrollEnd:
       event_name = "GestureScrollEnd";
       break;
-    case blink::WebInputEvent::GestureScrollUpdateWithoutPropagation:
     case blink::WebInputEvent::GestureScrollUpdate:
       event_name = "GestureScrollUpdate";
       break;
@@ -678,6 +685,10 @@ bool TestPlugin::handleInputEvent(const blink::WebInputEvent& event,
       break;
     case blink::WebInputEvent::TouchCancel:
       event_name = "TouchCancel";
+      break;
+    default:
+      NOTREACHED() << "Received unexpected event type: " << event.type;
+      event_name = "unknown";
       break;
   }
 

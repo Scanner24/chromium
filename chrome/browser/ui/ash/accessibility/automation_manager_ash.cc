@@ -12,6 +12,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/ax_event_notification_details.h"
 #include "content/public/browser/browser_context.h"
+#include "ui/aura/window.h"
 #include "ui/views/accessibility/ax_aura_obj_cache.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
 #include "ui/views/view.h"
@@ -26,8 +27,14 @@ AutomationManagerAsh* AutomationManagerAsh::GetInstance() {
 
 void AutomationManagerAsh::Enable(BrowserContext* context) {
   enabled_ = true;
-  Reset();
+  if (!current_tree_.get())
+    current_tree_.reset(new AXTreeSourceAsh());
+  ResetSerializer();
   SendEvent(context, current_tree_->GetRoot(), ui::AX_EVENT_LOAD_COMPLETE);
+  if (!pending_alert_text_.empty()) {
+    HandleAlert(context, pending_alert_text_);
+    pending_alert_text_.clear();
+  }
 }
 
 void AutomationManagerAsh::Disable() {
@@ -40,19 +47,12 @@ void AutomationManagerAsh::Disable() {
 void AutomationManagerAsh::HandleEvent(BrowserContext* context,
                                          views::View* view,
                                          ui::AXEvent event_type) {
-  if (!enabled_) {
-    return;
-  }
-
-  // TODO(dtseng): Events should only be delivered to extensions with the
-  // desktop permission.
-  views::Widget* widget = view->GetWidget();
-  if (!widget)
+  if (!enabled_)
     return;
 
-  if (!context && g_browser_process->profile_manager()) {
+  if (!context && g_browser_process->profile_manager())
     context = g_browser_process->profile_manager()->GetLastUsedProfile();
-  }
+
   if (!context) {
     LOG(WARNING) << "Accessibility notification but no browser context";
     return;
@@ -61,6 +61,19 @@ void AutomationManagerAsh::HandleEvent(BrowserContext* context,
   views::AXAuraObjWrapper* aura_obj =
       views::AXAuraObjCache::GetInstance()->GetOrCreate(view);
   SendEvent(context, aura_obj, event_type);
+}
+
+void AutomationManagerAsh::HandleAlert(content::BrowserContext* context,
+                                       const std::string& text) {
+  if (!enabled_) {
+    pending_alert_text_ = text;
+    return;
+  }
+
+  views::AXAuraObjWrapper* obj =
+      static_cast<AXRootObjWrapper*>(current_tree_->GetRoot())
+          ->GetAlertForText(text);
+  SendEvent(context, obj, ui::AX_EVENT_ALERT);
 }
 
 void AutomationManagerAsh::DoDefault(int32 id) {
@@ -83,12 +96,12 @@ void AutomationManagerAsh::SetSelection(int32 id, int32 start, int32 end) {
   current_tree_->SetSelection(id, start, end);
 }
 
-AutomationManagerAsh::AutomationManagerAsh() : enabled_(false) {}
+AutomationManagerAsh::AutomationManagerAsh() : enabled_(false) {
+}
 
 AutomationManagerAsh::~AutomationManagerAsh() {}
 
-void AutomationManagerAsh::Reset() {
-  current_tree_.reset(new AXTreeSourceAsh());
+void AutomationManagerAsh::ResetSerializer() {
   current_tree_serializer_.reset(
       new ui::AXTreeSerializer<views::AXAuraObjWrapper*>(
           current_tree_.get()));

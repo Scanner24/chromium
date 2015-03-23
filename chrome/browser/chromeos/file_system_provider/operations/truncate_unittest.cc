@@ -27,7 +27,8 @@ namespace {
 const char kExtensionId[] = "mbflcebpggnecokmikipoihdbecnjfoj";
 const char kFileSystemId[] = "testing-file-system";
 const int kRequestId = 2;
-const base::FilePath::CharType kFilePath[] = "/kitty/and/puppy/happy";
+const base::FilePath::CharType kFilePath[] =
+    FILE_PATH_LITERAL("/kitty/and/puppy/happy");
 const int64 kTruncateLength = 64;
 
 }  // namespace
@@ -35,15 +36,13 @@ const int64 kTruncateLength = 64;
 class FileSystemProviderOperationsTruncateTest : public testing::Test {
  protected:
   FileSystemProviderOperationsTruncateTest() {}
-  virtual ~FileSystemProviderOperationsTruncateTest() {}
+  ~FileSystemProviderOperationsTruncateTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
+    MountOptions mount_options(kFileSystemId, "" /* display_name */);
+    mount_options.writable = true;
     file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* file_system_name */,
-                               true /* writable */,
-                               base::FilePath() /* mount_path */);
+        ProvidedFileSystemInfo(kExtensionId, mount_options, base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;
@@ -55,9 +54,7 @@ TEST_F(FileSystemProviderOperationsTruncateTest, Execute) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  Truncate truncate(NULL,
-                    file_system_info_,
-                    base::FilePath::FromUTF8Unsafe(kFilePath),
+  Truncate truncate(NULL, file_system_info_, base::FilePath(kFilePath),
                     kTruncateLength,
                     base::Bind(&util::LogStatusCallback, &callback_log));
   truncate.SetDispatchEventImplForTesting(
@@ -89,9 +86,7 @@ TEST_F(FileSystemProviderOperationsTruncateTest, Execute_NoListener) {
   util::LoggingDispatchEventImpl dispatcher(false /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  Truncate truncate(NULL,
-                    file_system_info_,
-                    base::FilePath::FromUTF8Unsafe(kFilePath),
+  Truncate truncate(NULL, file_system_info_, base::FilePath(kFilePath),
                     kTruncateLength,
                     base::Bind(&util::LogStatusCallback, &callback_log));
   truncate.SetDispatchEventImplForTesting(
@@ -107,14 +102,10 @@ TEST_F(FileSystemProviderOperationsTruncateTest, Execute_ReadOnly) {
 
   const ProvidedFileSystemInfo read_only_file_system_info(
       kExtensionId,
-      kFileSystemId,
-      "" /* file_system_name */,
-      false /* writable */,
+      MountOptions(kFileSystemId, "" /* display_name */),
       base::FilePath() /* mount_path */);
 
-  Truncate truncate(NULL,
-                    file_system_info_,
-                    base::FilePath::FromUTF8Unsafe(kFilePath),
+  Truncate truncate(NULL, file_system_info_, base::FilePath(kFilePath),
                     kTruncateLength,
                     base::Bind(&util::LogStatusCallback, &callback_log));
   truncate.SetDispatchEventImplForTesting(
@@ -128,9 +119,7 @@ TEST_F(FileSystemProviderOperationsTruncateTest, OnSuccess) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  Truncate truncate(NULL,
-                    file_system_info_,
-                    base::FilePath::FromUTF8Unsafe(kFilePath),
+  Truncate truncate(NULL, file_system_info_, base::FilePath(kFilePath),
                     kTruncateLength,
                     base::Bind(&util::LogStatusCallback, &callback_log));
   truncate.SetDispatchEventImplForTesting(
@@ -150,9 +139,7 @@ TEST_F(FileSystemProviderOperationsTruncateTest, OnError) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  Truncate truncate(NULL,
-                    file_system_info_,
-                    base::FilePath::FromUTF8Unsafe(kFilePath),
+  Truncate truncate(NULL, file_system_info_, base::FilePath(kFilePath),
                     kTruncateLength,
                     base::Bind(&util::LogStatusCallback, &callback_log));
   truncate.SetDispatchEventImplForTesting(

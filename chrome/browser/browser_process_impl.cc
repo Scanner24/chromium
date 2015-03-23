@@ -16,6 +16,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -24,11 +25,12 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/default_tick_clock.h"
-#include "chrome/browser/background/background_mode_manager.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/component_updater/chrome_component_updater_configurator.h"
+#include "chrome/browser/component_updater/supervised_user_whitelist_installer.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
@@ -37,7 +39,6 @@
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/icon_manager.h"
-#include "chrome/browser/idle.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -46,7 +47,6 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/omaha_query_params/chrome_omaha_query_params_delegate.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -60,10 +60,10 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
-#include "chrome/browser/ui/apps/chrome_app_window_client.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/user_manager.h"
+#include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -78,10 +78,11 @@
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/metrics/metrics_service.h"
 #include "components/network_time/network_time_tracker.h"
-#include "components/omaha_query_params/omaha_query_params.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/translate_download_manager.h"
+#include "components/update_client/update_query_params.h"
+#include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/notification_details.h"
@@ -91,9 +92,9 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/extension_l10n_util.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "ui/base/idle/idle.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
 
@@ -104,9 +105,7 @@
 #include "chrome/browser/chrome_browser_main_mac.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "components/gcm_driver/gcm_driver_android.h"
-#else
+#if !defined(OS_ANDROID)
 #include "chrome/browser/chrome_device_client.h"
 #include "chrome/browser/services/gcm/gcm_desktop_utils.h"
 #include "components/gcm_driver/gcm_client_factory.h"
@@ -114,6 +113,10 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
+#endif
+
+#if defined(ENABLE_BACKGROUND)
+#include "chrome/browser/background/background_mode_manager.h"
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -127,7 +130,9 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
+#include "chrome/browser/ui/apps/chrome_app_window_client.h"
 #include "components/storage_monitor/storage_monitor.h"
+#include "extensions/common/extension_l10n_util.h"
 #endif
 
 #if !defined(DISABLE_NACL)
@@ -163,7 +168,7 @@ using content::ResourceDispatcherHost;
 
 BrowserProcessImpl::BrowserProcessImpl(
     base::SequencedTaskRunner* local_state_task_runner,
-    const CommandLine& command_line)
+    const base::CommandLine& command_line)
     : created_watchdog_thread_(false),
       created_browser_policy_connector_(false),
       created_profile_manager_(false),
@@ -193,7 +198,7 @@ BrowserProcessImpl::BrowserProcessImpl(
       chrome::kChromeSearchScheme);
 
 #if defined(OS_MACOSX)
-  InitIdleMonitor();
+  ui::InitIdleMonitor();
 #endif
 
 #if !defined(OS_ANDROID)
@@ -201,10 +206,8 @@ BrowserProcessImpl::BrowserProcessImpl(
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
-#if !defined(USE_ATHENA)
   // Athena sets its own instance during Athena's init process.
   extensions::AppWindowClient::Set(ChromeAppWindowClient::GetInstance());
-#endif
 
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
   ExtensionRendererState::GetInstance()->Init();
@@ -219,8 +222,8 @@ BrowserProcessImpl::BrowserProcessImpl(
 
   message_center::MessageCenter::Initialize();
 
-  omaha_query_params::OmahaQueryParams::SetDelegate(
-      ChromeOmahaQueryParamsDelegate::GetInstance());
+  update_client::UpdateQueryParams::SetDelegate(
+      ChromeUpdateQueryParamsDelegate::GetInstance());
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
@@ -243,11 +246,19 @@ void BrowserProcessImpl::StartTearDown() {
   if (safe_browsing_service_.get())
     safe_browsing_service()->ShutDown();
 #endif
+  promo_resource_service_.reset();
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  plugins_resource_service_.reset();
+#endif
 
   // Need to clear the desktop notification balloons before the io_thread_ and
   // before the profiles, since if there are any still showing we will access
   // those things during teardown.
   notification_ui_manager_.reset();
+
+  // The SupervisedUserWhitelistInstaller observes the ProfileInfoCache, so it
+  // needs to be shut down before the ProfileManager.
+  supervised_user_whitelist_installer_.reset();
 
   // Need to clear profiles (download managers) before the io_thread_.
   {
@@ -346,24 +357,12 @@ unsigned int BrowserProcessImpl::AddRefModule() {
   return module_ref_count_;
 }
 
-static void ShutdownServiceWorkerContext(content::StoragePartition* partition) {
-  partition->GetServiceWorkerContext()->Terminate();
-}
-
 unsigned int BrowserProcessImpl::ReleaseModule() {
   DCHECK(CalledOnValidThread());
   DCHECK_NE(0u, module_ref_count_);
   module_ref_count_--;
   if (0 == module_ref_count_) {
     release_last_reference_callstack_ = base::debug::StackTrace();
-
-    // Stop service workers
-    ProfileManager* pm = profile_manager();
-    std::vector<Profile*> profiles(pm->GetLoadedProfiles());
-    for (size_t i = 0; i < profiles.size(); ++i) {
-      content::BrowserContext::ForEachStoragePartition(
-          profiles[i], base::Bind(ShutdownServiceWorkerContext));
-    }
 
 #if defined(ENABLE_PRINTING)
     // Wait for the pending print jobs to finish. Don't do this later, since
@@ -456,25 +455,9 @@ bool RundownTaskCounter::TimedWait(const base::TimeDelta& max_time) {
   return waitable_event_.TimedWait(max_time);
 }
 
-bool ExperimentUseBrokenSynchronization() {
-  // The logoff behavior used to have a race, whereby it would perform profile
-  // IO writes on the blocking thread pool, but would sycnhronize to the FILE
-  // thread. Windows feels free to terminate any process that's hidden or
-  // destroyed all it's windows, and sometimes Chrome would be terminated
-  // with pending profile IO due to this mis-synchronization.
-  // Under the "WindowsLogoffRace" experiment group, the broken behavior is
-  // emulated, in order to allow measuring what fraction of unclean shutdowns
-  // are due to this bug.
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("WindowsLogoffRace");
-  return group_name == "BrokenSynchronization";
-}
-
 }  // namespace
 
 void BrowserProcessImpl::EndSession() {
-  bool use_broken_synchronization = ExperimentUseBrokenSynchronization();
-
   // Mark all the profiles as clean.
   ProfileManager* pm = profile_manager();
   std::vector<Profile*> profiles(pm->GetLoadedProfiles());
@@ -483,8 +466,7 @@ void BrowserProcessImpl::EndSession() {
     Profile* profile = profiles[i];
     profile->SetExitType(Profile::EXIT_SESSION_ENDED);
 
-    if (!use_broken_synchronization)
-      rundown_counter->Post(profile->GetIOTaskRunner().get());
+    rundown_counter->Post(profile->GetIOTaskRunner().get());
   }
 
   // Tell the metrics service it was cleanly shutdown.
@@ -497,8 +479,7 @@ void BrowserProcessImpl::EndSession() {
     // commit metrics::prefs::kStabilitySessionEndCompleted change immediately.
     local_state()->CommitPendingWrite();
 
-    if (!use_broken_synchronization)
-      rundown_counter->Post(local_state_task_runner_.get());
+    rundown_counter->Post(local_state_task_runner_.get());
 #endif
   }
 
@@ -512,11 +493,6 @@ void BrowserProcessImpl::EndSession() {
   // If you change the condition here, be sure to also change
   // ProfileBrowserTests to match.
 #if defined(USE_X11) || defined(OS_WIN)
-  if (use_broken_synchronization) {
-    rundown_counter->Post(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE).get());
-  }
-
   // Do a best-effort wait on the successful countdown of rundown tasks. Note
   // that if we don't complete "quickly enough", Windows will terminate our
   // process.
@@ -665,7 +641,7 @@ GpuModeManager* BrowserProcessImpl::gpu_mode_manager() {
 void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
     chrome::HostDesktopType host_desktop_type,
     const std::string& ip,
-    int port) {
+    uint16 port) {
   DCHECK(CalledOnValidThread());
 #if !defined(OS_ANDROID)
   // StartupBrowserCreator::LaunchBrowser can be run multiple times when browser
@@ -689,7 +665,7 @@ printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
 
 printing::PrintPreviewDialogController*
     BrowserProcessImpl::print_preview_dialog_controller() {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   DCHECK(CalledOnValidThread());
   if (!print_preview_dialog_controller_.get())
     CreatePrintPreviewDialogController();
@@ -702,7 +678,7 @@ printing::PrintPreviewDialogController*
 
 printing::BackgroundPrintingManager*
     BrowserProcessImpl::background_printing_manager() {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   DCHECK(CalledOnValidThread());
   if (!background_printing_manager_.get())
     CreateBackgroundPrintingManager();
@@ -727,7 +703,9 @@ const std::string& BrowserProcessImpl::GetApplicationLocale() {
 
 void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
   locale_ = locale;
+#if defined(ENABLE_EXTENSIONS)
   extension_l10n_util::SetProcessLocale(locale);
+#endif
   chrome::ChromeContentBrowserClient::SetApplicationLocale(locale);
   translate::TranslateDownloadManager::GetInstance()->set_application_locale(
       locale);
@@ -841,7 +819,9 @@ BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
 
 void BrowserProcessImpl::set_background_mode_manager_for_test(
     scoped_ptr<BackgroundModeManager> manager) {
+#if defined(ENABLE_BACKGROUND)
   background_mode_manager_ = manager.Pass();
+#endif
 }
 
 StatusTray* BrowserProcessImpl::status_tray() {
@@ -892,19 +872,20 @@ BrowserProcessImpl::component_updater() {
   if (!component_updater_.get()) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
       return NULL;
-    component_updater::Configurator* configurator =
+    update_client::Configurator* configurator =
         component_updater::MakeChromeComponentUpdaterConfigurator(
-            CommandLine::ForCurrentProcess(),
+            base::CommandLine::ForCurrentProcess(),
             io_thread()->system_url_request_context_getter());
     // Creating the component updater does not do anything, components
     // need to be registered and Start() needs to be called.
-    component_updater_.reset(ComponentUpdateServiceFactory(configurator));
+    component_updater_.reset(
+        component_updater::ComponentUpdateServiceFactory(configurator));
   }
   return component_updater_.get();
 }
 
 CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
-  if (!crl_set_fetcher_.get())
+  if (!crl_set_fetcher_)
     crl_set_fetcher_ = new CRLSetFetcher();
   return crl_set_fetcher_.get();
 }
@@ -912,14 +893,25 @@ CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
 component_updater::PnaclComponentInstaller*
 BrowserProcessImpl::pnacl_component_installer() {
 #if !defined(DISABLE_NACL)
-  if (!pnacl_component_installer_.get()) {
-    pnacl_component_installer_.reset(
-        new component_updater::PnaclComponentInstaller());
+  if (!pnacl_component_installer_) {
+    pnacl_component_installer_ =
+        new component_updater::PnaclComponentInstaller();
   }
   return pnacl_component_installer_.get();
 #else
-  return NULL;
+  return nullptr;
 #endif
+}
+
+component_updater::SupervisedUserWhitelistInstaller*
+BrowserProcessImpl::supervised_user_whitelist_installer() {
+  if (!supervised_user_whitelist_installer_) {
+    supervised_user_whitelist_installer_ =
+        component_updater::SupervisedUserWhitelistInstaller::Create(
+            component_updater(), &profile_manager()->GetProfileInfoCache(),
+            local_state());
+  }
+  return supervised_user_whitelist_installer_.get();
 }
 
 void BrowserProcessImpl::ResourceDispatcherHostCreated() {
@@ -1006,6 +998,10 @@ void BrowserProcessImpl::PreCreateThreads() {
 }
 
 void BrowserProcessImpl::PreMainMessageLoopRun() {
+  TRACE_EVENT0("startup", "BrowserProcessImpl::PreMainMessageLoopRun");
+  SCOPED_UMA_HISTOGRAM_TIMER(
+      "Startup.BrowserProcessImpl_PreMainMessageLoopRunTime");
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // browser_policy_connector() is created very early because local_state()
   // needs policy to be initialized with the managed preference values.
@@ -1031,7 +1027,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 #if defined(OS_POSIX)
   // Also find plugins in a user-specific plugins dir,
   // e.g. ~/.config/chromium/Plugins.
-  const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& cmd_line = *base::CommandLine::ForCurrentProcess();
   if (!cmd_line.HasSwitch(switches::kDisablePluginsDiscovery)) {
     base::FilePath user_data_dir;
     if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
@@ -1044,15 +1040,16 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   DCHECK(!plugins_resource_service_.get());
-  plugins_resource_service_ = new PluginsResourceService(local_state());
+  plugins_resource_service_.reset(new PluginsResourceService(local_state()));
   plugins_resource_service_->Init();
 #endif
 #endif  // defined(ENABLE_PLUGINS)
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (!command_line.HasSwitch(switches::kDisableWebResources)) {
     DCHECK(!promo_resource_service_.get());
-    promo_resource_service_ = new PromoResourceService;
+    promo_resource_service_.reset(new PromoResourceService);
     promo_resource_service_->StartAfterDelay();
   }
 
@@ -1085,10 +1082,12 @@ void BrowserProcessImpl::CreateNotificationUIManager() {
 }
 
 void BrowserProcessImpl::CreateBackgroundModeManager() {
+#if defined(ENABLE_BACKGROUND)
   DCHECK(background_mode_manager_.get() == NULL);
   background_mode_manager_.reset(
-      new BackgroundModeManager(CommandLine::ForCurrentProcess(),
+      new BackgroundModeManager(*base::CommandLine::ForCurrentProcess(),
                                 &profile_manager()->GetProfileInfoCache()));
+#endif
 }
 
 void BrowserProcessImpl::CreateStatusTray() {
@@ -1097,7 +1096,7 @@ void BrowserProcessImpl::CreateStatusTray() {
 }
 
 void BrowserProcessImpl::CreatePrintPreviewDialogController() {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   DCHECK(print_preview_dialog_controller_.get() == NULL);
   print_preview_dialog_controller_ =
       new printing::PrintPreviewDialogController();
@@ -1107,7 +1106,7 @@ void BrowserProcessImpl::CreatePrintPreviewDialogController() {
 }
 
 void BrowserProcessImpl::CreateBackgroundPrintingManager() {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   DCHECK(background_printing_manager_.get() == NULL);
   background_printing_manager_.reset(new printing::BackgroundPrintingManager());
 #else
@@ -1130,7 +1129,11 @@ void BrowserProcessImpl::CreateGCMDriver() {
   DCHECK(!gcm_driver_);
 
 #if defined(OS_ANDROID)
-  gcm_driver_.reset(new gcm::GCMDriverAndroid);
+  // Android's GCMDriver currently makes the assumption that it's a singleton.
+  // Until this gets fixed, instantiating multiple Java GCMDrivers will throw
+  // an exception, but because they're only initialized on demand these crashes
+  // would be very difficult to triage. See http://crbug.com/437827.
+  NOTREACHED();
 #else
   base::FilePath store_path;
   CHECK(PathService::Get(chrome::DIR_GLOBAL_GCM_STORE, &store_path));
@@ -1139,11 +1142,6 @@ void BrowserProcessImpl::CreateGCMDriver() {
       local_state(),
       store_path,
       system_request_context());
-  // Sign-in is not required for device-level GCM usage. So we just call
-  // OnSignedIn to assume always signed-in. Note that GCM will not be started
-  // at this point since no one has asked for it yet.
-  // TODO(jianli): To be removed when sign-in enforcement is dropped.
-  gcm_driver_->OnSignedIn();
 #endif  // defined(OS_ANDROID)
 }
 
@@ -1186,19 +1184,21 @@ const char* const kSwitchesToAddOnAutorestart[] = {
 };
 
 void BrowserProcessImpl::RestartBackgroundInstance() {
-  CommandLine* old_cl = CommandLine::ForCurrentProcess();
-  scoped_ptr<CommandLine> new_cl(new CommandLine(old_cl->GetProgram()));
+  base::CommandLine* old_cl = base::CommandLine::ForCurrentProcess();
+  scoped_ptr<base::CommandLine> new_cl(
+      new base::CommandLine(old_cl->GetProgram()));
 
-  std::map<std::string, CommandLine::StringType> switches =
+  std::map<std::string, base::CommandLine::StringType> switches =
       old_cl->GetSwitches();
 
   switches::RemoveSwitchesForAutostart(&switches);
 
   // Append the rest of the switches (along with their values, if any)
   // to the new command line
-  for (std::map<std::string, CommandLine::StringType>::const_iterator i =
-      switches.begin(); i != switches.end(); ++i) {
-      CommandLine::StringType switch_value = i->second;
+  for (std::map<std::string, base::CommandLine::StringType>::const_iterator i =
+           switches.begin();
+       i != switches.end(); ++i) {
+    base::CommandLine::StringType switch_value = i->second;
       if (switch_value.length() > 0) {
         new_cl->AppendSwitchNative(i->first, i->second);
       } else {

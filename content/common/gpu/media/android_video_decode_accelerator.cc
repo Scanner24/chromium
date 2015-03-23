@@ -259,9 +259,6 @@ void AndroidVideoDecodeAccelerator::DequeueOutput() {
       }
 
       case media::MEDIA_CODEC_OUTPUT_BUFFERS_CHANGED:
-        RETURN_ON_FAILURE(media_codec_->GetOutputBuffers(),
-                          "Cannot get output buffer from MediaCodec.",
-                          PLATFORM_FAILURE);
         break;
 
       case media::MEDIA_CODEC_OK:
@@ -376,11 +373,10 @@ void AndroidVideoDecodeAccelerator::SendCurrentSurfaceToClient(
                                       default_matrix);
 
   base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &AndroidVideoDecodeAccelerator::NotifyPictureReady,
-          weak_this_factory_.GetWeakPtr(),
-          media::Picture(picture_buffer_id, bitstream_id, gfx::Rect(size_))));
+      FROM_HERE, base::Bind(&AndroidVideoDecodeAccelerator::NotifyPictureReady,
+                            weak_this_factory_.GetWeakPtr(),
+                            media::Picture(picture_buffer_id, bitstream_id,
+                                           gfx::Rect(size_), false)));
 }
 
 void AndroidVideoDecodeAccelerator::Decode(

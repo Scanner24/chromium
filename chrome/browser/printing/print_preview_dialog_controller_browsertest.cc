@@ -8,14 +8,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/print_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/printing/common/print_messages.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
-#include "url/gurl.h"
 #include "ipc/ipc_message_macros.h"
+#include "url/gurl.h"
 
 using content::WebContents;
 using content::WebContentsObserver;
@@ -25,7 +25,7 @@ class RequestPrintPreviewObserver : public WebContentsObserver {
   explicit RequestPrintPreviewObserver(WebContents* dialog)
       : WebContentsObserver(dialog) {
   }
-  virtual ~RequestPrintPreviewObserver() {}
+  ~RequestPrintPreviewObserver() override {}
 
   void set_quit_closure(const base::Closure& quit_closure) {
     quit_closure_ = quit_closure;
@@ -33,7 +33,7 @@ class RequestPrintPreviewObserver : public WebContentsObserver {
 
  private:
   // content::WebContentsObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& message) override {
     IPC_BEGIN_MESSAGE_MAP(RequestPrintPreviewObserver, message)
       IPC_MESSAGE_HANDLER(PrintHostMsg_RequestPrintPreview,
                           OnRequestPrintPreview)
@@ -57,7 +57,7 @@ class PrintPreviewDialogClonedObserver : public WebContentsObserver {
   explicit PrintPreviewDialogClonedObserver(WebContents* dialog)
       : WebContentsObserver(dialog) {
   }
-  virtual ~PrintPreviewDialogClonedObserver() {}
+  ~PrintPreviewDialogClonedObserver() override {}
 
   RequestPrintPreviewObserver* request_preview_dialog_observer() {
     return request_preview_dialog_observer_.get();
@@ -65,9 +65,8 @@ class PrintPreviewDialogClonedObserver : public WebContentsObserver {
 
  private:
   // content::WebContentsObserver implementation.
-  virtual void DidCloneToNewWebContents(
-      WebContents* old_web_contents,
-      WebContents* new_web_contents) OVERRIDE {
+  void DidCloneToNewWebContents(WebContents* old_web_contents,
+                                WebContents* new_web_contents) override {
     request_preview_dialog_observer_.reset(
         new RequestPrintPreviewObserver(new_web_contents));
   }
@@ -83,15 +82,13 @@ class PrintPreviewDialogDestroyedObserver : public WebContentsObserver {
       : WebContentsObserver(dialog),
         dialog_destroyed_(false) {
   }
-  virtual ~PrintPreviewDialogDestroyedObserver() {}
+  ~PrintPreviewDialogDestroyedObserver() override {}
 
   bool dialog_destroyed() const { return dialog_destroyed_; }
 
  private:
   // content::WebContentsObserver implementation.
-  virtual void WebContentsDestroyed() OVERRIDE {
-    dialog_destroyed_ = true;
-  }
+  void WebContentsDestroyed() override { dialog_destroyed_ = true; }
 
   bool dialog_destroyed_;
 
@@ -101,7 +98,7 @@ class PrintPreviewDialogDestroyedObserver : public WebContentsObserver {
 class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
  public:
   PrintPreviewDialogControllerBrowserTest() : initiator_(NULL) {}
-  virtual ~PrintPreviewDialogControllerBrowserTest() {}
+  ~PrintPreviewDialogControllerBrowserTest() override {}
 
   WebContents* initiator() {
     return initiator_;
@@ -121,7 +118,7 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
   }
 
  private:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     WebContents* first_tab =
         browser()->tab_strip_model()->GetActiveWebContents();
     ASSERT_TRUE(first_tab);
@@ -139,7 +136,7 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
     ASSERT_NE(first_tab, initiator_);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     cloned_tab_observer_.reset();
     initiator_ = NULL;
   }

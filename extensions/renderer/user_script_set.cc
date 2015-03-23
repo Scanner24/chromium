@@ -4,11 +4,13 @@
 
 #include "extensions/renderer/user_script_set.h"
 
+#include "base/memory/ref_counted.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/renderer/extension_injection_host.h"
 #include "extensions/renderer/extensions_renderer_client.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/script_injection.h"
@@ -107,14 +109,14 @@ bool UserScriptSet::UpdateUserScripts(
     return false;
 
   // Unpickle scripts.
-  uint64 num_scripts = 0;
+  size_t num_scripts = 0;
   Pickle pickle(reinterpret_cast<char*>(shared_memory_->memory()), pickle_size);
   PickleIterator iter(pickle);
-  CHECK(pickle.ReadUInt64(&iter, &num_scripts));
+  CHECK(iter.ReadSizeT(&num_scripts));
 
   scripts_.clear();
   scripts_.reserve(num_scripts);
-  for (uint64 i = 0; i < num_scripts; ++i) {
+  for (size_t i = 0; i < num_scripts; ++i) {
     scoped_ptr<UserScript> script(new UserScript());
     script->Unpickle(pickle, &iter);
 
@@ -124,14 +126,14 @@ bool UserScriptSet::UpdateUserScripts(
     for (size_t j = 0; j < script->js_scripts().size(); ++j) {
       const char* body = NULL;
       int body_length = 0;
-      CHECK(pickle.ReadData(&iter, &body, &body_length));
+      CHECK(iter.ReadData(&body, &body_length));
       script->js_scripts()[j].set_external_content(
           base::StringPiece(body, body_length));
     }
     for (size_t j = 0; j < script->css_scripts().size(); ++j) {
       const char* body = NULL;
       int body_length = 0;
-      CHECK(pickle.ReadData(&iter, &body, &body_length));
+      CHECK(iter.ReadData(&body, &body_length));
       script->css_scripts()[j].set_external_content(
           base::StringPiece(body, body_length));
     }
@@ -194,8 +196,11 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
   scoped_ptr<ScriptInjector> injector(new UserScriptInjector(script,
                                                              this,
                                                              is_declarative));
+  HostID host_id(HostID::EXTENSIONS, extension->id());
+  ExtensionInjectionHost extension_injection_host(
+      make_scoped_refptr<const Extension>(extension));
   if (injector->CanExecuteOnFrame(
-          extension,
+          &extension_injection_host,
           web_frame,
           -1,  // Content scripts are not tab-specific.
           web_frame->top()->document().url()) ==
@@ -211,7 +216,7 @@ scoped_ptr<ScriptInjection> UserScriptSet::GetInjectionForScript(
     injection.reset(new ScriptInjection(
         injector.Pass(),
         web_frame->toWebLocalFrame(),
-        extension->id(),
+        host_id,
         run_location,
         tab_id));
   }

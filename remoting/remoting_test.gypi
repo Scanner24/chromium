@@ -9,6 +9,7 @@
       'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
+        '../components/components.gyp:policy_component_test_support',
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
@@ -26,10 +27,6 @@
         'host/fake_host_status_monitor.h',
         'host/fake_mouse_cursor_monitor.cc',
         'host/fake_mouse_cursor_monitor.h',
-        'host/policy_hack/fake_policy_watcher.cc',
-        'host/policy_hack/fake_policy_watcher.h',
-        'host/policy_hack/mock_policy_callback.cc',
-        'host/policy_hack/mock_policy_callback.h',
         'protocol/fake_authenticator.cc',
         'protocol/fake_authenticator.h',
         'protocol/fake_datagram_socket.cc',
@@ -75,6 +72,7 @@
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
+        '../components/components.gyp:policy',
         '../ipc/ipc.gyp:ipc',
         '../net/net.gyp:net_test_support',
         '../ppapi/ppapi.gyp:ppapi_cpp',
@@ -121,6 +119,7 @@
         'client/audio_player_unittest.cc',
         'client/client_status_logger_unittest.cc',
         'client/key_event_mapper_unittest.cc',
+        'client/plugin/empty_cursor_filter_unittest.cc',
         'client/plugin/normalizing_input_filter_cros_unittest.cc',
         'client/plugin/normalizing_input_filter_mac_unittest.cc',
         'client/server_log_entry_client_unittest.cc',
@@ -131,11 +130,13 @@
         'codec/video_encoder_helper_unittest.cc',
         'codec/video_encoder_verbatim_unittest.cc',
         'codec/video_encoder_vpx_unittest.cc',
+        'host/audio_pump_unittest.cc',
         'host/audio_silence_detector_unittest.cc',
         'host/branding.cc',
         'host/branding.h',
         'host/capture_scheduler_unittest.cc',
         'host/chromeos/aura_desktop_capturer_unittest.cc',
+        'host/chromeos/clipboard_aura_unittest.cc',
         'host/chromoting_host_context_unittest.cc',
         'host/chromoting_host_unittest.cc',
         'host/client_session_unittest.cc',
@@ -151,23 +152,24 @@
         'host/gnubby_auth_handler_posix_unittest.cc',
         'host/heartbeat_sender_unittest.cc',
         'host/host_change_notification_listener_unittest.cc',
+        'host/host_config_unittest.cc',
         'host/host_extension_session_manager_unittest.cc',
         'host/host_mock_objects.cc',
         'host/host_status_logger_unittest.cc',
-        'host/host_status_sender_unittest.cc',
         'host/ipc_desktop_environment_unittest.cc',
+        'host/it2me/it2me_confirmation_dialog_proxy_unittest.cc',
         'host/it2me/it2me_native_messaging_host_unittest.cc',
-        'host/json_host_config_unittest.cc',
         'host/linux/audio_pipe_reader_unittest.cc',
         'host/linux/unicode_to_keysym_unittest.cc',
         'host/linux/x_server_clipboard_unittest.cc',
         'host/local_input_monitor_unittest.cc',
+        'host/mouse_shape_pump_unittest.cc',
         'host/native_messaging/native_messaging_reader_unittest.cc',
         'host/native_messaging/native_messaging_writer_unittest.cc',
         'host/pairing_registry_delegate_linux_unittest.cc',
         'host/pairing_registry_delegate_win_unittest.cc',
         'host/pin_hash_unittest.cc',
-        'host/policy_hack/policy_watcher_unittest.cc',
+        'host/policy_watcher_unittest.cc',
         'host/register_support_host_request_unittest.cc',
         'host/remote_input_filter_unittest.cc',
         'host/resizing_host_observer_unittest.cc',
@@ -180,8 +182,8 @@
         'host/setup/pin_validator_unittest.cc',
         'host/shaped_desktop_capturer_unittest.cc',
         'host/token_validator_factory_impl_unittest.cc',
+        'host/video_frame_pump_unittest.cc',
         'host/video_frame_recorder_unittest.cc',
-        'host/video_scheduler_unittest.cc',
         'host/win/rdp_client_unittest.cc',
         'host/win/worker_process_launcher.cc',
         'host/win/worker_process_launcher.h',
@@ -248,26 +250,30 @@
           'sources!': [
             'client/plugin/normalizing_input_filter_cros_unittest.cc',
             'host/chromeos/aura_desktop_capturer_unittest.cc',
+            'host/clipboard_aura_unittest.cc',
+          ],
+        }, { # chromeos==1
+          'sources!': [
+            'host/linux/x_server_clipboard_unittest.cc',
+            'host/local_input_monitor_unittest.cc',
+          ],
+        }],
+        [ 'use_ozone==1', {
+          'sources!': [
+            'host/local_input_monitor_unittest.cc',
           ],
         }],
         ['enable_remoting_host == 0', {
           'dependencies!': [
             'remoting_host',
             'remoting_host_setup_base',
+            'remoting_it2me_host_static',
             'remoting_native_messaging_base',
           ],
           'sources/': [
             ['exclude', '^codec/'],
             ['exclude', '^host/'],
             ['exclude', '^base/resources_unittest\\.cc$'],
-          ]
-        }],
-        ['enable_it2me_host == 0', {
-          'dependencies!': [
-            'remoting_it2me_host_static',
-          ],
-          'sources/': [
-            ['exclude', '^host/it2me/'],
           ]
         }],
         [ 'OS == "linux" and use_allocator!="none"', {
@@ -280,38 +286,14 @@
     {
       'target_name': 'remoting_browser_test_resources',
       'type': 'none',
-      'variables': {
-        'zip_script': '../build/android/gyp/zip.py',
-      },
       'copies': [
         {
-          'destination': '<(PRODUCT_DIR)',
+          'destination': '<(PRODUCT_DIR)/remoting/browser_test_resources',
             'files': [
-              '<@(remoting_webapp_js_browser_test_files)',
+              '<@(remoting_webapp_browsertest_all_js_files)',
             ],
         },
-      ], #end of copies
-      'actions': [
-        {
-          # Store the browser test resources into a zip file so there is a
-          # consistent filename to reference for build archiving (i.e. in
-          # FILES.cfg).
-          'action_name': 'zip browser test resources',
-          'inputs': [
-            '<(zip_script)',
-            '<@(remoting_webapp_js_browser_test_files)'
-          ],
-          'outputs': [
-            '<(PRODUCT_DIR)/remoting-browser-tests.zip',
-          ],
-          'action': [
-            'python',
-            '<(zip_script)',
-            '--input-dir', 'webapp/browser_test',
-            '--output', '<@(_outputs)',
-           ],
-        },
-      ], # end of actions
+      ], # end of copies
     },  # end of target 'remoting_browser_test_resources'
     {
       'target_name': 'remoting_webapp_unittest',
@@ -319,7 +301,7 @@
       'variables': {
         'output_dir': '<(PRODUCT_DIR)/remoting/unittests',
         'webapp_js_files': [
-          '<@(remoting_webapp_main_html_js_files)',
+          '<@(remoting_webapp_shared_main_html_js_files)',
           '<@(remoting_webapp_js_wcs_sandbox_files)',
           '<@(remoting_webapp_background_js_files)',
         ]
@@ -351,8 +333,7 @@
           'destination': '<(output_dir)',
           'files': [
             '<@(webapp_js_files)',
-            '<@(remoting_webapp_unittest_js_files)',
-            '<@(remoting_webapp_unittest_additional_files)'
+            '<@(remoting_webapp_unittest_all_files)',
           ],
         },
       ],
@@ -363,7 +344,7 @@
             'webapp/build-html.py',
             '<(remoting_webapp_unittest_template_main)',
             '<@(webapp_js_files)',
-            '<@(remoting_webapp_unittest_js_files)'
+            '<@(remoting_webapp_unittest_all_js_files)'
           ],
           'outputs': [
             '<(output_dir)/unittest.html',
@@ -376,13 +357,13 @@
             # arguments.  Therefore, the excludejs flag must be set before the
             # instrumentedjs flag or else GYP will ignore the files in the
             # exclude list.
-            '--exclude-js', '<@(remoting_webapp_unittest_exclude_files)',
-            '--js', '<@(remoting_webapp_unittest_js_files)',
+            '--exclude-js', '<@(remoting_webapp_unittest_exclude_js_files)',
+            '--js', '<@(remoting_webapp_unittest_all_js_files)',
             '--instrument-js', '<@(webapp_js_files)',
            ],
         },
       ],
-    },  # end of target 'remoting_webapp_js_unittest'
+    },  # end of target 'remoting_webapp_unittest'
   ],  # end of targets
 
   'conditions': [

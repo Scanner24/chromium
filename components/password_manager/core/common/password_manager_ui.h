@@ -16,12 +16,7 @@ enum State {
   // The password manager has nothing to do with the current site.
   INACTIVE_STATE,
 
-  // A password has been typed in and submitted successfully. Now we need to
-  // display an Omnibox icon, and pop up a bubble asking the user whether
-  // they'd like to save the password.
-  PENDING_PASSWORD_AND_BUBBLE_STATE,
-
-  // A password is pending, but we don't need to pop up a bubble.
+  // A password is pending.
   PENDING_PASSWORD_STATE,
 
   // A password has been saved and we wish to display UI confirming the save
@@ -35,6 +30,20 @@ enum State {
   // The user has blacklisted the site rendered in the current WebContents.
   // The icon needs to be visible, in the blacklisted state.
   BLACKLIST_STATE,
+
+  // The site has asked user to choose a credential.
+  CREDENTIAL_REQUEST_STATE,
+
+  // The user was auto signed in to the site. The icon and the auto-signin toast
+  // should be visible.
+  AUTO_SIGNIN_STATE,
+
+  // Password manager failed to detect the form, bubble should outlive next
+  // navigation.
+  ASK_USER_REPORT_URL_BUBBLE_SHOWN_BEFORE_TRANSITION_STATE,
+
+  // "Allow to collect URL?" bubble is showing.
+  ASK_USER_REPORT_URL_BUBBLE_SHOWN_STATE,
 };
 
 // The position of a password item in a list of credentials.
@@ -46,16 +55,7 @@ enum PasswordItemPosition {
   SUBSEQUENT_ITEM,
 };
 
-// Returns true if |state| represents a pending password.
-bool IsPendingState(State state);
-
-// Returns true if this state show cause the bubble to be shown without user
-// interaction.
-bool IsAutomaticDisplayState(State state);
-
-// Returns the state that the bubble should be in after the automatic display
-// occurs.
-State GetEndStateForAutomaticState(State state);
+bool IsAskSubmitURLState(State state);
 
 }  // namespace ui
 

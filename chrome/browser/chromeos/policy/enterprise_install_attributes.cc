@@ -121,7 +121,7 @@ void EnterpriseInstallAttributes::ReadAttributesIfReady(
         !cryptohome_util::InstallAttributesIsFirstInstall()) {
       device_locked_ = true;
 
-      static const char* kEnterpriseAttributes[] = {
+      static const char* const kEnterpriseAttributes[] = {
         kAttrEnterpriseDeviceId,
         kAttrEnterpriseDomain,
         kAttrEnterpriseMode,
@@ -161,7 +161,7 @@ void EnterpriseInstallAttributes::LockDevice(
       std::string domain = gaia::ExtractDomainName(user);
       callback.Run(
           (!registration_domain_.empty() && domain == registration_domain_) ?
-              LOCK_SUCCESS : LOCK_WRONG_USER);
+              LOCK_SUCCESS : LOCK_WRONG_DOMAIN);
     }
     return;
   }
@@ -197,12 +197,13 @@ void EnterpriseInstallAttributes::LockDeviceIfAttributesIsReady(
   // Make sure we really have a working InstallAttrs.
   if (cryptohome_util::InstallAttributesIsInvalid()) {
     LOG(ERROR) << "Install attributes invalid.";
-    callback.Run(LOCK_BACKEND_ERROR);
+    callback.Run(LOCK_BACKEND_INVALID);
     return;
   }
 
   if (!cryptohome_util::InstallAttributesIsFirstInstall()) {
-    callback.Run(LOCK_BACKEND_ERROR);
+    LOG(ERROR) << "Install attributes already installed.";
+    callback.Run(LOCK_ALREADY_LOCKED);
     return;
   }
 
@@ -215,8 +216,8 @@ void EnterpriseInstallAttributes::LockDeviceIfAttributesIsReady(
     // Set values in the InstallAttrs and lock it.
     if (!cryptohome_util::InstallAttributesSet(kAttrConsumerKioskEnabled,
                                                "true")) {
-      LOG(ERROR) << "Failed writing attributes";
-      callback.Run(LOCK_BACKEND_ERROR);
+      LOG(ERROR) << "Failed writing attributes.";
+      callback.Run(LOCK_SET_ERROR);
       return;
     }
   } else {
@@ -230,8 +231,8 @@ void EnterpriseInstallAttributes::LockDeviceIfAttributesIsReady(
         !cryptohome_util::InstallAttributesSet(kAttrEnterpriseMode, mode) ||
         !cryptohome_util::InstallAttributesSet(kAttrEnterpriseDeviceId,
                                                device_id)) {
-      LOG(ERROR) << "Failed writing attributes";
-      callback.Run(LOCK_BACKEND_ERROR);
+      LOG(ERROR) << "Failed writing attributes.";
+      callback.Run(LOCK_SET_ERROR);
       return;
     }
   }
@@ -239,7 +240,7 @@ void EnterpriseInstallAttributes::LockDeviceIfAttributesIsReady(
   if (!cryptohome_util::InstallAttributesFinalize() ||
       cryptohome_util::InstallAttributesIsFirstInstall()) {
     LOG(ERROR) << "Failed locking.";
-    callback.Run(LOCK_BACKEND_ERROR);
+    callback.Run(LOCK_FINALIZE_ERROR);
     return;
   }
 
@@ -255,8 +256,8 @@ void EnterpriseInstallAttributes::OnReadImmutableAttributes(
     const LockResultCallback& callback) {
 
   if (GetRegistrationUser() != registration_user) {
-    LOG(ERROR) << "Locked data doesn't match";
-    callback.Run(LOCK_BACKEND_ERROR);
+    LOG(ERROR) << "Locked data doesn't match.";
+    callback.Run(LOCK_READBACK_ERROR);
     return;
   }
 
@@ -303,7 +304,7 @@ DeviceMode EnterpriseInstallAttributes::GetMode() {
 // that all changes to the constants are reflected there as well.
 const char EnterpriseInstallAttributes::kConsumerDeviceMode[] = "consumer";
 const char EnterpriseInstallAttributes::kEnterpriseDeviceMode[] = "enterprise";
-const char EnterpriseInstallAttributes::kRetailKioskDeviceMode[] = "kiosk";
+const char EnterpriseInstallAttributes::kLegacyRetailDeviceMode[] = "kiosk";
 const char EnterpriseInstallAttributes::kConsumerKioskDeviceMode[] =
     "consumer_kiosk";
 const char EnterpriseInstallAttributes::kUnknownDeviceMode[] = "unknown";
@@ -327,8 +328,8 @@ std::string EnterpriseInstallAttributes::GetDeviceModeString(DeviceMode mode) {
       return EnterpriseInstallAttributes::kConsumerDeviceMode;
     case DEVICE_MODE_ENTERPRISE:
       return EnterpriseInstallAttributes::kEnterpriseDeviceMode;
-    case DEVICE_MODE_RETAIL_KIOSK:
-      return EnterpriseInstallAttributes::kRetailKioskDeviceMode;
+    case DEVICE_MODE_LEGACY_RETAIL_MODE:
+      return EnterpriseInstallAttributes::kLegacyRetailDeviceMode;
     case DEVICE_MODE_CONSUMER_KIOSK_AUTOLAUNCH:
       return EnterpriseInstallAttributes::kConsumerKioskDeviceMode;
     case DEVICE_MODE_PENDING:
@@ -345,8 +346,8 @@ DeviceMode EnterpriseInstallAttributes::GetDeviceModeFromString(
     return DEVICE_MODE_CONSUMER;
   else if (mode == EnterpriseInstallAttributes::kEnterpriseDeviceMode)
     return DEVICE_MODE_ENTERPRISE;
-  else if (mode == EnterpriseInstallAttributes::kRetailKioskDeviceMode)
-    return DEVICE_MODE_RETAIL_KIOSK;
+  else if (mode == EnterpriseInstallAttributes::kLegacyRetailDeviceMode)
+    return DEVICE_MODE_LEGACY_RETAIL_MODE;
   else if (mode == EnterpriseInstallAttributes::kConsumerKioskDeviceMode)
     return DEVICE_MODE_CONSUMER_KIOSK_AUTOLAUNCH;
   NOTREACHED() << "Unknown device mode string: " << mode;

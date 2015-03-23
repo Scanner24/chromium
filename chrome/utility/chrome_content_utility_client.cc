@@ -6,13 +6,13 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
 #include "chrome/utility/utility_message_handler.h"
-#include "chrome/utility/web_resource_unpacker.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/utility/utility_thread.h"
@@ -23,13 +23,14 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/zlib/google/zip.h"
 #include "ui/gfx/codec/jpeg_codec.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/utility/profile_import_handler.h"
 #endif
 
 #if defined(OS_WIN)
+#include "chrome/utility/font_cache_handler_win.h"
 #include "chrome/utility/shell_handler_win.h"
 #endif
 
@@ -41,7 +42,7 @@
 #include "chrome/utility/media_galleries/media_metadata_parser.h"
 #endif
 
-#if defined(ENABLE_FULL_PRINTING) || defined(OS_WIN)
+#if defined(ENABLE_PRINT_PREVIEW) || defined(OS_WIN)
 #include "chrome/utility/printing_handler.h"
 #endif
 
@@ -86,7 +87,7 @@ ChromeContentUtilityClient::ChromeContentUtilityClient()
   handlers_.push_back(new image_writer::ImageWriterHandler());
 #endif
 
-#if defined(ENABLE_FULL_PRINTING) || defined(OS_WIN)
+#if defined(ENABLE_PRINT_PREVIEW) || defined(OS_WIN)
   handlers_.push_back(new PrintingHandler());
 #endif
 
@@ -99,6 +100,7 @@ ChromeContentUtilityClient::ChromeContentUtilityClient()
 
 #if defined(OS_WIN)
   handlers_.push_back(new ShellHandler());
+  handlers_.push_back(new FontCacheHandler());
 #endif
 }
 
@@ -107,7 +109,7 @@ ChromeContentUtilityClient::~ChromeContentUtilityClient() {
 
 void ChromeContentUtilityClient::UtilityThreadStarted() {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::ExtensionsHandler::UtilityThreadStarted();
+  extensions::UtilityHandler::UtilityThreadStarted();
 #endif
 
   if (kMessageWhitelistSize > 0) {
@@ -127,11 +129,10 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeContentUtilityClient, message)
-    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_UnpackWebResource,
-                        OnUnpackWebResource)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_DecodeImage, OnDecodeImage)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_RobustJPEGDecodeImage,
                         OnRobustJPEGDecodeImage)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_PatchFileBsdiff,
                         OnPatchFileBsdiff)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_PatchFileCourgette,
@@ -163,10 +164,6 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 void ChromeContentUtilityClient::PreSandboxStartup() {
 #if defined(ENABLE_EXTENSIONS)
   extensions::ExtensionsHandler::PreSandboxStartup();
-#endif
-
-#if defined(ENABLE_FULL_PRINTING) || defined(OS_WIN)
-  PrintingHandler::PreSandboxStartup();
 #endif
 
 #if defined(ENABLE_MDNS)
@@ -222,23 +219,6 @@ void ChromeContentUtilityClient::DecodeImageAndSend(
   ReleaseProcessIfNeeded();
 }
 
-void ChromeContentUtilityClient::OnUnpackWebResource(
-    const std::string& resource_data) {
-  // Parse json data.
-  // TODO(mrc): Add the possibility of a template that controls parsing, and
-  // the ability to download and verify images.
-  WebResourceUnpacker unpacker(resource_data);
-  if (unpacker.Run()) {
-    Send(new ChromeUtilityHostMsg_UnpackWebResource_Succeeded(
-        *unpacker.parsed_json()));
-  } else {
-    Send(new ChromeUtilityHostMsg_UnpackWebResource_Failed(
-        unpacker.error_message()));
-  }
-
-  ReleaseProcessIfNeeded();
-}
-
 void ChromeContentUtilityClient::OnDecodeImage(
     const std::vector<unsigned char>& encoded_data, bool shrink_to_fit) {
   DecodeImageAndSend(encoded_data, shrink_to_fit);
@@ -249,6 +229,9 @@ void ChromeContentUtilityClient::OnCreateZipFile(
     const base::FilePath& src_dir,
     const std::vector<base::FilePath>& src_relative_paths,
     const base::FileDescriptor& dest_fd) {
+  // dest_fd should be closed in the function. See ipc/ipc_message_util.h for
+  // details.
+  base::ScopedFD fd_closer(dest_fd.fd);
   bool succeeded = true;
 
   // Check sanity of source relative paths. Reject if path is absolute or
@@ -287,6 +270,21 @@ void ChromeContentUtilityClient::OnRobustJPEGDecodeImage(
     }
   } else {
     Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
+  }
+  ReleaseProcessIfNeeded();
+}
+
+void ChromeContentUtilityClient::OnParseJSON(const std::string& json) {
+  int error_code;
+  std::string error;
+  base::Value* value = base::JSONReader::ReadAndReturnError(
+      json, base::JSON_PARSE_RFC, &error_code, &error);
+  if (value) {
+    base::ListValue wrapper;
+    wrapper.Append(value);
+    Send(new ChromeUtilityHostMsg_ParseJSON_Succeeded(wrapper));
+  } else {
+    Send(new ChromeUtilityHostMsg_ParseJSON_Failed(error));
   }
   ReleaseProcessIfNeeded();
 }

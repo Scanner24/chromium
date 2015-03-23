@@ -60,7 +60,7 @@ void ChromotingClient::Start(
 
   connection_.set_client_stub(this);
   connection_.set_clipboard_stub(this);
-  connection_.set_video_stub(video_renderer_);
+  connection_.set_video_stub(video_renderer_->GetVideoStub());
   connection_.set_audio_stub(audio_decode_scheduler_.get());
 
   connection_.Connect(signal_strategy, transport_factory.Pass(),
@@ -147,7 +147,7 @@ void ChromotingClient::OnAuthenticated() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   // Initialize the decoder.
-  video_renderer_->Initialize(connection_.config());
+  video_renderer_->OnSessionConfig(connection_.config());
   if (connection_.config().is_audio_enabled())
     audio_decode_scheduler_->Initialize(connection_.config());
 

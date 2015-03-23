@@ -13,7 +13,7 @@
 namespace content {
 
 BrowserCompositorOutputSurface::BrowserCompositorOutputSurface(
-    const scoped_refptr<ContextProviderCommandBuffer>& context_provider,
+    const scoped_refptr<cc::ContextProvider>& context_provider,
     int surface_id,
     IDMap<BrowserCompositorOutputSurface>* output_surface_map,
     const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager)
@@ -68,14 +68,6 @@ bool BrowserCompositorOutputSurface::BindToClient(
   return true;
 }
 
-void BrowserCompositorOutputSurface::OnSwapBuffersComplete() {
-  // On Mac, delay acknowledging the swap to the output surface client until
-  // it has been drawn.
-#if !defined(OS_MACOSX)
-  cc::OutputSurface::OnSwapBuffersComplete();
-#endif
-}
-
 void BrowserCompositorOutputSurface::OnUpdateVSyncParameters(
     base::TimeTicks timebase,
     base::TimeDelta interval) {
@@ -95,11 +87,5 @@ void BrowserCompositorOutputSurface::OnUpdateVSyncParametersFromGpu(
 void BrowserCompositorOutputSurface::SetReflector(ReflectorImpl* reflector) {
   reflector_ = reflector;
 }
-
-#if defined(OS_MACOSX)
-void BrowserCompositorOutputSurface::OnSurfaceDisplayed() {
-  cc::OutputSurface::OnSwapBuffersComplete();
-}
-#endif
 
 }  // namespace content

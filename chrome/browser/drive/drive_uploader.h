@@ -11,8 +11,9 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/drive/drive_service_interface.h"
-#include "google_apis/drive/gdata_errorcode.h"
+#include "google_apis/drive/drive_api_error_codes.h"
 
 class GURL;
 
@@ -33,16 +34,15 @@ class DriveServiceInterface;
 // terminated before the completion due to some errors. It can be used to
 // resume it.
 typedef base::Callback<void(
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     const GURL& upload_location,
     scoped_ptr<google_apis::FileResource> resource_entry)>
     UploadCompletionCallback;
 
 class DriveUploaderInterface {
  public:
-  typedef DriveServiceInterface::InitiateUploadNewFileOptions
-      UploadNewFileOptions;
-  typedef DriveServiceInterface::InitiateUploadExistingFileOptions
+  typedef DriveServiceInterface::UploadNewFileOptions UploadNewFileOptions;
+  typedef DriveServiceInterface::UploadExistingFileOptions
       UploadExistingFileOptions;
 
   virtual ~DriveUploaderInterface() {}
@@ -115,30 +115,30 @@ class DriveUploader : public DriveUploaderInterface {
  public:
   DriveUploader(DriveServiceInterface* drive_service,
                 const scoped_refptr<base::TaskRunner>& blocking_task_runner);
-  virtual ~DriveUploader();
+  ~DriveUploader() override;
 
   // DriveUploaderInterface overrides.
-  virtual google_apis::CancelCallback UploadNewFile(
+  google_apis::CancelCallback UploadNewFile(
       const std::string& parent_resource_id,
       const base::FilePath& local_file_path,
       const std::string& title,
       const std::string& content_type,
       const UploadNewFileOptions& options,
       const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) OVERRIDE;
-  virtual google_apis::CancelCallback UploadExistingFile(
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback UploadExistingFile(
       const std::string& resource_id,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadExistingFileOptions& options,
       const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) OVERRIDE;
-  virtual google_apis::CancelCallback ResumeUploadFile(
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback ResumeUploadFile(
       const GURL& upload_location,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) OVERRIDE;
+      const google_apis::ProgressCallback& progress_callback) override;
 
  private:
   struct UploadFileInfo;
@@ -154,24 +154,26 @@ class DriveUploader : public DriveUploaderInterface {
       const StartInitiateUploadCallback& start_initiate_upload_callback,
       bool get_file_size_result);
 
-  // Starts to initiate the new file uploading.
-  // Upon completion, OnUploadLocationReceived should be called.
-  void StartInitiateUploadNewFile(
-      const std::string& parent_resource_id,
-      const std::string& title,
-      const UploadNewFileOptions& options,
-      scoped_ptr<UploadFileInfo> upload_file_info);
+  // Checks file size and call InitiateUploadNewFile or MultipartUploadNewFile
+  // API.  Upon completion, OnUploadLocationReceived (for InitiateUploadNewFile)
+  // or OnMultipartUploadComplete (for MultipartUploadNewFile) should be called.
+  void CallUploadServiceAPINewFile(const std::string& parent_resource_id,
+                                   const std::string& title,
+                                   const UploadNewFileOptions& options,
+                                   scoped_ptr<UploadFileInfo> upload_file_info);
 
-  // Starts to initiate the existing file uploading.
-  // Upon completion, OnUploadLocationReceived should be called.
-  void StartInitiateUploadExistingFile(
+  // Checks file size and call InitiateUploadExistingFile or
+  // MultipartUploadExistingFile API.  Upon completion, OnUploadLocationReceived
+  // (for InitiateUploadExistingFile) or OnMultipartUploadComplete (for
+  // MultipartUploadExistingFile) should be called.
+  void CallUploadServiceAPIExistingFile(
       const std::string& resource_id,
       const UploadExistingFileOptions& options,
       scoped_ptr<UploadFileInfo> upload_file_info);
 
   // DriveService callback for InitiateUpload.
   void OnUploadLocationReceived(scoped_ptr<UploadFileInfo> upload_file_info,
-                                google_apis::GDataErrorCode code,
+                                google_apis::DriveApiErrorCode code,
                                 const GURL& upload_location);
 
   // Starts to get the current upload status for the file uploading.
@@ -192,9 +194,17 @@ class DriveUploader : public DriveUploaderInterface {
                         int64 progress_of_chunk,
                         int64 total_of_chunk);
 
-  // Handle failed uploads.
+  // Handles failed uploads.
   void UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
-                    google_apis::GDataErrorCode error);
+                    google_apis::DriveApiErrorCode error);
+
+  // Handles completion/error of multipart uploading.
+  void OnMultipartUploadComplete(scoped_ptr<UploadFileInfo> upload_file_info,
+                                 google_apis::DriveApiErrorCode error,
+                                 scoped_ptr<google_apis::FileResource> entry);
+
+  // The class is expected to run on UI thread.
+  base::ThreadChecker thread_checker_;
 
   // The lifetime of this object should be guaranteed to exceed that of the
   // DriveUploader instance.

@@ -15,9 +15,12 @@
 #include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "sandbox/linux/bpf_dsl/bpf_dsl_impl.h"
+#include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
 #include "sandbox/linux/seccomp-bpf/errorcode.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 #define CASES SANDBOX_BPF_DSL_CASES
 
@@ -60,11 +63,11 @@ class Stubs {
 #endif
 };
 
-class BasicPolicy : public SandboxBPFDSLPolicy {
+class BasicPolicy : public Policy {
  public:
   BasicPolicy() {}
-  virtual ~BasicPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~BasicPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_getpgid) {
       const Arg<pid_t> pid(0);
       return If(pid == 0, Error(EPERM)).Else(Error(EINVAL));
@@ -90,11 +93,11 @@ BPF_TEST_C(BPFDSL, Basic, BasicPolicy) {
 
 /* On IA-32, socketpair() is implemented via socketcall(). :-( */
 #if !defined(ARCH_CPU_X86)
-class BooleanLogicPolicy : public SandboxBPFDSLPolicy {
+class BooleanLogicPolicy : public Policy {
  public:
   BooleanLogicPolicy() {}
-  virtual ~BooleanLogicPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~BooleanLogicPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_socketpair) {
       const Arg<int> domain(0), type(1), protocol(2);
       return If(domain == AF_UNIX &&
@@ -128,11 +131,11 @@ BPF_TEST_C(BPFDSL, BooleanLogic, BooleanLogicPolicy) {
 }
 #endif  // !ARCH_CPU_X86
 
-class MoreBooleanLogicPolicy : public SandboxBPFDSLPolicy {
+class MoreBooleanLogicPolicy : public Policy {
  public:
   MoreBooleanLogicPolicy() {}
-  virtual ~MoreBooleanLogicPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~MoreBooleanLogicPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_setresuid) {
       const Arg<uid_t> ruid(0), euid(1), suid(2);
       return If(ruid == 0 || euid == 0 || suid == 0, Error(EPERM))
@@ -165,11 +168,11 @@ BPF_TEST_C(BPFDSL, MoreBooleanLogic, MoreBooleanLogicPolicy) {
 static const uintptr_t kDeadBeefAddr =
     static_cast<uintptr_t>(0xdeadbeefdeadbeefULL);
 
-class ArgSizePolicy : public SandboxBPFDSLPolicy {
+class ArgSizePolicy : public Policy {
  public:
   ArgSizePolicy() {}
-  virtual ~ArgSizePolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~ArgSizePolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_uname) {
       const Arg<uintptr_t> addr(0);
       return If(addr == kDeadBeefAddr, Error(EPERM)).Else(Allow());
@@ -188,11 +191,11 @@ BPF_TEST_C(BPFDSL, ArgSizeTest, ArgSizePolicy) {
       -EPERM, uname, reinterpret_cast<struct utsname*>(kDeadBeefAddr));
 }
 
-class TrappingPolicy : public SandboxBPFDSLPolicy {
+class TrappingPolicy : public Policy {
  public:
   TrappingPolicy() {}
-  virtual ~TrappingPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~TrappingPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_uname) {
       return Trap(UnameTrap, &count_);
     }
@@ -218,11 +221,11 @@ BPF_TEST_C(BPFDSL, TrapTest, TrappingPolicy) {
   ASSERT_SYSCALL_RESULT(3, uname, NULL);
 }
 
-class MaskingPolicy : public SandboxBPFDSLPolicy {
+class MaskingPolicy : public Policy {
  public:
   MaskingPolicy() {}
-  virtual ~MaskingPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~MaskingPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_setuid) {
       const Arg<uid_t> uid(0);
       return If((uid & 0xf) == 0, Error(EINVAL)).Else(Error(EACCES));
@@ -259,11 +262,11 @@ BPF_TEST_C(BPFDSL, MaskTest, MaskingPolicy) {
   }
 }
 
-class ElseIfPolicy : public SandboxBPFDSLPolicy {
+class ElseIfPolicy : public Policy {
  public:
   ElseIfPolicy() {}
-  virtual ~ElseIfPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~ElseIfPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_setuid) {
       const Arg<uid_t> uid(0);
       return If((uid & 0xfff) == 0, Error(0))
@@ -291,11 +294,11 @@ BPF_TEST_C(BPFDSL, ElseIfTest, ElseIfPolicy) {
   ASSERT_SYSCALL_RESULT(-EACCES, setuid, 0x0222);
 }
 
-class SwitchPolicy : public SandboxBPFDSLPolicy {
+class SwitchPolicy : public Policy {
  public:
   SwitchPolicy() {}
-  virtual ~SwitchPolicy() {}
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ~SwitchPolicy() override {}
+  ResultExpr EvaluateSyscall(int sysno) const override {
     if (sysno == __NR_fcntl) {
       const Arg<int> cmd(1);
       const Arg<unsigned long> long_arg(2);
@@ -325,6 +328,48 @@ BPF_TEST_C(BPFDSL, SwitchTest, SwitchPolicy) {
   ASSERT_SYSCALL_RESULT(-EPERM, fcntl, sock_fd.get(), F_SETFL, O_RDONLY);
 
   ASSERT_SYSCALL_RESULT(-EACCES, fcntl, sock_fd.get(), F_DUPFD, 0);
+}
+
+static intptr_t DummyTrap(const struct arch_seccomp_data& data, void* aux) {
+  return 0;
+}
+
+TEST(BPFDSL, IsAllowDeny) {
+  ResultExpr allow = Allow();
+  EXPECT_TRUE(allow->IsAllow());
+  EXPECT_FALSE(allow->IsDeny());
+
+  ResultExpr error = Error(ENOENT);
+  EXPECT_FALSE(error->IsAllow());
+  EXPECT_TRUE(error->IsDeny());
+
+  ResultExpr trace = Trace(42);
+  EXPECT_FALSE(trace->IsAllow());
+  EXPECT_FALSE(trace->IsDeny());
+
+  ResultExpr trap = Trap(DummyTrap, nullptr);
+  EXPECT_FALSE(trap->IsAllow());
+  EXPECT_TRUE(trap->IsDeny());
+
+  const Arg<int> arg(0);
+  ResultExpr maybe = If(arg == 0, Allow()).Else(Error(EPERM));
+  EXPECT_FALSE(maybe->IsAllow());
+  EXPECT_FALSE(maybe->IsDeny());
+}
+
+TEST(BPFDSL, HasUnsafeTraps) {
+  ResultExpr allow = Allow();
+  EXPECT_FALSE(allow->HasUnsafeTraps());
+
+  ResultExpr safe = Trap(DummyTrap, nullptr);
+  EXPECT_FALSE(safe->HasUnsafeTraps());
+
+  ResultExpr unsafe = UnsafeTrap(DummyTrap, nullptr);
+  EXPECT_TRUE(unsafe->HasUnsafeTraps());
+
+  const Arg<int> arg(0);
+  ResultExpr maybe = If(arg == 0, allow).Else(unsafe);
+  EXPECT_TRUE(maybe->HasUnsafeTraps());
 }
 
 }  // namespace

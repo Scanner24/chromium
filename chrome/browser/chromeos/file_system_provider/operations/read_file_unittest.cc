@@ -64,7 +64,6 @@ class CallbackLogger {
 
  private:
   ScopedVector<Event> events_;
-  bool dispatch_reply_;
 
   DISALLOW_COPY_AND_ASSIGN(CallbackLogger);
 };
@@ -74,15 +73,13 @@ class CallbackLogger {
 class FileSystemProviderOperationsReadFileTest : public testing::Test {
  protected:
   FileSystemProviderOperationsReadFileTest() {}
-  virtual ~FileSystemProviderOperationsReadFileTest() {}
+  ~FileSystemProviderOperationsReadFileTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               false /* writable */,
-                               base::FilePath() /* mount_path */);
+  void SetUp() override {
+    file_system_info_ = ProvidedFileSystemInfo(
+        kExtensionId,
+        MountOptions(kFileSystemId, "" /* display_name */),
+        base::FilePath());
     io_buffer_ = make_scoped_refptr(new net::IOBuffer(kOffset + kLength));
   }
 

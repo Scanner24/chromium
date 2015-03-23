@@ -27,12 +27,12 @@ class NaClBrokerListener : public content::SandboxedProcessLauncherDelegate,
 
   // content::SandboxedProcessLauncherDelegate implementation:
   virtual void PreSpawnTarget(sandbox::TargetPolicy* policy,
-                              bool* success) OVERRIDE;
+                              bool* success) override;
 
   // IPC::Listener implementation.
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) override;
+  virtual bool OnMessageReceived(const IPC::Message& msg) override;
+  virtual void OnChannelError() override;
 
  private:
   void OnLaunchLoaderThroughBroker(const std::string& loader_channel_id);
@@ -41,7 +41,7 @@ class NaClBrokerListener : public content::SandboxedProcessLauncherDelegate,
                                      const std::string& startup_info);
   void OnStopBroker();
 
-  base::ProcessHandle browser_handle_;
+  base::Process browser_process_;
   scoped_ptr<IPC::Channel> channel_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClBrokerListener);

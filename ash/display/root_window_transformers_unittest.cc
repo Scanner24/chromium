@@ -14,6 +14,7 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/cursor_manager_test_api.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/test/mirror_window_test_api.h"
 #include "base/synchronization/waitable_event.h"
 #include "ui/aura/env.h"
@@ -22,7 +23,7 @@
 #include "ui/events/event_handler.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 
@@ -40,9 +41,9 @@ class TestEventHandler : public ui::EventHandler {
                        scroll_y_offset_(0.0),
                        scroll_x_offset_ordinal_(0.0),
                        scroll_y_offset_ordinal_(0.0) {}
-  virtual ~TestEventHandler() {}
+  ~TestEventHandler() override {}
 
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->flags() & ui::EF_IS_SYNTHESIZED)
       return;
     aura::Window* target = static_cast<aura::Window*>(event->target());
@@ -51,7 +52,7 @@ class TestEventHandler : public ui::EventHandler {
     event->StopPropagation();
   }
 
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE {
+  void OnTouchEvent(ui::TouchEvent* event) override {
     aura::Window* target = static_cast<aura::Window*>(event->target());
     // Only record when the target is the background which covers
     // entire root window.
@@ -62,7 +63,7 @@ class TestEventHandler : public ui::EventHandler {
     event->StopPropagation();
   }
 
-  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE {
+  void OnScrollEvent(ui::ScrollEvent* event) override {
     aura::Window* target = static_cast<aura::Window*>(event->target());
     // Only record when the target is the background which covers
     // entire root window.
@@ -233,7 +234,8 @@ TEST_F(RootWindowTransformersTest, ScaleAndMagnify) {
   UpdateDisplay("600x400*2@1.5,500x300");
 
   gfx::Display display1 = Shell::GetScreen()->GetPrimaryDisplay();
-  gfx::Display::SetInternalDisplayId(display1.id());
+  test::DisplayManagerTestApi(Shell::GetInstance()->display_manager())
+      .SetInternalDisplayId(display1.id());
   gfx::Display display2 = ScreenUtil::GetSecondaryDisplay();
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   MagnificationController* magnifier =

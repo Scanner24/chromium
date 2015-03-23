@@ -28,12 +28,12 @@ class QuicSpdyServerStreamPeer;
 class QuicSpdyServerStream : public QuicDataStream {
  public:
   QuicSpdyServerStream(QuicStreamId id, QuicSession* session);
-  virtual ~QuicSpdyServerStream();
+  ~QuicSpdyServerStream() override;
 
   // ReliableQuicStream implementation called by the session when there's
   // data for us.
-  virtual uint32 ProcessData(const char* data, uint32 data_len) OVERRIDE;
-  virtual void OnFinRead() OVERRIDE;
+  uint32 ProcessData(const char* data, uint32 data_len) override;
+  void OnFinRead() override;
 
   void ParseRequestHeaders();
 
@@ -52,7 +52,7 @@ class QuicSpdyServerStream : public QuicDataStream {
                           base::StringPiece body);
 
   BalsaHeaders headers_;
-  string body_;
+  std::string body_;
 
   // Buffer into which response header data is read.
   scoped_refptr<GrowableIOBuffer> read_buf_;

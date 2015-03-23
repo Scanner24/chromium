@@ -12,8 +12,8 @@
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "ui/gfx/vector2d.h"
-#include "ui/gfx/vector2d_f.h"
+#include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace content {
 
@@ -28,11 +28,11 @@ class CONTENT_EXPORT SyntheticSmoothScrollGesture : public SyntheticGesture {
  public:
   explicit SyntheticSmoothScrollGesture(
       const SyntheticSmoothScrollGestureParams& params);
-  virtual ~SyntheticSmoothScrollGesture();
+  ~SyntheticSmoothScrollGesture() override;
 
-  virtual SyntheticGesture::Result ForwardInputEvents(
+  SyntheticGesture::Result ForwardInputEvents(
       const base::TimeTicks& timestamp,
-      SyntheticGestureTarget* target) OVERRIDE;
+      SyntheticGestureTarget* target) override;
 
  private:
   enum GestureState {

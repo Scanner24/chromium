@@ -69,10 +69,6 @@ void WebServiceWorkerImpl::proxyReadyChanged() {
   queued_states_.clear();
 }
 
-blink::WebURL WebServiceWorkerImpl::scope() const {
-  return handle_ref_->scope();
-}
-
 blink::WebURL WebServiceWorkerImpl::url() const {
   return handle_ref_->url();
 }
@@ -87,6 +83,11 @@ void WebServiceWorkerImpl::postMessage(const WebString& message,
       handle_ref_->handle_id(),
       message,
       WebMessagePortChannelImpl::ExtractMessagePortIDs(channels)));
+}
+
+void WebServiceWorkerImpl::terminate() {
+  thread_safe_sender_->Send(
+      new ServiceWorkerHostMsg_TerminateWorker(handle_ref_->handle_id()));
 }
 
 void WebServiceWorkerImpl::CommitState(blink::WebServiceWorkerState new_state) {

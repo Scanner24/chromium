@@ -28,7 +28,8 @@ def print_landmines():
       builder() == 'ninja'):
     print 'Need to clobber winja goma due to backend cwd cache fix.'
   if platform() == 'android':
-    print 'Clobber: To delete generated mojo class files.'
+    print 'Clobber: to handle new way of suppressing findbugs failures.'
+    print 'Clobber to fix gyp not rename package name (crbug.com/457038)'
   if platform() == 'win' and builder() == 'ninja':
     print 'Compile on cc_unittests fails due to symbols removed in r185063.'
   if platform() == 'linux' and builder() == 'ninja':
@@ -47,15 +48,21 @@ def print_landmines():
       gyp_msvs_version().startswith('2013')):
     print "Switched win from VS2010 to VS2013."
     print "Update to VS2013 Update 2."
+    print "Update to VS2013 Update 4."
   print 'Need to clobber everything due to an IDL change in r154579 (blink)'
   print 'Need to clobber everything due to gen file moves in r175513 (Blink)'
   if (platform() != 'ios'):
     print 'Clobber to get rid of obselete test plugin after r248358'
     print 'Clobber to rebuild GN files for V8'
+  print 'Clobber to get rid of stale generated mojom.h files'
   print 'Need to clobber everything due to build_nexe change in nacl r13424'
   print '[chromium-dev] PSA: clobber build needed for IDR_INSPECTOR_* compil...'
   print 'blink_resources.grd changed: crbug.com/400860'
   print 'ninja dependency cycle: crbug.com/408192'
+  print 'Clobber to fix missing NaCl gyp dependencies (crbug.com/427427).'
+  print 'Another clobber for missing NaCl gyp deps (crbug.com/427427).'
+  print 'Clobber to fix GN not picking up increased ID range (crbug.com/444902)'
+  print 'Remove NaCl toolchains from the output dir (crbug.com/456902)'
 
 
 def main():

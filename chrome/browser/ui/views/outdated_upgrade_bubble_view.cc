@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/views/outdated_upgrade_bubble_view.h"
 
 #include "base/metrics/histogram.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/views/elevation_icon_setter.h"
@@ -68,9 +67,9 @@ void OutdatedUpgradeBubbleView::ShowBubble(views::View* anchor_view,
   upgrade_bubble_ = new OutdatedUpgradeBubbleView(
       anchor_view, navigator, auto_update_enabled);
   views::BubbleDelegateView::CreateBubble(upgrade_bubble_)->Show();
-  content::RecordAction(base::UserMetricsAction(
-      auto_update_enabled ? "OutdatedUpgradeBubble.Show"
-                          : "OutdatedUpgradeBubble.ShowNoAU"));
+  content::RecordAction(auto_update_enabled ?
+      base::UserMetricsAction("OutdatedUpgradeBubble.Show") :
+      base::UserMetricsAction("OutdatedUpgradeBubble.ShowNoAU"));
 }
 
 bool OutdatedUpgradeBubbleView::IsAvailable() {

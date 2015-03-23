@@ -53,24 +53,22 @@ class SYNC_EXPORT AttachmentServiceImpl
                         Delegate* delegate,
                         const base::TimeDelta& initial_backoff_delay,
                         const base::TimeDelta& max_backoff_delay);
-  virtual ~AttachmentServiceImpl();
+  ~AttachmentServiceImpl() override;
 
   // Create an AttachmentServiceImpl suitable for use in tests.
   static scoped_ptr<syncer::AttachmentService> CreateForTest();
 
   // AttachmentService implementation.
-  virtual AttachmentStore* GetStore() OVERRIDE;
-  virtual void GetOrDownloadAttachments(
-      const AttachmentIdList& attachment_ids,
-      const GetOrDownloadCallback& callback) OVERRIDE;
-  virtual void DropAttachments(const AttachmentIdList& attachment_ids,
-                               const DropCallback& callback) OVERRIDE;
-  virtual void UploadAttachments(
-      const AttachmentIdSet& attachment_ids) OVERRIDE;
+  AttachmentStore* GetStore() override;
+  void GetOrDownloadAttachments(const AttachmentIdList& attachment_ids,
+                                const GetOrDownloadCallback& callback) override;
+  void DropAttachments(const AttachmentIdList& attachment_ids,
+                       const DropCallback& callback) override;
+  void UploadAttachments(const AttachmentIdSet& attachment_ids) override;
 
   // NetworkChangeObserver implementation.
-  virtual void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE;
+  void OnNetworkChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override;
 
   // Use |timer| in the underlying TaskQueue.
   //
@@ -84,6 +82,9 @@ class SYNC_EXPORT AttachmentServiceImpl
                 const AttachmentStore::Result& result,
                 scoped_ptr<AttachmentMap> attachments,
                 scoped_ptr<AttachmentIdList> unavailable_attachment_ids);
+  void WriteDone(const scoped_refptr<GetOrDownloadState>& state,
+                 const Attachment& attachment,
+                 const AttachmentStore::Result& result);
   void DropDone(const DropCallback& callback,
                 const AttachmentStore::Result& result);
   void UploadDone(const AttachmentUploader::UploadResult& result,

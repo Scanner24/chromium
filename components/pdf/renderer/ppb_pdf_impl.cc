@@ -5,8 +5,11 @@
 #include "components/pdf/renderer/ppb_pdf_impl.h"
 
 #include "base/files/scoped_file.h"
+#include "base/lazy_instance.h"
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_local.h"
 #include "build/build_config.h"
 #include "components/pdf/common/pdf_messages.h"
 #include "components/pdf/renderer/pdf_resource_util.h"
@@ -15,6 +18,7 @@
 #include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
+#include "gin/public/isolate_holder.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/trusted/ppb_browser_font_trusted.h"
@@ -33,7 +37,11 @@
 namespace pdf {
 namespace {
 
-PPB_PDF_Impl::PrintClient* g_print_client = NULL;
+// --single-process model may fail in CHECK(!g_print_client) if there exist
+// more than two RenderThreads, so here we use TLS for g_print_client.
+// See http://crbug.com/457580.
+base::LazyInstance<base::ThreadLocalPointer<PPB_PDF_Impl::PrintClient> >::Leaky
+    g_print_client_tls = LAZY_INSTANCE_INITIALIZER;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 class PrivateFontFile : public ppapi::Resource {
@@ -240,8 +248,9 @@ void SaveAs(PP_Instance instance_id) {
   content::RenderView* render_view = instance->GetRenderView();
   blink::WebLocalFrame* frame =
       render_view->GetWebView()->mainFrame()->toWebLocalFrame();
-  content::Referrer referrer(frame->document().url(),
-                             frame->document().referrerPolicy());
+  content::Referrer referrer = content::Referrer::SanitizeForRequest(
+      url, content::Referrer(frame->document().url(),
+                             frame->document().referrerPolicy()));
   render_view->Send(
       new PDFHostMsg_PDFSaveURLAs(render_view->GetRoutingID(), url, referrer));
 }
@@ -255,7 +264,8 @@ PP_Bool IsFeatureEnabled(PP_Instance instance, PP_PDFFeature feature) {
     case PP_PDFFEATURE_HIDPI:
       return PP_TRUE;
     case PP_PDFFEATURE_PRINTING:
-      return (g_print_client && g_print_client->IsPrintingEnabled(instance))
+      return (g_print_client_tls.Pointer()->Get() &&
+              g_print_client_tls.Pointer()->Get()->IsPrintingEnabled(instance))
                  ? PP_TRUE
                  : PP_FALSE;
   }
@@ -308,8 +318,16 @@ PP_Bool IsOutOfProcess(PP_Instance instance_id) {
   return PP_FALSE;
 }
 
+// This function is intended for both in-process and out-of-process pdf.
 void SetSelectedText(PP_Instance instance_id, const char* selected_text) {
-  // This function is intended for out of process PDF plugin.
+  content::PepperPluginInstance* instance =
+      content::PepperPluginInstance::Get(instance_id);
+  if (!instance)
+    return;
+
+  base::string16 selection_text;
+  base::UTF8ToUTF16(selected_text, strlen(selected_text), &selection_text);
+  instance->SetSelectedText(selection_text);
 }
 
 void SetLinkUnderCursor(PP_Instance instance_id, const char* url) {
@@ -318,6 +336,15 @@ void SetLinkUnderCursor(PP_Instance instance_id, const char* url) {
   if (!instance)
     return;
   instance->SetLinkUnderCursor(url);
+}
+
+void GetV8ExternalSnapshotData(PP_Instance instance_id,
+                               const char** natives_data_out,
+                               int* natives_size_out,
+                               const char** snapshot_data_out,
+                               int* snapshot_size_out) {
+  gin::IsolateHolder::GetV8ExternalSnapshotData(natives_data_out,
+      natives_size_out, snapshot_data_out, snapshot_size_out);
 }
 
 const PPB_PDF ppb_pdf = {                      //
@@ -340,6 +367,7 @@ const PPB_PDF ppb_pdf = {                      //
     &IsOutOfProcess,                           //
     &SetSelectedText,                          //
     &SetLinkUnderCursor,                       //
+    &GetV8ExternalSnapshotData,                //
 };
 
 }  // namespace
@@ -351,12 +379,15 @@ const PPB_PDF* PPB_PDF_Impl::GetInterface() {
 
 // static
 bool PPB_PDF_Impl::InvokePrintingForInstance(PP_Instance instance_id) {
-  return g_print_client ? g_print_client->Print(instance_id) : false;
+  return g_print_client_tls.Pointer()->Get()
+             ? g_print_client_tls.Pointer()->Get()->Print(instance_id)
+             : false;
 }
 
 void PPB_PDF_Impl::SetPrintClient(PPB_PDF_Impl::PrintClient* client) {
-  CHECK(!g_print_client) << "There should only be a single PrintClient.";
-  g_print_client = client;
+  CHECK(!g_print_client_tls.Pointer()->Get())
+      << "There should only be a single PrintClient for one RenderThread.";
+  g_print_client_tls.Pointer()->Set(client);
 }
 
 }  // namespace pdf

@@ -8,13 +8,13 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context_stub_with_extensions.h"
@@ -33,7 +33,7 @@ namespace gfx {
 
 namespace {
 
-const wchar_t kD3DCompiler[] = L"D3DCompiler_46.dll";
+const wchar_t kD3DCompiler[] = L"D3DCompiler_47.dll";
 
 void GL_BINDING_CALL MarshalClearDepthToClearDepthf(GLclampd depth) {
   glClearDepthf(static_cast<GLclampf>(depth));
@@ -162,7 +162,8 @@ bool InitializeStaticGLBindings(GLImplementation implementation) {
       LoadD3DXLibrary(module_path, kD3DCompiler);
 
       base::FilePath gles_path;
-      const CommandLine* command_line = CommandLine::ForCurrentProcess();
+      const base::CommandLine* command_line =
+          base::CommandLine::ForCurrentProcess();
       bool using_swift_shader =
           command_line->GetSwitchValueASCII(switches::kUseGL) == "swiftshader";
       if (using_swift_shader) {
@@ -319,16 +320,9 @@ bool InitializeDynamicGLBindings(GLImplementation implementation,
     GLContext* context) {
   switch (implementation) {
     case kGLImplementationOSMesaGL:
-      InitializeDynamicGLBindingsGL(context);
-      InitializeDynamicGLBindingsOSMESA(context);
-      break;
     case kGLImplementationEGLGLES2:
-      InitializeDynamicGLBindingsGL(context);
-      InitializeDynamicGLBindingsEGL(context);
-      break;
     case kGLImplementationDesktopGL:
       InitializeDynamicGLBindingsGL(context);
-      InitializeDynamicGLBindingsWGL(context);
       break;
     case kGLImplementationMockGL:
       if (!context) {

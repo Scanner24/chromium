@@ -144,8 +144,8 @@
           'sources!': [
             'http/http_auth_gssapi_posix.cc',
             'http/http_auth_gssapi_posix.h',
-            'http/http_auth_handler_negotiate.h',
             'http/http_auth_handler_negotiate.cc',
+            'http/http_auth_handler_negotiate.h',
           ],
         }],
         ['posix_avoid_mmap==1', {
@@ -172,12 +172,12 @@
           'sources!': [
             'base/directory_lister.cc',
             'base/directory_lister.h',
+            'url_request/file_protocol_handler.cc',
+            'url_request/file_protocol_handler.h',
             'url_request/url_request_file_dir_job.cc',
             'url_request/url_request_file_dir_job.h',
             'url_request/url_request_file_job.cc',
             'url_request/url_request_file_job.h',
-            'url_request/file_protocol_handler.cc',
-            'url_request/file_protocol_handler.h',
           ],
         }],
         ['disable_ftp_support==1', {
@@ -221,6 +221,7 @@
               'cert/nss_profile_filter_chromeos.cc',
               'cert/nss_profile_filter_chromeos.h',
               'cert/scoped_nss_types.h',
+              'cert/sha256_legacy_support_nss_win.cc',
               'cert/test_root_certs_nss.cc',
               'cert/x509_certificate_nss.cc',
               'cert/x509_util_nss.cc',
@@ -252,15 +253,15 @@
               '../third_party/boringssl/boringssl.gyp:boringssl',
             ],
           },
-          {  # else !use_openssl: remove the unneeded files
+          {  # else !use_openssl: remove the unneeded files and depend on NSS.
             'sources!': [
               'base/crypto_module_openssl.cc',
               'cert/ct_log_verifier_openssl.cc',
               'cert/ct_objects_extractor_openssl.cc',
               'cert/jwk_serializer_openssl.cc',
+              'cert/sha256_legacy_support_openssl_win.cc',
               'cert/x509_util_openssl.cc',
               'cert/x509_util_openssl.h',
-              'crypto/scoped_openssl_types.h',
               'quic/crypto/aead_base_decrypter_openssl.cc',
               'quic/crypto/aead_base_encrypter_openssl.cc',
               'quic/crypto/aes_128_gcm_12_decrypter_openssl.cc',
@@ -277,11 +278,25 @@
               'socket/ssl_server_socket_openssl.h',
               'socket/ssl_session_cache_openssl.cc',
               'socket/ssl_session_cache_openssl.h',
+              'ssl/openssl_platform_key.h',
               'ssl/openssl_platform_key_mac.cc',
               'ssl/openssl_platform_key_win.cc',
-              'ssl/openssl_platform_key.h',
               'ssl/openssl_ssl_util.cc',
               'ssl/openssl_ssl_util.h',
+            ],
+            'conditions': [
+              # Pull in the bundled or system NSS as appropriate.
+              [ 'desktop_linux == 1 or chromeos == 1', {
+                'dependencies': [
+                  '../build/linux/system.gyp:ssl',
+                ],
+              }, {
+                'dependencies': [
+                  '../third_party/nss/nss.gyp:nspr',
+                  '../third_party/nss/nss.gyp:nss',
+                  'third_party/nss/ssl.gyp:libssl',
+                ],
+              }]
             ],
           },
         ],
@@ -308,12 +323,6 @@
         }],
         [ 'desktop_linux == 1 or chromeos == 1', {
             'conditions': [
-              ['use_openssl == 0', {
-                 # use NSS
-                'dependencies': [
-                  '../build/linux/system.gyp:ssl',
-                ],
-              }],
               ['os_bsd==1', {
                 'sources!': [
                   'base/network_change_notifier_linux.cc',
@@ -358,20 +367,15 @@
             'sources!': [
               'cert/cert_verify_proc_nss.cc',
               'cert/cert_verify_proc_nss.h',
-              'ssl/client_cert_store_nss.cc',
-              'ssl/client_cert_store_nss.h',
               'ssl/client_cert_store_chromeos.cc',
               'ssl/client_cert_store_chromeos.h',
+              'ssl/client_cert_store_nss.cc',
+              'ssl/client_cert_store_nss.h',
             ],
         }],
         [ 'enable_websockets != 1', {
             'sources/': [
-              ['exclude', '^socket_stream/'],
               ['exclude', '^websockets/'],
-            ],
-            'sources!': [
-              'spdy/spdy_websocket_stream.cc',
-              'spdy/spdy_websocket_stream.h',
             ],
         }],
         [ 'enable_mdns != 1', {
@@ -398,12 +402,7 @@
               'udp/udp_socket_libevent.cc',
               'udp/udp_socket_libevent.h',
             ],
-            'dependencies': [
-              '../third_party/nss/nss.gyp:nspr',
-              '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:libssl',
-            ],
-            # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+             # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
             'msvs_disabled_warnings': [4267, ],
           }, { # else: OS != "win"
             'sources!': [
@@ -417,16 +416,6 @@
           },
         ],
         [ 'OS == "mac"', {
-            'conditions': [
-              [ 'use_openssl == 0', {
-                'dependencies': [
-                  # defaults to nss
-                  '../third_party/nss/nss.gyp:nspr',
-                  '../third_party/nss/nss.gyp:nss',
-                  'third_party/nss/ssl.gyp:libssl',
-                ],
-              }],
-            ],
             'link_settings': {
               'libraries': [
                 '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
@@ -438,10 +427,6 @@
           },
         ],
         [ 'OS == "ios"', {
-            'dependencies': [
-              '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:libssl',
-            ],
             'sources!': [
               'disk_cache/blockfile/file_posix.cc',
             ],
@@ -456,6 +441,12 @@
             },
           },
         ],
+        [ 'OS == "ios" or OS == "mac"', {
+            'sources': [
+              '<@(net_base_mac_ios_sources)',
+            ],
+          },
+        ],
         ['OS=="android" and _toolset=="target" and android_webview_build == 0', {
           'dependencies': [
              'net_java',
@@ -463,7 +454,6 @@
         }],
         [ 'OS == "android"', {
             'dependencies': [
-              '../third_party/boringssl/boringssl.gyp:boringssl',
               'net_jni_headers',
             ],
             'sources!': [
@@ -502,10 +492,14 @@
             ['include', '^base/platform_mime_util_linux\\.cc$'],
             ['include', '^base/address_tracker_linux\\.cc$'],
             ['include', '^base/address_tracker_linux\\.h$'],
+            ['include', '^base/net_util_linux\\.cc$'],
+            ['include', '^base/net_util_linux\\.h$'],
           ],
         }],
         ['OS == "ios"', {
           'sources/': [
+            ['include', '^base/net_util_mac\\.cc$'],
+            ['include', '^base/net_util_mac\\.h$'],
             ['include', '^base/network_change_notifier_mac\\.cc$'],
             ['include', '^base/network_config_watcher_mac\\.cc$'],
             ['include', '^base/platform_mime_util_mac\\.mm$'],
@@ -561,6 +555,11 @@
             '<@(net_linux_test_sources)',
           ],
         }],
+        ['OS == "mac" or OS == "ios"', {
+          'sources': [
+            '<@(net_base_test_mac_ios_sources)',
+          ],
+        }],
         ['chromeos==1', {
           'sources!': [
             'proxy/proxy_config_service_linux_unittest.cc',
@@ -581,8 +580,8 @@
         }],
         [ 'use_nss != 1', {
           'sources!': [
-            'ssl/client_cert_store_nss_unittest.cc',
             'ssl/client_cert_store_chromeos_unittest.cc',
+            'ssl/client_cert_store_nss_unittest.cc',
           ],
         }],
         [ 'use_openssl == 1', {
@@ -597,6 +596,11 @@
                 '../build/linux/system.gyp:ssl',
               ],
             }, {  # desktop_linux == 0 and chromeos == 0
+              'dependencies': [
+                '../third_party/nss/nss.gyp:nspr',
+                '../third_party/nss/nss.gyp:nss',
+                'third_party/nss/ssl.gyp:libssl',
+              ],
               'sources!': [
                 'cert/nss_cert_database_unittest.cc',
               ],
@@ -637,13 +641,13 @@
             # TODO(bulach): Add equivalent tests when the underlying
             #               functionality is ported to OpenSSL.
             'sources!': [
-              'cert/nss_cert_database_unittest.cc',
               'cert/nss_cert_database_chromeos_unittest.cc',
+              'cert/nss_cert_database_unittest.cc',
               'cert/nss_profile_filter_chromeos_unittest.cc',
               'cert/x509_util_nss_unittest.cc',
               'quic/test_tools/crypto_test_utils_nss.cc',
             ],
-          }, {  # else !use_openssl: remove the unneeded files
+          }, {  # else !use_openssl: remove the unneeded files and pull in NSS.
             'sources!': [
               'cert/x509_util_openssl_unittest.cc',
               'quic/test_tools/crypto_test_utils_openssl.cc',
@@ -659,9 +663,11 @@
         }],
         [ 'enable_websockets != 1', {
             'sources/': [
-              ['exclude', '^socket_stream/'],
               ['exclude', '^websockets/'],
-              ['exclude', '^spdy/spdy_websocket_stream_unittest\\.cc$'],
+              ['exclude', '^server/'],
+            ],
+            'dependencies!': [
+              'http_server',
             ],
         }],
         ['disable_file_support==1', {
@@ -695,8 +701,21 @@
             ],
           }, {  # else: !use_v8_in_net
             'sources!': [
-              'proxy/proxy_resolver_v8_unittest.cc',
               'proxy/proxy_resolver_v8_tracing_unittest.cc',
+              'proxy/proxy_resolver_v8_unittest.cc',
+            ],
+          },
+        ],
+
+        [ 'use_v8_in_net==1 and OS != "android"', {
+            'dependencies': [
+              'net_with_v8',
+              'net_browser_services',
+              '../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
+            ],
+          }, {  # else
+            'sources!': [
+              'dns/mojo_host_resolver_impl_unittest.cc',
             ],
           },
         ],
@@ -715,11 +734,8 @@
               'dns/dns_config_service_posix_unittest.cc',
               'http/http_auth_gssapi_posix_unittest.cc',
             ],
-            'dependencies': [
-              '../third_party/nss/nss.gyp:nspr',
-              '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:libssl',
-            ],
+            # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+            'msvs_disabled_warnings': [4267, ],
             'conditions': [
               [ 'icu_use_data_file_flag == 0', {
                 # This is needed to trigger the dll copy step on windows.
@@ -729,22 +745,9 @@
                 ],
               }],
             ],
-            # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-            'msvs_disabled_warnings': [4267, ],
-          },
-        ],
-        [ 'OS == "mac" and use_openssl == 0', {
-            'dependencies': [
-              '../third_party/nss/nss.gyp:nspr',
-              '../third_party/nss/nss.gyp:nss',
-              'third_party/nss/ssl.gyp:libssl',
-            ],
           },
         ],
         [ 'OS == "ios"', {
-            'dependencies': [
-              '../third_party/nss/nss.gyp:nss',
-            ],
             'actions': [
               {
                 'action_name': 'copy_test_data',
@@ -768,15 +771,15 @@
               'disk_cache/blockfile/block_files_unittest.cc',
               # Need to read input data files.
               'filter/gzip_filter_unittest.cc',
-              'socket/ssl_server_socket_unittest.cc',
-              'spdy/fuzzing/hpack_fuzz_util_test.cc',
               # Need TestServer.
               'proxy/proxy_script_fetcher_impl_unittest.cc',
               'socket/ssl_client_socket_unittest.cc',
-              'url_request/url_fetcher_impl_unittest.cc',
-              'url_request/url_request_context_builder_unittest.cc',
+              'socket/ssl_server_socket_unittest.cc',
+              'spdy/fuzzing/hpack_fuzz_util_test.cc',
               # Needs GetAppOutput().
               'test/python_utils_unittest.cc',
+              'url_request/url_fetcher_impl_unittest.cc',
+              'url_request/url_request_context_builder_unittest.cc',
 
               # The following tests are disabled because they don't apply to
               # iOS.
@@ -790,9 +793,6 @@
             ],
         }],
         [ 'OS == "android"', {
-            'dependencies': [
-              '../third_party/boringssl/boringssl.gyp:boringssl',
-            ],
             'sources!': [
               'dns/dns_config_service_posix_unittest.cc',
             ],
@@ -815,6 +815,11 @@
             ],
           },
         ],
+        ['v8_use_external_startup_data==1', {
+          'dependencies': [
+            '../gin/gin.gyp:gin',
+          ]
+        }],
       ],
       'target_conditions': [
         # These source files are excluded by default platform rules, but they
@@ -844,6 +849,7 @@
         'cookies/cookie_monster_perftest.cc',
         'disk_cache/blockfile/disk_cache_perftest.cc',
         'proxy/proxy_resolver_perftest.cc',
+        'udp/udp_socket_perftest.cc',
         'websockets/websocket_frame_perftest.cc',
       ],
       'conditions': [
@@ -883,6 +889,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
+        '../crypto/crypto.gyp:crypto',
         '../net/tools/tld_cleanup/tld_cleanup.gyp:tld_cleanup_util',
         '../testing/gtest.gyp:gtest',
         '../testing/gmock.gyp:gmock',
@@ -898,8 +905,12 @@
         '../testing/gmock.gyp:gmock',
       ],
       'sources': [
+        'base/captured_net_log_entry.cc',
+        'base/captured_net_log_entry.h',
         'base/capturing_net_log.cc',
         'base/capturing_net_log.h',
+        'base/capturing_net_log_observer.cc',
+        'base/capturing_net_log_observer.h',
         'base/load_timing_info_test_util.cc',
         'base/load_timing_info_test_util.h',
         'base/mock_file_stream.cc',
@@ -955,10 +966,10 @@
         'test/python_utils.h',
         'test/spawned_test_server/base_test_server.cc',
         'test/spawned_test_server/base_test_server.h',
-        'test/spawned_test_server/local_test_server_posix.cc',
-        'test/spawned_test_server/local_test_server_win.cc',
         'test/spawned_test_server/local_test_server.cc',
         'test/spawned_test_server/local_test_server.h',
+        'test/spawned_test_server/local_test_server_posix.cc',
+        'test/spawned_test_server/local_test_server_win.cc',
         'test/spawned_test_server/remote_test_server.cc',
         'test/spawned_test_server/remote_test_server.h',
         'test/spawned_test_server/spawned_test_server.h',
@@ -966,8 +977,12 @@
         'test/spawned_test_server/spawner_communicator.h',
         'test/url_request/url_request_failed_job.cc',
         'test/url_request/url_request_failed_job.h',
+        'test/url_request/url_request_mock_data_job.cc',
+        'test/url_request/url_request_mock_data_job.h',
         'test/url_request/url_request_mock_http_job.cc',
         'test/url_request/url_request_mock_http_job.h',
+        'test/url_request/url_request_slow_download_job.cc',
+        'test/url_request/url_request_slow_download_job.h',
         'url_request/test_url_fetcher_factory.cc',
         'url_request/test_url_fetcher_factory.h',
         'url_request/test_url_request_interceptor.cc',
@@ -981,15 +996,17 @@
             '../third_party/protobuf/protobuf.gyp:py_proto',
           ],
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
+        ['use_openssl == 0 and (use_nss == 1 or OS == "ios")', {
           'conditions': [
-            ['use_openssl==1', {
-              'dependencies': [
-                '../third_party/boringssl/boringssl.gyp:boringssl',
-              ],
-            }, {
+            [ 'desktop_linux == 1 or chromeos == 1', {
               'dependencies': [
                 '../build/linux/system.gyp:ssl',
+              ],
+            }, {  # desktop_linux == 0 and chromeos == 0
+              'dependencies': [
+                '../third_party/nss/nss.gyp:nspr',
+                '../third_party/nss/nss.gyp:nss',
+                'third_party/nss/ssl.gyp:libssl',
               ],
             }],
           ],
@@ -1009,11 +1026,6 @@
             'test/spawned_test_server/remote_test_server.h',
             'test/spawned_test_server/spawner_communicator.cc',
             'test/spawned_test_server/spawner_communicator.h',
-          ],
-        }],
-        ['OS == "ios"', {
-          'dependencies': [
-            '../third_party/nss/nss.gyp:nss',
           ],
         }],
         [ 'use_v8_in_net==1', {
@@ -1085,6 +1097,8 @@
         'server/http_server_response_info.h',
         'server/web_socket.cc',
         'server/web_socket.h',
+        'server/web_socket_encoder.cc',
+        'server/web_socket_encoder.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],
@@ -1135,8 +1149,8 @@
         'tools/dump_cache/simple_cache_dumper.h',
         'tools/dump_cache/url_to_filename_encoder.cc',
         'tools/dump_cache/url_to_filename_encoder.h',
-        'tools/dump_cache/url_utilities.h',
         'tools/dump_cache/url_utilities.cc',
+        'tools/dump_cache/url_utilities.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],
@@ -1199,6 +1213,52 @@
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [4267, ],
+        },
+      ],
+    }],
+    ['use_v8_in_net == 1 and OS != "android"', {
+      'targets': [
+        {
+          # GN version: //net/interfaces
+          'target_name': 'net_interfaces',
+          'type': 'static_library',
+          'sources': [
+            'interfaces/host_resolver_service.mojom',
+            'interfaces/proxy_resolver_service.mojom',
+          ],
+          'includes': [
+            '../third_party/mojo/mojom_bindings_generator.gypi',
+          ],
+        },
+        {
+          # GN version: //net:net_browser_services
+          'target_name': 'net_browser_services',
+          'type': 'static_library',
+          'sources': [
+            'dns/mojo_host_resolver_impl.cc',
+            'dns/mojo_host_resolver_impl.h',
+          ],
+          'dependencies': [
+            'mojo_type_converters',
+            'net',
+            'net_interfaces',
+            '../mojo/mojo_base.gyp:mojo_environment_chromium',
+            '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+          ],
+        },
+        {
+          # GN version: //net:mojo_type_converters
+          'target_name': 'mojo_type_converters',
+          'type': 'static_library',
+          'sources': [
+            'dns/mojo_type_converters.cc',
+            'dns/mojo_type_converters.h',
+          ],
+          'dependencies': [
+            'net',
+            'net_interfaces',
+            '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+          ],
         },
       ],
     }],
@@ -1406,20 +1466,20 @@
           'sources': [
             'tools/dump_cache/url_to_filename_encoder.cc',
             'tools/dump_cache/url_to_filename_encoder.h',
-            'tools/dump_cache/url_utilities.h',
             'tools/dump_cache/url_utilities.cc',
-            'tools/flip_server/acceptor_thread.h',
+            'tools/dump_cache/url_utilities.h',
             'tools/flip_server/acceptor_thread.cc',
+            'tools/flip_server/acceptor_thread.h',
+            'tools/flip_server/constants.h',
             'tools/flip_server/create_listener.cc',
             'tools/flip_server/create_listener.h',
-            'tools/flip_server/constants.h',
             'tools/flip_server/flip_config.cc',
             'tools/flip_server/flip_config.h',
             'tools/flip_server/http_interface.cc',
             'tools/flip_server/http_interface.h',
             'tools/flip_server/loadtime_measurement.h',
-            'tools/flip_server/mem_cache.h',
             'tools/flip_server/mem_cache.cc',
+            'tools/flip_server/mem_cache.h',
             'tools/flip_server/output_ordering.cc',
             'tools/flip_server/output_ordering.h',
             'tools/flip_server/ring_buffer.cc',
@@ -1427,10 +1487,10 @@
             'tools/flip_server/sm_connection.cc',
             'tools/flip_server/sm_connection.h',
             'tools/flip_server/sm_interface.h',
-            'tools/flip_server/spdy_ssl.cc',
-            'tools/flip_server/spdy_ssl.h',
             'tools/flip_server/spdy_interface.cc',
             'tools/flip_server/spdy_interface.h',
+            'tools/flip_server/spdy_ssl.cc',
+            'tools/flip_server/spdy_ssl.h',
             'tools/flip_server/spdy_util.cc',
             'tools/flip_server/spdy_util.h',
             'tools/flip_server/streamer_interface.cc',
@@ -1490,8 +1550,8 @@
             'tools/quic/quic_client_session.h',
             'tools/quic/quic_default_packet_writer.cc',
             'tools/quic/quic_default_packet_writer.h',
-            'tools/quic/quic_dispatcher.h',
             'tools/quic/quic_dispatcher.cc',
+            'tools/quic/quic_dispatcher.h',
             'tools/quic/quic_epoll_clock.cc',
             'tools/quic/quic_epoll_clock.h',
             'tools/quic/quic_epoll_connection_helper.cc',
@@ -1512,8 +1572,8 @@
             'tools/quic/quic_spdy_client_stream.h',
             'tools/quic/quic_spdy_server_stream.cc',
             'tools/quic/quic_spdy_server_stream.h',
-            'tools/quic/quic_time_wait_list_manager.h',
             'tools/quic/quic_time_wait_list_manager.cc',
+            'tools/quic/quic_time_wait_list_manager.h',
           ],
         },
         {
@@ -1591,6 +1651,7 @@
             '../base/base.gyp:base',
             'cert_verify_status_android_java',
             'certificate_mime_types_java',
+            'network_change_notifier_types_java',
             'net_errors_java',
             'private_key_types_java',
             'remote_android_keystore_aidl',
@@ -1647,38 +1708,34 @@
         {
           'target_name': 'certificate_mime_types_java',
           'type': 'none',
-          'sources': [
-            'android/java/CertificateMimeType.template',
-          ],
           'variables': {
-            'package_name': 'org/chromium/net',
-            'template_deps': ['base/mime_util_certificate_type_list.h'],
+            'source_file': 'base/mime_util.h',
           },
-          'includes': [ '../build/android/java_cpp_template.gypi' ],
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
           'target_name': 'cert_verify_status_android_java',
           'type': 'none',
-          'sources': [
-            'android/java/CertVerifyStatusAndroid.template',
-          ],
           'variables': {
-            'package_name': 'org/chromium/net',
-            'template_deps': ['android/cert_verify_status_android_list.h'],
+            'source_file': 'android/cert_verify_result_android.h',
           },
-          'includes': [ '../build/android/java_cpp_template.gypi' ],
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          'target_name': 'network_change_notifier_types_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'base/network_change_notifier.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
           'target_name': 'private_key_types_java',
           'type': 'none',
-          'sources': [
-            'android/java/PrivateKeyType.template',
-          ],
           'variables': {
-            'package_name': 'org/chromium/net',
-            'template_deps': ['android/private_key_type_list.h'],
+            'source_file': 'android/keystore.h',
           },
-          'includes': [ '../build/android/java_cpp_template.gypi' ],
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
           'target_name': 'net_unittests_apk',
@@ -1688,8 +1745,37 @@
             'net_javatests',
             'net_unittests',
           ],
+          'conditions': [
+            ['v8_use_external_startup_data==1', {
+              'dependencies': [
+                '../v8/tools/gyp/v8.gyp:v8_external_snapshot',
+              ],
+              'copies': [
+                {
+                'destination': '<(asset_location)',
+                  'files': [
+                    '<(PRODUCT_DIR)/natives_blob.bin',
+                    '<(PRODUCT_DIR)/snapshot_blob.bin',
+                  ],
+                },
+              ],
+            }],
+          ],
           'variables': {
             'test_suite_name': 'net_unittests',
+            'conditions': [
+              ['v8_use_external_startup_data==1', {
+                'asset_location': '<(PRODUCT_DIR)/net_unittests_apk/assets',
+                'additional_input_paths': [
+                  '<(PRODUCT_DIR)/net_unittests_apk/assets/natives_blob.bin',
+                  '<(PRODUCT_DIR)/net_unittests_apk/assets/snapshot_blob.bin',
+                ],
+                'inputs': [
+                  '<(PRODUCT_DIR)/natives_blob.bin',
+                  '<(PRODUCT_DIR)/snapshot_blob.bin',
+                ],
+              }],
+            ],
           },
           'includes': [ '../build/apk_test.gypi' ],
         },
@@ -1720,7 +1806,6 @@
           ],
           'includes': [
             '../build/isolate.gypi',
-            'net_unittests.isolate',
           ],
           'sources': [
             'net_unittests.isolate',

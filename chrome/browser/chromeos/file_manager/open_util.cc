@@ -69,16 +69,12 @@ void ExecuteFileTaskForUrl(Profile* profile,
 // internal handlers of special action IDs:
 //
 // "open" - Open the file manager for the given folder.
-// "auto-open" - Open the file manager for the given removal drive and close
-//               the file manager when the removal drive is unmounted.
 // "select" - Open the file manager for the given file. The folder containing
 //            the file will be opened with the file selected.
 void OpenFileManagerWithInternalActionId(Profile* profile,
                                          const GURL& url,
                                          const std::string& action_id) {
-  DCHECK(action_id == "auto-open" ||
-         action_id == "open" ||
-         action_id == "select");
+  DCHECK(action_id == "open" || action_id == "select");
   content::RecordAction(base::UserMetricsAction("ShowFileBrowserFullTab"));
 
   file_tasks::TaskDescriptor task(kFileManagerAppId,
@@ -107,21 +103,23 @@ void OpenFileWithMimeType(Profile* profile,
       file_urls,
       &tasks);
 
-  if (tasks.empty()) {
-    callback.Run(false);
-    return;
-  }
-
-  const file_tasks::FullTaskDescriptor* chosen_task = &tasks[0];
-  for (size_t i = 0; i < tasks.size(); ++i) {
-    if (tasks[i].is_default()) {
-      chosen_task = &tasks[i];
-      break;
+  // Select a default handler. If a default handler is not available, select
+  // a non-generic file handler.
+  const file_tasks::FullTaskDescriptor* chosen_task = nullptr;
+  for (const auto& task : tasks) {
+    if (!task.is_generic_file_handler()) {
+      chosen_task = &task;
+      if (task.is_default())
+        break;
     }
   }
 
-  ExecuteFileTaskForUrl(profile, chosen_task->task_descriptor(), url);
-  callback.Run(true);
+  if (chosen_task != nullptr) {
+    ExecuteFileTaskForUrl(profile, chosen_task->task_descriptor(), url);
+    callback.Run(true);
+  } else {
+    callback.Run(false);
+  }
 }
 
 // Opens the file specified by |url| by finding and executing a file task for
@@ -173,24 +171,14 @@ void ContinueOpenItem(Profile* profile,
   }
 }
 
-// Converts the |given_path| passed from external callers to the form that the
-// file manager can correctly handle. It first migrates old Drive/Download
-// folder path to the new formats, and then converts path to filesystem URL.
+// Converts the |path| passed from external callers to the filesystem URL
+// that the file manager can correctly handle.
 //
 // When conversion fails, it shows a warning dialog UI and returns false.
-bool ConvertPath(Profile* profile,
-                 const base::FilePath& given_path,
-                 base::FilePath* path,
-                 GURL* url) {
-  // The path may have been stored in preferences in old versions.
-  // We need migration here.
-  // TODO(kinaba): crbug.com/313539 remove it in the future.
-  if (!util::MigratePathFromOldFormat(profile, given_path, path))
-    *path = given_path;
-
+bool ConvertPath(Profile* profile, const base::FilePath& path, GURL* url) {
   if (!ConvertAbsoluteFilePathToFileSystemUrl(
-          profile, *path, kFileManagerAppId, url)) {
-    ShowWarningMessageBox(profile, *path,
+          profile, path, kFileManagerAppId, url)) {
+    ShowWarningMessageBox(profile, path,
                           IDS_FILE_BROWSER_ERROR_UNRESOLVABLE_FILE);
     return false;
   }
@@ -199,37 +187,24 @@ bool ConvertPath(Profile* profile,
 
 }  // namespace
 
-void OpenRemovableDrive(Profile* profile, const base::FilePath& file_path) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  base::FilePath converted_path;
-  GURL url;
-  if (!ConvertPath(profile, file_path, &converted_path, &url))
-    return;
-
-  OpenFileManagerWithInternalActionId(profile, url, "auto-open");
-}
-
 void OpenItem(Profile* profile, const base::FilePath& file_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::FilePath converted_path;
   GURL url;
-  if (!ConvertPath(profile, file_path, &converted_path, &url))
+  if (!ConvertPath(profile, file_path, &url))
     return;
 
   CheckIfDirectoryExists(
       GetFileSystemContextForExtensionId(profile, kFileManagerAppId),
       url,
-      base::Bind(&ContinueOpenItem, profile, converted_path, url));
+      base::Bind(&ContinueOpenItem, profile, file_path, url));
 }
 
 void ShowItemInFolder(Profile* profile, const base::FilePath& file_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::FilePath converted_path;
   GURL url;
-  if (!ConvertPath(profile, file_path, &converted_path, &url))
+  if (!ConvertPath(profile, file_path, &url))
     return;
 
   // This action changes the selection so we do not reuse existing tabs.

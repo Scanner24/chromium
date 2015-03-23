@@ -5,12 +5,15 @@
 #ifndef CC_SURFACES_SURFACE_FACTORY_H_
 #define CC_SURFACES_SURFACE_FACTORY_H_
 
+#include <set>
+
 #include "base/callback_forward.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_resource_holder.h"
+#include "cc/surfaces/surface_sequence.h"
 #include "cc/surfaces/surfaces_export.h"
 
 namespace gfx {
@@ -24,6 +27,8 @@ class Surface;
 class SurfaceFactoryClient;
 class SurfaceManager;
 
+enum class SurfaceDrawStatus { DRAW_SKIPPED, DRAWN };
+
 // A SurfaceFactory is used to create surfaces that may share resources and
 // receive returned resources for frames submitted to those surfaces. Resources
 // submitted to frames created by a particular factory will be returned to that
@@ -32,17 +37,21 @@ class SurfaceManager;
 class CC_SURFACES_EXPORT SurfaceFactory
     : public base::SupportsWeakPtr<SurfaceFactory> {
  public:
+  using DrawCallback = base::Callback<void(SurfaceDrawStatus)>;
+
   SurfaceFactory(SurfaceManager* manager, SurfaceFactoryClient* client);
   ~SurfaceFactory();
 
-  void Create(SurfaceId surface_id, const gfx::Size& size);
+  void Create(SurfaceId surface_id);
   void Destroy(SurfaceId surface_id);
+  void DestroyAll();
   // A frame can only be submitted to a surface created by this factory,
   // although the frame may reference surfaces created by other factories.
-  // The callback is called the first time this frame is used to draw.
+  // The callback is called the first time this frame is used to draw, or if
+  // the frame is discarded.
   void SubmitFrame(SurfaceId surface_id,
                    scoped_ptr<CompositorFrame> frame,
-                   const base::Closure& callback);
+                   const DrawCallback& callback);
   void RequestCopyOfSurface(SurfaceId surface_id,
                             scoped_ptr<CopyOutputRequest> copy_request);
 
@@ -51,6 +60,8 @@ class CC_SURFACES_EXPORT SurfaceFactory
   void ReceiveFromChild(const TransferableResourceArray& resources);
   void RefResources(const TransferableResourceArray& resources);
   void UnrefResources(const ReturnedResourceArray& resources);
+
+  SurfaceManager* manager() { return manager_; }
 
  private:
   SurfaceManager* manager_;

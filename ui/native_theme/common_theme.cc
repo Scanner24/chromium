@@ -9,8 +9,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/sys_color_change_listener.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -151,10 +151,7 @@ void CommonThemePaintComboboxArrow(SkCanvas* canvas, const gfx::Rect& rect) {
   CommonThemeCreateCanvas(canvas)->DrawImageInt(*arrow, rect.x(), rect.y());
 }
 
-void CommonThemePaintMenuSeparator(
-    SkCanvas* canvas,
-    const gfx::Rect& rect,
-    const NativeTheme::MenuSeparatorExtraParams& extra) {
+void CommonThemePaintMenuSeparator(SkCanvas* canvas, const gfx::Rect& rect) {
   SkColor color;
   CommonThemeGetSystemColor(NativeTheme::kColorId_MenuSeparatorColor, &color);
   SkPaint paint;
@@ -210,7 +207,7 @@ scoped_ptr<gfx::Canvas> CommonThemeCreateCanvas(SkCanvas* sk_canvas) {
   // scale factor from canvas scale.
   SkMatrix m = sk_canvas->getTotalMatrix();
   float device_scale = static_cast<float>(SkScalarAbs(m.getScaleX()));
-  return scoped_ptr<gfx::Canvas>(
+  return make_scoped_ptr(
       gfx::Canvas::CreateCanvasWithoutScaling(sk_canvas, device_scale));
 }
 

@@ -15,9 +15,11 @@
 #include "chrome/common/web_application_info.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/common/manifest.h"
 
 class ExtensionService;
 class FaviconDownloader;
+class Profile;
 class SkBitmap;
 
 namespace content {
@@ -38,11 +40,17 @@ class BookmarkAppHelper : public content::NotificationObserver {
   // This helper class will create a bookmark app out of |web_app_info| and
   // install it to |service|. Icons will be downloaded from the URLs in
   // |web_app_info.icons| using |contents| if |contents| is not NULL.
-  // All existing icons from WebApplicationInfo will also be used.
-  BookmarkAppHelper(ExtensionService* service,
+  // All existing icons from WebApplicationInfo will also be used. The user
+  // will then be prompted to edit the creation information via a bubble and
+  // will have a chance to cancel the operation.
+  BookmarkAppHelper(Profile* profile,
                     WebApplicationInfo web_app_info,
                     content::WebContents* contents);
-  virtual ~BookmarkAppHelper();
+  ~BookmarkAppHelper() override;
+
+  // Update the given WebApplicationInfo with information from the manifest.
+  static void UpdateWebAppInfoFromManifest(const content::Manifest& manifest,
+                                           WebApplicationInfo* web_app_info);
 
   // This finds the closest not-smaller bitmap in |bitmaps| for each size in
   // |sizes| and resizes it to that size. This returns a map of sizes to bitmaps
@@ -66,14 +74,34 @@ class BookmarkAppHelper : public content::NotificationObserver {
  private:
   friend class TestBookmarkAppHelper;
 
+  // Called by the WebContents when the manifest has been downloaded. If there
+  // is no manifest, or the WebContents is destroyed before the manifest could
+  // be downloaded, this is called with an empty manifest.
+  void OnDidGetManifest(const content::Manifest& manifest);
+
   // Performs post icon download tasks including installing the bookmark app.
   void OnIconsDownloaded(bool success,
                          const std::map<GURL, std::vector<SkBitmap> >& bitmaps);
 
+  // Called after the bubble has been shown, and the user has either accepted or
+  // the dialog was dismissed.
+  void OnBubbleCompleted(bool user_accepted,
+                         const WebApplicationInfo& web_app_info);
+
+  // Called when the installation of the app is complete to perform the final
+  // installation steps.
+  void FinishInstallation(const Extension* extension);
+
   // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
+
+  // The profile that the bookmark app is being added to.
+  Profile* profile_;
+
+  // The web contents that the bookmark app is being created for.
+  content::WebContents* contents_;
 
   // The WebApplicationInfo that the bookmark app is being created for.
   WebApplicationInfo web_app_info_;
@@ -94,7 +122,7 @@ class BookmarkAppHelper : public content::NotificationObserver {
 // Creates or updates a bookmark app from the given |web_app_info|. Icons will
 // not be downloaded so only supplied icon data will be used.
 void CreateOrUpdateBookmarkApp(ExtensionService* service,
-                               WebApplicationInfo& web_app_info);
+                               WebApplicationInfo* web_app_info);
 
 // Retrieves the WebApplicationInfo that represents a given bookmark app.
 // |callback| will be called with a WebApplicationInfo which is populated with

@@ -4,6 +4,7 @@
 
 #include "extensions/browser/api/web_view/web_view_internal_api.h"
 
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -64,7 +65,7 @@ bool WebViewInternalNavigateFunction::RunAsyncSafe(WebViewGuest* guest) {
       webview::Navigate::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   std::string src = params->src;
-  guest->NavigateGuest(src);
+  guest->NavigateGuest(src, true /* force_navigation */);
   return true;
 }
 
@@ -114,6 +115,8 @@ bool WebViewInternalExecuteCodeFunction::CanExecuteScriptOnPage() {
 
 extensions::ScriptExecutor*
 WebViewInternalExecuteCodeFunction::GetScriptExecutor() {
+  if (!render_view_host() || !render_view_host()->GetProcess())
+    return NULL;
   WebViewGuest* guest = WebViewGuest::From(
       render_view_host()->GetProcess()->GetID(), guest_instance_id_);
   if (!guest)
@@ -150,30 +153,6 @@ bool WebViewInternalInsertCSSFunction::ShouldInsertCSS() const {
   return true;
 }
 
-WebViewInternalCaptureVisibleRegionFunction::
-    WebViewInternalCaptureVisibleRegionFunction() {
-}
-
-WebViewInternalCaptureVisibleRegionFunction::
-    ~WebViewInternalCaptureVisibleRegionFunction() {
-}
-
-bool WebViewInternalCaptureVisibleRegionFunction::IsScreenshotEnabled() {
-  return true;
-}
-
-WebContents* WebViewInternalCaptureVisibleRegionFunction::GetWebContentsForID(
-    int instance_id) {
-  WebViewGuest* guest = WebViewGuest::From(
-      render_view_host()->GetProcess()->GetID(), instance_id);
-  return guest ? guest->web_contents() : NULL;
-}
-
-void WebViewInternalCaptureVisibleRegionFunction::OnCaptureFailure(
-    FailureReason reason) {
-  SendResponse(false);
-}
-
 WebViewInternalSetNameFunction::WebViewInternalSetNameFunction() {
 }
 
@@ -207,6 +186,23 @@ bool WebViewInternalSetAllowTransparencyFunction::RunAsyncSafe(
   return true;
 }
 
+WebViewInternalSetAllowScalingFunction::
+    WebViewInternalSetAllowScalingFunction() {
+}
+
+WebViewInternalSetAllowScalingFunction::
+    ~WebViewInternalSetAllowScalingFunction() {
+}
+
+bool WebViewInternalSetAllowScalingFunction::RunAsyncSafe(WebViewGuest* guest) {
+  scoped_ptr<webview::SetAllowScaling::Params> params(
+      webview::SetAllowScaling::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  guest->SetAllowScaling(params->allow);
+  SendResponse(true);
+  return true;
+}
+
 WebViewInternalSetZoomFunction::WebViewInternalSetZoomFunction() {
 }
 
@@ -234,7 +230,7 @@ bool WebViewInternalGetZoomFunction::RunAsyncSafe(WebViewGuest* guest) {
       webview::GetZoom::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  double zoom_factor = guest->GetZoom();
+  double zoom_factor = guest->zoom();
   SetResult(new base::FundamentalValue(zoom_factor));
   SendResponse(true);
   return true;
@@ -265,7 +261,7 @@ bool WebViewInternalFindFunction::RunAsyncSafe(WebViewGuest* guest) {
         params->options->match_case ? *params->options->match_case : false;
   }
 
-  guest->Find(search_text, options, this);
+  guest->StartFindInternal(search_text, options, this);
   return true;
 }
 
@@ -296,8 +292,33 @@ bool WebViewInternalStopFindingFunction::RunAsyncSafe(WebViewGuest* guest) {
       action = content::STOP_FIND_ACTION_KEEP_SELECTION;
   }
 
-  guest->StopFinding(action);
+  guest->StopFindingInternal(action);
   return true;
+}
+
+WebViewInternalLoadDataWithBaseUrlFunction::
+    WebViewInternalLoadDataWithBaseUrlFunction() {
+}
+
+WebViewInternalLoadDataWithBaseUrlFunction::
+    ~WebViewInternalLoadDataWithBaseUrlFunction() {
+}
+
+bool WebViewInternalLoadDataWithBaseUrlFunction::RunAsyncSafe(
+    WebViewGuest* guest) {
+  scoped_ptr<webview::LoadDataWithBaseUrl::Params> params(
+      webview::LoadDataWithBaseUrl::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  // If a virtual URL was provided, use it. Otherwise, the user will be shown
+  // the data URL.
+  std::string virtual_url =
+      params->virtual_url ? *params->virtual_url : params->data_url;
+
+  bool successful = guest->LoadDataWithBaseURL(
+      params->data_url, params->base_url, virtual_url, &error_);
+  SendResponse(successful);
+  return successful;
 }
 
 WebViewInternalGoFunction::WebViewInternalGoFunction() {
@@ -310,7 +331,9 @@ bool WebViewInternalGoFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::Go::Params> params(webview::Go::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  guest->Go(params->relative_index);
+  bool successful = guest->Go(params->relative_index);
+  SetResult(new base::FundamentalValue(successful));
+  SendResponse(true);
   return true;
 }
 

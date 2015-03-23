@@ -36,6 +36,8 @@
 #include "sync/util/cryptographer.h"
 #include "sync/util/data_type_histogram.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 
 namespace browser_sync {
@@ -66,38 +68,6 @@ const char kOtherBookmarksTag[] = "other_bookmarks";
 // limits; see write_node.cc).
 const int kTitleLimitBytes = 255;
 
-// Bookmark comparer for map of bookmark nodes.
-class BookmarkComparer {
- public:
-  // Compares the two given nodes and returns whether node1 should appear
-  // before node2 in strict weak ordering.
-  bool operator()(const BookmarkNode* node1,
-                  const BookmarkNode* node2) const {
-    DCHECK(node1);
-    DCHECK(node2);
-
-    // Keep folder nodes before non-folder nodes.
-    if (node1->is_folder() != node2->is_folder())
-      return node1->is_folder();
-
-    // Truncate bookmark titles in the form sync does internally to avoid
-    // mismatches due to sync munging titles.
-    std::string title1 = base::UTF16ToUTF8(node1->GetTitle());
-    syncer::SyncAPINameToServerName(title1, &title1);
-    base::TruncateUTF8ToByteSize(title1, kTitleLimitBytes, &title1);
-
-    std::string title2 = base::UTF16ToUTF8(node2->GetTitle());
-    syncer::SyncAPINameToServerName(title2, &title2);
-    base::TruncateUTF8ToByteSize(title2, kTitleLimitBytes, &title2);
-
-    int result = title1.compare(title2);
-    if (result != 0)
-      return result < 0;
-
-    return node1->url() < node2->url();
-  }
-};
-
 // Provides the following abstraction: given a parent bookmark node, find best
 // matching child node for many sync nodes.
 class BookmarkNodeFinder {
@@ -106,17 +76,38 @@ class BookmarkNodeFinder {
   explicit BookmarkNodeFinder(const BookmarkNode* parent_node);
 
   // Finds the bookmark node that matches the given url, title and folder
-  // attribute. Returns the matching node if one exists; NULL otherwise. If a
-  // matching node is found, it's removed for further matches.
+  // attribute. Returns the matching node if one exists; NULL otherwise.
+  // If there are multiple matches then a node with ID matching |preferred_id|
+  // is returned; otherwise the first matching node is returned.
+  // If a matching node is found, it's removed for further matches.
   const BookmarkNode* FindBookmarkNode(const GURL& url,
                                        const std::string& title,
-                                       bool is_folder);
+                                       bool is_folder,
+                                       int64 preferred_id);
+
+  // Returns true if |bookmark_node| matches the specified |url|,
+  // |title|, and |is_folder| flags.
+  static bool NodeMatches(const BookmarkNode* bookmark_node,
+                          const GURL& url,
+                          const std::string& title,
+                          bool is_folder);
 
  private:
-  typedef std::multiset<const BookmarkNode*, BookmarkComparer> BookmarkNodesSet;
+  // Maps bookmark node titles to instances, duplicates allowed.
+  // Titles are converted to the sync internal format before
+  // being used as keys for the map.
+  typedef base::hash_multimap<std::string,
+                              const BookmarkNode*> BookmarkNodeMap;
+  typedef std::pair<BookmarkNodeMap::iterator,
+                    BookmarkNodeMap::iterator> BookmarkNodeRange;
+
+  // Converts and truncates bookmark titles in the form sync does internally
+  // to avoid mismatches due to sync munging titles.
+  static void ConvertTitleToSyncInternalFormat(const std::string& input,
+                                               std::string* output);
 
   const BookmarkNode* parent_node_;
-  BookmarkNodesSet child_nodes_;
+  BookmarkNodeMap child_nodes_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkNodeFinder);
 };
@@ -141,29 +132,77 @@ class ScopedAssociationUpdater {
 BookmarkNodeFinder::BookmarkNodeFinder(const BookmarkNode* parent_node)
     : parent_node_(parent_node) {
   for (int i = 0; i < parent_node_->child_count(); ++i) {
-    child_nodes_.insert(parent_node_->GetChild(i));
+    const BookmarkNode* child_node = parent_node_->GetChild(i);
+
+    std::string title = base::UTF16ToUTF8(child_node->GetTitle());
+    ConvertTitleToSyncInternalFormat(title, &title);
+
+    child_nodes_.insert(std::make_pair(title, child_node));
   }
 }
 
 const BookmarkNode* BookmarkNodeFinder::FindBookmarkNode(
-    const GURL& url, const std::string& title, bool is_folder) {
-  // Create a bookmark node from the given bookmark attributes.
-  BookmarkNode temp_node(url);
-  temp_node.SetTitle(base::UTF8ToUTF16(title));
-  if (is_folder)
-    temp_node.set_type(BookmarkNode::FOLDER);
-  else
-    temp_node.set_type(BookmarkNode::URL);
+    const GURL& url,
+    const std::string& title,
+    bool is_folder,
+    int64 preferred_id) {
+  const BookmarkNode* match = nullptr;
 
-  const BookmarkNode* result = NULL;
-  BookmarkNodesSet::iterator iter = child_nodes_.find(&temp_node);
-  if (iter != child_nodes_.end()) {
-    result = *iter;
-    // Remove the matched node so we don't match with it again.
-    child_nodes_.erase(iter);
+  // First lookup a range of bookmarks with the same title.
+  std::string adjusted_title;
+  ConvertTitleToSyncInternalFormat(title, &adjusted_title);
+  BookmarkNodeRange range = child_nodes_.equal_range(adjusted_title);
+  BookmarkNodeMap::iterator match_iter = range.second;
+  for (BookmarkNodeMap::iterator iter = range.first;
+       iter != range.second;
+       ++iter) {
+    // Then within the range match the node by the folder bit
+    // and the url.
+    const BookmarkNode* node = iter->second;
+    if (is_folder == node->is_folder() && url == node->url()) {
+      if (node->id() == preferred_id || preferred_id == 0) {
+        // Preferred match - use this node.
+        match = node;
+        match_iter = iter;
+        break;
+      } else if (match == nullptr) {
+        // First match - continue iterating.
+        match = node;
+        match_iter = iter;
+      }
+    }
   }
 
-  return result;
+  if (match_iter != range.second) {
+    // Remove the matched node so we don't match with it again.
+    child_nodes_.erase(match_iter);
+  }
+
+  return match;
+}
+
+/* static */
+bool BookmarkNodeFinder::NodeMatches(const BookmarkNode* bookmark_node,
+                                     const GURL& url,
+                                     const std::string& title,
+                                     bool is_folder) {
+  if (url != bookmark_node->url() || is_folder != bookmark_node->is_folder()) {
+    return false;
+  }
+
+  // The title passed to this method comes from a sync directory entry.
+  // The following two lines are needed to make the native bookmark title
+  // comparable. The same conversion is used in BookmarkNodeFinder constructor.
+  std::string bookmark_title = base::UTF16ToUTF8(bookmark_node->GetTitle());
+  ConvertTitleToSyncInternalFormat(bookmark_title, &bookmark_title);
+  return title == bookmark_title;
+}
+
+/* static */
+void BookmarkNodeFinder::ConvertTitleToSyncInternalFormat(
+    const std::string& input, std::string* output) {
+  syncer::SyncAPINameToServerName(input, output);
+  base::TruncateUTF8ToByteSize(*output, kTitleLimitBytes, output);
 }
 
 // Helper class to build an index of bookmark nodes by their IDs.
@@ -352,27 +391,6 @@ bool BookmarkModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   return true;
 }
 
-bool BookmarkModelAssociator::NodesMatch(
-    const BookmarkNode* bookmark,
-    const syncer::BaseNode* sync_node) const {
-  std::string truncated_title = base::UTF16ToUTF8(bookmark->GetTitle());
-  base::TruncateUTF8ToByteSize(truncated_title,
-                               kTitleLimitBytes,
-                               &truncated_title);
-  if (truncated_title != sync_node->GetTitle())
-    return false;
-  if (bookmark->is_folder() != sync_node->GetIsFolder())
-    return false;
-  if (bookmark->is_url()) {
-    if (bookmark->url() != GURL(sync_node->GetBookmarkSpecifics().url()))
-      return false;
-  }
-  // Don't compare favicons here, because they are not really
-  // user-updated and we don't have versioning information -- a site changing
-  // its favicon shouldn't result in a bookmark mismatch.
-  return true;
-}
-
 bool BookmarkModelAssociator::AssociateTaggedPermanentNode(
     const BookmarkNode* permanent_node, const std::string&tag) {
   // Do nothing if |permanent_node| is already initialized and associated.
@@ -430,11 +448,10 @@ syncer::SyncError BookmarkModelAssociator::BuildAssociations(
   // * When all children sync nodes are done, add the extra children bookmark
   //   nodes to the sync parent node.
   //
-  // This algorithm will do a good job of merging when folder names are a good
-  // indicator of the two folders being the same. It will handle reordering and
-  // new node addition very well (without creating duplicates).
-  // This algorithm will not do well if the folder name has changes but the
-  // children under them are all the same.
+  // The best match algorithm uses folder title or bookmark title/url to
+  // perform the primary match. If there are multiple match candidates it
+  // selects the preferred one based on sync node external ID match to the
+  // bookmark folder ID.
 
   DCHECK(bookmark_model_->loaded());
 
@@ -498,6 +515,9 @@ syncer::SyncError BookmarkModelAssociator::BuildAssociations(
       bookmark_model_->root_node()->GetTotalNodeCount());
 
   // Remove obsolete bookmarks according to sync delete journal.
+  // TODO (stanisc): crbug.com/456876: rewrite this to avoid a separate
+  // traversal and instead perform deletes at the end of the loop below where
+  // the unmatched bookmark nodes are created as sync nodes.
   local_merge_result->set_num_items_deleted(
       ApplyDeletesFromSyncJournal(&trans));
 
@@ -540,11 +560,10 @@ syncer::SyncError BookmarkModelAssociator::BuildAssociations(
             model_type());
       }
 
-      const BookmarkNode* child_node = NULL;
-      child_node = node_finder.FindBookmarkNode(
+      const BookmarkNode* child_node = node_finder.FindBookmarkNode(
           GURL(sync_child_node.GetBookmarkSpecifics().url()),
-          sync_child_node.GetTitle(),
-          sync_child_node.GetIsFolder());
+          sync_child_node.GetTitle(), sync_child_node.GetIsFolder(),
+          sync_child_node.GetExternalId());
       if (child_node) {
         Associate(child_node, sync_child_id);
 
@@ -622,6 +641,14 @@ int64 BookmarkModelAssociator::ApplyDeletesFromSyncJournal(
     return 0;
   size_t num_journals_unmatched = bk_delete_journals.size();
 
+  // Make a set of all external IDs in the delete journal,
+  // ignore entries with unset external IDs.
+  std::set<int64> journaled_external_ids;
+  for (size_t i = 0; i < num_journals_unmatched; i++) {
+    if (bk_delete_journals[i].external_id != 0)
+      journaled_external_ids.insert(bk_delete_journals[i].external_id);
+  }
+
   // Check bookmark model from top to bottom.
   std::stack<const BookmarkNode*> dfs_stack;
   dfs_stack.push(bookmark_model_->bookmark_bar_node());
@@ -636,39 +663,53 @@ int64 BookmarkModelAssociator::ApplyDeletesFromSyncJournal(
   // bookmarks are removed in first pass, recheck the folders in reverse order
   // to remove empty ones.
   FolderInfoList folders_matched;
-  while (!dfs_stack.empty()) {
+  while (!dfs_stack.empty() && num_journals_unmatched > 0) {
     const BookmarkNode* parent = dfs_stack.top();
     dfs_stack.pop();
+    DCHECK(parent->is_folder());
 
-    BookmarkNodeFinder finder(parent);
-    // Iterate through journals from back to front. Remove matched journal by
-    // moving an unmatched journal at the tail to its position so that we can
-    // read unmatched journals off the head in next loop.
-    for (int i = num_journals_unmatched - 1; i >= 0; --i) {
-      const BookmarkNode* child = finder.FindBookmarkNode(
-          GURL(bk_delete_journals[i].specifics.bookmark().url()),
-          bk_delete_journals[i].specifics.bookmark().title(),
-          bk_delete_journals[i].is_folder);
-      if (child) {
-        if (child->is_folder()) {
-          // Remember matched folder without removing and delete only empty
-          // ones later.
-          folders_matched.push_back(FolderInfo(child, parent,
-                                               bk_delete_journals[i].id));
-        } else {
-          bookmark_model_->Remove(parent, parent->GetIndexOf(child));
-          ++num_bookmark_deleted;
-        }
-        // Move unmatched journal here and decrement counter.
-        bk_delete_journals[i] = bk_delete_journals[--num_journals_unmatched];
+    // Enumerate folder children in reverse order to make it easier to remove
+    // bookmarks matching entries in the delete journal.
+    for (int child_index = parent->child_count() - 1;
+         child_index >= 0 && num_journals_unmatched > 0; --child_index) {
+      const BookmarkNode* child = parent->GetChild(child_index);
+      if (child->is_folder())
+        dfs_stack.push(child);
+
+      if (journaled_external_ids.find(child->id()) ==
+          journaled_external_ids.end()) {
+        // Skip bookmark node which id is not in the set of external IDs.
+        continue;
       }
-    }
-    if (num_journals_unmatched == 0)
-      break;
 
-    for (int i = 0; i < parent->child_count(); ++i) {
-      if (parent->GetChild(i)->is_folder())
-        dfs_stack.push(parent->GetChild(i));
+      // Iterate through the journal entries from back to front. Remove matched
+      // journal by moving an unmatched entry at the tail to the matched
+      // position so that we can read unmatched entries off the head in next
+      // loop.
+      for (int journal_index = num_journals_unmatched - 1; journal_index >= 0;
+           --journal_index) {
+        const syncer::BookmarkDeleteJournal& delete_entry =
+            bk_delete_journals[journal_index];
+        if (child->id() == delete_entry.external_id &&
+            BookmarkNodeFinder::NodeMatches(
+                child, GURL(delete_entry.specifics.bookmark().url()),
+                delete_entry.specifics.bookmark().title(),
+                delete_entry.is_folder)) {
+          if (child->is_folder()) {
+            // Remember matched folder without removing and delete only empty
+            // ones later.
+            folders_matched.push_back(
+                FolderInfo(child, parent, delete_entry.id));
+          } else {
+            bookmark_model_->Remove(parent, child_index);
+            ++num_bookmark_deleted;
+          }
+          // Move unmatched journal here and decrement counter.
+          bk_delete_journals[journal_index] =
+              bk_delete_journals[--num_journals_unmatched];
+          break;
+        }
+      }
     }
   }
 

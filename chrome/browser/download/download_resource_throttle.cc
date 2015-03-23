@@ -5,6 +5,7 @@
 #include "chrome/browser/download/download_resource_throttle.h"
 
 #include "base/bind.h"
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/download/download_stats.h"
 #include "content/public/browser/resource_controller.h"
 
@@ -33,12 +34,18 @@ void DownloadResourceThrottle::WillStartRequest(bool* defer) {
   WillDownload(defer);
 }
 
-void DownloadResourceThrottle::WillRedirectRequest(const GURL& new_url,
-                                                   bool* defer) {
+void DownloadResourceThrottle::WillRedirectRequest(
+    const net::RedirectInfo& redirect_info,
+    bool* defer) {
   WillDownload(defer);
 }
 
 void DownloadResourceThrottle::WillProcessResponse(bool* defer) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 DownloadResourceThrottle::WillProcessResponse"));
+
   WillDownload(defer);
 }
 

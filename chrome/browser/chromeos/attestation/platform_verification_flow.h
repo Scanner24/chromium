@@ -92,9 +92,10 @@ class PlatformVerificationFlow
 
     // Invokes consent UI within the context of |web_contents| and calls
     // |callback| when the user responds.
-    // Precondition: The last committed URL for |web_contents| has a valid
-    //               origin.
+    // |requesting_origin| or the extension/app name will be shown on the prompt
+    // if the request comes from a web page or an extension/app, respectively.
     virtual void ShowConsentPrompt(content::WebContents* web_contents,
+                                   const GURL& requesting_origin,
                                    const ConsentCallback& callback) = 0;
 
     // Gets prefs associated with the given |web_contents|.  If no prefs are
@@ -106,7 +107,8 @@ class PlatformVerificationFlow
 
     // Gets the user associated with the given |web_contents|.  NULL may be
     // returned.
-    virtual user_manager::User* GetUser(content::WebContents* web_contents) = 0;
+    virtual const user_manager::User* GetUser(
+        content::WebContents* web_contents) = 0;
 
     // Gets the content settings map associated with the given |web_contents|.
     virtual HostContentSettingsMap* GetContentSettings(
@@ -182,6 +184,13 @@ class PlatformVerificationFlow
   };
 
   ~PlatformVerificationFlow();
+
+  // Checks whether the device has already been enrolled for attestation. The
+  // arguments to ChallengePlatformKey are in |context| and
+  // |attestation_prepared| specifies whether attestation has been prepared on
+  // this device.
+  void CheckEnrollment(const ChallengeContext& context,
+                       bool attestation_prepared);
 
   // Checks whether we need to prompt the user for consent before proceeding and
   // invokes the consent UI if so.  The arguments to ChallengePlatformKey are

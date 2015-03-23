@@ -9,10 +9,10 @@
 #include "base/values.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/error_utils.h"
-#include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/renderer/injection_host.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -66,24 +66,25 @@ bool ProgrammaticScriptInjector::ShouldInjectCss(
 }
 
 PermissionsData::AccessType ProgrammaticScriptInjector::CanExecuteOnFrame(
-    const Extension* extension,
+    const InjectionHost* injection_host,
     blink::WebFrame* frame,
     int tab_id,
     const GURL& top_url) const {
   GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
       frame, frame->document().url(), params_->match_about_blank);
   if (params_->is_web_view) {
+    if (frame->parent()) {
+      // This is a subframe inside <webview>, so allow it.
+      return PermissionsData::ACCESS_ALLOWED;
+    }
+
     return effective_document_url == params_->webview_src
                ? PermissionsData::ACCESS_ALLOWED
                : PermissionsData::ACCESS_DENIED;
   }
 
-  return extension->permissions_data()->GetPageAccess(extension,
-                                                      effective_document_url,
-                                                      top_url,
-                                                      tab_id,
-                                                      -1,  // no process ID.
-                                                      NULL /* ignore error */);
+  return injection_host->CanExecuteOnFrame(
+      effective_document_url, top_url, tab_id, true /* is_declarative */);
 }
 
 std::vector<blink::WebScriptSource> ProgrammaticScriptInjector::GetJsSources(

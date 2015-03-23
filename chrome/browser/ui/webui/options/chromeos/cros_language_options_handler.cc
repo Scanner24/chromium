@@ -20,12 +20,8 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -33,6 +29,10 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/manifest_url_handlers.h"
+#include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using base::UserMetricsAction;
@@ -187,7 +187,8 @@ void CrosLanguageOptionsHandler::SetApplicationLocale(
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
 
   // Secondary users and public session users cannot change the locale.
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
   if (user &&
       user->email() == user_manager->GetPrimaryUser()->email() &&
       user->GetType() != user_manager::USER_TYPE_PUBLIC_ACCOUNT) {

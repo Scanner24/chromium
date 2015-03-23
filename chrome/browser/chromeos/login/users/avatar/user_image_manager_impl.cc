@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager_impl.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -20,6 +19,7 @@
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -33,7 +33,6 @@
 #include "components/user_manager/user_image/default_user_images.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_manager.h"
-#include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "policy/policy_constants.h"
@@ -610,7 +609,12 @@ void UserImageManagerImpl::UserLoggedIn(bool user_is_new,
   profile_image_url_ = GURL();
   profile_image_requested_ = false;
 
-  if (IsUserLoggedInAndRegular()) {
+  user_image_sync_observer_.reset();
+  TryToCreateImageSyncObserver();
+}
+
+void UserImageManagerImpl::UserProfileCreated() {
+  if (IsUserLoggedInAndHasGaiaAccount()) {
     TryToInitDownloadedProfileImage();
 
     // Schedule an initial download of the profile data (full name and
@@ -634,9 +638,6 @@ void UserImageManagerImpl::UserLoggedIn(bool user_is_new,
     profile_download_one_shot_timer_.Stop();
     profile_download_periodic_timer_.Stop();
   }
-
-  user_image_sync_observer_.reset();
-  TryToCreateImageSyncObserver();
 }
 
 void UserImageManagerImpl::SaveUserDefaultImageIndex(int default_image_index) {
@@ -891,14 +892,13 @@ void UserImageManagerImpl::TryToInitDownloadedProfileImage() {
 
 bool UserImageManagerImpl::NeedProfileImage() const {
   const user_manager::User* user = GetUser();
-  return IsUserLoggedInAndRegular() &&
+  return IsUserLoggedInAndHasGaiaAccount() &&
          (user->image_index() == user_manager::User::USER_IMAGE_PROFILE ||
           profile_image_requested_);
 }
 
 void UserImageManagerImpl::DownloadProfileData(const std::string& reason) {
-  // GAIA profiles exist for regular users only.
-  if (!IsUserLoggedInAndRegular())
+  if (!IsUserLoggedInAndHasGaiaAccount())
     return;
 
   // If a download is already in progress, allow it to continue, with one
@@ -1019,12 +1019,11 @@ user_manager::User* UserImageManagerImpl::GetUserAndModify() const {
   return user_manager_->FindUserAndModify(user_id());
 }
 
-bool UserImageManagerImpl::IsUserLoggedInAndRegular() const {
+bool UserImageManagerImpl::IsUserLoggedInAndHasGaiaAccount() const {
   const user_manager::User* user = GetUser();
   if (!user)
     return false;
-  return user->is_logged_in() &&
-         user->GetType() == user_manager::USER_TYPE_REGULAR;
+  return user->is_logged_in() && user->HasGaiaAccount();
 }
 
 }  // namespace chromeos

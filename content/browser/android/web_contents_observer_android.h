@@ -27,48 +27,50 @@ class WebContentsObserverAndroid : public WebContentsObserver {
   WebContentsObserverAndroid(JNIEnv* env,
                              jobject obj,
                              WebContents* web_contents);
-  virtual ~WebContentsObserverAndroid();
+  ~WebContentsObserverAndroid() override;
 
   void Destroy(JNIEnv* env, jobject obj);
 
  private:
-  virtual void RenderProcessGone(
-      base::TerminationStatus termination_status) OVERRIDE;
-  virtual void DidStartLoading(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidStopLoading(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidFailProvisionalLoad(
-      RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      int error_code,
-      const base::string16& error_description) OVERRIDE;
-  virtual void DidFailLoad(RenderFrameHost* render_frame_host,
-                           const GURL& validated_url,
-                           int error_code,
-                           const base::string16& error_description) OVERRIDE;
-  virtual void DidNavigateMainFrame(const LoadCommittedDetails& details,
-                                    const FrameNavigateParams& params) OVERRIDE;
-  virtual void DidNavigateAnyFrame(const LoadCommittedDetails& details,
-                                   const FrameNavigateParams& params) OVERRIDE;
-  virtual void DidFirstVisuallyNonEmptyPaint() OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
-      RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void DidCommitProvisionalLoadForFrame(
+  void RenderViewReady() override;
+  void RenderProcessGone(base::TerminationStatus termination_status) override;
+  void DidStartLoading(RenderViewHost* render_view_host) override;
+  void DidStopLoading(RenderViewHost* render_view_host) override;
+  void DidFailProvisionalLoad(RenderFrameHost* render_frame_host,
+                              const GURL& validated_url,
+                              int error_code,
+                              const base::string16& error_description) override;
+  void DidFailLoad(RenderFrameHost* render_frame_host,
+                   const GURL& validated_url,
+                   int error_code,
+                   const base::string16& error_description) override;
+  void DidNavigateMainFrame(const LoadCommittedDetails& details,
+                            const FrameNavigateParams& params) override;
+  void DidNavigateAnyFrame(RenderFrameHost* render_frame_host,
+                           const LoadCommittedDetails& details,
+                           const FrameNavigateParams& params) override;
+  void DocumentAvailableInMainFrame() override;
+  void DidFirstVisuallyNonEmptyPaint() override;
+  void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
+                                       const GURL& validated_url,
+                                       bool is_error_page,
+                                       bool is_iframe_srcdoc) override;
+  void DidCommitProvisionalLoadForFrame(
       RenderFrameHost* render_frame_host,
       const GURL& url,
-      ui::PageTransition transition_type) OVERRIDE;
-  virtual void DidFinishLoad(RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE;
-  virtual void DocumentLoadedInFrame(
-      RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void NavigationEntryCommitted(
-      const LoadCommittedDetails& load_details) OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
-  virtual void DidAttachInterstitialPage() OVERRIDE;
-  virtual void DidDetachInterstitialPage() OVERRIDE;
-  virtual void DidChangeThemeColor(SkColor color) OVERRIDE;
+      ui::PageTransition transition_type) override;
+  void DidFinishLoad(RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override;
+  void DocumentLoadedInFrame(RenderFrameHost* render_frame_host) override;
+  void NavigationEntryCommitted(
+      const LoadCommittedDetails& load_details) override;
+  void WebContentsDestroyed() override;
+  void DidAttachInterstitialPage() override;
+  void DidDetachInterstitialPage() override;
+  void DidChangeThemeColor(SkColor color) override;
+  void DidStartNavigationToPendingEntry(
+      const GURL& url,
+      NavigationController::ReloadType reload_type) override;
 
   void DidFailLoadInternal(bool is_provisional_load,
                            bool is_main_frame,

@@ -27,17 +27,16 @@ class AutofillOptionsHandler : public OptionsPageUIHandler,
                                public autofill::PersonalDataManagerObserver {
  public:
   AutofillOptionsHandler();
-  virtual ~AutofillOptionsHandler();
+  ~AutofillOptionsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void RegisterMessages() override;
 
   // PersonalDataManagerObserver implementation.
-  virtual void OnPersonalDataChanged() OVERRIDE;
+  void OnPersonalDataChanged() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AutofillOptionsHandlerTest, AddressToDictionary);
@@ -94,6 +93,9 @@ class AutofillOptionsHandler : public OptionsPageUIHandler,
   // |args| - an array containing the index of the modified or added number, the
   // array of numbers, and the country code string set on the profile.
   void ValidatePhoneNumbers(const base::ListValue* args);
+
+  // Resets the masked state on all unmasked Wallet cards.
+  void RemaskServerCards(const base::ListValue* args);
 
   // Returns true if |personal_data_| is non-null and loaded.
   bool IsPersonalDataLoaded() const;

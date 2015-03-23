@@ -9,6 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -53,13 +54,16 @@ class ExtensionServiceTestBase : public testing::Test {
     ExtensionServiceInitParams();
   };
 
+  // Public because parameterized test cases need it to be, or else the compiler
+  // barfs.
+  static void SetUpTestCase();  // faux-verride (static override).
+
  protected:
   ExtensionServiceTestBase();
-  virtual ~ExtensionServiceTestBase();
+  ~ExtensionServiceTestBase() override;
 
   // testing::Test implementation.
-  virtual void SetUp() OVERRIDE;
-  static void SetUpTestCase();  // faux-verride (static override).
+  void SetUp() override;
 
   // Create a set of InitParams to install an ExtensionService into |temp_dir_|.
   ExtensionServiceInitParams CreateDefaultInitParams();
@@ -81,9 +85,6 @@ class ExtensionServiceTestBase : public testing::Test {
 
   // Initialize an ExtensionService with autoupdate enabled.
   void InitializeExtensionServiceWithUpdater();
-
-  // Initialize the associated ProcessManager.
-  void InitializeProcessManager();
 
   // TODO(rdevlin.cronin): Pull out more methods from ExtensionServiceTest that
   // are commonly used and/or reimplemented. For instance, methods to install
@@ -109,6 +110,7 @@ class ExtensionServiceTestBase : public testing::Test {
   // The ExtensionService, whose lifetime is managed by |profile|'s
   // ExtensionSystem.
   ExtensionService* service_;
+  ScopedTestingLocalState testing_local_state_;
 
  private:
   void CreateExtensionService(const ExtensionServiceInitParams& params);

@@ -8,7 +8,9 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/process/process_metrics.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -16,6 +18,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/task_manager/background_information.h"
 #include "chrome/browser/task_manager/browser_process_resource_provider.h"
 #include "chrome/browser/task_manager/child_process_resource_provider.h"
@@ -27,6 +30,7 @@
 #include "chrome/browser/task_manager/tab_contents_information.h"
 #include "chrome/browser/task_manager/web_contents_resource_provider.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -165,7 +169,7 @@ class TaskManagerModelGpuDataManagerObserver
     content::GpuDataManager::GetInstance()->AddObserver(this);
   }
 
-  virtual ~TaskManagerModelGpuDataManagerObserver() {
+  ~TaskManagerModelGpuDataManagerObserver() override {
     content::GpuDataManager::GetInstance()->RemoveObserver(this);
   }
 
@@ -175,9 +179,8 @@ class TaskManagerModelGpuDataManagerObserver
         video_memory_usage_stats);
   }
 
-  virtual void OnVideoMemoryUsageStatsUpdate(
-      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
-          OVERRIDE {
+  void OnVideoMemoryUsageStatsUpdate(const content::GPUVideoMemoryUsageStats&
+                                         video_memory_usage_stats) override {
     if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
       NotifyVideoMemoryUsageStats(video_memory_usage_stats);
     } else {
@@ -239,32 +242,79 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       listen_requests_(0),
       update_state_(IDLE),
       is_updating_byte_count_(false) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel1"));
+
   AddResourceProvider(
       new task_manager::BrowserProcessResourceProvider(task_manager));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel2"));
+
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::BackgroundInformation())));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel3"));
+
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::TabContentsInformation())));
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel4"));
+
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::PrintingInformation())));
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel5"));
+
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::PanelInformation())));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile6(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel6"));
+
   AddResourceProvider(
       new task_manager::ChildProcessResourceProvider(task_manager));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile7(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel7"));
+
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::ExtensionInformation())));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/437890 is fixed.
+  tracked_objects::ScopedTracker tracking_profile8(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "437890 TaskManagerModel::TaskManagerModel8"));
+
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
@@ -1227,6 +1277,11 @@ void TaskManagerModel::NotifyV8HeapStats(base::ProcessId renderer_id,
 
 void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
                                        int byte_count) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 TaskManagerModel::NotifyBytesRead1"));
+
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!is_updating_byte_count_)
     return;
@@ -1253,6 +1308,11 @@ void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
         base::Bind(&TaskManagerModel::NotifyMultipleBytesRead, this),
         base::TimeDelta::FromSeconds(1));
   }
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 TaskManagerModel::NotifyBytesRead2"));
 
   bytes_read_buffer_.push_back(
       BytesReadParam(origin_pid, child_id, route_id, byte_count));
@@ -1527,10 +1587,17 @@ TaskManager* TaskManager::GetInstance() {
 }
 
 void TaskManager::OpenAboutMemory(chrome::HostDesktopType desktop_type) {
+  Profile* profile = ProfileManager::GetLastUsedProfileAllowedByPolicy();
+  if (profile->IsGuestSession() && !g_browser_process->local_state()->
+      GetBoolean(prefs::kBrowserGuestModeEnabled)) {
+    UserManager::Show(base::FilePath(),
+                      profiles::USER_MANAGER_NO_TUTORIAL,
+                      profiles::USER_MANAGER_SELECT_PROFILE_CHROME_MEMORY);
+    return;
+  }
+
   chrome::NavigateParams params(
-      ProfileManager::GetLastUsedProfileAllowedByPolicy(),
-      GURL(chrome::kChromeUIMemoryURL),
-      ui::PAGE_TRANSITION_LINK);
+      profile, GURL(chrome::kChromeUIMemoryURL), ui::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   params.host_desktop_type = desktop_type;
   chrome::Navigate(&params);

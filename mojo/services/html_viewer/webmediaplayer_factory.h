@@ -17,6 +17,7 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
+class WebContentDecryptionModule;
 class WebMediaPlayer;
 class WebLocalFrame;
 class WebURL;
@@ -26,9 +27,14 @@ class WebMediaPlayerClient;
 namespace media {
 class AudioManager;
 class AudioRendererSink;
+class MediaPermission;
 }
 
 namespace mojo {
+class Shell;
+}
+
+namespace html_viewer {
 
 // Helper class used to create blink::WebMediaPlayer objects.
 // This class stores the "global state" shared across all WebMediaPlayer
@@ -36,12 +42,17 @@ namespace mojo {
 class WebMediaPlayerFactory {
  public:
   explicit WebMediaPlayerFactory(const scoped_refptr<
-      base::SingleThreadTaskRunner>& compositor_task_runner);
+      base::SingleThreadTaskRunner>& compositor_task_runner,
+      bool enable_mojo_media_renderer);
   ~WebMediaPlayerFactory();
 
-  blink::WebMediaPlayer* CreateMediaPlayer(blink::WebLocalFrame* frame,
-                                           const blink::WebURL& url,
-                                           blink::WebMediaPlayerClient* client);
+  blink::WebMediaPlayer* CreateMediaPlayer(
+      blink::WebLocalFrame* frame,
+      const blink::WebURL& url,
+      blink::WebMediaPlayerClient* client,
+      media::MediaPermission* media_permission,
+      blink::WebContentDecryptionModule* initial_cdm,
+      mojo::Shell* shell);
 
  private:
   const media::AudioHardwareConfig& GetAudioHardwareConfig();
@@ -49,6 +60,7 @@ class WebMediaPlayerFactory {
   scoped_refptr<base::SingleThreadTaskRunner> GetMediaThreadTaskRunner();
 
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
+  const bool enable_mojo_media_renderer_;
   base::Thread media_thread_;
   media::FakeAudioLogFactory fake_audio_log_factory_;
   scoped_ptr<media::AudioManager> audio_manager_;
@@ -57,6 +69,6 @@ class WebMediaPlayerFactory {
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerFactory);
 };
 
-}  // namespace mojo
+}  // namespace html_viewer
 
 #endif  // MOJO_SERVICES_HTML_VIEWER_WEBMEDIAPLAYER_FACTORY_H_

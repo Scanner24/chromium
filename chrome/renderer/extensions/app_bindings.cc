@@ -11,8 +11,8 @@
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_view.h"
-#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest.h"
@@ -34,7 +34,7 @@ namespace {
 
 bool IsCheckoutURL(const std::string& url_spec) {
   std::string checkout_url_prefix =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kAppsCheckoutURL);
   if (checkout_url_prefix.empty())
     checkout_url_prefix = "https://checkout.google.com/";
@@ -53,7 +53,7 @@ bool CheckAccessToAppDetails(WebFrame* frame, v8::Isolate* isolate) {
   return true;
 }
 
-const char* kInvalidCallbackIdError = "Invalid callbackId";
+const char kInvalidCallbackIdError[] = "Invalid callbackId";
 
 }  // namespace
 

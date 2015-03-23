@@ -51,7 +51,7 @@ class ASH_EXPORT TrayPower : public SystemTrayItem,
 
   TrayPower(SystemTray* system_tray,
             message_center::MessageCenter* message_center);
-  virtual ~TrayPower();
+  ~TrayPower() override;
 
  private:
   friend class TrayPowerTest;
@@ -68,19 +68,17 @@ class ASH_EXPORT TrayPower : public SystemTrayItem,
   };
 
   // Overridden from SystemTrayItem.
-  virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateNotificationView(
-      user::LoginStatus status) OVERRIDE;
-  virtual void DestroyTrayView() OVERRIDE;
-  virtual void DestroyDefaultView() OVERRIDE;
-  virtual void DestroyNotificationView() OVERRIDE;
-  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
-  virtual void UpdateAfterShelfAlignmentChange(
-      ShelfAlignment alignment) OVERRIDE;
+  views::View* CreateTrayView(user::LoginStatus status) override;
+  views::View* CreateDefaultView(user::LoginStatus status) override;
+  views::View* CreateNotificationView(user::LoginStatus status) override;
+  void DestroyTrayView() override;
+  void DestroyDefaultView() override;
+  void DestroyNotificationView() override;
+  void UpdateAfterLoginStatusChange(user::LoginStatus status) override;
+  void UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) override;
 
   // Overridden from PowerStatus::Observer.
-  virtual void OnPowerStatusChanged() OVERRIDE;
+  void OnPowerStatusChanged() override;
 
   // Show a notification that a low-power USB charger has been connected.
   // Returns true if a notification was shown or explicitly hidden.
@@ -90,9 +88,6 @@ class ASH_EXPORT TrayPower : public SystemTrayItem,
   bool UpdateNotificationState();
   bool UpdateNotificationStateForRemainingTime();
   bool UpdateNotificationStateForRemainingPercentage();
-
-  // Records the charger type in UMA.
-  void RecordChargerType();
 
   message_center::MessageCenter* message_center_;  // Not owned.
   tray::PowerTrayView* power_tray_;

@@ -40,7 +40,7 @@
 #include "content/public/common/frame_navigate_params.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/page_transition_types.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using content::BrowserThread;
 using content::DownloadItem;
@@ -99,10 +99,13 @@ const int PrerenderContents::kNumCookieSendTypes = COOKIE_SEND_TYPE_MAX;
 
 class PrerenderContentsFactoryImpl : public PrerenderContents::Factory {
  public:
-  virtual PrerenderContents* CreatePrerenderContents(
-      PrerenderManager* prerender_manager, Profile* profile,
-      const GURL& url, const content::Referrer& referrer,
-      Origin origin, uint8 experiment_id) OVERRIDE {
+  PrerenderContents* CreatePrerenderContents(
+      PrerenderManager* prerender_manager,
+      Profile* profile,
+      const GURL& url,
+      const content::Referrer& referrer,
+      Origin origin,
+      uint8 experiment_id) override {
     return new PrerenderContents(prerender_manager, profile,
                                  url, referrer, origin, experiment_id);
   }
@@ -118,8 +121,8 @@ class PrerenderContents::WebContentsDelegateImpl
   }
 
   // content::WebContentsDelegate implementation:
-  virtual WebContents* OpenURLFromTab(WebContents* source,
-                                      const OpenURLParams& params) OVERRIDE {
+  WebContents* OpenURLFromTab(WebContents* source,
+                              const OpenURLParams& params) override {
     // |OpenURLFromTab| is typically called when a frame performs a navigation
     // that requires the browser to perform the transition instead of WebKit.
     // Examples include prerendering a site that redirects to an app URL,
@@ -131,28 +134,28 @@ class PrerenderContents::WebContentsDelegateImpl
     return NULL;
   }
 
-  virtual void CloseContents(content::WebContents* contents) OVERRIDE {
+  void CloseContents(content::WebContents* contents) override {
     prerender_contents_->Destroy(FINAL_STATUS_CLOSED);
   }
 
-  virtual void CanDownload(
-      RenderViewHost* render_view_host,
-      const GURL& url,
-      const std::string& request_method,
-      const base::Callback<void(bool)>& callback) OVERRIDE {
+  void CanDownload(RenderViewHost* render_view_host,
+                   const GURL& url,
+                   const std::string& request_method,
+                   const base::Callback<void(bool)>& callback) override {
     prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
     // Cancel the download.
     callback.Run(false);
   }
 
-   virtual bool ShouldCreateWebContents(
-       WebContents* web_contents,
-       int route_id,
-       WindowContainerType window_container_type,
-       const base::string16& frame_name,
-       const GURL& target_url,
-       const std::string& partition_id,
-       SessionStorageNamespace* session_storage_namespace) OVERRIDE {
+  bool ShouldCreateWebContents(
+      WebContents* web_contents,
+      int route_id,
+      int main_frame_route_id,
+      WindowContainerType window_container_type,
+      const base::string16& frame_name,
+      const GURL& target_url,
+      const std::string& partition_id,
+      SessionStorageNamespace* session_storage_namespace) override {
     // Since we don't want to permit child windows that would have a
     // window.opener property, terminate prerendering.
     prerender_contents_->Destroy(FINAL_STATUS_CREATE_NEW_WINDOW);
@@ -160,7 +163,7 @@ class PrerenderContents::WebContentsDelegateImpl
     return false;
   }
 
-  virtual bool OnGoToEntryOffset(int offset) OVERRIDE {
+  bool OnGoToEntryOffset(int offset) override {
     // This isn't allowed because the history merge operation
     // does not work if there are renderer issued challenges.
     // TODO(cbentzel): Cancel in this case? May not need to do
@@ -169,7 +172,7 @@ class PrerenderContents::WebContentsDelegateImpl
     return false;
   }
 
-  virtual bool ShouldSuppressDialogs() OVERRIDE {
+  bool ShouldSuppressDialogs(WebContents* source) override {
     // We still want to show the user the message when they navigate to this
     // page, so cancel this prerender.
     prerender_contents_->Destroy(FINAL_STATUS_JAVASCRIPT_ALERT);
@@ -178,17 +181,16 @@ class PrerenderContents::WebContentsDelegateImpl
     return true;
   }
 
-  virtual void RegisterProtocolHandler(WebContents* web_contents,
-                                       const std::string& protocol,
-                                       const GURL& url,
-                                       bool user_gesture) OVERRIDE {
+  void RegisterProtocolHandler(WebContents* web_contents,
+                               const std::string& protocol,
+                               const GURL& url,
+                               bool user_gesture) override {
     // TODO(mmenke): Consider supporting this if it is a common case during
     // prerenders.
     prerender_contents_->Destroy(FINAL_STATUS_REGISTER_PROTOCOL_HANDLER);
   }
 
-  virtual gfx::Size GetSizeForNewRenderView(
-      WebContents* web_contents) const OVERRIDE {
+  gfx::Size GetSizeForNewRenderView(WebContents* web_contents) const override {
     // Have to set the size of the RenderView on initialization to be sure it is
     // set before the RenderView is hidden on all platforms (esp. Android).
     return prerender_contents_->size_;
@@ -239,7 +241,6 @@ PrerenderContents::PrerenderContents(
       route_id_(-1),
       origin_(origin),
       experiment_id_(experiment_id),
-      creator_child_id_(-1),
       cookie_status_(0),
       cookie_send_type_(COOKIE_SEND_TYPE_NONE),
       network_bytes_(0) {
@@ -291,7 +292,6 @@ PrerenderContents* PrerenderContents::FromWebContents(
 }
 
 void PrerenderContents::StartPrerendering(
-    int creator_child_id,
     const gfx::Size& size,
     SessionStorageNamespace* session_storage_namespace,
     net::URLRequestContextGetter* request_context) {
@@ -299,11 +299,9 @@ void PrerenderContents::StartPrerendering(
   DCHECK(!size.IsEmpty());
   DCHECK(!prerendering_has_started_);
   DCHECK(prerender_contents_.get() == NULL);
-  DCHECK_EQ(-1, creator_child_id_);
   DCHECK(size_.IsEmpty());
   DCHECK_EQ(1U, alias_urls_.size());
 
-  creator_child_id_ = creator_child_id;
   session_storage_namespace_id_ = session_storage_namespace->id();
   size_ = size;
 
@@ -324,9 +322,7 @@ void PrerenderContents::StartPrerendering(
 
   prerendering_has_started_ = true;
 
-  alias_session_storage_namespace = session_storage_namespace->CreateAlias();
-  prerender_contents_.reset(
-      CreateWebContents(alias_session_storage_namespace.get()));
+  prerender_contents_.reset(CreateWebContents(session_storage_namespace));
   TabHelpers::AttachTabHelpers(prerender_contents_.get());
   content::WebContentsObserver::Observe(prerender_contents_.get());
 
@@ -337,10 +333,6 @@ void PrerenderContents::StartPrerendering(
 
   child_id_ = GetRenderViewHost()->GetProcess()->GetID();
   route_id_ = GetRenderViewHost()->GetRoutingID();
-
-  // Log transactions to see if we could merge session storage namespaces in
-  // the event of a mismatch.
-  alias_session_storage_namespace->AddTransactionLogProcessId(child_id_);
 
   // Add the RenderProcessHost to the Prerender Manager.
   prerender_manager()->AddPrerenderProcessHost(
@@ -590,6 +582,8 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
 bool PrerenderContents::Matches(
     const GURL& url,
     const SessionStorageNamespace* session_storage_namespace) const {
+  // TODO(davidben): Remove any consumers that pass in a NULL
+  // session_storage_namespace and only test with matches.
   if (session_storage_namespace &&
       session_storage_namespace_id_ != session_storage_namespace->id()) {
     return false;
@@ -678,7 +672,7 @@ void PrerenderContents::DidNavigateMainFrame(
 }
 
 void PrerenderContents::DidGetRedirectForResourceRequest(
-    RenderViewHost* render_view_host,
+    content::RenderFrameHost* render_frame_host,
     const content::ResourceRedirectDetails& details) {
   // DidGetRedirectForResourceRequest can come for any resource on a page.  If
   // it's a redirect on the top-level resource, the name needs to be remembered
@@ -748,8 +742,6 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
 WebContents* PrerenderContents::ReleasePrerenderContents() {
   prerender_contents_->SetDelegate(NULL);
   content::WebContentsObserver::Observe(NULL);
-  if (alias_session_storage_namespace.get())
-    alias_session_storage_namespace->RemoveTransactionLogProcessId(child_id_);
   return prerender_contents_.release();
 }
 
@@ -809,13 +801,6 @@ void PrerenderContents::PrepareForUse() {
       FROM_HERE,
       base::Bind(&ResumeThrottles, resource_throttles_));
   resource_throttles_.clear();
-}
-
-SessionStorageNamespace* PrerenderContents::GetSessionStorageNamespace() const {
-  if (!prerender_contents())
-    return NULL;
-  return prerender_contents()->GetController().
-      GetDefaultSessionStorageNamespace();
 }
 
 void PrerenderContents::OnCancelPrerenderForPrinting() {

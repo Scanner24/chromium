@@ -9,8 +9,8 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "sync/api/sync_change.h"
 #include "sync/protocol/history_delete_directive_specifics.pb.h"
 #include "sync/protocol/proto_value_conversions.h"
@@ -124,12 +124,12 @@ class DeleteDirectiveHandler::DeleteDirectiveTask : public HistoryDBTask {
        post_processing_action_(post_processing_action) {}
 
   // Implements HistoryDBTask.
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE;
-  virtual void DoneRunOnMainThread() OVERRIDE;
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override;
+  void DoneRunOnMainThread() override;
 
  private:
-  virtual ~DeleteDirectiveTask() {}
+  ~DeleteDirectiveTask() override {}
 
   // Process a list of global Id directives. Delete all visits to a URL in
   // time ranges of directives if the timestamp of one visit matches with one

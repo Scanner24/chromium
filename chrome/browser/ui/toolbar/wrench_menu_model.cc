@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "base/command_line.h"
+#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/search.h"
@@ -35,8 +37,6 @@
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
-#include "chrome/browser/ui/zoom/zoom_event_manager.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -46,6 +46,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/ui/zoom/zoom_controller.h"
+#include "components/ui/zoom/zoom_event_manager.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -194,8 +196,6 @@ class WrenchMenuModel::HelpMenuModel : public ui::SimpleMenuModel {
       : SimpleMenuModel(delegate) {
     Build(browser);
   }
-  virtual ~HelpMenuModel() {
-  }
 
  private:
   void Build(Browser* browser) {
@@ -239,8 +239,19 @@ void ToolsMenuModel::Build(Browser* browser) {
     show_create_shortcuts = false;
 #endif
 
-  if (extensions::util::IsStreamlinedHostedAppsEnabled()) {
-    AddItemWithStringId(IDC_CREATE_HOSTED_APP, IDS_CREATE_HOSTED_APP);
+  if (extensions::util::IsNewBookmarkAppsEnabled()) {
+#if defined(OS_MACOSX)
+    int string_id = IDS_ADD_TO_APPLICATIONS;
+#elif defined(OS_WIN)
+    int string_id = IDS_ADD_TO_TASKBAR;
+#else
+    int string_id = IDS_ADD_TO_DESKTOP;
+#endif
+#if defined(USE_ASH)
+    if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+      string_id = IDS_ADD_TO_SHELF;
+#endif
+    AddItemWithStringId(IDC_CREATE_HOSTED_APP, string_id);
     AddSeparator(ui::NORMAL_SEPARATOR);
   } else if (show_create_shortcuts) {
     AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
@@ -253,6 +264,10 @@ void ToolsMenuModel::Build(Browser* browser) {
     AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
 
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
+
+#if defined(OS_CHROMEOS)
+  AddItemWithStringId(IDC_TAKE_SCREENSHOT, IDS_TAKE_SCREENSHOT);
+#endif
 
   AddSeparator(ui::NORMAL_SEPARATOR);
 
@@ -276,21 +291,17 @@ void ToolsMenuModel::Build(Browser* browser) {
 WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
                                  Browser* browser)
     : ui::SimpleMenuModel(this),
+      uma_action_recorded_(false),
       provider_(provider),
       browser_(browser),
       tab_strip_model_(browser_->tab_strip_model()) {
   Build();
   UpdateZoomControls();
 
-  content_zoom_subscription_ =
-      content::HostZoomMap::GetDefaultForBrowserContext(browser->profile())
+  browser_zoom_subscription_ =
+      ui_zoom::ZoomEventManager::GetForBrowserContext(browser->profile())
           ->AddZoomLevelChangedCallback(base::Bind(
               &WrenchMenuModel::OnZoomLevelChanged, base::Unretained(this)));
-
-  browser_zoom_subscription_ = ZoomEventManager::GetForBrowserContext(
-      browser->profile())->AddZoomLevelChangedCallback(
-          base::Bind(&WrenchMenuModel::OnZoomLevelChanged,
-                     base::Unretained(this)));
 
   tab_strip_model_->AddObserver(this);
 
@@ -404,17 +415,307 @@ void WrenchMenuModel::ExecuteCommand(int command_id, int event_flags) {
     }
   }
 
-  if (command_id == IDC_HELP_PAGE_VIA_MENU)
-    content::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
+  LogMenuMetrics(command_id);
+  chrome::ExecuteCommand(browser_, command_id);
+}
 
-  if (command_id == IDC_FULLSCREEN) {
-    // We issue the UMA command here and not in BrowserCommandController or even
-    // FullscreenController since we want to be able to distinguish this event
-    // and a menu which is under development.
-    content::RecordAction(UserMetricsAction("EnterFullScreenWithWrenchMenu"));
+void WrenchMenuModel::LogMenuMetrics(int command_id) {
+  base::TimeDelta delta = timer_.Elapsed();
+
+  switch (command_id) {
+    case IDC_NEW_TAB:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.NewTab", delta);
+      LogMenuAction(MENU_ACTION_NEW_TAB);
+      break;
+    case IDC_NEW_WINDOW:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.NewWindow", delta);
+      LogMenuAction(MENU_ACTION_NEW_WINDOW);
+      break;
+    case IDC_NEW_INCOGNITO_WINDOW:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.NewIncognitoWindow",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_NEW_INCOGNITO_WINDOW);
+      break;
+
+    // Bookmarks sub menu.
+    case IDC_SHOW_BOOKMARK_BAR:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ShowBookmarkBar",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_SHOW_BOOKMARK_BAR);
+      break;
+    case IDC_SHOW_BOOKMARK_MANAGER:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ShowBookmarkMgr",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_SHOW_BOOKMARK_MANAGER);
+      break;
+    case IDC_IMPORT_SETTINGS:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ImportSettings",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_IMPORT_SETTINGS);
+      break;
+    case IDC_BOOKMARK_PAGE:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.BookmarkPage",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_BOOKMARK_PAGE);
+      break;
+    case IDC_BOOKMARK_ALL_TABS:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.BookmarkAllTabs",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_BOOKMARK_ALL_TABS);
+      break;
+    case IDC_PIN_TO_START_SCREEN:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.PinToStartScreen",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_PIN_TO_START_SCREEN);
+      break;
+
+    // Recent tabs menu.
+    case IDC_RESTORE_TAB:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.RestoreTab", delta);
+      LogMenuAction(MENU_ACTION_RESTORE_TAB);
+      break;
+
+    // Windows.
+    case IDC_WIN_DESKTOP_RESTART:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.WinDesktopRestart",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_WIN_DESKTOP_RESTART);
+      break;
+    case IDC_WIN8_METRO_RESTART:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Win8MetroRestart",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_WIN8_METRO_RESTART);
+      break;
+
+    case IDC_WIN_CHROMEOS_RESTART:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ChromeOSRestart",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_WIN_CHROMEOS_RESTART);
+      break;
+    case IDC_DISTILL_PAGE:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.DistillPage",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_DISTILL_PAGE);
+      break;
+    case IDC_SAVE_PAGE:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.SavePage", delta);
+      LogMenuAction(MENU_ACTION_SAVE_PAGE);
+      break;
+    case IDC_FIND:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Find", delta);
+      LogMenuAction(MENU_ACTION_FIND);
+      break;
+    case IDC_PRINT:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Print", delta);
+      LogMenuAction(MENU_ACTION_PRINT);
+      break;
+
+    // Edit menu.
+    case IDC_CUT:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Cut", delta);
+      LogMenuAction(MENU_ACTION_CUT);
+      break;
+    case IDC_COPY:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Copy", delta);
+      LogMenuAction(MENU_ACTION_COPY);
+      break;
+    case IDC_PASTE:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Paste", delta);
+      LogMenuAction(MENU_ACTION_PASTE);
+      break;
+
+    // Tools menu.
+    case IDC_CREATE_HOSTED_APP:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.CreateHostedApp",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_CREATE_HOSTED_APP);
+      break;
+    case IDC_CREATE_SHORTCUTS:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.CreateShortcuts",
+                                   delta);
+      LogMenuAction(MENU_ACTION_CREATE_SHORTCUTS);
+      break;
+    case IDC_MANAGE_EXTENSIONS:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ManageExtensions",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_MANAGE_EXTENSIONS);
+      break;
+    case IDC_TASK_MANAGER:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.TaskManager",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_TASK_MANAGER);
+      break;
+    case IDC_CLEAR_BROWSING_DATA:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ClearBrowsingData",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_CLEAR_BROWSING_DATA);
+      break;
+    case IDC_VIEW_SOURCE:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ViewSource", delta);
+      LogMenuAction(MENU_ACTION_VIEW_SOURCE);
+      break;
+    case IDC_DEV_TOOLS:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.DevTools", delta);
+      LogMenuAction(MENU_ACTION_DEV_TOOLS);
+      break;
+    case IDC_DEV_TOOLS_CONSOLE:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.DevToolsConsole",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_DEV_TOOLS_CONSOLE);
+      break;
+    case IDC_DEV_TOOLS_DEVICES:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.DevToolsDevices",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_DEV_TOOLS_DEVICES);
+      break;
+    case IDC_PROFILING_ENABLED:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ProfilingEnabled",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_PROFILING_ENABLED);
+      break;
+
+    // Zoom menu
+    case IDC_ZOOM_MINUS:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ZoomMinus", delta);
+        LogMenuAction(MENU_ACTION_ZOOM_MINUS);
+      }
+      break;
+    case IDC_ZOOM_PLUS:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ZoomPlus", delta);
+        LogMenuAction(MENU_ACTION_ZOOM_PLUS);
+      }
+      break;
+    case IDC_FULLSCREEN:
+      content::RecordAction(UserMetricsAction("EnterFullScreenWithWrenchMenu"));
+
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.EnterFullScreen",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_FULLSCREEN);
+      break;
+
+    case IDC_SHOW_HISTORY:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ShowHistory",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_SHOW_HISTORY);
+      break;
+    case IDC_SHOW_DOWNLOADS:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ShowDownloads",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_SHOW_DOWNLOADS);
+      break;
+    case IDC_SHOW_SYNC_SETUP:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.ShowSyncSetup",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_SHOW_SYNC_SETUP);
+      break;
+    case IDC_OPTIONS:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Settings", delta);
+      LogMenuAction(MENU_ACTION_OPTIONS);
+      break;
+    case IDC_ABOUT:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.About", delta);
+      LogMenuAction(MENU_ACTION_ABOUT);
+      break;
+
+    // Help menu.
+    case IDC_HELP_PAGE_VIA_MENU:
+      content::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
+
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.HelpPage", delta);
+      LogMenuAction(MENU_ACTION_HELP_PAGE_VIA_MENU);
+      break;
+  #if defined(GOOGLE_CHROME_BUILD)
+    case IDC_FEEDBACK:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Feedback", delta);
+      LogMenuAction(MENU_ACTION_FEEDBACK);
+      break;
+  #endif
+
+    case IDC_TOGGLE_REQUEST_TABLET_SITE:
+      if (!uma_action_recorded_) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.RequestTabletSite",
+                                   delta);
+      }
+      LogMenuAction(MENU_ACTION_TOGGLE_REQUEST_TABLET_SITE);
+      break;
+    case IDC_EXIT:
+      if (!uma_action_recorded_)
+        UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction.Exit", delta);
+      LogMenuAction(MENU_ACTION_EXIT);
+      break;
   }
 
-  chrome::ExecuteCommand(browser_, command_id);
+  if (!uma_action_recorded_) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("WrenchMenu.TimeToAction", delta);
+    uma_action_recorded_ = true;
+  }
+}
+
+void WrenchMenuModel::LogMenuAction(int action_id) {
+  UMA_HISTOGRAM_ENUMERATION("WrenchMenu.MenuAction", action_id,
+                            LIMIT_MENU_ACTION);
 }
 
 bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
@@ -517,10 +818,11 @@ WrenchMenuModel::WrenchMenuModel()
 }
 
 bool WrenchMenuModel::ShouldShowNewIncognitoWindowMenuItem() {
-  if (browser_->profile()->IsSupervised())
+  if (browser_->profile()->IsGuestSession())
     return false;
 
-  return !browser_->profile()->IsGuestSession();
+  return IncognitoModePrefs::GetAvailability(browser_->profile()->GetPrefs()) !=
+      IncognitoModePrefs::DISABLED;
 }
 
 void WrenchMenuModel::Build() {
@@ -556,15 +858,29 @@ void WrenchMenuModel::Build() {
   }
 
 #if defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor()) {
+  base::win::Version min_version_for_ash_mode = base::win::VERSION_WIN8;
+  // Windows 7 ASH mode is only supported in DEBUG for now.
+#if !defined(NDEBUG)
+  min_version_for_ash_mode = base::win::VERSION_WIN7;
+#endif
+  // Windows 8 can support ASH mode using WARP, but Windows 7 requires a working
+  // GPU compositor.
+  if ((base::win::GetVersion() >= min_version_for_ash_mode &&
+      content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor()) ||
+      (base::win::GetVersion() >= base::win::VERSION_WIN8)) {
     if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
       // ASH/Metro mode, add the 'Relaunch Chrome in desktop mode'.
       AddSeparator(ui::NORMAL_SEPARATOR);
       AddItemWithStringId(IDC_WIN_DESKTOP_RESTART, IDS_WIN_DESKTOP_RESTART);
     } else {
+      // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
+      // In Windows 7 desktop, add the 'Relaunch Chrome in Windows ASH mode'
       AddSeparator(ui::NORMAL_SEPARATOR);
-      AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
+      if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+        AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
+      } else {
+        AddItemWithStringId(IDC_WIN_CHROMEOS_RESTART, IDS_WIN_CHROMEOS_RESTART);
+      }
     }
   }
 #endif
@@ -573,7 +889,7 @@ void WrenchMenuModel::Build() {
   // appended when this is a touch menu - otherwise it would get added twice.
   CreateCutCopyPasteMenu();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableDomDistiller)) {
     AddItemWithStringId(IDC_DISTILL_PAGE, IDS_DISTILL_PAGE);
   }
@@ -618,7 +934,7 @@ void WrenchMenuModel::Build() {
 #endif
 
 #if defined(OS_CHROMEOS)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableRequestTabletSite))
     AddCheckItemWithStringId(IDC_TOGGLE_REQUEST_TABLET_SITE,
                              IDS_TOGGLE_REQUEST_TABLET_SITE);
@@ -651,6 +967,7 @@ void WrenchMenuModel::Build() {
   }
 
   RemoveTrailingSeparators();
+  uma_action_recorded_ = false;
 }
 
 void WrenchMenuModel::AddGlobalErrorMenuItems() {
@@ -696,21 +1013,19 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
 }
 
 void WrenchMenuModel::CreateExtensionToolbarOverflowMenu() {
-#if defined(TOOLKIT_VIEWS)
-  AddItem(IDC_EXTENSIONS_OVERFLOW_MENU, base::string16());
-  // We only add the separator if there are > 0 items to show in the overflow.
-  extensions::ExtensionToolbarModel* toolbar_model =
-      extensions::ExtensionToolbarModel::Get(browser_->profile());
-  // A count of -1 means all actions are visible.
-  if (toolbar_model->GetVisibleIconCount() != -1)
+  // We only add the extensions overflow container if there are any icons that
+  // aren't shown in the main container.
+  if (!extensions::ExtensionToolbarModel::Get(browser_->profile())->
+          all_icons_visible()) {
+    AddItem(IDC_EXTENSIONS_OVERFLOW_MENU, base::string16());
     AddSeparator(ui::UPPER_SEPARATOR);
-#endif  // defined(TOOLKIT_VIEWS)
+  }
 }
 
 void WrenchMenuModel::CreateCutCopyPasteMenu() {
   AddSeparator(ui::LOWER_SEPARATOR);
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
+#if defined(OS_MACOSX)
   // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
   // layout for this menu item in Toolbar.xib. It does, however, use the
   // command_id value from AddButtonItem() to identify this special item.
@@ -734,7 +1049,7 @@ void WrenchMenuModel::CreateZoomMenu() {
   // This menu needs to be enclosed by separators.
   AddSeparator(ui::LOWER_SEPARATOR);
 
-#if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
+#if defined(OS_MACOSX)
   // WARNING: Mac does not use the ButtonMenuItemModel, but instead defines the
   // layout for this menu item in Toolbar.xib. It does, however, use the
   // command_id value from AddButtonItem() to identify this special item.
@@ -764,7 +1079,7 @@ void WrenchMenuModel::CreateZoomMenu() {
 void WrenchMenuModel::UpdateZoomControls() {
   int zoom_percent = 100;
   if (browser_->tab_strip_model()->GetActiveWebContents()) {
-    zoom_percent = ZoomController::FromWebContents(
+    zoom_percent = ui_zoom::ZoomController::FromWebContents(
                        browser_->tab_strip_model()->GetActiveWebContents())
                        ->GetZoomPercent();
   }

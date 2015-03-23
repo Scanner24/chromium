@@ -37,26 +37,30 @@
         'codec/jpeg_codec_unittest.cc',
         'codec/png_codec_unittest.cc',
         'color_analysis_unittest.cc',
+        'color_profile_mac_unittest.mm',
         'color_utils_unittest.cc',
         'display_change_notifier_unittest.cc',
         'display_unittest.cc',
         'font_list_unittest.cc',
+        'font_render_params_linux_unittest.cc',
         'geometry/box_unittest.cc',
         'geometry/cubic_bezier_unittest.cc',
         'geometry/insets_unittest.cc',
         'geometry/matrix3_unittest.cc',
-        'geometry/point_unittest.cc',
         'geometry/point3_unittest.cc',
+        'geometry/point_unittest.cc',
         'geometry/quad_unittest.cc',
         'geometry/r_tree_unittest.cc',
         'geometry/rect_unittest.cc',
         'geometry/safe_integer_conversions_unittest.cc',
+        'geometry/scroll_offset_unittest.cc',
         'geometry/size_unittest.cc',
         'geometry/vector2d_unittest.cc',
         'geometry/vector3d_unittest.cc',
         'image/image_mac_unittest.mm',
         'image/image_util_unittest.cc',
         'mac/coordinate_conversion_unittest.mm',
+        'platform_font_linux_unittest.cc',
         'platform_font_mac_unittest.mm',
         'range/range_mac_unittest.mm',
         'range/range_unittest.cc',
@@ -89,34 +93,8 @@
         }],
         ['OS != "mac" and OS != "ios"', {
           'sources': [
-            'transform_unittest.cc',
             'interpolated_transform_unittest.cc',
-          ],
-        }],
-        ['use_pango == 1', {
-          'dependencies': [
-            '../../build/linux/system.gyp:fontconfig',
-            '../../build/linux/system.gyp:pangocairo',
-          ],
-          'sources': [
-            'font_render_params_linux_unittest.cc',
-            'platform_font_pango_unittest.cc',
-          ],
-          'conditions': [
-            ['use_allocator!="none"', {
-              'dependencies': [
-                '../../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        }],
-        ['use_ozone==1 and use_pango==0', {
-          'sources!': [
-            'canvas_unittest.cc',
-            'font_list_unittest.cc',
-            'font_unittest.cc',
-            'render_text_unittest.cc',
-            'text_elider_unittest.cc',
+            'transform_unittest.cc',
           ],
         }],
         ['OS == "android"', {
@@ -145,6 +123,7 @@
             'font_fallback_win_unittest.cc',
             'icon_util_unittest.cc',
             'icon_util_unittests.rc',
+            'path_win_unittest.cc',
             'platform_font_win_unittest.cc',
           ],
           'msvs_settings': {
@@ -185,6 +164,30 @@
             'test_suite_name': 'gfx_unittests',
           },
           'includes': [ '../../build/apk_test.gypi' ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'gfx_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'gfx_unittests',
+          ],
+          'includes': [
+            '../../build/isolate.gypi',
+          ],
+          'sources': [
+            'gfx_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11 == 1', {
+              'dependencies': [
+                '../../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+          ],
         },
       ],
     }],

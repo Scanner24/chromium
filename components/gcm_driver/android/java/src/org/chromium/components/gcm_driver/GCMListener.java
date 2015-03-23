@@ -5,6 +5,8 @@
 package org.chromium.components.gcm_driver;
 
 import android.content.Intent;
+import android.os.Bundle;
+import android.util.Log;
 
 import com.google.ipc.invalidation.external.client.contrib.MultiplexingGcmListener;
 
@@ -29,48 +31,49 @@ public class GCMListener extends MultiplexingGcmListener.AbstractListener {
 
     private static final String TAG = "GCMListener";
 
-    // Used as a fallback since GCM doesn't yet give us the app ID.
-    // TODO(johnme): Get real app IDs from GCM, and remove this.
-    private static final String UNKNOWN_APP_ID = "push#https://www.gcmlistenerfake.com#0";
-
     public GCMListener() {
         super(TAG);
     }
 
     @Override
-    protected void onRegistered(final String registrationId) {
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override public void run() {
-                GCMDriver.onRegisterFinished(UNKNOWN_APP_ID, registrationId);
-            }
-        });
+    protected void onRegistered(String registrationId) {
+        // Ignore this, since we register using GoogleCloudMessagingV2.
     }
 
     @Override
     protected void onUnregistered(String registrationId) {
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override public void run() {
-                GCMDriver.onUnregisterFinished(UNKNOWN_APP_ID);
-            }
-        });
+        // Ignore this, since we register using GoogleCloudMessagingV2.
     }
 
     @Override
     protected void onMessage(final Intent intent) {
+        final String bundleSubtype = "subtype";
+        final String bundleDataForPushApi = "data";
+        Bundle extras = intent.getExtras();
+        if (!extras.containsKey(bundleSubtype)) {
+            Log.w(TAG, "Received push message with no subtype");
+            return;
+        }
+        final String appId = extras.getString(bundleSubtype);
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override public void run() {
-                GCMDriver.onMessageReceived(getApplicationContext(), UNKNOWN_APP_ID,
-                    intent.getExtras());
+                GCMDriver.onMessageReceived(getApplicationContext(), appId,
+                        intent.getExtras());
             }
         });
     }
 
     @Override
     protected void onDeletedMessages(int total) {
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override public void run() {
-                GCMDriver.onMessagesDeleted(getApplicationContext(), UNKNOWN_APP_ID);
-            }
-        });
+        // TODO(johnme): Refactor/replace MultiplexingGcmListener so it passes us the extras and
+        // hence the subtype (aka appId).
+        Log.w(TAG, "Push messages were deleted, but we can't tell the Service Worker, as we"
+                   + " don't have access to the intent extras so we can't get the appId");
+        return;
+        //ThreadUtils.runOnUiThread(new Runnable() {
+        //    @Override public void run() {
+        //        GCMDriver.onMessagesDeleted(getApplicationContext(), appId);
+        //    }
+        //});
     }
 }

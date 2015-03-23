@@ -43,7 +43,13 @@ void MidiManagerUsb::DispatchSendMidiData(MidiManagerClient* client,
                                           uint32_t port_index,
                                           const std::vector<uint8>& data,
                                           double timestamp) {
-  DCHECK_LT(port_index, output_streams_.size());
+  if (port_index >= output_streams_.size()) {
+    // |port_index| is provided by a renderer so we can't believe that it is
+    // in the valid range.
+    // TODO(toyoshim): Move this check to MidiHost and kill the renderer when
+    // it fails.
+    return;
+  }
   output_streams_[port_index]->Send(data);
   client->AccumulateMidiBytesSent(data.size());
 }
@@ -100,6 +106,7 @@ void MidiManagerUsb::OnEnumerateDevicesDone(bool result,
         // setting is sufficiently unique although there is no user-friendly
         // meaning.
         MidiPortInfo port;
+        port.state = MIDI_PORT_OPENED;
         port.id = base::StringPrintf("port-%ld-%ld",
                                      static_cast<long>(i),
                                      static_cast<long>(j));
@@ -109,6 +116,7 @@ void MidiManagerUsb::OnEnumerateDevicesDone(bool result,
         input_jacks.push_back(jacks[j]);
         // TODO(yhirano): Set appropriate properties.
         MidiPortInfo port;
+        port.state = MIDI_PORT_OPENED;
         port.id = base::StringPrintf("port-%ld-%ld",
                                      static_cast<long>(i),
                                      static_cast<long>(j));

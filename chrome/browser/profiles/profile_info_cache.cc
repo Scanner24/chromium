@@ -33,6 +33,10 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_util.h"
 
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/supervised_user_constants.h"
+#endif
+
 using content::BrowserThread;
 
 namespace {
@@ -54,6 +58,7 @@ const char kSigninRequiredKey[] = "signin_required";
 const char kSupervisedUserId[] = "managed_user_id";
 const char kProfileIsEphemeral[] = "is_ephemeral";
 const char kActiveTimeKey[] = "active_time";
+const char kIsAuthErrorKey[] = "is_auth_error";
 
 // First eight are generic icons, which use IDS_NUMBERED_PROFILE_NAME.
 const int kDefaultNames[] = {
@@ -129,6 +134,13 @@ void ReadBitmap(const base::FilePath& image_path,
   }
 
   *out_image = new gfx::Image(image);
+}
+
+void RunCallbackIfFileMissing(const base::FilePath& file_path,
+                              const base::Closure& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  if (!base::PathExists(file_path))
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, callback);
 }
 
 void DeleteBitmap(const base::FilePath& image_path) {
@@ -210,7 +222,7 @@ void ProfileInfoCache::AddProfileToCache(
   sorted_keys_.insert(FindPositionForProfile(key, name), key);
 
   if (switches::IsNewAvatarMenu())
-    DownloadHighResAvatar(icon_index, profile_path);
+    DownloadHighResAvatarIfNeeded(icon_index, profile_path);
 
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,
@@ -381,7 +393,7 @@ const gfx::Image* ProfileInfoCache::GetGAIAPictureOfProfileAtIndex(
     return NULL;
 
   base::FilePath image_path = path.AppendASCII(file_name);
-  return LoadAvatarPictureFromPath(key, image_path);
+  return LoadAvatarPictureFromPath(path, key, image_path);
 }
 
 bool ProfileInfoCache::IsUsingGAIAPictureOfProfileAtIndex(size_t index) const {
@@ -397,6 +409,19 @@ bool ProfileInfoCache::IsUsingGAIAPictureOfProfileAtIndex(size_t index) const {
 
 bool ProfileInfoCache::ProfileIsSupervisedAtIndex(size_t index) const {
   return !GetSupervisedUserIdOfProfileAtIndex(index).empty();
+}
+
+bool ProfileInfoCache::ProfileIsChildAtIndex(size_t index) const {
+#if defined(ENABLE_SUPERVISED_USERS)
+  return GetSupervisedUserIdOfProfileAtIndex(index) ==
+      supervised_users::kChildAccountSUID;
+#else
+  return false;
+#endif
+}
+
+bool ProfileInfoCache::ProfileIsLegacySupervisedAtIndex(size_t index) const {
+  return ProfileIsSupervisedAtIndex(index) && !ProfileIsChildAtIndex(index);
 }
 
 bool ProfileInfoCache::IsOmittedProfileAtIndex(size_t index) const {
@@ -435,6 +460,12 @@ bool ProfileInfoCache::ProfileIsUsingDefaultNameAtIndex(size_t index) const {
 bool ProfileInfoCache::ProfileIsUsingDefaultAvatarAtIndex(size_t index) const {
   bool value = false;
   GetInfoForProfileAtIndex(index)->GetBoolean(kIsUsingDefaultAvatarKey, &value);
+  return value;
+}
+
+bool ProfileInfoCache::ProfileIsAuthErrorAtIndex(size_t index) const {
+  bool value = false;
+  GetInfoForProfileAtIndex(index)->GetBoolean(kIsAuthErrorKey, &value);
   return value;
 }
 
@@ -519,9 +550,8 @@ void ProfileInfoCache::SetAvatarIconOfProfileAtIndex(size_t index,
 
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
 
-  // If needed, start downloading the high-res avatar.
   if (switches::IsNewAvatarMenu())
-    DownloadHighResAvatar(icon_index, profile_path);
+    DownloadHighResAvatarIfNeeded(icon_index, profile_path);
 
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,
@@ -676,7 +706,6 @@ void ProfileInfoCache::SetIsUsingGAIAPictureOfProfileAtIndex(size_t index,
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
 
-  // Retrieve some info to update observers who care about avatar changes.
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,
@@ -731,6 +760,17 @@ void ProfileInfoCache::SetProfileIsUsingDefaultAvatarAtIndex(
   scoped_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kIsUsingDefaultAvatarKey, value);
+  // This takes ownership of |info|.
+  SetInfoForProfileAtIndex(index, info.release());
+}
+
+void ProfileInfoCache::SetProfileIsAuthErrorAtIndex(size_t index, bool value) {
+  if (value == ProfileIsAuthErrorAtIndex(index))
+    return;
+
+  scoped_ptr<base::DictionaryValue> info(
+      GetInfoForProfileAtIndex(index)->DeepCopy());
+  info->SetBoolean(kIsAuthErrorKey, value);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
 }
@@ -810,28 +850,11 @@ const base::FilePath& ProfileInfoCache::GetUserDataDir() const {
 }
 
 // static
-std::vector<base::string16> ProfileInfoCache::GetProfileNames() {
-  std::vector<base::string16> names;
-  PrefService* local_state = g_browser_process->local_state();
-  const base::DictionaryValue* cache = local_state->GetDictionary(
-      prefs::kProfileInfoCache);
-  base::string16 name;
-  for (base::DictionaryValue::Iterator it(*cache); !it.IsAtEnd();
-       it.Advance()) {
-    const base::DictionaryValue* info = NULL;
-    it.value().GetAsDictionary(&info);
-    info->GetString(kNameKey, &name);
-    names.push_back(name);
-  }
-  return names;
-}
-
-// static
 void ProfileInfoCache::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kProfileInfoCache);
 }
 
-void ProfileInfoCache::DownloadHighResAvatar(
+void ProfileInfoCache::DownloadHighResAvatarIfNeeded(
     size_t icon_index,
     const base::FilePath& profile_path) {
   // Downloading is only supported on desktop.
@@ -839,25 +862,15 @@ void ProfileInfoCache::DownloadHighResAvatar(
   return;
 #endif
 
-  // TODO(noms): We should check whether the file already exists on disk
-  // before trying to re-download it. For now, since this is behind a flag and
-  // the resources are still changing, re-download it every time the profile
-  // avatar changes, to make sure we have the latest copy.
-  std::string file_name = profiles::GetDefaultAvatarIconFileNameAtIndex(
-      icon_index);
-  // If the file is already being downloaded, don't start another download.
-  if (avatar_images_downloads_in_progress_[file_name])
-    return;
-
-  // Start the download for this file. The cache takes ownership of the
-  // |avatar_downloader|, which will be deleted when the download completes, or
-  // if that never happens, when the ProfileInfoCache is destroyed.
-  ProfileAvatarDownloader* avatar_downloader = new ProfileAvatarDownloader(
-      icon_index,
-      profile_path,
-      this);
-  avatar_images_downloads_in_progress_[file_name] = avatar_downloader;
-  avatar_downloader->Start();
+  const base::FilePath& file_path =
+      profiles::GetPathOfHighResAvatarAtIndex(icon_index);
+  base::Closure callback =
+      base::Bind(&ProfileInfoCache::DownloadHighResAvatar,
+                 AsWeakPtr(),
+                 icon_index,
+                 profile_path);
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      base::Bind(&RunCallbackIfFileMissing, file_path, callback));
 }
 
 void ProfileInfoCache::SaveAvatarImageAtPath(
@@ -871,12 +884,22 @@ void ProfileInfoCache::SaveAvatarImageAtPath(
   scoped_refptr<base::RefCountedMemory> png_data = image->As1xPNGBytes();
   data->assign(png_data->front(), png_data->front() + png_data->size());
 
+  // Remove the file from the list of downloads in progress. Note that this list
+  // only contains the high resolution avatars, and not the Gaia profile images.
+  auto downloader_iter = avatar_images_downloads_in_progress_.find(key);
+  if (downloader_iter != avatar_images_downloads_in_progress_.end()) {
+    // We mustn't delete the avatar downloader right here, since we're being
+    // called by it.
+    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE,
+                              downloader_iter->second);
+    avatar_images_downloads_in_progress_.erase(downloader_iter);
+  }
+
   if (!data->size()) {
     LOG(ERROR) << "Failed to PNG encode the image.";
   } else {
     base::Closure callback = base::Bind(&ProfileInfoCache::OnAvatarPictureSaved,
         AsWeakPtr(), key, profile_path);
-
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         base::Bind(&SaveBitmap, base::Passed(&data), image_path, callback));
   }
@@ -989,15 +1012,45 @@ const gfx::Image* ProfileInfoCache::GetHighResAvatarOfProfileAtIndex(
   int avatar_index = GetAvatarIconIndexOfProfileAtIndex(index);
   std::string key = profiles::GetDefaultAvatarIconFileNameAtIndex(avatar_index);
 
-  if (!strcmp(key.c_str(), profiles::GetNoHighResAvatarFileName()))
-      return NULL;
+  // If this is the placeholder avatar, it is already included in the
+  // resources, so it doesn't need to be downloaded.
+  if (!strcmp(key.c_str(), profiles::GetNoHighResAvatarFileName())) {
+    return &ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        profiles::GetPlaceholderAvatarIconResourceID());
+  }
 
   base::FilePath image_path =
       profiles::GetPathOfHighResAvatarAtIndex(avatar_index);
-  return LoadAvatarPictureFromPath(key, image_path);
+  return LoadAvatarPictureFromPath(GetPathOfProfileAtIndex(index),
+                                   key, image_path);
+}
+
+void ProfileInfoCache::DownloadHighResAvatar(
+    size_t icon_index,
+    const base::FilePath& profile_path) {
+  // Downloading is only supported on desktop.
+#if defined(OS_ANDROID) || defined(OS_IOS) || defined(OS_CHROMEOS)
+  return;
+#endif
+  const std::string file_name =
+      profiles::GetDefaultAvatarIconFileNameAtIndex(icon_index);
+  // If the file is already being downloaded, don't start another download.
+  if (avatar_images_downloads_in_progress_.count(file_name))
+    return;
+
+  // Start the download for this file. The cache takes ownership of the
+  // |avatar_downloader|, which will be deleted when the download completes, or
+  // if that never happens, when the ProfileInfoCache is destroyed.
+  ProfileAvatarDownloader* avatar_downloader = new ProfileAvatarDownloader(
+      icon_index,
+      profile_path,
+      this);
+  avatar_images_downloads_in_progress_[file_name] = avatar_downloader;
+  avatar_downloader->Start();
 }
 
 const gfx::Image* ProfileInfoCache::LoadAvatarPictureFromPath(
+    const base::FilePath& profile_path,
     const std::string& key,
     const base::FilePath& image_path) const {
   // If the picture is already loaded then use it.
@@ -1016,11 +1069,13 @@ const gfx::Image* ProfileInfoCache::LoadAvatarPictureFromPath(
   BrowserThread::PostTaskAndReply(BrowserThread::FILE, FROM_HERE,
       base::Bind(&ReadBitmap, image_path, image),
       base::Bind(&ProfileInfoCache::OnAvatarPictureLoaded,
-          const_cast<ProfileInfoCache*>(this)->AsWeakPtr(), key, image));
+          const_cast<ProfileInfoCache*>(this)->AsWeakPtr(),
+          profile_path, key, image));
   return NULL;
 }
 
-void ProfileInfoCache::OnAvatarPictureLoaded(const std::string& key,
+void ProfileInfoCache::OnAvatarPictureLoaded(const base::FilePath& profile_path,
+                                             const std::string& key,
                                              gfx::Image** image) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -1039,6 +1094,10 @@ void ProfileInfoCache::OnAvatarPictureLoaded(const std::string& key,
       chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
+
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileHighResAvatarLoaded(profile_path));
 }
 
 void ProfileInfoCache::OnAvatarPictureSaved(
@@ -1052,16 +1111,8 @@ void ProfileInfoCache::OnAvatarPictureSaved(
       content::NotificationService::NoDetails());
 
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
-                    observer_list_,
-                    OnProfileAvatarChanged(profile_path));
-
-  // Remove the file from the list of downloads in progress. Note that this list
-  // only contains the high resolution avatars, and not the Gaia profile images.
-  if (!avatar_images_downloads_in_progress_[file_name])
-    return;
-
-  delete avatar_images_downloads_in_progress_[file_name];
-  avatar_images_downloads_in_progress_[file_name] = NULL;
+      observer_list_,
+      OnProfileHighResAvatarLoaded(profile_path));
 }
 
 void ProfileInfoCache::MigrateLegacyProfileNamesAndDownloadAvatars() {
@@ -1085,9 +1136,8 @@ void ProfileInfoCache::MigrateLegacyProfileNamesAndDownloadAvatars() {
       l10n_util::GetStringUTF16(IDS_LEGACY_DEFAULT_PROFILE_NAME));
 
   for (size_t i = 0; i < GetNumberOfProfiles(); i++) {
-    // If needed, start downloading the high-res avatar for this profile.
-    DownloadHighResAvatar(GetAvatarIconIndexOfProfileAtIndex(i),
-                          GetPathOfProfileAtIndex(i));
+    DownloadHighResAvatarIfNeeded(GetAvatarIconIndexOfProfileAtIndex(i),
+                                  GetPathOfProfileAtIndex(i));
 
     base::string16 name = base::i18n::ToLower(GetNameOfProfileAtIndex(i));
     if (name == default_profile_name || name == default_legacy_profile_name)

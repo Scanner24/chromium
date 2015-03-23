@@ -8,16 +8,17 @@
 #include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/views/apps/desktop_keyboard_capture.h"
 #include "chrome/browser/ui/views/apps/shaped_app_window_targeter.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/frame/taskbar_decorator.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/ui/zoom/page_zoom.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "extensions/common/extension.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
@@ -50,6 +51,10 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/window_observer.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "ash/shell_window_ids.h"
 #endif
 
 using extensions::AppWindow;
@@ -137,7 +142,7 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
     window_state_->AddObserver(this);
     window_state_->window()->AddObserver(this);
   }
-  virtual ~NativeAppWindowStateDelegate() {
+  ~NativeAppWindowStateDelegate() override {
     if (window_state_) {
       window_state_->RemoveObserver(this);
       window_state_->window()->RemoveObserver(this);
@@ -146,7 +151,7 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
 
  private:
   // Overridden from ash::wm::WindowStateDelegate.
-  virtual bool ToggleFullscreen(ash::wm::WindowState* window_state) OVERRIDE {
+  bool ToggleFullscreen(ash::wm::WindowState* window_state) override {
     // Windows which cannot be maximized should not be fullscreened.
     DCHECK(window_state->IsFullscreen() || window_state->CanMaximize());
     if (window_state->IsFullscreen())
@@ -157,9 +162,8 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
   }
 
   // Overridden from ash::wm::WindowStateObserver:
-  virtual void OnPostWindowStateTypeChange(
-      ash::wm::WindowState* window_state,
-      ash::wm::WindowStateType old_type) OVERRIDE {
+  void OnPostWindowStateTypeChange(ash::wm::WindowState* window_state,
+                                   ash::wm::WindowStateType old_type) override {
     // Since the window state might get set by a window manager, it is possible
     // to come here before the application set its |BaseWindow|.
     if (!window_state->IsFullscreen() && !window_state->IsMinimized() &&
@@ -175,7 +179,7 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
   }
 
   // Overridden from aura::WindowObserver:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+  void OnWindowDestroying(aura::Window* window) override {
     window_state_->RemoveObserver(this);
     window_state_->window()->RemoveObserver(this);
     window_state_ = NULL;
@@ -229,6 +233,14 @@ void ChromeNativeAppWindowViews::InitializeDefaultWindow(
 #endif
 
   OnBeforeWidgetInit(&init_params, widget());
+#if defined(OS_CHROMEOS)
+  if (create_params.is_ime_window) {
+    // Puts ime windows into ime window container.
+    init_params.parent =
+        ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
+                                 ash::kShellWindowId_ImeWindowParentContainer);
+  }
+#endif
   widget()->Init(init_params);
 
   // The frame insets are required to resolve the bounds specifications
@@ -257,6 +269,11 @@ void ChromeNativeAppWindowViews::InitializeDefaultWindow(
     wm::SetShadowType(widget()->GetNativeWindow(), wm::SHADOW_TYPE_NONE);
   }
 
+#if defined(OS_CHROMEOS)
+  if (create_params.is_ime_window)
+    return;
+#endif
+
   // Register accelarators supported by app windows.
   // TODO(jeremya/stevenjb): should these be registered for panels too?
   views::FocusManager* focus_manager = GetFocusManager();
@@ -276,8 +293,8 @@ void ChromeNativeAppWindowViews::InitializeDefaultWindow(
 
   // Ensure there is a ZoomController in kiosk mode, otherwise the processing
   // of the accelerators will cause a crash.
-  DCHECK(!is_kiosk_app_mode ||
-         ZoomController::FromWebContents(web_view()->GetWebContents()));
+  DCHECK(!is_kiosk_app_mode || ui_zoom::ZoomController::FromWebContents(
+                                   web_view()->GetWebContents()));
 
   for (std::map<ui::Accelerator, int>::const_iterator iter =
            accelerator_table.begin();
@@ -327,45 +344,6 @@ void ChromeNativeAppWindowViews::InitializePanelWindow(
 views::NonClientFrameView*
 ChromeNativeAppWindowViews::CreateStandardDesktopAppFrame() {
   return views::WidgetDelegateView::CreateNonClientFrameView(widget());
-}
-
-apps::AppWindowFrameView*
-ChromeNativeAppWindowViews::CreateNonStandardAppFrame() {
-  apps::AppWindowFrameView* frame =
-      new apps::AppWindowFrameView(widget(),
-                                   this,
-                                   has_frame_color_,
-                                   active_frame_color_,
-                                   inactive_frame_color_);
-  frame->Init();
-#if defined(USE_ASH)
-  // For Aura windows on the Ash desktop the sizes are different and the user
-  // can resize the window from slightly outside the bounds as well.
-  if (chrome::IsNativeWindowInAsh(widget()->GetNativeWindow())) {
-    frame->SetResizeSizes(ash::kResizeInsideBoundsSize,
-                          ash::kResizeOutsideBoundsSize,
-                          ash::kResizeAreaCornerSize);
-  }
-#endif
-
-#if !defined(OS_CHROMEOS)
-  // For non-Ash windows, install an easy resize window targeter, which ensures
-  // that the root window (not the app) receives mouse events on the edges.
-  if (chrome::GetHostDesktopTypeForNativeWindow(widget()->GetNativeWindow()) !=
-      chrome::HOST_DESKTOP_TYPE_ASH) {
-    aura::Window* window = widget()->GetNativeWindow();
-    int resize_inside = frame->resize_inside_bounds_size();
-    gfx::Insets inset(
-        resize_inside, resize_inside, resize_inside, resize_inside);
-    // Add the EasyResizeWindowTargeter on the window, not its root window. The
-    // root window does not have a delegate, which is needed to handle the event
-    // in Linux.
-    window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
-        new wm::EasyResizeWindowTargeter(window, inset, inset)));
-  }
-#endif
-
-  return frame;
 }
 
 // ui::BaseWindow implementation.
@@ -507,17 +485,15 @@ views::NonClientFrameView* ChromeNativeAppWindowViews::CreateNonClientFrameView(
         scoped_ptr<ash::wm::WindowStateDelegate>(
             new NativeAppWindowStateDelegate(app_window(), this)).Pass());
 
+    if (IsFrameless())
+      return CreateNonStandardAppFrame();
+
     if (app_window()->window_type_is_panel()) {
-      ash::PanelFrameView::FrameType frame_type = IsFrameless() ?
-          ash::PanelFrameView::FRAME_NONE : ash::PanelFrameView::FRAME_ASH;
       views::NonClientFrameView* frame_view =
-          new ash::PanelFrameView(widget, frame_type);
+          new ash::PanelFrameView(widget, ash::PanelFrameView::FRAME_ASH);
       frame_view->set_context_menu_controller(this);
       return frame_view;
     }
-
-    if (IsFrameless())
-      return CreateNonStandardAppFrame();
 
     ash::CustomFrameViewAsh* custom_frame_view =
         new ash::CustomFrameViewAsh(widget);
@@ -527,6 +503,12 @@ views::NonClientFrameView* ChromeNativeAppWindowViews::CreateNonClientFrameView(
     custom_frame_view->InitImmersiveFullscreenControllerForView(
         immersive_fullscreen_controller_.get());
     custom_frame_view->GetHeaderView()->set_context_menu_controller(this);
+
+    if (has_frame_color_) {
+      custom_frame_view->SetFrameColors(active_frame_color_,
+                                        inactive_frame_color_);
+    }
+
     return custom_frame_view;
   }
 #endif
@@ -563,16 +545,16 @@ bool ChromeNativeAppWindowViews::AcceleratorPressed(
       Close();
       return true;
     case IDC_ZOOM_MINUS:
-      chrome_page_zoom::Zoom(web_view()->GetWebContents(),
-                             content::PAGE_ZOOM_OUT);
+      ui_zoom::PageZoom::Zoom(web_view()->GetWebContents(),
+                              content::PAGE_ZOOM_OUT);
       return true;
     case IDC_ZOOM_NORMAL:
-      chrome_page_zoom::Zoom(web_view()->GetWebContents(),
-                             content::PAGE_ZOOM_RESET);
+      ui_zoom::PageZoom::Zoom(web_view()->GetWebContents(),
+                              content::PAGE_ZOOM_RESET);
       return true;
     case IDC_ZOOM_PLUS:
-      chrome_page_zoom::Zoom(web_view()->GetWebContents(),
-                             content::PAGE_ZOOM_IN);
+      ui_zoom::PageZoom::Zoom(web_view()->GetWebContents(),
+                              content::PAGE_ZOOM_IN);
       return true;
     default:
       NOTREACHED() << "Unknown accelerator sent to app window.";
@@ -589,8 +571,7 @@ void ChromeNativeAppWindowViews::SetFullscreen(int fullscreen_types) {
   is_fullscreen_ = (fullscreen_types != AppWindow::FULLSCREEN_TYPE_NONE);
   widget()->SetFullscreen(is_fullscreen_);
 
-  // TODO(oshima): Remove USE_ATHENA once athena has its own NativeAppWindow.
-#if defined(USE_ASH) && !defined(USE_ATHENA)
+#if defined(USE_ASH)
   if (immersive_fullscreen_controller_.get()) {
     // |immersive_fullscreen_controller_| should only be set if immersive
     // fullscreen is the fullscreen type used by the OS.
@@ -664,6 +645,14 @@ SkColor ChromeNativeAppWindowViews::InactiveFrameColor() const {
   return inactive_frame_color_;
 }
 
+void ChromeNativeAppWindowViews::SetInterceptAllKeys(bool want_all_keys) {
+  if (want_all_keys && (desktop_keyboard_capture_.get() == NULL)) {
+    desktop_keyboard_capture_.reset(new DesktopKeyboardCapture(widget()));
+  } else if (!want_all_keys) {
+    desktop_keyboard_capture_.reset(NULL);
+  }
+}
+
 // NativeAppWindowViews implementation.
 
 void ChromeNativeAppWindowViews::InitializeWindow(
@@ -684,4 +673,43 @@ void ChromeNativeAppWindowViews::InitializeWindow(
       widget()->GetFocusManager(),
       extensions::ExtensionKeybindingRegistry::PLATFORM_APPS_ONLY,
       NULL));
+}
+
+apps::AppWindowFrameView*
+ChromeNativeAppWindowViews::CreateNonStandardAppFrame() {
+  apps::AppWindowFrameView* frame =
+      new apps::AppWindowFrameView(widget(),
+                                   this,
+                                   has_frame_color_,
+                                   active_frame_color_,
+                                   inactive_frame_color_);
+  frame->Init();
+#if defined(USE_ASH)
+  // For Aura windows on the Ash desktop the sizes are different and the user
+  // can resize the window from slightly outside the bounds as well.
+  if (chrome::IsNativeWindowInAsh(widget()->GetNativeWindow())) {
+    frame->SetResizeSizes(ash::kResizeInsideBoundsSize,
+                          ash::kResizeOutsideBoundsSize,
+                          ash::kResizeAreaCornerSize);
+  }
+#endif
+
+#if !defined(OS_CHROMEOS)
+  // For non-Ash windows, install an easy resize window targeter, which ensures
+  // that the root window (not the app) receives mouse events on the edges.
+  if (chrome::GetHostDesktopTypeForNativeWindow(widget()->GetNativeWindow()) !=
+      chrome::HOST_DESKTOP_TYPE_ASH) {
+    aura::Window* window = widget()->GetNativeWindow();
+    int resize_inside = frame->resize_inside_bounds_size();
+    gfx::Insets inset(
+        resize_inside, resize_inside, resize_inside, resize_inside);
+    // Add the EasyResizeWindowTargeter on the window, not its root window. The
+    // root window does not have a delegate, which is needed to handle the event
+    // in Linux.
+    window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
+        new wm::EasyResizeWindowTargeter(window, inset, inset)));
+  }
+#endif
+
+  return frame;
 }

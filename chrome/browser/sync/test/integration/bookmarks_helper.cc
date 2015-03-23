@@ -4,6 +4,9 @@
 
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 
+#include <set>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
@@ -20,7 +23,7 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_db_task.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
@@ -29,17 +32,21 @@
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/bookmarks/browser/bookmark_client.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/favicon_base/favicon_util.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_types.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "ui/gfx/image/image_skia.h"
+
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 namespace {
 
@@ -49,24 +56,24 @@ class HistoryEmptyTask : public history::HistoryDBTask {
  public:
   explicit HistoryEmptyTask(base::WaitableEvent* done) : done_(done) {}
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     content::RunAllPendingInMessageLoop();
     done_->Signal();
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {}
+  void DoneRunOnMainThread() override {}
 
  private:
-  virtual ~HistoryEmptyTask() {}
+  ~HistoryEmptyTask() override {}
 
   base::WaitableEvent* done_;
 };
 
 // Helper class used to wait for changes to take effect on the favicon of a
 // particular bookmark node in a particular bookmark model.
-class FaviconChangeObserver : public BookmarkModelObserver {
+class FaviconChangeObserver : public bookmarks::BookmarkModelObserver {
  public:
   FaviconChangeObserver(BookmarkModel* model, const BookmarkNode* node)
       : model_(model),
@@ -74,9 +81,7 @@ class FaviconChangeObserver : public BookmarkModelObserver {
         wait_for_load_(false) {
     model->AddObserver(this);
   }
-  virtual ~FaviconChangeObserver() {
-    model_->RemoveObserver(this);
-  }
+  ~FaviconChangeObserver() override { model_->RemoveObserver(this); }
   void WaitForGetFavicon() {
     wait_for_load_ = true;
     content::RunMessageLoop();
@@ -87,37 +92,36 @@ class FaviconChangeObserver : public BookmarkModelObserver {
     wait_for_load_ = false;
     content::RunMessageLoop();
   }
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE {}
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index) OVERRIDE {}
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE {}
-  virtual void BookmarkNodeRemoved(
-      BookmarkModel* model,
-      const BookmarkNode* parent,
-      int old_index,
-      const BookmarkNode* node,
-      const std::set<GURL>& removed_urls) OVERRIDE {}
-  virtual void BookmarkAllUserNodesRemoved(
-      BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE {}
 
-  virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   const BookmarkNode* node) OVERRIDE {
+  // bookmarks::BookmarkModelObserver:
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override {
+  }
+  void BookmarkNodeMoved(BookmarkModel* model,
+                         const BookmarkNode* old_parent,
+                         int old_index,
+                         const BookmarkNode* new_parent,
+                         int new_index) override {}
+  void BookmarkNodeAdded(BookmarkModel* model,
+                         const BookmarkNode* parent,
+                         int index) override {}
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override {}
+  void BookmarkAllUserNodesRemoved(
+      BookmarkModel* model,
+      const std::set<GURL>& removed_urls) override {}
+
+  void BookmarkNodeChanged(BookmarkModel* model,
+                           const BookmarkNode* node) override {
     if (model == model_ && node == node_)
       model->GetFavicon(node);
   }
-  virtual void BookmarkNodeChildrenReordered(
-      BookmarkModel* model,
-      const BookmarkNode* node) OVERRIDE {}
-  virtual void BookmarkNodeFaviconChanged(
-      BookmarkModel* model,
-      const BookmarkNode* node) OVERRIDE {
+  void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                     const BookmarkNode* node) override {}
+  void BookmarkNodeFaviconChanged(BookmarkModel* model,
+                                  const BookmarkNode* node) override {
     if (model == model_ && node == node_) {
       if (!wait_for_load_ || (wait_for_load_ && node->is_favicon_loaded()))
         base::MessageLoopForUI::current()->Quit();
@@ -149,6 +153,20 @@ int CountNodesWithTitlesMatching(BookmarkModel* model,
   while (iterator.has_next()) {
     const BookmarkNode* node = iterator.Next();
     if ((node->type() == node_type) && (node->GetTitle() == title))
+      ++count;
+  }
+  return count;
+}
+
+// Returns the number of nodes of node type |node_type| in |model|.
+int CountNodes(BookmarkModel* model, BookmarkNode::Type node_type) {
+  ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
+  // Walk through the model tree looking for bookmark nodes of node type
+  // |node_type|.
+  int count = 0;
+  while (iterator.has_next()) {
+    const BookmarkNode* node = iterator.Next();
+    if (node->type() == node_type)
       ++count;
   }
   return count;
@@ -232,9 +250,8 @@ void SetFaviconImpl(Profile* profile,
     BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
 
     FaviconChangeObserver observer(model, node);
-    FaviconService* favicon_service =
-        FaviconServiceFactory::GetForProfile(profile,
-                                             Profile::EXPLICIT_ACCESS);
+    FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+        profile, ServiceAccessType::EXPLICIT_ACCESS);
     if (favicon_source == bookmarks_helper::FROM_UI) {
       favicon_service->SetFavicons(
           node->url(), icon_url, favicon_base::FAVICON, image);
@@ -709,10 +726,10 @@ namespace {
 class AllModelsMatchChecker : public MultiClientStatusChangeChecker {
  public:
   AllModelsMatchChecker();
-  virtual ~AllModelsMatchChecker();
+  ~AllModelsMatchChecker() override;
 
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
-  virtual std::string GetDebugMessage() const OVERRIDE;
+  bool IsExitConditionSatisfied() override;
+  std::string GetDebugMessage() const override;
 };
 
 AllModelsMatchChecker::AllModelsMatchChecker()
@@ -773,6 +790,10 @@ const BookmarkNode* GetUniqueNodeByURL(int profile, const GURL& url) {
   if (nodes.empty())
     return NULL;
   return nodes[0];
+}
+
+int CountAllBookmarks(int profile) {
+  return CountNodes(GetBookmarkModel(profile), BookmarkNode::URL);
 }
 
 int CountBookmarksWithTitlesMatching(int profile, const std::string& title) {

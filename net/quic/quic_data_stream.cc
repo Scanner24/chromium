@@ -29,7 +29,7 @@ QuicPriority kDefaultPriority = 3;
 QuicDataStream::QuicDataStream(QuicStreamId id,
                                QuicSession* session)
     : ReliableQuicStream(id, session),
-      visitor_(NULL),
+      visitor_(nullptr),
       headers_decompressed_(false),
       priority_(kDefaultPriority),
       decompression_failed_(false),
@@ -48,7 +48,7 @@ size_t QuicDataStream::WriteHeaders(
     bool fin,
     QuicAckNotifier::DelegateInterface* ack_notifier_delegate) {
   size_t bytes_written = session()->WriteHeaders(
-      id(), header_block, fin, ack_notifier_delegate);
+      id(), header_block, fin, priority_, ack_notifier_delegate);
   if (fin) {
     // TODO(rch): Add test to ensure fin_sent_ is set whenever a fin is sent.
     set_fin_sent(true);
@@ -175,7 +175,7 @@ void QuicDataStream::OnClose() {
     Visitor* visitor = visitor_;
     // Calling Visitor::OnClose() may result the destruction of the visitor,
     // so we need to ensure we don't call it again.
-    visitor_ = NULL;
+    visitor_ = nullptr;
     visitor->OnClose(this);
   }
 }

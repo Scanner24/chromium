@@ -56,16 +56,16 @@ class SessionInputInjectorWin::Core
 
   // InputInjector implementation.
   virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+      scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
 
   // protocol::ClipboardStub implementation.
   virtual void InjectClipboardEvent(
-      const protocol::ClipboardEvent& event) OVERRIDE;
+      const protocol::ClipboardEvent& event) override;
 
   // protocol::InputStub implementation.
-  virtual void InjectKeyEvent(const protocol::KeyEvent& event) OVERRIDE;
-  virtual void InjectTextEvent(const protocol::TextEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const protocol::MouseEvent& event) OVERRIDE;
+  virtual void InjectKeyEvent(const protocol::KeyEvent& event) override;
+  virtual void InjectTextEvent(const protocol::TextEvent& event) override;
+  virtual void InjectMouseEvent(const protocol::MouseEvent& event) override;
 
  private:
   friend class base::RefCountedThreadSafe<Core>;
@@ -197,7 +197,7 @@ void SessionInputInjectorWin::Core::SwitchToInputDesktop() {
   // one.
   scoped_ptr<webrtc::Desktop> input_desktop(
       webrtc::Desktop::GetInputDesktop());
-  if (input_desktop.get() != NULL && !desktop_.IsSame(*input_desktop)) {
+  if (input_desktop.get() != nullptr && !desktop_.IsSame(*input_desktop)) {
     // If SetThreadDesktop() fails, the thread is still assigned a desktop.
     // So we can continue capture screen bits, just from a diffected desktop.
     desktop_.SetThreadDesktop(input_desktop.release());

@@ -21,25 +21,30 @@
     'cronet.gypi',
     'crx_file.gypi',
     'data_reduction_proxy.gypi',
+    'device_event_log.gypi',
+    'network_hints.gypi',
     'dom_distiller.gypi',
     'domain_reliability.gypi',
     'enhanced_bookmarks.gypi',
+    'error_page.gypi',
     'favicon.gypi',
     'favicon_base.gypi',
     'google.gypi',
+    'handoff.gypi',
     'history.gypi',
     'infobars.gypi',
     'json_schema.gypi',
     'keyed_service.gypi',
     'language_usage_metrics.gypi',
     'leveldb_proto.gypi',
+    'login.gypi',
     'metrics.gypi',
     'navigation_metrics.gypi',
     'network_time.gypi',
-    'omaha_query_params.gypi',
     'onc.gypi',
     'os_crypt.gypi',
     'ownership.gypi',
+    'packed_ct_ev_whitelist.gypi',
     'password_manager.gypi',
     'policy.gypi',
     'precache.gypi',
@@ -48,28 +53,39 @@
     'rappor.gypi',
     'search.gypi',
     'search_provider_logos.gypi',
+    'sessions.gypi',
     'signin.gypi',
     'startup_metric_utils.gypi',
     'suggestions.gypi',
     'translate.gypi',
+    'ui_zoom.gypi',
+    'update_client.gypi',
     'url_fixer.gypi',
     'url_matcher.gypi',
     'user_prefs.gypi',
     'variations.gypi',
+    'wallpaper.gypi',
     'webdata.gypi',
+    'web_resource.gypi',
   ],
   'conditions': [
     ['OS != "ios"', {
       'includes': [
+        'app_modal.gypi',
         'cdm.gypi',
         'navigation_interception.gypi',
         'plugins.gypi',
         'power.gypi',
-        'sessions.gypi',
         'visitedlink.gypi',
         'web_cache.gypi',
         'web_contents_delegate_android.gypi',
         'web_modal.gypi',
+      ],
+    }],
+    ['OS == "ios"', {
+      'includes': [
+        'open_from_clipboard.gypi',
+        'webp_transcode.gypi',
       ],
     }],
     ['OS != "android"', {
@@ -79,6 +95,7 @@
     }],
     ['OS != "ios" and OS != "android"', {
       'includes': [
+        'audio_modem.gypi',
         'copresence.gypi',
         'proximity_auth.gypi',
         'storage_monitor.gypi',
@@ -87,6 +104,8 @@
     ['chromeos == 1', {
       'includes': [
         'pairing.gypi',
+        'timers.gypi',
+        'wifi_sync.gypi',
       ],
     }],
     ['OS == "win" or OS == "mac"', {
@@ -94,10 +113,20 @@
         'wifi.gypi',
       ],
     }],
-    ['use_ash==1', {
+    ['OS == "win"', {
+      'includes': [
+        'browser_watcher.gypi',
+      ],
+    }],
+    ['chromeos == 1 or use_ash == 1', {
       'includes': [
         'session_manager.gypi',
         'user_manager.gypi',
+      ],
+    }],
+    ['toolkit_views==1', {
+      'includes': [
+        'constrained_window.gypi',
       ],
     }],
     ['android_webview_build == 0', {
@@ -110,11 +139,12 @@
         'search_engines.gypi',
         'sync_driver.gypi',
         'invalidation.gypi',
+        'webdata_services.gypi',
       ],
     }],
-    ['toolkit_views==1', {
+    ['enable_basic_printing==1 or enable_print_preview==1', {
       'includes': [
-        'native_app_window.gypi',
+        'printing.gypi',
       ],
     }],
     ['enable_plugins==1', {

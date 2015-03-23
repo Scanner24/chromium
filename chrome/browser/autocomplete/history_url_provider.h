@@ -157,11 +157,6 @@ struct HistoryURLProviderParams {
   // this to.  See comments in DoAutocomplete().
   PromoteType promote_type;
 
-  // True if |what_you_typed_match| is eligible for display.  If this is true,
-  // PromoteMatchesIfNecessary() may choose to place |what_you_typed_match| on
-  // |matches_| even when |promote_type| is not WHAT_YOU_TYPED_MATCH.
-  bool have_what_you_typed_match;
-
   // Languages we should pass to gfx::GetCleanStringFromUrl.
   std::string languages;
 
@@ -194,8 +189,9 @@ class HistoryURLProvider : public HistoryProvider {
 
   // HistoryProvider:
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes) OVERRIDE;
-  virtual void Stop(bool clear_cached_results) OVERRIDE;
+                     bool minimal_changes,
+                     bool called_due_to_focus) override;
+  virtual void Stop(bool clear_cached_results) override;
 
   // Returns a match representing a navigation to |destination_url| given user
   // input of |text|.  |trim_http| controls whether the match's |fill_into_edit|
@@ -249,10 +245,10 @@ class HistoryURLProvider : public HistoryProvider {
                       history::URLDatabase* db,
                       HistoryURLProviderParams* params);
 
-  // May promote the what you typed match, the first history match in
-  // parmas->matches, or both to the front of |matches_|, depending on the
-  // values of params->promote_type and params->have_what_you_typed_match.
-  void PromoteMatchesIfNecessary(const HistoryURLProviderParams& params);
+  // May promote either the what you typed match or first history match in
+  // params->matches to the front of |matches_|, depending on the value of
+  // params->promote_type.
+  void PromoteMatchIfNecessary(const HistoryURLProviderParams& params);
 
   // Dispatches the results to the autocomplete controller. Called on the
   // main thread by ExecuteWithDB when the results are available.

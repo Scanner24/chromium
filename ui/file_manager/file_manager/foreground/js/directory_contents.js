@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Scanner of the entries.
  * @constructor
@@ -22,7 +20,7 @@ function ContentScanner() {
  *     completion.
  * @param {function()} successCallback Called when the scan is completed
  *     successfully.
- * @param {function(FileError)} errorCallback Called an error occurs.
+ * @param {function(DOMError)} errorCallback Called an error occurs.
  */
 ContentScanner.prototype.scan = function(
     entriesCallback, successCallback, errorCallback) {
@@ -259,7 +257,7 @@ LocalSearchContentScanner.prototype.scan = function(
 
 /**
  * Scanner of the entries for the metadata search on Drive File System.
- * @param {DriveMetadataSearchContentScanner.SearchType} searchType The option
+ * @param {!DriveMetadataSearchContentScanner.SearchType} searchType The option
  *     of the search.
  * @constructor
  * @extends {ContentScanner}
@@ -279,12 +277,13 @@ DriveMetadataSearchContentScanner.prototype.__proto__ =
  * The search types on the Drive File System.
  * @enum {string}
  */
-DriveMetadataSearchContentScanner.SearchType = Object.freeze({
+DriveMetadataSearchContentScanner.SearchType = {
   SEARCH_ALL: 'ALL',
   SEARCH_SHARED_WITH_ME: 'SHARED_WITH_ME',
   SEARCH_RECENT_FILES: 'EXCLUDE_DIRECTORIES',
   SEARCH_OFFLINE: 'OFFLINE'
-});
+};
+Object.freeze(DriveMetadataSearchContentScanner.SearchType);
 
 /**
  * Starts to metadata-search on Drive File System.
@@ -318,31 +317,18 @@ DriveMetadataSearchContentScanner.prototype.scan = function(
  * This class manages filters and determines a file should be shown or not.
  * When filters are changed, a 'changed' event is fired.
  *
- * @param {MetadataCache} metadataCache Metadata cache service.
  * @param {boolean} showHidden If files starting with '.' or ending with
  *     '.crdownlaod' are shown.
  * @constructor
  * @extends {cr.EventTarget}
  */
-function FileFilter(metadataCache, showHidden) {
-  /**
-   * @type {MetadataCache}
-   * @private
-   */
-  this.metadataCache_ = metadataCache;
-
+function FileFilter(showHidden) {
   /**
    * @type {Object.<string, Function>}
    * @private
    */
   this.filters_ = {};
   this.setFilterHidden(!showHidden);
-
-  // Do not show entries marked as 'deleted'.
-  this.addFilter('deleted', function(entry) {
-    var internal = this.metadataCache_.getCached(entry, 'internal');
-    return !(internal && internal.deleted);
-  }.bind(this));
 }
 
 /*
@@ -407,25 +393,35 @@ FileFilter.prototype.filter = function(entry) {
 
 /**
  * File list.
- * @param {MetadataCache} metadataCache Metadata cache.
+ * @param {!FileSystemMetadata} fileSystemMetadata
  * @constructor
  * @extends {cr.ui.ArrayDataModel}
  */
-function FileListModel(metadataCache) {
+function FileListModel(fileSystemMetadata) {
   cr.ui.ArrayDataModel.call(this, []);
 
   /**
-   * Metadata cache.
-   * @type {MetadataCache}
-   * @private
+   * @private {!FileSystemMetadata}
+   * @const
    */
-  this.metadataCache_ = metadataCache;
+  this.fileSystemMetadata_ = fileSystemMetadata;
 
   // Initialize compare functions.
-  this.setCompareFunction('name', util.compareName);
-  this.setCompareFunction('modificationTime', this.compareMtime_.bind(this));
-  this.setCompareFunction('size', this.compareSize_.bind(this));
-  this.setCompareFunction('type', this.compareType_.bind(this));
+  this.setCompareFunction('name',
+      /** @type {function(*, *): number} */ (this.compareName_.bind(this)));
+  this.setCompareFunction('modificationTime',
+      /** @type {function(*, *): number} */ (this.compareMtime_.bind(this)));
+  this.setCompareFunction('size',
+      /** @type {function(*, *): number} */ (this.compareSize_.bind(this)));
+  this.setCompareFunction('type',
+      /** @type {function(*, *): number} */ (this.compareType_.bind(this)));
+
+  /**
+   * Whether this file list is sorted in descending order.
+   * @type {boolean}
+   * @private
+   */
+  this.isDescendingOrder_ = false;
 }
 
 FileListModel.prototype = {
@@ -433,18 +429,63 @@ FileListModel.prototype = {
 };
 
 /**
- * Compare by mtime first, then by name.
+ * Sorts data model according to given field and direction and dispathes
+ * sorted event.
+ * @param {string} field Sort field.
+ * @param {string} direction Sort direction.
+ * @override
+ */
+FileListModel.prototype.sort = function(field, direction) {
+  this.isDescendingOrder_ = direction === 'desc';
+  cr.ui.ArrayDataModel.prototype.sort.call(this, field, direction);
+};
+
+/**
+ * Called before a sort happens so that you may fetch additional data
+ * required for the sort.
+ * @param {string} field Sort field.
+ * @param {function()} callback The function to invoke when preparation
+ *     is complete.
+ * @override
+ */
+FileListModel.prototype.prepareSort = function(field, callback) {
+  // Starts the actual sorting immediately as we don't need any preparation to
+  // sort the file list and we want to start actual sorting as soon as possible
+  // after we get the |this.isDescendingOrder_| value in sort().
+  callback();
+};
+
+/**
+ * Compares entries by name.
+ * @param {!Entry} a First entry.
+ * @param {!Entry} b Second entry.
+ * @return {number} Compare result.
+ * @private
+ */
+FileListModel.prototype.compareName_ = function(a, b) {
+  // Directories always precede files.
+  if (a.isDirectory !== b.isDirectory)
+    return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
+
+  return util.compareName(a, b);
+};
+
+/**
+ * Compares entries by mtime first, then by name.
  * @param {Entry} a First entry.
  * @param {Entry} b Second entry.
  * @return {number} Compare result.
  * @private
  */
 FileListModel.prototype.compareMtime_ = function(a, b) {
-  var aCachedFilesystem = this.metadataCache_.getCached(a, 'filesystem');
-  var aTime = aCachedFilesystem ? aCachedFilesystem.modificationTime : 0;
+  // Directories always precede files.
+  if (a.isDirectory !== b.isDirectory)
+    return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
 
-  var bCachedFilesystem = this.metadataCache_.getCached(b, 'filesystem');
-  var bTime = bCachedFilesystem ? bCachedFilesystem.modificationTime : 0;
+  var properties =
+      this.fileSystemMetadata_.getCache([a, b], ['modificationTime']);
+  var aTime = properties[0].modificationTime || 0;
+  var bTime = properties[1].modificationTime || 0;
 
   if (aTime > bTime)
     return 1;
@@ -456,33 +497,35 @@ FileListModel.prototype.compareMtime_ = function(a, b) {
 };
 
 /**
- * Compare by size first, then by name.
+ * Compares entries by size first, then by name.
  * @param {Entry} a First entry.
  * @param {Entry} b Second entry.
  * @return {number} Compare result.
  * @private
  */
 FileListModel.prototype.compareSize_ = function(a, b) {
-  var aCachedFilesystem = this.metadataCache_.getCached(a, 'filesystem');
-  var aSize = aCachedFilesystem ? aCachedFilesystem.size : 0;
+  // Directories always precede files.
+  if (a.isDirectory !== b.isDirectory)
+    return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
 
-  var bCachedFilesystem = this.metadataCache_.getCached(b, 'filesystem');
-  var bSize = bCachedFilesystem ? bCachedFilesystem.size : 0;
+  var properties = this.fileSystemMetadata_.getCache([a, b], ['size']);
+  var aSize = properties[0].size || 0;
+  var bSize = properties[1].size || 0;
 
   return aSize !== bSize ? aSize - bSize : util.compareName(a, b);
 };
 
 /**
- * Compare by type first, then by subtype and then by name.
+ * Compares entries by type first, then by subtype and then by name.
  * @param {Entry} a First entry.
  * @param {Entry} b Second entry.
  * @return {number} Compare result.
  * @private
  */
 FileListModel.prototype.compareType_ = function(a, b) {
-  // Directories precede files.
+  // Directories always precede files.
   if (a.isDirectory !== b.isDirectory)
-    return Number(b.isDirectory) - Number(a.isDirectory);
+    return a.isDirectory === this.isDescendingOrder_ ? 1 : -1;
 
   var aType = FileType.typeToString(FileType.getType(a));
   var bType = FileType.typeToString(FileType.getType(b));
@@ -496,25 +539,49 @@ FileListModel.prototype.compareType_ = function(a, b) {
  * TODO(yoshiki): remove this. crbug.com/224869.
  *
  * @param {FileFilter} fileFilter The file-filter context.
- * @param {MetadataCache} metadataCache Metadata cache service.
+ * @param {!FileSystemMetadata} fileSystemMetadata
  * @constructor
  */
-function FileListContext(fileFilter, metadataCache) {
+function FileListContext(fileFilter, fileSystemMetadata) {
   /**
    * @type {FileListModel}
    */
-  this.fileList = new FileListModel(metadataCache);
+  this.fileList = new FileListModel(fileSystemMetadata);
 
   /**
-   * @type {MetadataCache}
+   * @public {!FileSystemMetadata}
+   * @const
    */
-  this.metadataCache = metadataCache;
+  this.fileSystemMetadata = fileSystemMetadata;
 
   /**
    * @type {FileFilter}
    */
   this.fileFilter = fileFilter;
+
+  /**
+   * @public {!Array<string>}
+   * @const
+   */
+  this.prefetchPropertyNames = FileListContext.createPrefetchPropertyNames_();
 }
+
+/**
+ * @return {!Array<string>}
+ * @private
+ */
+FileListContext.createPrefetchPropertyNames_ = function() {
+  var set = {};
+  for (var i = 0;
+       i < ListContainer.METADATA_PREFETCH_PROPERTY_NAMES.length;
+       i++) {
+    set[ListContainer.METADATA_PREFETCH_PROPERTY_NAMES[i]] = true;
+  }
+  for (var i = 0; i < Command.METADATA_PREFETCH_PROPERTY_NAMES.length; i++) {
+    set[Command.METADATA_PREFETCH_PROPERTY_NAMES[i]] = true;
+  }
+  return Object.keys(set);
+};
 
 /**
  * This class is responsible for scanning directory (or search results),
@@ -547,7 +614,11 @@ function DirectoryContents(context,
   this.processNewEntriesQueue_ = new AsyncUtil.Queue();
   this.scanCancelled_ = false;
 
-  this.lastSpaceInMetadataCache_ = 0;
+  /**
+   * Metadata snapshot which is used to know which file is actually changed.
+   * @type {Object}
+   */
+  this.metadataSnapshot_ = null;
 }
 
 /**
@@ -557,7 +628,7 @@ DirectoryContents.prototype.__proto__ = cr.EventTarget.prototype;
 
 /**
  * Create the copy of the object, but without scan started.
- * @return {DirectoryContents} Object copy.
+ * @return {!DirectoryContents} Object copy.
  */
 DirectoryContents.prototype.clone = function() {
   return new DirectoryContents(
@@ -568,50 +639,80 @@ DirectoryContents.prototype.clone = function() {
 };
 
 /**
- * Disposes the reserved metadata cache.
- */
-DirectoryContents.prototype.dispose = function() {
-  this.context_.metadataCache.resizeBy(-this.lastSpaceInMetadataCache_);
-  // Though the lastSpaceInMetadataCache_ is not supposed to be referred after
-  // dispose(), keep it synced with requested cache size just in case.
-  this.lastSpaceInMetadataCache_ = 0;
-};
-
-/**
- * Make a space for current directory size in the metadata cache.
- *
- * @param {number} size The cache size to be set.
- * @private
- */
-DirectoryContents.prototype.makeSpaceInMetadataCache_ = function(size) {
-  this.context_.metadataCache.resizeBy(size - this.lastSpaceInMetadataCache_);
-  this.lastSpaceInMetadataCache_ = size;
-};
-
-/**
  * Use a given fileList instead of the fileList from the context.
- * @param {Array|cr.ui.ArrayDataModel} fileList The new file list.
+ * @param {(!Array|!cr.ui.ArrayDataModel)} fileList The new file list.
  */
 DirectoryContents.prototype.setFileList = function(fileList) {
   if (fileList instanceof cr.ui.ArrayDataModel)
     this.fileList_ = fileList;
   else
     this.fileList_ = new cr.ui.ArrayDataModel(fileList);
-  this.makeSpaceInMetadataCache_(this.fileList_.length);
 };
 
 /**
+ * Creates snapshot of metadata in the directory.
+ * @return {!Object} Metadata snapshot of current directory contents.
+ */
+DirectoryContents.prototype.createMetadataSnapshot = function() {
+  var snapshot = {};
+  var entries = /** @type {!Array<!Entry>} */ (this.fileList_.slice());
+  var metadata = this.context_.fileSystemMetadata.getCache(
+      entries, ['modificationTime']);
+  for (var i = 0; i < entries.length; i++) {
+    snapshot[entries[i].toURL()] = metadata[i];
+  }
+  return snapshot;
+}
+
+/**
+ * Sets metadata snapshot which is used to check changed files.
+ * @param {!Object} metadataSnapshot A metadata snapshot.
+ */
+DirectoryContents.prototype.setMetadataSnapshot = function(metadataSnapshot) {
+  this.metadataSnapshot_ = metadataSnapshot;
+}
+
+/**
  * Use the filelist from the context and replace its contents with the entries
- * from the current fileList.
+ * from the current fileList. If metadata snapshot is set, this method checks
+ * actually updated files and dispatch change events by calling updateIndexes.
  */
 DirectoryContents.prototype.replaceContextFileList = function() {
   if (this.context_.fileList !== this.fileList_) {
+    // TODO(yawano): While we should update the list with adding or deleting
+    // what actually added and deleted instead of deleting and adding all items,
+    // splice of array data model is expensive since it always runs sort and we
+    // replace the list in this way to reduce the number of splice calls.
     var spliceArgs = this.fileList_.slice();
     var fileList = this.context_.fileList;
     spliceArgs.unshift(0, fileList.length);
     fileList.splice.apply(fileList, spliceArgs);
     this.fileList_ = fileList;
-    this.makeSpaceInMetadataCache_(this.fileList_.length);
+
+    // Check updated files and dispatch change events.
+    if (this.metadataSnapshot_) {
+      var updatedIndexes = [];
+      var entries = /** @type {!Array<!Entry>} */ (this.fileList_.slice());
+      var newMetadatas = this.context_.fileSystemMetadata.getCache(
+          entries, ['modificationTime']);
+
+      for (var i = 0; i < entries.length; i++) {
+        var url = entries[i].toURL();
+        var newMetadata = newMetadatas[i];
+        // If Files.app fails to obtain both old and new modificationTime,
+        // regard the entry as not updated.
+        if ((this.metadataSnapshot_[url] &&
+             this.metadataSnapshot_[url].modificationTime &&
+             this.metadataSnapshot_[url].modificationTime.getTime()) !==
+            (newMetadata.modificationTime &&
+             newMetadata.modificationTime.getTime())) {
+          updatedIndexes.push(i);
+        }
+      }
+
+      if (updatedIndexes.length > 0)
+        this.fileList_.updateIndexes(updatedIndexes);
+    }
   }
 };
 
@@ -709,7 +810,7 @@ DirectoryContents.prototype.update = function(updatedEntries, removedUrls) {
   }
 
   if (removedUrls.length > 0)
-    this.fileList_.metadataCache_.clearByUrl(removedUrls, '*');
+    this.context_.fileSystemMetadata.notifyEntriesRemoved(removedUrls);
 
   this.prefetchMetadata(updatedList, true, function() {
     this.onNewEntries_(true, addedList);
@@ -815,11 +916,18 @@ DirectoryContents.prototype.onNewEntries_ = function(refresh, entries) {
 
   // Enlarge the cache size into the new filelist size.
   var newListSize = this.fileList_.length + entriesFiltered.length;
-  this.makeSpaceInMetadataCache_(newListSize);
 
   this.processNewEntriesQueue_.run(function(callbackOuter) {
     var finish = function() {
       if (!this.scanCancelled_) {
+        // Just before inserting entries into the file list, check and avoid
+        // duplication.
+        var currentURLs = {};
+        for (var i = 0; i < this.fileList_.length; i++)
+          currentURLs[this.fileList_.item(i).toURL()] = true;
+        entriesFiltered = entriesFiltered.filter(function(entry) {
+          return !currentURLs[entry.toURL()];
+        });
         // Update the filelist without waiting the metadata.
         this.fileList_.push.apply(this.fileList_, entriesFiltered);
         cr.dispatchSimpleEvent(this, 'scan-updated');
@@ -859,18 +967,17 @@ DirectoryContents.prototype.onNewEntries_ = function(refresh, entries) {
 };
 
 /**
- * @param {Array.<Entry>} entries Files.
+ * @param {!Array<!Entry>} entries Files.
  * @param {boolean} refresh True to refresh metadata, or false to use cached
  *     one.
  * @param {function(Object)} callback Callback on done.
  */
 DirectoryContents.prototype.prefetchMetadata =
     function(entries, refresh, callback) {
-  var TYPES = 'filesystem|external';
   if (refresh)
-    this.context_.metadataCache.getLatest(entries, TYPES, callback);
-  else
-    this.context_.metadataCache.get(entries, TYPES, callback);
+    this.context_.fileSystemMetadata.notifyEntriesChanged(entries);
+  this.context_.fileSystemMetadata.get(
+      entries, this.context_.prefetchPropertyNames).then(callback);
 };
 
 /**
@@ -938,7 +1045,7 @@ DirectoryContents.createForLocalSearch = function(
  * @param {DirectoryEntry} fakeDirectoryEntry Fake directory entry representing
  *     the set of result entries. This serves as a top directory for the
  *     search.
- * @param {DriveMetadataSearchContentScanner.SearchType} searchType The type of
+ * @param {!DriveMetadataSearchContentScanner.SearchType} searchType The type of
  *     the search. The scanner will restricts the entries based on the given
  *     type.
  * @return {DirectoryContents} Created DirectoryContents instance.

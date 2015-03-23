@@ -16,14 +16,14 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/events_test_utils_x11.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/touch_factory_x11.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace ui {
 
@@ -83,9 +83,9 @@ bool HasFunctionKeyFlagSetIfSupported(Display* display, int x_keysym) {
 class EventsXTest : public testing::Test {
  public:
   EventsXTest() {}
-  virtual ~EventsXTest() {}
+  ~EventsXTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     DeviceDataManagerX11::CreateInstance();
     ui::TouchFactory::GetInstance()->ResetForTest();
   }
@@ -215,7 +215,6 @@ TEST_F(EventsXTest, ClickCount) {
   }
 }
 
-#if defined(USE_XI2_MT)
 TEST_F(EventsXTest, TouchEventBasic) {
   std::vector<unsigned int> devices;
   devices.push_back(0);
@@ -301,56 +300,48 @@ int GetTouchIdForTrackingId(uint32 tracking_id) {
   return -1;
 }
 
-TEST_F(EventsXTest, TouchEventIdRefcounting) {
+TEST_F(EventsXTest, TouchEventNotRemovingFromNativeMapping) {
   std::vector<unsigned int> devices;
   devices.push_back(0);
   ui::SetUpTouchDevicesForTest(devices);
   std::vector<Valuator> valuators;
 
-  const int kTrackingId0 = 5;
-  const int kTrackingId1 = 7;
+  const int kTrackingId = 5;
 
-  // Increment ref count once for first touch.
+  // Two touch presses with the same tracking id.
   ui::ScopedXI2Event xpress0;
   xpress0.InitTouchEvent(
-      0, XI_TouchBegin, kTrackingId0, gfx::Point(10, 10), valuators);
+      0, XI_TouchBegin, kTrackingId, gfx::Point(10, 10), valuators);
   scoped_ptr<ui::TouchEvent> upress0(new ui::TouchEvent(xpress0));
-  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId0));
+  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
 
-  // Increment ref count 4 times for second touch.
   ui::ScopedXI2Event xpress1;
   xpress1.InitTouchEvent(
-      0, XI_TouchBegin, kTrackingId1, gfx::Point(20, 20), valuators);
+      0, XI_TouchBegin, kTrackingId, gfx::Point(20, 20), valuators);
+  ui::TouchEvent upress1(xpress1);
+  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
 
-  for (int i = 0; i < 4; ++i) {
-    ui::TouchEvent upress1(xpress1);
-    EXPECT_EQ(1, GetTouchIdForTrackingId(kTrackingId1));
-  }
-
-  ui::ScopedXI2Event xrelease1;
-  xrelease1.InitTouchEvent(
-      0, XI_TouchEnd, kTrackingId1, gfx::Point(10, 10), valuators);
-
-  // Decrement ref count 3 times for second touch.
-  for (int i = 0; i < 3; ++i) {
-    ui::TouchEvent urelease1(xrelease1);
-    EXPECT_EQ(1, GetTouchIdForTrackingId(kTrackingId1));
-  }
-
-  // This should clear the touch id of the second touch.
-  scoped_ptr<ui::TouchEvent> urelease1(new ui::TouchEvent(xrelease1));
-  urelease1.reset();
-  EXPECT_EQ(-1, GetTouchIdForTrackingId(kTrackingId1));
-
-  // This should clear the touch id of the first touch.
+  // The first touch release shouldn't clear the mapping from the
+  // tracking id.
   ui::ScopedXI2Event xrelease0;
   xrelease0.InitTouchEvent(
-      0, XI_TouchEnd, kTrackingId0, gfx::Point(10, 10), valuators);
-  scoped_ptr<ui::TouchEvent> urelease0(new ui::TouchEvent(xrelease0));
-  urelease0.reset();
-  EXPECT_EQ(-1, GetTouchIdForTrackingId(kTrackingId0));
+      0, XI_TouchEnd, kTrackingId, gfx::Point(10, 10), valuators);
+  {
+    ui::TouchEvent urelease0(xrelease0);
+    urelease0.set_should_remove_native_touch_id_mapping(false);
+  }
+  EXPECT_EQ(0, GetTouchIdForTrackingId(kTrackingId));
+
+  // The second touch release should clear the mapping from the
+  // tracking id.
+  ui::ScopedXI2Event xrelease1;
+  xrelease1.InitTouchEvent(
+      0, XI_TouchEnd, kTrackingId, gfx::Point(10, 10), valuators);
+  {
+    ui::TouchEvent urelease1(xrelease1);
+  }
+  EXPECT_EQ(-1, GetTouchIdForTrackingId(kTrackingId));
 }
-#endif
 
 TEST_F(EventsXTest, NumpadKeyEvents) {
   XEvent event;
@@ -449,7 +440,7 @@ TEST_F(EventsXTest, NumpadKeyEvents) {
     { false, XK_A },
   };
 
-  for (size_t k = 0; k < ARRAYSIZE_UNSAFE(keys); ++k) {
+  for (size_t k = 0; k < arraysize(keys); ++k) {
     int x_keycode = XKeysymToKeycode(display, keys[k].x_keysym);
     // Exclude keysyms for which the server has no corresponding keycode.
     if (x_keycode) {
@@ -508,7 +499,6 @@ TEST_F(EventsXTest, FunctionKeyEvents) {
   EXPECT_FALSE(HasFunctionKeyFlagSetIfSupported(display, XK_F35 + 1));
 }
 
-#if defined(USE_XI2_MT)
 // Verifies that the type of events from a disabled keyboard is ET_UNKNOWN, but
 // that an exception list of keys can still be processed.
 TEST_F(EventsXTest, DisableKeyboard) {
@@ -556,8 +546,7 @@ TEST_F(EventsXTest, DisableKeyboard) {
   EXPECT_EQ(ui::ET_KEY_PRESSED, ui::EventTypeFromNative(xev));
 
   device_data_manager->EnableDevice(blocked_device_id);
-  device_data_manager->SetDisabledKeyboardAllowedKeys(
-      scoped_ptr<std::set<KeyboardCode> >());
+  device_data_manager->SetDisabledKeyboardAllowedKeys(nullptr);
 
   // A key returns KEY_PRESSED as per usual now that keyboard was re-enabled.
   xev.InitGenericKeyEvent(master_device_id,
@@ -597,7 +586,6 @@ TEST_F(EventsXTest, DisableMouse) {
       EF_LEFT_MOUSE_BUTTON);
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, ui::EventTypeFromNative(xev));
 }
-#endif  // defined(USE_XI2_MT)
 
 #if !defined(OS_CHROMEOS)
 TEST_F(EventsXTest, ImeFabricatedKeyEvents) {
@@ -606,7 +594,7 @@ TEST_F(EventsXTest, ImeFabricatedKeyEvents) {
   unsigned int state_to_be_fabricated[] = {
     0, ShiftMask, LockMask, ShiftMask | LockMask,
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(state_to_be_fabricated); ++i) {
+  for (size_t i = 0; i < arraysize(state_to_be_fabricated); ++i) {
     unsigned int state = state_to_be_fabricated[i];
     for (int is_char = 0; is_char < 2; ++is_char) {
       XEvent x_event;
@@ -623,7 +611,7 @@ TEST_F(EventsXTest, ImeFabricatedKeyEvents) {
   unsigned int state_to_be_not_fabricated[] = {
     ControlMask, Mod1Mask, Mod2Mask, ShiftMask | ControlMask,
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(state_to_be_not_fabricated); ++i) {
+  for (size_t i = 0; i < arraysize(state_to_be_not_fabricated); ++i) {
     unsigned int state = state_to_be_not_fabricated[i];
     for (int is_char = 0; is_char < 2; ++is_char) {
       XEvent x_event;

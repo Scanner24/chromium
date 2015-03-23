@@ -23,6 +23,7 @@ import pipes
 import platform
 import psutil
 import platform
+import re
 import signal
 import socket
 import subprocess
@@ -48,7 +49,8 @@ DEFAULT_SIZES = "1600x1200,3840x2560"
 # resolution is supported in this case.
 DEFAULT_SIZE_NO_RANDR = "1600x1200"
 
-SCRIPT_PATH = sys.path[0]
+SCRIPT_PATH = os.path.abspath(sys.argv[0])
+SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
 
 IS_INSTALLED = (os.path.basename(sys.argv[0]) != 'linux_me2me_host.py')
 
@@ -394,9 +396,8 @@ class Desktop:
       self.child_env["SSH_AUTH_SOCK"] = self.ssh_auth_sockname
 
     # Wait for X to be active.
-    for _test in range(5):
-      proc = subprocess.Popen("xdpyinfo", env=self.child_env, stdout=devnull)
-      _pid, retcode = os.waitpid(proc.pid, 0)
+    for _test in range(20):
+      retcode = subprocess.call("xdpyinfo", env=self.child_env, stdout=devnull)
       if retcode == 0:
         break
       time.sleep(0.5)
@@ -411,11 +412,13 @@ class Desktop:
     # Reconfigure the X server to use "evdev" keymap rules.  The X server must
     # be started with -noreset otherwise it'll reset as soon as the command
     # completes, since there are no other X clients running yet.
-    proc = subprocess.Popen("setxkbmap -rules evdev", env=self.child_env,
-                            shell=True)
-    _pid, retcode = os.waitpid(proc.pid, 0)
+    retcode = subprocess.call("setxkbmap -rules evdev", env=self.child_env,
+                              shell=True)
     if retcode != 0:
       logging.error("Failed to set XKB to 'evdev'")
+
+    if not self.server_supports_exact_resize:
+      return
 
     # Register the screen sizes if the X server's RANDR extension supports it.
     # Errors here are non-fatal; the X server will continue to run with the
@@ -431,7 +434,8 @@ class Desktop:
     # Set the initial mode to the first size specified, otherwise the X server
     # would default to (max_width, max_height), which might not even be in the
     # list.
-    label = "%dx%d" % self.sizes[0]
+    initial_size = self.sizes[0]
+    label = "%dx%d" % initial_size
     args = ["xrandr", "-s", label]
     subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
@@ -440,6 +444,14 @@ class Desktop:
     # something realistic.
     args = ["xrandr", "--dpi", "96"]
     subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+
+    # Monitor for any automatic resolution changes from the desktop environment.
+    args = [SCRIPT_PATH, "--watch-resolution", str(initial_size[0]),
+            str(initial_size[1])]
+
+    # It is not necessary to wait() on the process here, as this script's main
+    # loop will reap the exit-codes of all child processes.
+    subprocess.Popen(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
     devnull.close()
 
@@ -558,17 +570,16 @@ def choose_x_session():
   for startup_file in XSESSION_FILES:
     startup_file = os.path.expanduser(startup_file)
     if os.path.exists(startup_file):
-      # Use the same logic that a Debian system typically uses with ~/.xsession
-      # (see /etc/X11/Xsession.d/50x11-common_determine-startup), to determine
-      # exactly how to run this file.
       if os.access(startup_file, os.X_OK):
         # "/bin/sh -c" is smart about how to execute the session script and
         # works in cases where plain exec() fails (for example, if the file is
         # marked executable, but is a plain script with no shebang line).
         return ["/bin/sh", "-c", pipes.quote(startup_file)]
       else:
-        shell = os.environ.get("SHELL", "sh")
-        return [shell, startup_file]
+        # If this is a system-wide session script, it should be run using the
+        # system shell, ignoring any login shell that might be set for the
+        # current user.
+        return ["/bin/sh", startup_file]
 
   # Choose a session wrapper script to run the session. On some systems,
   # /etc/X11/Xsession fails to load the user's .profile, so look for an
@@ -598,9 +609,9 @@ def locate_executable(exe_name):
   if IS_INSTALLED:
     # If the script is running from its installed location, search the host
     # binary only in the same directory.
-    paths_to_try = [ SCRIPT_PATH ]
+    paths_to_try = [ SCRIPT_DIR ]
   else:
-    paths_to_try = map(lambda p: os.path.join(SCRIPT_PATH, p),
+    paths_to_try = map(lambda p: os.path.join(SCRIPT_DIR, p),
                        [".", "../../../out/Debug", "../../../out/Release" ])
   for path in paths_to_try:
     exe_path = os.path.join(path, exe_name)
@@ -781,9 +792,24 @@ def cleanup():
 
   global g_desktops
   for desktop in g_desktops:
-    if desktop.x_proc:
-      logging.info("Terminating Xvfb")
-      desktop.x_proc.terminate()
+    for proc, name in [(desktop.x_proc, "Xvfb"),
+                       (desktop.session_proc, "session"),
+                       (desktop.host_proc, "host")]:
+      if proc is not None:
+        logging.info("Terminating " + name)
+        try:
+          psutil_proc = psutil.Process(proc.pid)
+          psutil_proc.terminate()
+
+          # Use a short timeout, to avoid delaying service shutdown if the
+          # process refuses to die for some reason.
+          psutil_proc.wait(timeout=10)
+        except psutil.TimeoutExpired:
+          logging.error("Timed out - sending SIGKILL")
+          psutil_proc.kill()
+        except psutil.Error:
+          logging.error("Error terminating process")
+
   g_desktops = []
   if ParentProcessLogger.instance():
     ParentProcessLogger.instance().release_parent()
@@ -860,7 +886,7 @@ class RelaunchInhibitor:
 
 def relaunch_self():
   cleanup()
-  os.execvp(sys.argv[0], sys.argv)
+  os.execvp(SCRIPT_PATH, sys.argv)
 
 
 def waitpid_with_timeout(pid, deadline):
@@ -932,6 +958,47 @@ def waitpid_handle_exceptions(pid, deadline):
         raise
 
 
+def watch_for_resolution_changes(initial_size):
+  """Watches for any resolution-changes which set the maximum screen resolution,
+  and resets the initial size if this happens.
+
+  The Ubuntu desktop has a component (the 'xrandr' plugin of
+  unity-settings-daemon) which often changes the screen resolution to the
+  first listed mode. This is the built-in mode for the maximum screen size,
+  which can trigger excessive CPU usage in some situations. So this is a hack
+  which waits for any such events, and undoes the change if it occurs.
+
+  Sometimes, the user might legitimately want to use the maximum available
+  resolution, so this monitoring is limited to a short time-period.
+  """
+  for _ in range(30):
+    time.sleep(1)
+
+    xrandr_output = subprocess.Popen(["xrandr"],
+                                     stdout=subprocess.PIPE).communicate()[0]
+    matches = re.search(r'current (\d+) x (\d+), maximum (\d+) x (\d+)',
+                        xrandr_output)
+
+    # No need to handle ValueError. If xrandr fails to give valid output,
+    # there's no point in continuing to monitor.
+    current_size = (int(matches.group(1)), int(matches.group(2)))
+    maximum_size = (int(matches.group(3)), int(matches.group(4)))
+
+    if current_size != initial_size:
+      # Resolution change detected.
+      if current_size == maximum_size:
+        # This was probably an automated change from unity-settings-daemon, so
+        # undo it.
+        label = "%dx%d" % initial_size
+        args = ["xrandr", "-s", label]
+        subprocess.call(args)
+        args = ["xrandr", "--dpi", "96"]
+        subprocess.call(args)
+
+      # Stop monitoring after any change was detected.
+      break
+
+
 def main():
   EPILOG = """This script is not intended for use by end-users.  To configure
 Chrome Remote Desktop, please install the app from the Chrome
@@ -969,6 +1036,9 @@ Web Store: https://chrome.google.com/remotedesktop"""
   parser.add_option("", "--host-version", dest="host_version", default=False,
                     action="store_true",
                     help="Prints version of the host.")
+  parser.add_option("", "--watch-resolution", dest="watch_resolution",
+                    type="int", nargs=2, default=False, action="store",
+                    help=optparse.SUPPRESS_HELP)
   (options, args) = parser.parse_args()
 
   # Determine the filename of the host configuration and PID files.
@@ -976,7 +1046,6 @@ Web Store: https://chrome.google.com/remotedesktop"""
     options.config = os.path.join(CONFIG_DIR, "host#%s.json" % g_host_hash)
 
   # Check for a modal command-line option (start, stop, etc.)
-
   if options.get_status:
     proc = get_daemon_proc()
     if proc is not None:
@@ -1039,6 +1108,10 @@ Web Store: https://chrome.google.com/remotedesktop"""
   if options.host_version:
     # TODO(sergeyu): Also check RPM package version once we add RPM package.
     return os.system(locate_executable(HOST_BINARY_NAME) + " --version") >> 8
+
+  if options.watch_resolution:
+    watch_for_resolution_changes(options.watch_resolution)
+    return 0
 
   if not options.start:
     # If no modal command-line options specified, print an error and exit.

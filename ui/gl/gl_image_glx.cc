@@ -6,11 +6,10 @@ extern "C" {
 #include <X11/Xlib.h>
 }
 
-#include "ui/gl/gl_image_glx.h"
-
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_image_glx.h"
 #include "ui/gl/gl_surface_glx.h"
 
 namespace gfx {
@@ -26,7 +25,8 @@ struct ScopedPtrXFree {
 
 bool ValidFormat(unsigned internalformat) {
   switch (internalformat) {
-    case GL_BGRA8_EXT:
+    case GL_RGB:
+    case GL_RGBA:
       return true;
     default:
       return false;
@@ -35,7 +35,9 @@ bool ValidFormat(unsigned internalformat) {
 
 int TextureFormat(unsigned internalformat) {
   switch (internalformat) {
-    case GL_BGRA8_EXT:
+    case GL_RGB:
+      return GLX_TEXTURE_FORMAT_RGB_EXT;
+    case GL_RGBA:
       return GLX_TEXTURE_FORMAT_RGBA_EXT;
     default:
       NOTREACHED();
@@ -45,7 +47,9 @@ int TextureFormat(unsigned internalformat) {
 
 int BindToTextureFormat(unsigned internalformat) {
   switch (internalformat) {
-    case GL_BGRA8_EXT:
+    case GL_RGB:
+      return GLX_BIND_TO_TEXTURE_RGB_EXT;
+    case GL_RGBA:
       return GLX_BIND_TO_TEXTURE_RGBA_EXT;
     default:
       NOTREACHED();
@@ -55,8 +59,10 @@ int BindToTextureFormat(unsigned internalformat) {
 
 unsigned PixmapDepth(unsigned internalformat) {
   switch (internalformat) {
-    case GL_BGRA8_EXT:
+    case GL_RGBA:
       return 32u;
+    case GL_RGB:
+      return 24u;
     default:
       NOTREACHED();
       return 0u;

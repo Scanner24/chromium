@@ -9,13 +9,14 @@
 #include "base/values.h"
 #include "cc/base/math_util.h"
 #include "cc/resources/picture.h"
-#include "content/public/renderer/v8_value_converter.h"
+#include "content/public/child/v8_value_converter.h"
+#include "content/renderer/chrome_object_extensions_utils.h"
 #include "content/renderer/render_thread_impl.h"
 #include "gin/arguments.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "skia/ext/benchmarking_canvas.h"
-#include "third_party/WebKit/public/platform/WebArrayBuffer.h"
+#include "third_party/WebKit/public/web/WebArrayBuffer.h"
 #include "third_party/WebKit/public/web/WebArrayBufferConverter.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebKit.h"
@@ -25,10 +26,9 @@
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/skia/src/utils/debugger/SkDebugCanvas.h"
 #include "third_party/skia/src/utils/debugger/SkDrawCommand.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "v8/include/v8.h"
-
 
 namespace content {
 
@@ -77,13 +77,8 @@ void SkiaBenchmarking::Install(blink::WebFrame* frame) {
   if (controller.IsEmpty())
     return;
 
-  v8::Handle<v8::Object> global = context->Global();
-  v8::Handle<v8::Object> chrome =
-      global->Get(gin::StringToV8(isolate, "chrome"))->ToObject();
-  if (chrome.IsEmpty()) {
-    chrome = v8::Object::New(isolate);
-    global->Set(gin::StringToV8(isolate, "chrome"), chrome);
-  }
+  v8::Handle<v8::Object> chrome = GetOrCreateChromeObject(isolate,
+                                                          context->Global());
   chrome->Set(gin::StringToV8(isolate, "skiaBenchmarking"), controller.ToV8());
 }
 
@@ -224,7 +219,7 @@ void SkiaBenchmarking::GetOps(gin::Arguments* args) {
 
   v8::Handle<v8::Array> result = v8::Array::New(isolate, canvas.getSize());
   for (int i = 0; i < canvas.getSize(); ++i) {
-    DrawType cmd_type = canvas.getDrawCommandAt(i)->getType();
+    SkDrawCommand::OpType cmd_type = canvas.getDrawCommandAt(i)->getType();
     v8::Handle<v8::Object> cmd = v8::Object::New(isolate);
     cmd->Set(v8::String::NewFromUtf8(isolate, "cmd_type"),
              v8::Integer::New(isolate, cmd_type));
@@ -232,7 +227,7 @@ void SkiaBenchmarking::GetOps(gin::Arguments* args) {
              v8::String::NewFromUtf8(
                  isolate, SkDrawCommand::GetCommandString(cmd_type)));
 
-    SkTDArray<SkString*>* info = canvas.getCommandInfo(i);
+    const SkTDArray<SkString*>* info = canvas.getCommandInfo(i);
     DCHECK(info);
 
     v8::Local<v8::Array> v8_info = v8::Array::New(isolate, info->count());
@@ -268,9 +263,9 @@ void SkiaBenchmarking::GetOpTimings(gin::Arguments* args) {
   bitmap.allocN32Pixels(bounds.width(), bounds.height());
   SkCanvas bitmap_canvas(bitmap);
   bitmap_canvas.clear(SK_ColorTRANSPARENT);
-  base::TimeTicks t0 = base::TimeTicks::HighResNow();
+  base::TimeTicks t0 = base::TimeTicks::Now();
   picture->Replay(&bitmap_canvas);
-  base::TimeDelta total_time = base::TimeTicks::HighResNow() - t0;
+  base::TimeDelta total_time = base::TimeTicks::Now() - t0;
 
   // Gather per-op timing info by drawing into a BenchmarkingCanvas.
   skia::BenchmarkingCanvas benchmarking_canvas(bounds.width(), bounds.height());

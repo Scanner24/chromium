@@ -54,7 +54,7 @@ class ManagePasswordsBubblePendingViewControllerTest
  public:
   ManagePasswordsBubblePendingViewControllerTest() : controller_(nil) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ManagePasswordsControllerTest::SetUp();
     delegate_.reset(
         [[ManagePasswordsBubblePendingViewTestDelegate alloc] init]);

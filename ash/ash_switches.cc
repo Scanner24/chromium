@@ -29,18 +29,15 @@ const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
-// Indicates that the wallpaper images specified by
-// kAshDefaultWallpaper{Large,Small} are OEM-specific (i.e. they are not
-// downloadable from Google).
-const char kAshDefaultWallpaperIsOem[] = "ash-default-wallpaper-is-oem";
-
-// Default wallpaper to use (as paths to trusted, non-user-writable JPEG files).
-const char kAshDefaultWallpaperLarge[] = "ash-default-wallpaper-large";
-const char kAshDefaultWallpaperSmall[] = "ash-default-wallpaper-small";
-
 // Disables LockLayoutManager used for LockScreenContainer, return back to
 // WorkspaceLayoutManager.
 const char kAshDisableLockLayoutManager[] = "ash-disable-lock-layout-manager";
+
+#if defined(OS_CHROMEOS)
+// Disable the support for WebContents to lock the screen orientation.
+const char kAshDisableScreenOrientationLock[] =
+    "ash-disable-screen-orientation-lock";
+#endif
 
 // Disable the Touch Exploration Mode. Touch Exploration Mode will no longer be
 // turned on automatically when spoken feedback is enabled when this flag is
@@ -49,14 +46,16 @@ const char kAshDisableTouchExplorationMode[] =
     "ash-disable-touch-exploration-mode";
 
 #if defined(OS_CHROMEOS)
+// Enables fullscreen app list if Ash is in maximize mode.
+const char kAshEnableFullscreenAppList[] = "ash-enable-fullscreen-app-list";
+
 // Enables key bindings to scroll magnified screen.
 const char kAshEnableMagnifierKeyScroller[] =
     "ash-enable-magnifier-key-scroller";
 #endif
 
-// Enables text filtering with the keyboard in Overview Mode.
-const char kAshDisableTextFilteringInOverviewMode[] =
-    "ash-disable-text-filtering-in-overview-mode";
+// Enables mirrored screen.
+const char kAshEnableMirroredScreen[] = "ash-enable-mirrored-screen";
 
 // Enables quick, non-cancellable locking of the screen when in maximize mode.
 const char kAshEnablePowerButtonQuickLock[] =
@@ -65,26 +64,18 @@ const char kAshEnablePowerButtonQuickLock[] =
 // Enables software based mirroring.
 const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
 
+// Enables gesture swipe to close windows while in Overview mode.
+const char kAshEnableSwipeToCloseInOverviewMode[] =
+    "ash-enable-swipe-to-close-in-overview-mode";
+
 // Enables touch view testing.
 // TODO(skuhne): Remove TOGGLE_TOUCH_VIEW_TESTING accelerator once this
 // flag is removed.
 const char kAshEnableTouchViewTesting[] = "ash-enable-touch-view-testing";
 
-// Enables additional visual feedback to touch input.
-const char kAshEnableTouchViewTouchFeedback[] =
-    "ash-enable-touch-view-touch-feedback";
-
 // When this flag is set, system sounds will be played whether the
 // ChromeVox is enabled or not.
 const char kAshEnableSystemSounds[] = "ash-enable-system-sounds";
-
-// Enables showing the tray bubble by dragging on the shelf.
-const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
-
-// Wallpaper to use in guest mode (as paths to trusted, non-user-writable JPEG
-// files).
-const char kAshGuestWallpaperLarge[] = "ash-guest-wallpaper-large";
-const char kAshGuestWallpaperSmall[] = "ash-guest-wallpaper-small";
 
 // Hides notifications that are irrelevant to Chrome OS device factory testing,
 // such as battery level updates.

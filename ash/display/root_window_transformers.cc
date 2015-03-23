@@ -6,20 +6,22 @@
 
 #include <cmath>
 
+#include "ash/ash_switches.h"
 #include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/host/root_window_transformer.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/utils/SkMatrix44.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_property.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/transform.h"
 
@@ -122,6 +124,15 @@ gfx::Transform CreateInsetsAndScaleTransform(const gfx::Insets& insets,
   return transform;
 }
 
+gfx::Transform CreateMirrorTransform(const gfx::Display& display) {
+  gfx::Transform transform;
+  transform.matrix().set3x3(-1, 0, 0,
+                            0, 1, 0,
+                            0, 0, 1);
+  transform.Translate(-display.size().width(), 0);
+  return transform;
+}
+
 // RootWindowTransformer for ash environment.
 class AshRootWindowTransformer : public RootWindowTransformer {
  public:
@@ -137,19 +148,24 @@ class AshRootWindowTransformer : public RootWindowTransformer {
                                       display.device_scale_factor(),
                                       root_window_ui_scale_) *
         CreateRotationTransform(root, display);
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kAshEnableMirroredScreen)) {
+      // Apply the tranform that flips the screen image horizontally so that
+      // the screen looks normal when reflected on a mirror.
+      root_window_bounds_transform_ =
+          root_window_bounds_transform_ * CreateMirrorTransform(display);
+    }
     transform_ = root_window_bounds_transform_ * CreateMagnifierTransform(root);
+
     CHECK(transform_.GetInverse(&invert_transform_));
   }
 
   // aura::RootWindowTransformer overrides:
-  virtual gfx::Transform GetTransform() const OVERRIDE {
-    return transform_;
-  }
-  virtual gfx::Transform GetInverseTransform() const OVERRIDE {
+  gfx::Transform GetTransform() const override { return transform_; }
+  gfx::Transform GetInverseTransform() const override {
     return invert_transform_;
   }
-  virtual gfx::Rect GetRootWindowBounds(
-      const gfx::Size& host_size) const OVERRIDE {
+  gfx::Rect GetRootWindowBounds(const gfx::Size& host_size) const override {
     gfx::Rect bounds(host_size);
     bounds.Inset(host_insets_);
     bounds = ui::ConvertRectToDIP(root_window_->layer(), bounds);
@@ -168,12 +184,10 @@ class AshRootWindowTransformer : public RootWindowTransformer {
     return gfx::Rect(gfx::ToFlooredSize(new_bounds.size()));
   }
 
-  virtual gfx::Insets GetHostInsets() const OVERRIDE {
-    return host_insets_;
-  }
+  gfx::Insets GetHostInsets() const override { return host_insets_; }
 
  private:
-  virtual ~AshRootWindowTransformer() {}
+  ~AshRootWindowTransformer() override {}
 
   aura::Window* root_window_;
   gfx::Transform transform_;
@@ -238,24 +252,19 @@ class MirrorRootWindowTransformer : public RootWindowTransformer {
   }
 
   // aura::RootWindowTransformer overrides:
-  virtual gfx::Transform GetTransform() const OVERRIDE {
-    return transform_;
-  }
-  virtual gfx::Transform GetInverseTransform() const OVERRIDE {
+  gfx::Transform GetTransform() const override { return transform_; }
+  gfx::Transform GetInverseTransform() const override {
     gfx::Transform invert;
     CHECK(transform_.GetInverse(&invert));
     return invert;
   }
-  virtual gfx::Rect GetRootWindowBounds(
-      const gfx::Size& host_size) const OVERRIDE {
+  gfx::Rect GetRootWindowBounds(const gfx::Size& host_size) const override {
     return root_bounds_;
   }
-  virtual gfx::Insets GetHostInsets() const OVERRIDE {
-    return insets_;
-  }
+  gfx::Insets GetHostInsets() const override { return insets_; }
 
  private:
-  virtual ~MirrorRootWindowTransformer() {}
+  ~MirrorRootWindowTransformer() override {}
 
   gfx::Transform transform_;
   gfx::Rect root_bounds_;

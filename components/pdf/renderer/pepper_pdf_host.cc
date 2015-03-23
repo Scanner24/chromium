@@ -30,9 +30,9 @@
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/layout.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
-#include "ui/gfx/point.h"
 
 namespace pdf {
 
@@ -67,6 +67,8 @@ int32_t PepperPDFHost::OnResourceMessageReceived(
                                       OnHostMsgSetSelectedText)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SetLinkUnderCursor,
                                       OnHostMsgSetLinkUnderCursor)
+    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SetContentRestriction,
+                                      OnHostMsgSetContentRestriction)
   PPAPI_END_MESSAGE_MAP()
   return PP_ERROR_FAILED;
 }
@@ -151,8 +153,9 @@ int32_t PepperPDFHost::OnHostMsgSaveAs(
   content::RenderView* render_view = instance->GetRenderView();
   blink::WebLocalFrame* frame =
       render_view->GetWebView()->mainFrame()->toWebLocalFrame();
-  content::Referrer referrer(frame->document().url(),
-                             frame->document().referrerPolicy());
+  content::Referrer referrer = content::Referrer::SanitizeForRequest(
+      url, content::Referrer(frame->document().url(),
+                             frame->document().referrerPolicy()));
   render_view->Send(
       new PDFHostMsg_PDFSaveURLAs(render_view->GetRoutingID(), url, referrer));
   return PP_OK;

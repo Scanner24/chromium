@@ -29,11 +29,11 @@ class DefaultUIControllerDelegateAndroid
     : public DownloadUIController::Delegate {
  public:
   DefaultUIControllerDelegateAndroid() {}
-  virtual ~DefaultUIControllerDelegateAndroid() {}
+  ~DefaultUIControllerDelegateAndroid() override {}
 
  private:
   // DownloadUIController::Delegate
-  virtual void OnNewDownloadReady(content::DownloadItem* item) OVERRIDE;
+  void OnNewDownloadReady(content::DownloadItem* item) override;
 };
 
 void DefaultUIControllerDelegateAndroid::OnNewDownloadReady(
@@ -57,11 +57,11 @@ class DefaultUIControllerDelegate : public DownloadUIController::Delegate {
   // |profile| is required to outlive DefaultUIControllerDelegate.
   explicit DefaultUIControllerDelegate(Profile* profile)
       : profile_(profile) {}
-  virtual ~DefaultUIControllerDelegate() {}
+  ~DefaultUIControllerDelegate() override {}
 
  private:
   // DownloadUIController::Delegate
-  virtual void OnNewDownloadReady(content::DownloadItem* item) OVERRIDE;
+  void OnNewDownloadReady(content::DownloadItem* item) override;
 
   Profile* profile_;
 };

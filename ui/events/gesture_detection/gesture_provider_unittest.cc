@@ -12,7 +12,7 @@
 #include "ui/events/gesture_detection/gesture_event_data.h"
 #include "ui/events/gesture_detection/gesture_provider.h"
 #include "ui/events/gesture_detection/motion_event.h"
-#include "ui/events/test/mock_motion_event.h"
+#include "ui/events/test/motion_event_test_utils.h"
 #include "ui/gfx/geometry/point_f.h"
 
 using base::TimeDelta;
@@ -58,7 +58,7 @@ gfx::RectF BoundsForSingleMockTouchAtLocation(float x, float y) {
 class GestureProviderTest : public testing::Test, public GestureProviderClient {
  public:
   GestureProviderTest() {}
-  virtual ~GestureProviderTest() {}
+  ~GestureProviderTest() override {}
 
   static MockMotionEvent ObtainMotionEvent(base::TimeTicks event_time,
                                            MotionEvent::Action action,
@@ -123,15 +123,15 @@ class GestureProviderTest : public testing::Test, public GestureProviderClient {
   }
 
   // Test
-  virtual void SetUp() OVERRIDE { SetUpWithConfig(GetDefaultConfig()); }
+  void SetUp() override { SetUpWithConfig(GetDefaultConfig()); }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     gestures_.clear();
     gesture_provider_.reset();
   }
 
   // GestureProviderClient
-  virtual void OnGestureEvent(const GestureEventData& gesture) OVERRIDE {
+  void OnGestureEvent(const GestureEventData& gesture) override {
     if (gesture.type() == ET_GESTURE_SCROLL_BEGIN)
       active_scroll_begin_event_.reset(new GestureEventData(gesture));
     gestures_.push_back(gesture);
@@ -143,9 +143,10 @@ class GestureProviderTest : public testing::Test, public GestureProviderClient {
   }
 
   void ResetGestureDetection() {
-    CancelActiveTouchSequence();
+    gesture_provider_->ResetDetection();
     gestures_.clear();
   }
+
   bool CancelActiveTouchSequence() {
     if (!gesture_provider_->current_down_event())
       return false;
@@ -490,10 +491,13 @@ TEST_F(GestureProviderTest, GestureTapWithDelay) {
   EXPECT_EQ(1, GetMostRecentGestureEvent().details.touch_points());
   EXPECT_EQ(BoundsForSingleMockTouchAtLocation(kFakeCoordX, kFakeCoordY),
             GetMostRecentGestureEvent().details.bounding_box());
+  EXPECT_EQ(event.GetEventTime(), GetMostRecentGestureEvent().time);
 
   EXPECT_FALSE(HasReceivedGesture(ET_GESTURE_TAP));
   RunTasksAndWait(GetDoubleTapTimeout());
   EXPECT_TRUE(HasReceivedGesture(ET_GESTURE_TAP));
+  EXPECT_EQ(motion_event_id, GetMostRecentGestureEvent().motion_event_id);
+  EXPECT_EQ(event.GetEventTime(), GetMostRecentGestureEvent().time);
 }
 
 // Verify that a DOWN followed by a MOVE will trigger fling (but not LONG).
@@ -609,7 +613,7 @@ TEST_F(GestureProviderTest, FlingEventSequence) {
       << "FlingStart should have the time of the ACTION_UP";
 }
 
-TEST_F(GestureProviderTest, GestureCancelledWhenWindowFocusLost) {
+TEST_F(GestureProviderTest, GestureCancelledOnCancelEvent) {
   const base::TimeTicks event_time = TimeTicks::Now();
 
   MockMotionEvent event =
@@ -622,8 +626,31 @@ TEST_F(GestureProviderTest, GestureCancelledWhenWindowFocusLost) {
   EXPECT_TRUE(HasReceivedGesture(ET_GESTURE_SHOW_PRESS));
   EXPECT_EQ(ET_GESTURE_LONG_PRESS, GetMostRecentGestureEventType());
 
-  // The long press triggers window focus loss by opening a context menu.
+  // A cancellation event may be triggered for a number of reasons, e.g.,
+  // from a context-menu-triggering long press resulting in loss of focus.
   EXPECT_TRUE(CancelActiveTouchSequence());
+  EXPECT_FALSE(HasDownEvent());
+
+  // A final ACTION_UP should have no effect.
+  event = ObtainMotionEvent(event_time + kOneMicrosecond * 2,
+                            MotionEvent::ACTION_UP);
+  EXPECT_FALSE(gesture_provider_->OnTouchEvent(event));
+}
+
+TEST_F(GestureProviderTest, GestureCancelledOnDetectionReset) {
+  const base::TimeTicks event_time = TimeTicks::Now();
+
+  MockMotionEvent event =
+      ObtainMotionEvent(event_time, MotionEvent::ACTION_DOWN);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+  EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetMostRecentGestureEventType());
+
+  RunTasksAndWait(GetLongPressTimeout() + GetShowPressTimeout() +
+                  kOneMicrosecond);
+  EXPECT_TRUE(HasReceivedGesture(ET_GESTURE_SHOW_PRESS));
+  EXPECT_EQ(ET_GESTURE_LONG_PRESS, GetMostRecentGestureEventType());
+
+  ResetGestureDetection();
   EXPECT_FALSE(HasDownEvent());
 
   // A final ACTION_UP should have no effect.

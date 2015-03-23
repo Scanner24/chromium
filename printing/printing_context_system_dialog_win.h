@@ -25,8 +25,9 @@ class PRINTING_EXPORT PrintingContextSytemDialogWin
   virtual void AskUserForSettings(
       int max_pages,
       bool has_selection,
-      const PrintSettingsCallback& callback) OVERRIDE;
-  virtual void Cancel() OVERRIDE;
+      bool is_scripted,
+      const PrintSettingsCallback& callback) override;
+  virtual void Cancel() override;
 
  private:
   friend class MockPrintingContextWin;

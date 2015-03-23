@@ -7,11 +7,11 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "ipc/ipc_sync_message_filter.h"
@@ -30,44 +30,39 @@ GpuListenerInfo::GpuListenerInfo() {}
 
 GpuListenerInfo::~GpuListenerInfo() {}
 
+ProxyFlushInfo::ProxyFlushInfo()
+    : flush_pending(false),
+      route_id(MSG_ROUTING_NONE),
+      put_offset(0),
+      flush_count(0) {
+}
+
+ProxyFlushInfo::~ProxyFlushInfo() {
+}
+
 // static
 scoped_refptr<GpuChannelHost> GpuChannelHost::Create(
     GpuChannelHostFactory* factory,
     const gpu::GPUInfo& gpu_info,
     const IPC::ChannelHandle& channel_handle,
-    base::WaitableEvent* shutdown_event) {
+    base::WaitableEvent* shutdown_event,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager) {
   DCHECK(factory->IsMainThread());
-  scoped_refptr<GpuChannelHost> host = new GpuChannelHost(factory, gpu_info);
+  scoped_refptr<GpuChannelHost> host =
+      new GpuChannelHost(factory, gpu_info, gpu_memory_buffer_manager);
   host->Connect(channel_handle, shutdown_event);
   return host;
 }
 
-// static
-bool GpuChannelHost::IsValidGpuMemoryBuffer(
-    gfx::GpuMemoryBufferHandle handle) {
-  switch (handle.type) {
-    case gfx::SHARED_MEMORY_BUFFER:
-#if defined(OS_MACOSX)
-    case gfx::IO_SURFACE_BUFFER:
-#endif
-#if defined(OS_ANDROID)
-    case gfx::SURFACE_TEXTURE_BUFFER:
-#endif
-#if defined(USE_X11)
-    case gfx::X11_PIXMAP_BUFFER:
-#endif
-      return true;
-    default:
-      return false;
-  }
-}
-
-GpuChannelHost::GpuChannelHost(GpuChannelHostFactory* factory,
-                               const gpu::GPUInfo& gpu_info)
+GpuChannelHost::GpuChannelHost(
+    GpuChannelHostFactory* factory,
+    const gpu::GPUInfo& gpu_info,
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager)
     : factory_(factory),
-      gpu_info_(gpu_info) {
+      gpu_info_(gpu_info),
+      gpu_memory_buffer_manager_(gpu_memory_buffer_manager) {
   next_transfer_buffer_id_.GetNext();
-  next_gpu_memory_buffer_id_.GetNext();
+  next_image_id_.GetNext();
   next_route_id_.GetNext();
 }
 
@@ -117,14 +112,43 @@ bool GpuChannelHost::Send(IPC::Message* msg) {
     if (!result)
       DVLOG(1) << "GpuChannelHost::Send failed: Channel::Send failed";
     return result;
-  } else if (base::MessageLoop::current()) {
-    bool result = sync_filter_->Send(message.release());
-    if (!result)
-      DVLOG(1) << "GpuChannelHost::Send failed: SyncMessageFilter::Send failed";
-    return result;
   }
 
-  return false;
+  bool result = sync_filter_->Send(message.release());
+  return result;
+}
+
+void GpuChannelHost::OrderingBarrier(
+    int route_id,
+    int32 put_offset,
+    unsigned int flush_count,
+    const std::vector<ui::LatencyInfo>& latency_info,
+    bool put_offset_changed,
+    bool do_flush) {
+  AutoLock lock(context_lock_);
+  if (flush_info_.flush_pending && flush_info_.route_id != route_id)
+    InternalFlush();
+
+  if (put_offset_changed) {
+    flush_info_.flush_pending = true;
+    flush_info_.route_id = route_id;
+    flush_info_.put_offset = put_offset;
+    flush_info_.flush_count = flush_count;
+    flush_info_.latency_info.insert(flush_info_.latency_info.end(),
+                                    latency_info.begin(), latency_info.end());
+
+    if (do_flush)
+      InternalFlush();
+  }
+}
+
+void GpuChannelHost::InternalFlush() {
+  DCHECK(flush_info_.flush_pending);
+  Send(new GpuCommandBufferMsg_AsyncFlush(
+      flush_info_.route_id, flush_info_.put_offset, flush_info_.flush_count,
+      flush_info_.latency_info));
+  flush_info_.latency_info.clear();
+  flush_info_.flush_pending = false;
 }
 
 CommandBufferProxyImpl* GpuChannelHost::CreateViewCommandBuffer(
@@ -193,10 +217,8 @@ CommandBufferProxyImpl* GpuChannelHost::CreateOffscreenCommandBuffer(
   init_params.gpu_preference = gpu_preference;
   int32 route_id = GenerateRouteID();
   bool succeeded = false;
-  if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(size,
-                                                           init_params,
-                                                           route_id,
-                                                           &succeeded))) {
+  if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(
+          size, init_params, route_id, &succeeded))) {
     LOG(ERROR) << "Failed to send GpuChannelMsg_CreateOffscreenCommandBuffer.";
     return NULL;
   }
@@ -244,7 +266,17 @@ void GpuChannelHost::DestroyCommandBuffer(
 
   AutoLock lock(context_lock_);
   proxies_.erase(route_id);
+  if (flush_info_.flush_pending && flush_info_.route_id == route_id)
+    flush_info_.flush_pending = false;
+
   delete command_buffer;
+}
+
+void GpuChannelHost::DestroyChannel() {
+  // channel_ must be destroyed on the main thread.
+  if (channel_.get() && !factory_->IsMainThread())
+    factory_->GetMainLoop()->DeleteSoon(FROM_HERE, channel_.release());
+  channel_.reset();
 }
 
 void GpuChannelHost::AddRoute(
@@ -296,38 +328,29 @@ int32 GpuChannelHost::ReserveTransferBufferId() {
 }
 
 gfx::GpuMemoryBufferHandle GpuChannelHost::ShareGpuMemoryBufferToGpuProcess(
-    gfx::GpuMemoryBufferHandle source_handle) {
+    const gfx::GpuMemoryBufferHandle& source_handle,
+    bool* requires_sync_point) {
   switch (source_handle.type) {
     case gfx::SHARED_MEMORY_BUFFER: {
       gfx::GpuMemoryBufferHandle handle;
       handle.type = gfx::SHARED_MEMORY_BUFFER;
       handle.handle = ShareToGpuProcess(source_handle.handle);
+      *requires_sync_point = false;
       return handle;
     }
-#if defined(USE_OZONE)
-    case gfx::OZONE_NATIVE_BUFFER:
-      return source_handle;
-#endif
-#if defined(OS_MACOSX)
     case gfx::IO_SURFACE_BUFFER:
-      return source_handle;
-#endif
-#if defined(OS_ANDROID)
     case gfx::SURFACE_TEXTURE_BUFFER:
+    case gfx::OZONE_NATIVE_BUFFER:
+      *requires_sync_point = true;
       return source_handle;
-#endif
-#if defined(USE_X11)
-    case gfx::X11_PIXMAP_BUFFER:
-      return source_handle;
-#endif
     default:
       NOTREACHED();
       return gfx::GpuMemoryBufferHandle();
   }
 }
 
-int32 GpuChannelHost::ReserveGpuMemoryBufferId() {
-  return next_gpu_memory_buffer_id_.GetNext();
+int32 GpuChannelHost::ReserveImageId() {
+  return next_image_id_.GetNext();
 }
 
 int32 GpuChannelHost::GenerateRouteID() {
@@ -335,11 +358,8 @@ int32 GpuChannelHost::GenerateRouteID() {
 }
 
 GpuChannelHost::~GpuChannelHost() {
-  // channel_ must be destroyed on the main thread.
-  if (!factory_->IsMainThread())
-    factory_->GetMainLoop()->DeleteSoon(FROM_HERE, channel_.release());
+  DestroyChannel();
 }
-
 
 GpuChannelHost::MessageFilter::MessageFilter()
     : lost_(false) {

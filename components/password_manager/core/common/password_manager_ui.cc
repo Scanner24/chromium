@@ -9,29 +9,9 @@ namespace password_manager {
 
 namespace ui {
 
-bool IsPendingState(State state) {
-  return state == PENDING_PASSWORD_AND_BUBBLE_STATE ||
-         state == PENDING_PASSWORD_STATE;
-}
-
-bool IsAutomaticDisplayState(State state) {
-  return state == PENDING_PASSWORD_AND_BUBBLE_STATE ||
-         state == CONFIRMATION_STATE;
-}
-
-State GetEndStateForAutomaticState(State state) {
-  DCHECK(IsAutomaticDisplayState(state));
-  switch (state) {
-    case PENDING_PASSWORD_AND_BUBBLE_STATE:
-      return PENDING_PASSWORD_STATE;
-      break;
-    case CONFIRMATION_STATE:
-      return MANAGE_STATE;
-      break;
-    default:
-      NOTREACHED();
-      return INACTIVE_STATE;
-  }
+bool IsAskSubmitURLState(State state) {
+  return state == ASK_USER_REPORT_URL_BUBBLE_SHOWN_BEFORE_TRANSITION_STATE ||
+         state == ASK_USER_REPORT_URL_BUBBLE_SHOWN_STATE;
 }
 
 }  // namespace ui

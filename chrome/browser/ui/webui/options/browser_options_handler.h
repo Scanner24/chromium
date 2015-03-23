@@ -20,6 +20,8 @@
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
+#include "components/policy/core/common/policy_service.h"
 #include "components/search_engines/template_url_service_observer.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/notification_observer.h"
@@ -61,65 +63,69 @@ class BrowserOptionsHandler
 #endif
       public TemplateURLServiceObserver,
       public extensions::ExtensionRegistryObserver,
-      public content::NotificationObserver {
+      public content::NotificationObserver,
+      public policy::PolicyService::Observer {
  public:
   BrowserOptionsHandler();
-  virtual ~BrowserOptionsHandler();
+  ~BrowserOptionsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(base::DictionaryValue* values) OVERRIDE;
-  virtual void PageLoadStarted() OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
-  virtual void Uninitialize() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* values) override;
+  void PageLoadStarted() override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void RegisterMessages() override;
+  void Uninitialize() override;
 
   // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
   // SigninManagerBase::Observer implementation.
-  virtual void GoogleSigninSucceeded(const std::string& account_id,
-                                     const std::string& username,
-                                     const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE;
+  void GoogleSigninSucceeded(const std::string& account_id,
+                             const std::string& username,
+                             const std::string& password) override;
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override;
 
   // ShellIntegration::DefaultWebClientObserver implementation.
-  virtual void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) OVERRIDE;
-  virtual bool IsInteractiveSetDefaultPermitted() OVERRIDE;
+  void SetDefaultWebClientUIState(
+      ShellIntegration::DefaultWebClientUIState state) override;
+  bool IsInteractiveSetDefaultPermitted() override;
 
   // TemplateURLServiceObserver implementation.
-  virtual void OnTemplateURLServiceChanged() OVERRIDE;
+  void OnTemplateURLServiceChanged() override;
 
   // extensions::ExtensionRegistryObserver:
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
 
+  // policy::PolicyService::Observer:
+  void OnPolicyUpdated(const policy::PolicyNamespace& ns,
+                       const policy::PolicyMap& previous,
+                       const policy::PolicyMap& current) override;
  private:
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
   void OnCloudPrintPrefsChanged();
 #endif
 
   // SelectFileDialog::Listener implementation
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE;
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
 
 #if defined(OS_CHROMEOS)
   // PointerDeviceObserver::Observer implementation.
-  virtual void TouchpadExists(bool exists) OVERRIDE;
-  virtual void MouseExists(bool exists) OVERRIDE;
+  void TouchpadExists(bool exists) override;
+  void MouseExists(bool exists) override;
 
   // Will be called when the policy::key::kUserAvatarImage policy changes.
   void OnUserImagePolicyChanged(const base::Value* previous_policy,
@@ -133,7 +139,7 @@ class BrowserOptionsHandler
   void OnPowerwashDialogShow(const base::ListValue* args);
 
   // ConsumerManagementService::Observer:
-  virtual void OnConsumerManagementStatusChanged() OVERRIDE;
+  void OnConsumerManagementStatusChanged() override;
 #endif
 
   void UpdateSyncState();
@@ -220,6 +226,11 @@ class BrowserOptionsHandler
   // |false| and preventing the user from changing the wallpaper if |managed| is
   // |true|.
   void OnWallpaperManagedChanged(bool managed);
+
+  // Updates the UI, allowing the user to change the system time zone if
+  // kSystemTimezonePolicy is set, and preventing the user from changing the
+  // system time zone if kSystemTimezonePolicy is not set.
+  void OnSystemTimezonePolicyChanged();
 #endif
 
   // Callback for the "selectDownloadLocation" message. This will prompt the
@@ -270,7 +281,7 @@ class BrowserOptionsHandler
   void ShowCloudPrintDevicesPage(const base::ListValue* args);
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   // Register localized values used by Cloud Print
   void RegisterCloudPrintValues(base::DictionaryValue* values);
 #endif
@@ -279,11 +290,21 @@ class BrowserOptionsHandler
   // the hotword section of the settings page.
   void SendHotwordAvailable();
 
+  // Callback that updates the visibility of the audio history upon completion
+  // of a call to the server to the get the current value.
+  void SetHotwordAudioHistorySectionVisible(
+      const base::string16& audio_history_state,
+      bool success,
+      bool logging_enabled);
+
   // Callback for "requestHotwordAvailable" message.
   void HandleRequestHotwordAvailable(const base::ListValue* args);
 
   // Callback for "launchHotwordAudioVerificationApp" message.
   void HandleLaunchHotwordAudioVerificationApp(const base::ListValue* args);
+
+  // Callback for "requestGoogleNowAvailable" message.
+  void HandleRequestGoogleNowAvailable(const base::ListValue* args);
 
   // Callback for "launchEasyUnlockSetup" message.
   void HandleLaunchEasyUnlockSetup(const base::ListValue* args);
@@ -372,7 +393,9 @@ class BrowserOptionsHandler
   bool cloud_print_mdns_ui_enabled_;
 
   StringPrefMember auto_open_files_;
-  DoublePrefMember default_zoom_level_;
+
+  scoped_ptr<chrome::ChromeZoomLevelPrefs::DefaultZoomLevelSubscription>
+      default_zoom_level_subscription_;
 
   PrefChangeRegistrar profile_pref_registrar_;
 #if defined(OS_CHROMEOS)

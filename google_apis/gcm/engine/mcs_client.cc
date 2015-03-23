@@ -7,11 +7,13 @@
 #include <set>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/base/socket_stream.h"
 #include "google_apis/gcm/engine/connection_factory.h"
@@ -196,7 +198,6 @@ void MCSClient::Initialize(
                  weak_ptr_factory_.GetWeakPtr()),
       base::Bind(&MCSClient::MaybeSendMessage,
                  weak_ptr_factory_.GetWeakPtr()));
-  connection_handler_ = connection_factory_->GetConnectionHandler();
 
   stream_id_out_ = 1;  // Login request is hardcoded to id 1.
 
@@ -289,6 +290,7 @@ void MCSClient::Login(uint64 android_id, uint64 security_token) {
 
   state_ = CONNECTING;
   connection_factory_->Connect();
+  connection_handler_ = connection_factory_->GetConnectionHandler();
 }
 
 void MCSClient::SendMessage(const MCSMessage& message) {
@@ -362,6 +364,10 @@ void MCSClient::SendMessage(const MCSMessage& message) {
   NotifyMessageSendStatus(message.GetProtobuf(), QUEUED);
 
   MaybeSendMessage();
+}
+
+void MCSClient::UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) {
+  heartbeat_manager_.UpdateHeartbeatTimer(timer.Pass());
 }
 
 void MCSClient::ResetStateAndBuildLoginRequest(
@@ -565,9 +571,7 @@ void MCSClient::HandleMCSDataMesssage(
   }
 
   if (send) {
-    SendMessage(
-        MCSMessage(kDataMessageStanzaTag,
-                   response.PassAs<const google::protobuf::MessageLite>()));
+    SendMessage(MCSMessage(kDataMessageStanzaTag, response.Pass()));
   }
 }
 
@@ -619,9 +623,7 @@ void MCSClient::HandlePacketFromWire(
 
   if (unacked_server_ids_.size() > 0 &&
       unacked_server_ids_.size() % kUnackedMessageBeforeStreamAck == 0) {
-    SendMessage(MCSMessage(kIqStanzaTag,
-                           BuildStreamAck().
-                               PassAs<const google::protobuf::MessageLite>()));
+    SendMessage(MCSMessage(kIqStanzaTag, BuildStreamAck()));
   }
 
   // The connection is alive, treat this message as a heartbeat ack.
@@ -659,9 +661,7 @@ void MCSClient::HandlePacketFromWire(
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(message_received_callback_,
-                     MCSMessage(tag,
-                                protobuf.PassAs<
-                                    const google::protobuf::MessageLite>())));
+                     MCSMessage(tag, protobuf.Pass())));
 
       // If there are pending messages, attempt to send one.
       if (!to_send_.empty()) {
@@ -732,9 +732,7 @@ void MCSClient::HandlePacketFromWire(
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(message_received_callback_,
-                     MCSMessage(tag,
-                                protobuf.PassAs<
-                                    const google::protobuf::MessageLite>())));
+                     MCSMessage(tag, protobuf.Pass())));
       return;
     }
     default:

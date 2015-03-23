@@ -23,7 +23,7 @@ class ServiceClient::Core
   Core(const std::string& chromoting_hosts_url,
        net::URLRequestContextGetter* request_context_getter)
            : request_context_getter_(request_context_getter),
-             delegate_(NULL),
+             delegate_(nullptr),
              pending_request_type_(PENDING_REQUEST_NONE),
              chromoting_hosts_url_(chromoting_hosts_url) {
   }
@@ -40,11 +40,11 @@ class ServiceClient::Core
                       ServiceClient::Delegate* delegate);
 
   // net::URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
  private:
   friend class base::RefCountedThreadSafe<Core>;
-  virtual ~Core() {}
+  ~Core() override {}
 
   enum PendingRequestType {
     PENDING_REQUEST_NONE,

@@ -11,14 +11,13 @@
 #include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/mock_settings_observer.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -57,13 +56,23 @@ TEST_F(HostContentSettingsMapTest, DefaultValues) {
                 GURL(chrome::kChromeUINewTabURL),
                 CONTENT_SETTINGS_TYPE_IMAGES,
                 std::string()));
-  {
-    host_content_settings_map->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ASK);
-    EXPECT_EQ(CONTENT_SETTING_ASK,
-              host_content_settings_map->GetDefaultContentSetting(
-                  CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
-  }
+
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ALLOW);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_DETECT_IMPORTANT_CONTENT);
+  EXPECT_EQ(CONTENT_SETTING_DETECT_IMPORTANT_CONTENT,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_POPUPS, CONTENT_SETTING_ALLOW);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
@@ -915,78 +924,45 @@ TEST_F(HostContentSettingsMapTest, GetContentSetting) {
 }
 
 TEST_F(HostContentSettingsMapTest, ShouldAllowAllContent) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      profile.GetHostContentSettingsMap();
-
   GURL http_host("http://example.com/");
   GURL https_host("https://example.com/");
   GURL embedder("chrome://foo");
   GURL extension("chrome-extension://foo");
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    http_host, embedder, CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    http_host, embedder, CONTENT_SETTINGS_TYPE_GEOLOCATION));
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    http_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   https_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   https_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   embedder, http_host, CONTENT_SETTINGS_TYPE_COOKIES));
 #if defined(ENABLE_EXTENSIONS)
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   extension, extension, CONTENT_SETTINGS_TYPE_COOKIES));
 #else
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    extension, extension, CONTENT_SETTINGS_TYPE_COOKIES));
 #endif
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    extension, extension, CONTENT_SETTINGS_TYPE_PLUGINS));
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    extension, http_host, CONTENT_SETTINGS_TYPE_COOKIES));
 }
 
-TEST_F(HostContentSettingsMapTest, MigrateClearOnExit) {
+TEST_F(HostContentSettingsMapTest, IsSettingAllowedForType) {
   TestingProfile profile;
-  TestingPrefServiceSyncable* prefs = profile.GetTestingPrefService();
+  PrefService* prefs = profile.GetPrefs();
 
-  prefs->SetBoolean(prefs::kClearSiteDataOnExit, true);
+  EXPECT_TRUE(HostContentSettingsMap::IsSettingAllowedForType(
+                  prefs, CONTENT_SETTING_ASK,
+                  CONTENT_SETTINGS_TYPE_FULLSCREEN));
 
-  scoped_ptr<base::Value> patterns(base::JSONReader::Read(
-      "{\"[*.]example.com,*\":{\"cookies\": 1},"
-      " \"[*.]other.com,*\":{\"cookies\": 2},"
-      " \"[*.]third.com,*\":{\"cookies\": 4}}"));
-  profile.GetPrefs()->Set(prefs::kContentSettingsPatternPairs, *patterns);
-
-  scoped_ptr<base::Value> defaults(base::JSONReader::Read("{\"cookies\": 1}"));
-  profile.GetPrefs()->Set(prefs::kDefaultContentSettings, *defaults);
-
-  HostContentSettingsMap* host_content_settings_map =
-      profile.GetHostContentSettingsMap();
-
-  EXPECT_EQ(CONTENT_SETTING_SESSION_ONLY,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_COOKIES, NULL));
-  EXPECT_EQ(CONTENT_SETTING_SESSION_ONLY,
-            host_content_settings_map->GetContentSetting(
-                GURL("http://example.com"),
-                GURL("http://example.com"),
-                CONTENT_SETTINGS_TYPE_COOKIES,
-                std::string()));
-  EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            host_content_settings_map->GetContentSetting(
-                GURL("http://other.com"),
-                GURL("http://other.com"),
-                CONTENT_SETTINGS_TYPE_COOKIES,
-                std::string()));
-  EXPECT_EQ(CONTENT_SETTING_SESSION_ONLY,
-            host_content_settings_map->GetContentSetting(
-                GURL("http://third.com"),
-                GURL("http://third.com"),
-                CONTENT_SETTINGS_TYPE_COOKIES,
-                std::string()));
+  // TODO(msramek): Add more checks for setting type - setting pairs where
+  // it is not obvious whether or not they are allowed.
 }
 
 TEST_F(HostContentSettingsMapTest, AddContentSettingsObserver) {

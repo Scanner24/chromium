@@ -12,6 +12,7 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/linked_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "google_apis/gcm/base/gcm_export.h"
 #include "google_apis/gcm/base/mcs_message.h"
@@ -21,6 +22,7 @@
 
 namespace base {
 class Clock;
+class Timer;
 }  // namespace base
 
 namespace google {
@@ -144,6 +146,9 @@ class GCM_EXPORT MCSClient {
 
   // Returns text representation of the state enum.
   std::string GetStateString() const;
+
+  // Updates the timer used by |heartbeat_manager_| for sending heartbeats.
+  void UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer);
 
  private:
   typedef uint32 StreamId;

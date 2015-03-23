@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "media/base/media_export.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace media {
 
@@ -16,18 +16,19 @@ namespace media {
 // shared with device manager.
 typedef int VideoCaptureSessionId;
 
-// Color formats from camera.
+// Color formats from camera. This list is sorted in order of preference.
 enum VideoPixelFormat {
-  PIXEL_FORMAT_UNKNOWN,  // Color format not set.
   PIXEL_FORMAT_I420,
-  PIXEL_FORMAT_YUY2,
+  PIXEL_FORMAT_YV12,
+  PIXEL_FORMAT_NV12,
+  PIXEL_FORMAT_NV21,
   PIXEL_FORMAT_UYVY,
+  PIXEL_FORMAT_YUY2,
   PIXEL_FORMAT_RGB24,
   PIXEL_FORMAT_ARGB,
   PIXEL_FORMAT_MJPEG,
-  PIXEL_FORMAT_NV21,
-  PIXEL_FORMAT_YV12,
   PIXEL_FORMAT_TEXTURE,  // Capture format as a GL texture.
+  PIXEL_FORMAT_UNKNOWN,  // Color format not set.
   PIXEL_FORMAT_MAX,
 };
 
@@ -36,7 +37,7 @@ enum ResolutionChangePolicy {
   // Capture device outputs a fixed resolution all the time. The resolution of
   // the first frame is the resolution for all frames.
   // It is implementation specific for the capture device to scale, letter-box
-  // and pillar-box. The only gurantee is that resolution will never change.
+  // and pillar-box. The only guarantee is that resolution will never change.
   RESOLUTION_POLICY_FIXED,
 
   // Capture device outputs frames with dynamic resolution. The width and height
@@ -66,6 +67,10 @@ class MEDIA_EXPORT VideoCaptureFormat {
   std::string ToString() const;
   static std::string PixelFormatToString(VideoPixelFormat format);
 
+  // Returns the required buffer size to hold an image of a given
+  // VideoCaptureFormat with no padding and tightly packed.
+  size_t ImageAllocationSize() const;
+
   // Checks that all values are in the expected range. All limits are specified
   // in media::Limits.
   bool IsValid() const;
@@ -75,7 +80,24 @@ class MEDIA_EXPORT VideoCaptureFormat {
   VideoPixelFormat pixel_format;
 };
 
+// Image capture format specification.
+// This class is used by the video capture device to specify the format of a
+// still image captured and returned to a client. A list of these is also
+// provided when client queries supported formats for still image capture.
+class MEDIA_EXPORT ImageCaptureFormat {
+ public:
+  ImageCaptureFormat();
+
+  ImageCaptureFormat(const gfx::Size& frame_size,
+                     VideoPixelFormat pixel_format);
+
+  gfx::Size frame_size;
+  VideoPixelFormat pixel_format;
+};
+
 typedef std::vector<VideoCaptureFormat> VideoCaptureFormats;
+
+typedef std::vector<ImageCaptureFormat> ImageCaptureFormats;
 
 // Parameters for starting video capture.
 // This class is used by the client of a video capture device to specify the

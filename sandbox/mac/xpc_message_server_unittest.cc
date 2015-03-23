@@ -22,7 +22,7 @@ namespace sandbox {
 
 class XPCMessageServerTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     if (!RunXPCTest())
       return;
     ASSERT_TRUE(InitializeXPC());
@@ -43,7 +43,7 @@ class BlockDemuxer : public MessageDemuxer {
         pipe_(NULL) {
   }
 
-  virtual ~BlockDemuxer() {
+  ~BlockDemuxer() override {
     if (pipe_)
       xpc_release(pipe_);
     if (demux_block_)
@@ -68,7 +68,7 @@ class BlockDemuxer : public MessageDemuxer {
     return true;
   }
 
-  virtual void DemuxMessage(IPCMessage request) OVERRIDE {
+  void DemuxMessage(IPCMessage request) override {
     demux_block_(request);
   }
 
@@ -149,21 +149,19 @@ XPC_TEST_F(GetSenderPID)  // {
 #pragma GCC diagnostic pop
   ASSERT_EQ(KERN_SUCCESS, kr);
 
-  base::ProcessHandle child_handle = base::SpawnMultiProcessTestChild(
+  base::Process child = base::SpawnMultiProcessTestChild(
       "GetSenderPID",
       base::GetMultiProcessTestChildBaseCommandLine(),
       base::LaunchOptions());
-  ASSERT_NE(base::kNullProcessHandle, child_handle);
+  ASSERT_TRUE(child.IsValid());
 
   int exit_code = -1;
-  ASSERT_TRUE(base::WaitForExitCode(child_handle, &exit_code));
+  ASSERT_TRUE(child.WaitForExit(&exit_code));
   EXPECT_EQ(0, exit_code);
 
-  EXPECT_EQ(base::GetProcId(child_handle), sender_pid);
-  EXPECT_EQ(base::GetProcId(child_handle), child_pid);
+  EXPECT_EQ(child.Pid(), sender_pid);
+  EXPECT_EQ(child.Pid(), child_pid);
   EXPECT_EQ(sender_pid, child_pid);
-
-  base::CloseProcessHandle(child_handle);
 }
 
 MULTIPROCESS_TEST_MAIN(GetSenderPID) {

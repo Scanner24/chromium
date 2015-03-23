@@ -142,12 +142,12 @@ class FrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
         oracle_proxy_(oracle),
         delivery_log_(delivery_log) {}
 
-  virtual bool ShouldCaptureFrame(
+  bool ShouldCaptureFrame(
       const gfx::Rect& damage_rect,
       base::TimeTicks present_time,
       scoped_refptr<media::VideoFrame>* storage,
       RenderWidgetHostViewFrameSubscriber::DeliverFrameCallback*
-          deliver_frame_cb) OVERRIDE;
+          deliver_frame_cb) override;
 
  private:
   const VideoCaptureOracle::Event event_type_;
@@ -185,12 +185,12 @@ class ContentCaptureSubscription : public content::NotificationObserver {
       const RenderWidgetHost& source,
       const scoped_refptr<ThreadSafeCaptureOracle>& oracle_proxy,
       const CaptureCallback& capture_callback);
-  virtual ~ContentCaptureSubscription();
+  ~ContentCaptureSubscription() override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   void OnTimer();
@@ -229,12 +229,12 @@ void RenderVideoFrame(const SkBitmap& input,
 class WebContentsCaptureMachine : public VideoCaptureMachine {
  public:
   WebContentsCaptureMachine(int render_process_id, int main_render_frame_id);
-  virtual ~WebContentsCaptureMachine();
+  ~WebContentsCaptureMachine() override;
 
   // VideoCaptureMachine overrides.
-  virtual bool Start(const scoped_refptr<ThreadSafeCaptureOracle>& oracle_proxy,
-                     const media::VideoCaptureParams& params) OVERRIDE;
-  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  bool Start(const scoped_refptr<ThreadSafeCaptureOracle>& oracle_proxy,
+             const media::VideoCaptureParams& params) override;
+  void Stop(const base::Closure& callback) override;
 
   // Starts a copy from the backing store or the composited surface. Must be run
   // on the UI BrowserThread. |deliver_frame_cb| will be run when the operation
@@ -258,8 +258,8 @@ class WebContentsCaptureMachine : public VideoCaptureMachine {
       const scoped_refptr<media::VideoFrame>& target,
       const RenderWidgetHostViewFrameSubscriber::DeliverFrameCallback&
           deliver_frame_cb,
-      bool success,
-      const SkBitmap& bitmap);
+      const SkBitmap& bitmap,
+      ReadbackResponse response);
 
   // Response callback for RWHVP::CopyFromCompositingSurfaceToVideoFrame().
   void DidCopyFromCompositingSurfaceToVideoFrame(
@@ -667,15 +667,13 @@ gfx::Size WebContentsCaptureMachine::ComputeOptimalTargetSize() const {
   if (rwhv) {
     const gfx::NativeView view = rwhv->GetNativeView();
     gfx::Screen* const screen = gfx::Screen::GetScreenFor(view);
-    if (screen->IsDIPEnabled()) {
-      const gfx::Display display = screen->GetDisplayNearestWindow(view);
-      const float scale = display.device_scale_factor();
-      if (scale > 1.0f) {
-        const gfx::Size shrunk_size(
-            gfx::ToFlooredSize(gfx::ScaleSize(optimal_size, 1.0f / scale)));
-        if (shrunk_size.width() > 0 && shrunk_size.height() > 0)
-          optimal_size = shrunk_size;
-      }
+    const gfx::Display display = screen->GetDisplayNearestWindow(view);
+    const float scale = display.device_scale_factor();
+    if (scale > 1.0f) {
+      const gfx::Size shrunk_size(
+          gfx::ToFlooredSize(gfx::ScaleSize(optimal_size, 1.0f / scale)));
+      if (shrunk_size.width() > 0 && shrunk_size.height() > 0)
+        optimal_size = shrunk_size;
     }
   }
 
@@ -688,13 +686,13 @@ void WebContentsCaptureMachine::DidCopyFromBackingStore(
     const scoped_refptr<media::VideoFrame>& target,
     const RenderWidgetHostViewFrameSubscriber::DeliverFrameCallback&
         deliver_frame_cb,
-    bool success,
-    const SkBitmap& bitmap) {
+    const SkBitmap& bitmap,
+    ReadbackResponse response) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   base::TimeTicks now = base::TimeTicks::Now();
   DCHECK(render_thread_.get());
-  if (success) {
+  if (response == READBACK_SUCCESS) {
     UMA_HISTOGRAM_TIMES("TabCapture.CopyTimeBitmap", now - start_time);
     TRACE_EVENT_ASYNC_STEP_INTO0("mirroring", "Capture", target.get(),
                                  "Render");

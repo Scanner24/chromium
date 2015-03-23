@@ -5,7 +5,6 @@
 #include "net/quic/test_tools/quic_connection_peer.h"
 
 #include "base/stl_util.h"
-#include "net/quic/congestion_control/receive_algorithm_interface.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_packet_writer.h"
@@ -23,14 +22,6 @@ void QuicConnectionPeer::SendAck(QuicConnection* connection) {
 }
 
 // static
-void QuicConnectionPeer::SetReceiveAlgorithm(
-    QuicConnection* connection,
-    ReceiveAlgorithmInterface* receive_algorithm) {
-  connection->received_packet_manager_.receive_algorithm_.reset(
-      receive_algorithm);
-}
-
-// static
 void QuicConnectionPeer::SetSendAlgorithm(
     QuicConnection* connection,
     SendAlgorithmInterface* send_algorithm) {
@@ -38,14 +29,16 @@ void QuicConnectionPeer::SetSendAlgorithm(
 }
 
 // static
-QuicAckFrame* QuicConnectionPeer::CreateAckFrame(QuicConnection* connection) {
-  return connection->CreateAckFrame();
+void QuicConnectionPeer::PopulateAckFrame(QuicConnection* connection,
+                                          QuicAckFrame* ack) {
+  connection->PopulateAckFrame(ack);
 }
 
 // static
-QuicStopWaitingFrame* QuicConnectionPeer::CreateStopWaitingFrame(
-    QuicConnection* connection) {
-  return connection->CreateStopWaitingFrame();
+void QuicConnectionPeer::PopulateStopWaitingFrame(
+    QuicConnection* connection,
+    QuicStopWaitingFrame* stop_waiting) {
+  connection->PopulateStopWaitingFrame(stop_waiting);
 }
 
 // static
@@ -154,6 +147,11 @@ void QuicConnectionPeer::SetPeerAddress(QuicConnection* connection,
 }
 
 // static
+bool QuicConnectionPeer::IsSilentCloseEnabled(QuicConnection* connection) {
+  return connection->silent_close_enabled_;
+}
+
+// static
 void QuicConnectionPeer::SwapCrypters(QuicConnection* connection,
                                       QuicFramer* framer) {
   QuicFramerPeer::SwapCrypters(framer, &connection->framer_);
@@ -185,6 +183,11 @@ QuicAlarm* QuicConnectionPeer::GetAckAlarm(QuicConnection* connection) {
 // static
 QuicAlarm* QuicConnectionPeer::GetPingAlarm(QuicConnection* connection) {
   return connection->ping_alarm_.get();
+}
+
+// static
+QuicAlarm* QuicConnectionPeer::GetFecAlarm(QuicConnection* connection) {
+  return connection->fec_alarm_.get();
 }
 
 // static
@@ -240,6 +243,23 @@ QuicEncryptedPacket* QuicConnectionPeer::GetConnectionClosePacket(
 void QuicConnectionPeer::SetSupportedVersions(QuicConnection* connection,
                                               QuicVersionVector versions) {
   connection->framer_.SetSupportedVersions(versions);
+}
+
+// static
+QuicPacketHeader* QuicConnectionPeer::GetLastHeader(
+    QuicConnection* connection) {
+  return &connection->last_header_;
+}
+
+// static
+void QuicConnectionPeer::SetSequenceNumberOfLastSentPacket(
+    QuicConnection* connection, QuicPacketSequenceNumber number) {
+  connection->sequence_number_of_last_sent_packet_ = number;
+}
+
+// static
+QuicConnectionStats* QuicConnectionPeer::GetStats(QuicConnection* connection) {
+  return &connection->stats_;
 }
 
 }  // namespace test

@@ -5,59 +5,63 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_COPRESENCE_PRIVATE_COPRESENCE_PRIVATE_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_COPRESENCE_PRIVATE_COPRESENCE_PRIVATE_API_H_
 
-#include "chrome/browser/extensions/chrome_extension_function.h"
+#include <string>
 
-namespace copresence {
+#include "extensions/browser/extension_function.h"
+
+namespace audio_modem {
 class WhispernetClient;
 }
 
 namespace extensions {
 
-class CopresencePrivateFunction : public ChromeUIThreadExtensionFunction {
- protected:
-  copresence::WhispernetClient* GetWhispernetClient();
-  virtual ~CopresencePrivateFunction() {}
-};
+namespace copresence_private {
 
-class CopresencePrivateSendFoundFunction : public CopresencePrivateFunction {
+// Register a client to receive events from Whispernet.
+const std::string
+RegisterWhispernetClient(audio_modem::WhispernetClient* client);
+
+}  // namespace copresence_private
+
+class CopresencePrivateSendFoundFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("copresencePrivate.sendFound",
                              COPRESENCEPRIVATE_SENDFOUND);
 
  protected:
-  virtual ~CopresencePrivateSendFoundFunction() {}
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ~CopresencePrivateSendFoundFunction() override {}
+  ExtensionFunction::ResponseAction Run() override;
 };
 
-class CopresencePrivateSendSamplesFunction : public CopresencePrivateFunction {
+class CopresencePrivateSendSamplesFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("copresencePrivate.sendSamples",
                              COPRESENCEPRIVATE_SENDSAMPLES);
 
  protected:
-  virtual ~CopresencePrivateSendSamplesFunction() {}
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ~CopresencePrivateSendSamplesFunction() override {}
+  ExtensionFunction::ResponseAction Run() override;
 };
 
-class CopresencePrivateSendDetectFunction : public CopresencePrivateFunction {
+class CopresencePrivateSendDetectFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("copresencePrivate.sendDetect",
                              COPRESENCEPRIVATE_SENDDETECT);
 
  protected:
-  virtual ~CopresencePrivateSendDetectFunction() {}
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ~CopresencePrivateSendDetectFunction() override {}
+  ExtensionFunction::ResponseAction Run() override;
 };
 
 class CopresencePrivateSendInitializedFunction
-    : public CopresencePrivateFunction {
+    : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("copresencePrivate.sendInitialized",
                              COPRESENCEPRIVATE_SENDINITIALIZED);
 
  protected:
-  virtual ~CopresencePrivateSendInitializedFunction() {}
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ~CopresencePrivateSendInitializedFunction() override {}
+  ExtensionFunction::ResponseAction Run() override;
 };
 
 }  // namespace extensions

@@ -13,14 +13,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/version.h"
-#include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_install_checker.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/install_flag.h"
+#include "extensions/browser/sandboxed_unpacker.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 #include "sync/api/string_ordinal.h"
@@ -99,6 +98,7 @@ class CrxInstaller
 
   // Install the crx in |source_file|.
   void InstallCrx(const base::FilePath& source_file);
+  void InstallCrxFile(const CRXFileInfo& source_file);
 
   // Convert the specified user script into an extension and install it.
   void InstallUserScript(const base::FilePath& source_file,
@@ -108,8 +108,8 @@ class CrxInstaller
   void InstallWebApp(const WebApplicationInfo& web_app);
 
   // Overridden from ExtensionInstallPrompt::Delegate:
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
   int creation_flags() const { return creation_flags_; }
   void set_creation_flags(int val) { creation_flags_ = val; }
@@ -209,7 +209,7 @@ class CrxInstaller
   CrxInstaller(base::WeakPtr<ExtensionService> service_weak,
                scoped_ptr<ExtensionInstallPrompt> client,
                const WebstoreInstaller::Approval* approval);
-  virtual ~CrxInstaller();
+  ~CrxInstaller() override;
 
   // Converts the source user script to an extension.
   void ConvertUserScriptOnFileThread();
@@ -222,12 +222,12 @@ class CrxInstaller
   CrxInstallerError AllowInstall(const Extension* extension);
 
   // SandboxedUnpackerClient
-  virtual void OnUnpackFailure(const base::string16& error_message) OVERRIDE;
-  virtual void OnUnpackSuccess(const base::FilePath& temp_dir,
-                               const base::FilePath& extension_dir,
-                               const base::DictionaryValue* original_manifest,
-                               const Extension* extension,
-                               const SkBitmap& install_icon) OVERRIDE;
+  void OnUnpackFailure(const base::string16& error_message) override;
+  void OnUnpackSuccess(const base::FilePath& temp_dir,
+                       const base::FilePath& extension_dir,
+                       const base::DictionaryValue* original_manifest,
+                       const Extension* extension,
+                       const SkBitmap& install_icon) override;
 
   // Called on the UI thread to start the requirements, policy and blacklist
   // checks on the extension.

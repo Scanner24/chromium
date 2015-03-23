@@ -29,6 +29,11 @@
       'sources': [
         '<@(gles2_implementation_source_files)',
       ],
+      'includes': [
+        # Disable LTO due to ELF section name out of range
+        # crbug.com/422251
+        '../build/android/disable_lto.gypi',
+      ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],
     },
@@ -49,42 +54,17 @@
         'GL_IN_PROCESS_CONTEXT_IMPLEMENTATION',
       ],
       'sources': [
-        'command_buffer/client/gl_in_process_context.h',
         'command_buffer/client/gl_in_process_context.cc',
+        'command_buffer/client/gl_in_process_context.h',
         'command_buffer/client/gl_in_process_context_export.h',
       ],
     },
     {
       # Library emulates GLES2 using command_buffers.
-      # GN version: //gpu/command_buffer/client:gles2_implementation_client_side_arrays
-      'target_name': 'gles2_implementation_client_side_arrays',
+      'target_name': 'gles2_implementation_no_check',
       'type': '<(component)',
       'defines': [
         'GLES2_IMPL_IMPLEMENTATION',
-        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
-      ],
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../third_party/khronos/khronos.gyp:khronos_headers',
-        '../ui/gl/gl.gyp:gl',
-        '../ui/gfx/gfx.gyp:gfx_geometry',
-        '../ui/gfx/gfx.gyp:gfx',
-        'command_buffer/command_buffer.gyp:gles2_utils',
-        'gles2_cmd_helper',
-      ],
-      'sources': [
-        '<@(gles2_implementation_source_files)',
-      ],
-      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-      'msvs_disabled_warnings': [ 4267, ],
-    },
-    {
-      # Library emulates GLES2 using command_buffers.
-      'target_name': 'gles2_implementation_client_side_arrays_no_check',
-      'type': '<(component)',
-      'defines': [
-        'GLES2_IMPL_IMPLEMENTATION',
-        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
         'GLES2_CONFORMANCE_TESTS=1',
       ],
       'dependencies': [
@@ -136,7 +116,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         'command_buffer/command_buffer.gyp:gles2_utils',
         'command_buffer_client',
-        'gles2_implementation_client_side_arrays_no_check',
+        'gles2_implementation_no_check',
       ],
       'sources': [
         '<@(gles2_c_lib_source_files)',
@@ -144,30 +124,23 @@
     },
     {
       # GN version: //gpu:angle_unittests
+      # TODO(kbr): port this refactoring to the GN build.
       'target_name': 'angle_unittests',
       'type': '<(gtest_target_type)',
+      'includes': [
+        '../third_party/angle/build/common_defines.gypi',
+        '../third_party/angle/tests/angle_unittests.gypi',
+      ],
       'dependencies': [
         '../base/base.gyp:base',
-        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../testing/gmock.gyp:gmock',
-        '../testing/gtest.gyp:gtest',
-        '<(angle_path)/src/build_angle.gyp:translator_static',
-      ],
-      'variables': {
-        'ANGLE_DIR': '<(angle_path)',
-      },
-      'includes': [
-        '../third_party/angle/tests/preprocessor_tests/preprocessor_tests.gypi',
-        '../third_party/angle/tests/compiler_tests/compiler_tests.gypi',
+        '../base/base.gyp:test_support_base',
       ],
       'include_dirs': [
         '..',
-        '<(angle_path)/include',
-        '<(angle_path)/src',
-        '<(angle_path)/src/compiler/preprocessor',
-        '<(angle_path)/tests',
+        '../third_party/angle/include',
       ],
-      'sources': [
+      'sources':
+      [
         'angle_unittest_main.cc',
       ],
     },
@@ -181,7 +154,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '<(angle_path)/src/build_angle.gyp:translator',
+        '<(angle_path)/src/angle.gyp:translator',
         '../ui/gl/gl.gyp:gl',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_geometry',
@@ -192,7 +165,7 @@
         'command_buffer_service',
         'gpu',
         'gpu_unittest_utils',
-        'gles2_implementation_client_side_arrays',
+        'gles2_implementation',
         'gles2_cmd_helper',
         'gles2_c_lib',
       ],
@@ -205,8 +178,8 @@
         'command_buffer/client/fenced_allocator_test.cc',
         'command_buffer/client/gles2_implementation_unittest.cc',
         'command_buffer/client/mapped_memory_unittest.cc',
-        'command_buffer/client/query_tracker_unittest.cc',
         'command_buffer/client/program_info_manager_unittest.cc',
+        'command_buffer/client/query_tracker_unittest.cc',
         'command_buffer/client/ring_buffer_test.cc',
         'command_buffer/client/transfer_buffer_unittest.cc',
         'command_buffer/client/vertex_array_object_manager_unittest.cc',
@@ -221,10 +194,10 @@
         'command_buffer/common/id_allocator_test.cc',
         'command_buffer/common/trace_event.h',
         'command_buffer/common/unittest_main.cc',
-        'command_buffer/service/async_pixel_transfer_delegate_mock.h',
         'command_buffer/service/async_pixel_transfer_delegate_mock.cc',
-        'command_buffer/service/async_pixel_transfer_manager_mock.h',
+        'command_buffer/service/async_pixel_transfer_delegate_mock.h',
         'command_buffer/service/async_pixel_transfer_manager_mock.cc',
+        'command_buffer/service/async_pixel_transfer_manager_mock.h',
         'command_buffer/service/buffer_manager_unittest.cc',
         'command_buffer/service/cmd_parser_test.cc',
         'command_buffer/service/command_buffer_service_unittest.cc',
@@ -232,6 +205,8 @@
         'command_buffer/service/context_group_unittest.cc',
         'command_buffer/service/feature_info_unittest.cc',
         'command_buffer/service/framebuffer_manager_unittest.cc',
+        'command_buffer/service/gl_surface_mock.cc',
+        'command_buffer/service/gl_surface_mock.h',
         'command_buffer/service/gles2_cmd_decoder_unittest.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_0_autogen.h',
@@ -242,6 +217,7 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_3.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_3_autogen.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_async_pixel.cc',
+        'command_buffer/service/gles2_cmd_decoder_unittest_attribs.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_context_state.cc',
@@ -251,30 +227,30 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_framebuffers.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_programs.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_textures.cc',
-        'command_buffer/service/gles2_cmd_decoder_unittest_attribs.cc',
-        'command_buffer/service/gl_surface_mock.cc',
-        'command_buffer/service/gl_surface_mock.h',
+        'command_buffer/service/gles2_cmd_decoder_unittest_valuebuffer.cc',
         'command_buffer/service/gpu_scheduler_unittest.cc',
         'command_buffer/service/gpu_service_test.cc',
         'command_buffer/service/gpu_service_test.h',
+        'command_buffer/service/gpu_tracer_unittest.cc',
         'command_buffer/service/id_manager_unittest.cc',
         'command_buffer/service/mailbox_manager_unittest.cc',
         'command_buffer/service/memory_program_cache_unittest.cc',
         'command_buffer/service/mocks.cc',
         'command_buffer/service/mocks.h',
+        'command_buffer/service/program_cache_unittest.cc',
         'command_buffer/service/program_manager_unittest.cc',
         'command_buffer/service/query_manager_unittest.cc',
         'command_buffer/service/renderbuffer_manager_unittest.cc',
-        'command_buffer/service/program_cache_unittest.cc',
         'command_buffer/service/shader_manager_unittest.cc',
+        'command_buffer/service/shader_translator_cache_unittest.cc',
         'command_buffer/service/shader_translator_unittest.cc',
         'command_buffer/service/test_helper.cc',
         'command_buffer/service/test_helper.h',
         'command_buffer/service/texture_manager_unittest.cc',
         'command_buffer/service/transfer_buffer_manager_unittest.cc',
-        'command_buffer/service/vertex_attrib_manager_unittest.cc',
+        'command_buffer/service/valuebuffer_manager_unittest.cc',
         'command_buffer/service/vertex_array_manager_unittest.cc',
-        'command_buffer/service/gpu_tracer_unittest.cc',
+        'command_buffer/service/vertex_attrib_manager_unittest.cc',
         'config/gpu_blacklist_unittest.cc',
         'config/gpu_control_list_entry_unittest.cc',
         'config/gpu_control_list_number_info_unittest.cc',
@@ -305,15 +281,35 @@
       'msvs_disabled_warnings': [ 4267, ],
     },
     {
+      # GN version: //gpu/gpu_perftests
+      'target_name': 'gpu_perftests',
+      'type': '<(gtest_target_type)',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../base/base.gyp:test_support_base',
+        '../testing/gtest.gyp:gtest',
+        '../testing/perf/perf_test.gyp:perf_test',
+        '../ui/gfx/gfx.gyp:gfx_geometry',
+        '../ui/gl/gl.gyp:gl',
+        'command_buffer_service',
+      ],
+      'sources': [
+        'perftests/measurements.cc',
+        'perftests/run_all_tests.cc',
+        'perftests/texture_upload_perftest.cc',
+      ],
+    },
+    {
       # GN version: //gpu:gl_tests
       'target_name': 'gl_tests',
       'type': '<(gtest_target_type)',
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/base.gyp:test_support_base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '<(angle_path)/src/build_angle.gyp:translator',
+        '<(angle_path)/src/angle.gyp:translator',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_test_support',
         '../ui/gfx/gfx.gyp:gfx_geometry',
@@ -324,7 +320,7 @@
         'command_buffer_service',
         'gpu',
         'gpu_unittest_utils',
-        'gles2_implementation_client_side_arrays',
+        'gles2_implementation',
         'gles2_cmd_helper',
         'gles2_c_lib',
         #'gl_unittests',
@@ -338,6 +334,7 @@
         'command_buffer/tests/gl_bind_uniform_location_unittest.cc',
         'command_buffer/tests/gl_chromium_framebuffer_multisample_unittest.cc',
         'command_buffer/tests/gl_chromium_path_rendering_unittest.cc',
+        'command_buffer/tests/gl_clear_framebuffer_unittest.cc',
         'command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc',
         'command_buffer/tests/gl_depth_texture_unittest.cc',
         'command_buffer/tests/gl_gpu_memory_buffer_unittest.cc',
@@ -368,8 +365,8 @@
         }],
         ['OS == "win"', {
           'dependencies': [
-            '../third_party/angle/src/build_angle.gyp:libEGL',
-            '../third_party/angle/src/build_angle.gyp:libGLESv2',
+            '../third_party/angle/src/angle.gyp:libEGL',
+            '../third_party/angle/src/angle.gyp:libGLESv2',
           ],
         }],
       ],
@@ -391,10 +388,10 @@
         '..',
       ],
       'sources': [
-        'command_buffer/service/gles2_cmd_decoder_mock.cc',
-        'command_buffer/service/error_state_mock.cc',
         'command_buffer/client/gles2_interface_stub.cc',
         'command_buffer/client/gles2_interface_stub.h',
+        'command_buffer/service/error_state_mock.cc',
+        'command_buffer/service/gles2_cmd_decoder_mock.cc',
       ],
     },
   ],
@@ -479,6 +476,9 @@
           'includes': [
             'command_buffer_service.gypi',
             '../build/android/increase_size_for_speed.gypi',
+            # Disable LTO due to ELF section name out of range
+            # crbug.com/422251
+            '../build/android/disable_lto.gypi',
           ],
           'dependencies': [
             'command_buffer_common',
@@ -667,6 +667,45 @@
             'test_suite_name': 'gpu_unittests',
           },
           'includes': [ '../build/apk_test.gypi' ],
+        },
+      ],
+    }],
+    ['OS == "win"', {
+      'targets': [
+        {
+          # TODO(kbr): port this target to the GN build.
+          'target_name': 'angle_end2end_tests',
+          'type': '<(gtest_target_type)',
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../base/base.gyp:test_support_base',
+          ],
+          'includes':
+          [
+            '../third_party/angle/build/common_defines.gypi',
+            '../third_party/angle/tests/angle_end2end_tests.gypi',
+          ],
+          'sources':
+          [
+            'angle_end2end_tests_main.cc',
+          ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'gpu_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'gpu_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'gpu_unittests.isolate',
+          ],
         },
       ],
     }],

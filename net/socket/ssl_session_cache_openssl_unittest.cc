@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "crypto/openssl_util.h"
 #include "crypto/scoped_openssl_types.h"
+#include "net/ssl/scoped_openssl_types.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -20,19 +21,16 @@
 // |s| is the target SSL connection handle.
 // |session| is non-0 to ask for the creation of a new session. If 0,
 // this will set an empty session with no ID instead.
-extern "C" int ssl_get_new_session(SSL* s, int session);
+extern "C" OPENSSL_EXPORT int ssl_get_new_session(SSL* s, int session);
 
 // This is an internal OpenSSL function which is used internally to add
 // a new session to the cache. It is normally triggered by a succesful
 // connection. However, this unit test does not use the network at all.
-extern "C" void ssl_update_cache(SSL* s, int mode);
+extern "C" OPENSSL_EXPORT void ssl_update_cache(SSL* s, int mode);
 
 namespace net {
 
 namespace {
-
-typedef crypto::ScopedOpenSSL<SSL, SSL_free>::Type ScopedSSL;
-typedef crypto::ScopedOpenSSL<SSL_CTX, SSL_CTX_free>::Type ScopedSSL_CTX;
 
 // Helper class used to associate arbitrary std::string keys with SSL objects.
 class SSLKeyHelper {

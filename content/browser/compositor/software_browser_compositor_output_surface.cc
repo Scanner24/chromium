@@ -8,8 +8,8 @@
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "cc/output/compositor_frame.h"
+#include "cc/output/output_surface_client.h"
 #include "cc/output/software_output_device.h"
-#include "content/browser/compositor/browser_compositor_output_surface_proxy.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "ui/events/latency_info.h"
 #include "ui/gfx/vsync_provider.h"
@@ -17,7 +17,6 @@
 namespace content {
 
 SoftwareBrowserCompositorOutputSurface::SoftwareBrowserCompositorOutputSurface(
-    scoped_refptr<BrowserCompositorOutputSurfaceProxy> surface_proxy,
     scoped_ptr<cc::SoftwareOutputDevice> software_device,
     int surface_id,
     IDMap<BrowserCompositorOutputSurface>* output_surface_map,
@@ -26,10 +25,12 @@ SoftwareBrowserCompositorOutputSurface::SoftwareBrowserCompositorOutputSurface(
                                      surface_id,
                                      output_surface_map,
                                      vsync_manager),
-      output_surface_proxy_(surface_proxy) {}
+      weak_factory_(this) {
+}
 
 SoftwareBrowserCompositorOutputSurface::
-    ~SoftwareBrowserCompositorOutputSurface() {}
+    ~SoftwareBrowserCompositorOutputSurface() {
+}
 
 void SoftwareBrowserCompositorOutputSurface::SwapBuffers(
     cc::CompositorFrame* frame) {
@@ -45,12 +46,27 @@ void SoftwareBrowserCompositorOutputSurface::SwapBuffers(
 
   gfx::VSyncProvider* vsync_provider = software_device()->GetVSyncProvider();
   if (vsync_provider) {
-    vsync_provider->GetVSyncParameters(
-        base::Bind(&BrowserCompositorOutputSurfaceProxy::
-                        OnUpdateVSyncParametersOnCompositorThread,
-                   output_surface_proxy_,
-                   surface_id_));
+    vsync_provider->GetVSyncParameters(base::Bind(
+        &BrowserCompositorOutputSurface::OnUpdateVSyncParametersFromGpu,
+        weak_factory_.GetWeakPtr()));
   }
+  PostSwapBuffersComplete();
+  client_->DidSwapBuffers();
 }
+
+#if defined(OS_MACOSX)
+void SoftwareBrowserCompositorOutputSurface::OnSurfaceDisplayed() {
+  // See GpuBrowserCompositorOutputSurface for when and how this is used.
+  NOTREACHED() << "Not expected for software surfaces.";
+}
+
+void SoftwareBrowserCompositorOutputSurface::OnSurfaceRecycled() {
+}
+
+bool SoftwareBrowserCompositorOutputSurface::ShouldNotShowFramesAfterRecycle()
+    const {
+  return false;
+}
+#endif
 
 }  // namespace content

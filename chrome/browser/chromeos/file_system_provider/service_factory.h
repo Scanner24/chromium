@@ -35,12 +35,12 @@ class ServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<ServiceFactory>;
 
   ServiceFactory();
-  virtual ~ServiceFactory();
+  ~ServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory overrides:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceFactory);
 };

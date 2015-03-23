@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/debug/trace_event.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
+#include "base/trace_event/trace_event.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decryptor.h"
@@ -18,6 +18,8 @@
 #include "media/base/video_frame.h"
 
 namespace media {
+
+const char DecryptingVideoDecoder::kDecoderName[] = "DecryptingVideoDecoder";
 
 DecryptingVideoDecoder::DecryptingVideoDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
@@ -31,7 +33,7 @@ DecryptingVideoDecoder::DecryptingVideoDecoder(
       weak_factory_(this) {}
 
 std::string DecryptingVideoDecoder::GetDisplayName() const {
-  return "DecryptingVideoDecoder";
+  return kDecoderName;
 }
 
 void DecryptingVideoDecoder::Initialize(const VideoDecoderConfig& config,

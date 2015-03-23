@@ -8,7 +8,7 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/openssl/aes_key_openssl.h"
+#include "content/child/webcrypto/openssl/aes_algorithm_openssl.h"
 #include "content/child/webcrypto/openssl/key_openssl.h"
 #include "content/child/webcrypto/openssl/util_openssl.h"
 #include "content/child/webcrypto/status.h"
@@ -48,31 +48,27 @@ Status AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
   if (status.IsError())
     return status;
 
-  return AeadEncryptDecrypt(mode,
-                            raw_key,
-                            data,
-                            tag_length_bits / 8,
-                            CryptoData(params->iv()),
-                            CryptoData(params->optionalAdditionalData()),
-                            GetAesGcmAlgorithmFromKeySize(raw_key.size()),
-                            buffer);
+  return AeadEncryptDecrypt(
+      mode, raw_key, data, tag_length_bits / 8, CryptoData(params->iv()),
+      CryptoData(params->optionalAdditionalData()),
+      GetAesGcmAlgorithmFromKeySize(raw_key.size()), buffer);
 }
 
 class AesGcmImplementation : public AesAlgorithm {
  public:
   AesGcmImplementation() : AesAlgorithm("GCM") {}
 
-  virtual Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     return AesGcmEncryptDecrypt(ENCRYPT, algorithm, key, data, buffer);
   }
 
-  virtual Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     return AesGcmEncryptDecrypt(DECRYPT, algorithm, key, data, buffer);
   }
 };

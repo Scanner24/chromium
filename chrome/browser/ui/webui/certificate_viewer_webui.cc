@@ -21,7 +21,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 using content::WebContents;
 using content::WebUIMessageHandler;
@@ -228,8 +228,8 @@ void CertificateViewerDialog::Show(WebContents* web_contents,
                                    gfx::NativeWindow parent) {
   // TODO(bshe): UI tweaks needed for Aura HTML Dialog, such as adding padding
   // on the title for Aura ConstrainedWebDialogUI.
-  dialog_ = CreateConstrainedWebDialog(web_contents->GetBrowserContext(), this,
-                                       web_contents);
+  dialog_ = ShowConstrainedWebDialog(web_contents->GetBrowserContext(), this,
+                                     web_contents);
 }
 
 NativeWebContentsModalDialog
@@ -350,16 +350,14 @@ void CertificateViewerDialogHandler::RequestCertificateFields(
       l10n_util::GetStringUTF8(IDS_CERT_DETAILS_NOT_AFTER));
   base::Time issued, expires;
   if (x509_certificate_model::GetTimes(cert, &issued, &expires)) {
-    // The object Time internally saves the time in UTC timezone. This is why we
-    // do a simple UTC string concatenation.
     node_details->SetString(
         "payload.val",
-        base::UTF16ToUTF8(base::TimeFormatShortDateAndTime(issued)) + " " +
-            l10n_util::GetStringUTF8(IDS_CERT_DETAILS_UTC_TIMEZONE));
+        base::UTF16ToUTF8(
+            base::TimeFormatShortDateAndTimeWithTimeZone(issued)));
     alt_node_details->SetString(
         "payload.val",
-        base::UTF16ToUTF8(base::TimeFormatShortDateAndTime(expires)) + " " +
-            l10n_util::GetStringUTF8(IDS_CERT_DETAILS_UTC_TIMEZONE));
+        base::UTF16ToUTF8(
+            base::TimeFormatShortDateAndTimeWithTimeZone(expires)));
   }
 
   cert_fields->Append(node_details = new base::DictionaryValue());

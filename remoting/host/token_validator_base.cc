@@ -122,7 +122,7 @@ void TokenValidatorBase::OnCertificateRequested(
   client_cert_store = new net::ClientCertStoreMac();
 #elif defined(USE_OPENSSL)
     // OpenSSL does not use the ClientCertStore infrastructure.
-  client_cert_store = NULL;
+  client_cert_store = nullptr;
 #else
 #error Unknown platform.
 #endif
@@ -150,7 +150,7 @@ void TokenValidatorBase::OnCertificatesSelected(
         return;
       }
     }
-    request_->ContinueWithCertificate(NULL);
+    request_->ContinueWithCertificate(nullptr);
   }
 }
 
@@ -178,8 +178,7 @@ std::string TokenValidatorBase::ProcessResponse() {
   // Decode the JSON data from the response.
   scoped_ptr<base::Value> value(base::JSONReader::Read(data_));
   base::DictionaryValue* dict;
-  if (!value.get() || value->GetType() != base::Value::TYPE_DICTIONARY ||
-      !value->GetAsDictionary(&dict)) {
+  if (!value || !value->GetAsDictionary(&dict)) {
     LOG(ERROR) << "Invalid token validation response: '" << data_ << "'";
     return std::string();
   }

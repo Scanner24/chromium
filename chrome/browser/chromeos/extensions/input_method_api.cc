@@ -4,17 +4,19 @@
 
 #include "chrome/browser/chromeos/extensions/input_method_api.h"
 
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/input_method_event_router.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/input_method_descriptor.h"
-#include "chromeos/ime/input_method_manager.h"
+#include "chromeos/chromeos_switches.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/value_builder.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/input_method_descriptor.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 
 namespace {
 
@@ -24,6 +26,25 @@ const char kXkbPrefix[] = "xkb:";
 }  // namespace
 
 namespace extensions {
+
+ExtensionFunction::ResponseAction GetInputMethodConfigFunction::Run() {
+#if !defined(OS_CHROMEOS)
+  EXTENSION_FUNCTION_VALIDATE(false);
+#else
+  base::DictionaryValue* output = new base::DictionaryValue();
+  output->SetBoolean(
+      "isPhysicalKeyboardAutocorrectEnabled",
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnablePhysicalKeyboardAutocorrect));
+  output->SetBoolean("isVoiceInputEnabled",
+                     !base::CommandLine::ForCurrentProcess()->HasSwitch(
+                         chromeos::switches::kDisableVoiceInput));
+  output->SetBoolean("isNewMDInputViewEnabled",
+                     base::CommandLine::ForCurrentProcess()->HasSwitch(
+                         chromeos::switches::kEnableNewMDInputView));
+  return RespondNow(OneArgument(output));
+#endif
+}
 
 ExtensionFunction::ResponseAction GetCurrentInputMethodFunction::Run() {
 #if !defined(OS_CHROMEOS)
@@ -91,6 +112,7 @@ InputMethodAPI::InputMethodAPI(content::BrowserContext* context)
   EventRouter::Get(context_)->RegisterObserver(this, kOnInputMethodChanged);
   ExtensionFunctionRegistry* registry =
       ExtensionFunctionRegistry::GetInstance();
+  registry->RegisterFunction<GetInputMethodConfigFunction>();
   registry->RegisterFunction<GetCurrentInputMethodFunction>();
   registry->RegisterFunction<SetCurrentInputMethodFunction>();
   registry->RegisterFunction<GetInputMethodsFunction>();

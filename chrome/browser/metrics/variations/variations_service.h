@@ -16,9 +16,9 @@
 #include "base/time/time.h"
 #include "chrome/browser/metrics/variations/variations_request_scheduler.h"
 #include "chrome/browser/metrics/variations/variations_seed_store.h"
-#include "chrome/browser/web_resource/resource_request_allowed_notifier.h"
 #include "chrome/common/chrome_version_info.h"
 #include "components/variations/variations_seed_simulator.h"
+#include "components/web_resource/resource_request_allowed_notifier.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
@@ -51,7 +51,7 @@ namespace chrome_variations {
 // new seed data from the variations server.
 class VariationsService
     : public net::URLFetcherDelegate,
-      public ResourceRequestAllowedNotifier::Observer {
+      public web_resource::ResourceRequestAllowedNotifier::Observer {
  public:
   class Observer {
    public:
@@ -72,7 +72,7 @@ class VariationsService
     virtual ~Observer() {}
   };
 
-  virtual ~VariationsService();
+  ~VariationsService() override;
 
   // Creates field trials based on Variations Seed loaded from local prefs. If
   // there is a problem loading the seed data, all trials specified by the seed
@@ -102,13 +102,20 @@ class VariationsService
   void StartGoogleUpdateRegistrySync();
 #endif
 
+  // Sets the value of the "restrict" URL param to the variations service that
+  // should be used for variation seed requests. This takes precedence over any
+  // value coming from policy prefs. This should be called prior to any calls
+  // to |StartRepeatedVariationsSeedFetch|.
+  void SetRestrictMode(const std::string& restrict_mode);
+
   // Exposed for testing.
   void SetCreateTrialsFromSeedCalledForTesting(bool called);
 
   // Returns the variations server URL, which can vary if a command-line flag is
   // set and/or the variations restrict pref is set in |local_prefs|. Declared
   // static for test purposes.
-  static GURL GetVariationsServerURL(PrefService* local_prefs);
+  static GURL GetVariationsServerURL(PrefService* local_prefs,
+                                     const std::string& restrict_mode_override);
 
   // Exposed for testing.
   static std::string GetDefaultVariationsServerURLForTesting();
@@ -133,6 +140,11 @@ class VariationsService
     policy_pref_service_ = service;
   }
 
+  // Returns the invalid variations seed signature in base64 format, or an empty
+  // string if the signature was valid, missing, or if signature verification is
+  // disabled.
+  std::string GetInvalidVariationsSeedSignature() const;
+
  protected:
   // Starts the fetching process once, where |OnURLFetchComplete| is called with
   // the response.
@@ -149,7 +161,7 @@ class VariationsService
   // Does not take ownership of |state_manager|. Caller should ensure that
   // |state_manager| is valid for the lifetime of this class. Use the |Create|
   // factory method to create a VariationsService.
-  VariationsService(ResourceRequestAllowedNotifier* notifier,
+  VariationsService(web_resource::ResourceRequestAllowedNotifier* notifier,
                     PrefService* local_state,
                     metrics::MetricsStateManager* state_manager);
 
@@ -168,10 +180,10 @@ class VariationsService
       const variations::VariationsSeedSimulator::Result& result);
 
   // net::URLFetcherDelegate implementation:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // ResourceRequestAllowedNotifier::Observer implementation:
-  virtual void OnResourceRequestsAllowed() OVERRIDE;
+  void OnResourceRequestsAllowed() override;
 
   // Performs a variations seed simulation with the given |seed| and |version|
   // and logs the simulation results as histograms.
@@ -203,7 +215,12 @@ class VariationsService
   // is pending, and will be reset by |OnURLFetchComplete|.
   scoped_ptr<net::URLFetcher> pending_seed_request_;
 
-  // The URL to use for querying the Variations server.
+  // The value of the "restrict" URL param to the variations server that has
+  // been specified via |SetRestrictMode|. If empty, the URL param will be set
+  // based on policy prefs.
+  std::string restrict_mode_;
+
+  // The URL to use for querying the variations server.
   GURL variations_server_url_;
 
   // Tracks whether |CreateTrialsFromSeed| has been called, to ensure that
@@ -215,7 +232,8 @@ class VariationsService
 
   // Helper class used to tell this service if it's allowed to make network
   // resource requests.
-  scoped_ptr<ResourceRequestAllowedNotifier> resource_request_allowed_notifier_;
+  scoped_ptr<web_resource::ResourceRequestAllowedNotifier>
+      resource_request_allowed_notifier_;
 
   // The start time of the last seed request. This is used to measure the
   // latency of seed requests. Initially zero.

@@ -20,6 +20,7 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
@@ -69,7 +70,7 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/translate/translate_bubble_controller.h"
 #include "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
@@ -97,6 +98,8 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using l10n_util::GetStringUTF16;
 using l10n_util::GetNSStringWithFixup;
 using l10n_util::GetNSStringFWithFixup;
@@ -560,8 +563,11 @@ using content::WebContents;
 }
 
 - (void)updateDevToolsForContents:(WebContents*)contents {
-  [devToolsController_ updateDevToolsForWebContents:contents
-                                        withProfile:browser_->profile()];
+  BOOL layout_changed =
+      [devToolsController_ updateDevToolsForWebContents:contents
+                                            withProfile:browser_->profile()];
+  if (layout_changed && [findBarCocoaController_ isFindBarVisible])
+    [self layoutSubviews];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -584,7 +590,8 @@ using content::WebContents;
   [self saveWindowPositionIfNeeded];
 
   bool fast_tab_closing_enabled =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableFastUnload);
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableFastUnload);
 
   if (!browser_->tab_strip_model()->empty()) {
     // Tab strip isn't empty.  Hide the frame (so it appears to have closed
@@ -613,23 +620,23 @@ using content::WebContents;
   BrowserList::SetLastActive(browser_.get());
   [self saveWindowPositionIfNeeded];
 
-  // TODO(dmaclach): Instead of redrawing the whole window, views that care
-  // about the active window state should be registering for notifications.
-  [[self window] setViewsNeedDisplay:YES];
+  [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
+      if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
+        [view windowDidChangeActive];
+  }];
 
-  // TODO(viettrungluu): For some reason, the above doesn't suffice.
-  if ([self isInAnyFullscreenMode])
-    [floatingBarBackingView_ setNeedsDisplay:YES];  // Okay even if nil.
+  extensions::ExtensionCommandsGlobalRegistry::Get(browser_->profile())
+      ->set_registry_for_active_window(extension_keybinding_registry_.get());
 }
 
 - (void)windowDidResignMain:(NSNotification*)notification {
-  // TODO(dmaclach): Instead of redrawing the whole window, views that care
-  // about the active window state should be registering for notifications.
-  [[self window] setViewsNeedDisplay:YES];
+  [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
+      if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
+        [view windowDidChangeActive];
+  }];
 
-  // TODO(viettrungluu): For some reason, the above doesn't suffice.
-  if ([self isInAnyFullscreenMode])
-    [floatingBarBackingView_ setNeedsDisplay:YES];  // Okay even if nil.
+  extensions::ExtensionCommandsGlobalRegistry::Get(browser_->profile())
+      ->set_registry_for_active_window(nullptr);
 }
 
 // Called when we are activated (when we gain focus).
@@ -945,10 +952,11 @@ using content::WebContents;
   // Disable subview resizing while resizing the window, or else we will get
   // unwanted renderer resizes.  The calling code must call layoutSubviews to
   // make things right again.
-  NSView* contentView = [window contentView];
-  [contentView setAutoresizesSubviews:NO];
+  NSView* chromeContentView = [self chromeContentView];
+  BOOL autoresizesSubviews = [chromeContentView autoresizesSubviews];
+  [chromeContentView setAutoresizesSubviews:NO];
   [window setFrame:windowFrame display:NO];
-  [contentView setAutoresizesSubviews:YES];
+  [chromeContentView setAutoresizesSubviews:autoresizesSubviews];
   return YES;
 }
 
@@ -1256,6 +1264,10 @@ using content::WebContents;
 
 - (void)updateToolbarWithContents:(WebContents*)tab {
   [toolbarController_ updateToolbarWithContents:tab];
+}
+
+- (void)resetTabState:(WebContents*)tab {
+  [toolbarController_ resetTabState:tab];
 }
 
 - (void)setStarredState:(BOOL)isStarred {
@@ -1572,7 +1584,7 @@ using content::WebContents;
   if (!downloadShelfController_.get()) {
     downloadShelfController_.reset([[DownloadShelfController alloc]
         initWithBrowser:browser_.get() resizeDelegate:self]);
-    [[[self window] contentView] addSubview:[downloadShelfController_ view]];
+    [self.chromeContentView addSubview:[downloadShelfController_ view]];
   }
 }
 
@@ -1685,7 +1697,15 @@ using content::WebContents;
 }
 
 - (void)userChangedTheme {
-  [[[[self window] contentView] superview] cr_recursivelySetNeedsDisplay:YES];
+  NSView* rootView = [[[self window] contentView] superview];
+  [rootView cr_recursivelyInvokeBlock:^(id view) {
+      if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
+        [view windowDidChangeTheme];
+
+      // TODO(andresantoso): Remove this once all themed views respond to
+      // windowDidChangeTheme above.
+      [view setNeedsDisplay:YES];
+  }];
 }
 
 - (ui::ThemeProvider*)themeProvider {
@@ -1849,7 +1869,7 @@ using content::WebContents;
   [view setHidden:![self shouldShowAvatar]];
 
   // Install the view.
-  [[[self window] cr_windowView] addSubview:view];
+  [[[self window] contentView] addSubview:view];
 }
 
 // Called when we get a three-finger swipe.
@@ -2013,8 +2033,9 @@ willAnimateFromState:(BookmarkBar::State)oldState
 }
 
 // (Private/TestingAPI)
-- (FullscreenExitBubbleController*)fullscreenExitBubbleController {
-  return fullscreenExitBubbleController_.get();
+- (ExclusiveAccessBubbleWindowController*)
+        exclusiveAccessBubbleWindowController {
+  return exclusiveAccessBubbleWindowController_.get();
 }
 
 - (NSRect)omniboxPopupAnchorRect {
@@ -2029,10 +2050,6 @@ willAnimateFromState:(BookmarkBar::State)oldState
 
   // Shift to window base coordinates.
   return [[toolbarView superview] convertRect:anchorRect toView:nil];
-}
-
-- (void)layoutInfoBars {
-  [self layoutSubviews];
 }
 
 - (void)sheetDidEnd:(NSWindow*)sheet
@@ -2059,22 +2076,33 @@ willAnimateFromState:(BookmarkBar::State)oldState
   chrome::ExecuteCommand(browser_.get(), IDC_FULLSCREEN);
 }
 
-- (void)enterFullscreenWithChrome {
-  if (![self isInAppKitFullscreen]) {
-    // Invoking the AppKitFullscreen API by default uses Canonical Fullscreen.
-    [self enterAppKitFullscreen];
+- (void)enterBrowserFullscreenWithToolbar:(BOOL)withToolbar {
+  if (!chrome::mac::SupportsSystemFullscreen()) {
+    if (![self isInImmersiveFullscreen])
+      [self enterImmersiveFullscreen];
     return;
   }
 
-  // If AppKitFullscreen is already enabled, then just switch to Canonical
-  // Fullscreen.
-  [self adjustUIForSlidingFullscreenStyle:fullscreen_mac::OMNIBOX_TABS_PRESENT];
+  if ([self isInAppKitFullscreen]) {
+    [self updateFullscreenWithToolbar:withToolbar];
+  } else {
+    // Need to invoke AppKit Fullscreen API. Presentation mode (if set) will
+    // automatically be enabled in |-windowWillEnterFullScreen:|.
+    enteringPresentationMode_ = !withToolbar;
+    [self enterAppKitFullscreen];
+  }
+}
+
+- (void)updateFullscreenWithToolbar:(BOOL)withToolbar {
+  [self adjustUIForSlidingFullscreenStyle:
+            withToolbar ? fullscreen_mac::OMNIBOX_TABS_PRESENT
+                        : fullscreen_mac::OMNIBOX_TABS_HIDDEN];
 }
 
 - (void)updateFullscreenExitBubbleURL:(const GURL&)url
-                           bubbleType:(FullscreenExitBubbleType)bubbleType {
+                           bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   fullscreenUrl_ = url;
-  fullscreenBubbleType_ = bubbleType;
+  exclusiveAccessBubbleType_ = bubbleType;
   [self layoutSubviews];
   [self showFullscreenExitBubbleIfNecessary];
 }
@@ -2093,32 +2121,12 @@ willAnimateFromState:(BookmarkBar::State)oldState
          enteringAppKitFullscreen_;
 }
 
-- (void)enterPresentationMode {
-  if (!chrome::mac::SupportsSystemFullscreen()) {
-    if ([self isInImmersiveFullscreen])
-      return;
-    [self enterImmersiveFullscreen];
-    return;
-  }
-
-  if ([self isInAppKitFullscreen]) {
-    // Already in AppKit Fullscreen. Adjust the UI to use Presentation Mode.
-    [self
-        adjustUIForSlidingFullscreenStyle:fullscreen_mac::OMNIBOX_TABS_HIDDEN];
-  } else {
-    // Need to invoke AppKit Fullscreen API. Presentation mode will
-    // automatically be enabled in |-windowWillEnterFullScreen:|.
-    enteringPresentationMode_ = YES;
-    [self enterAppKitFullscreen];
-  }
-}
-
 - (void)enterExtensionFullscreenForURL:(const GURL&)url
-                            bubbleType:(FullscreenExitBubbleType)bubbleType {
+                            bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   if (chrome::mac::SupportsSystemFullscreen()) {
     fullscreenUrl_ = url;
-    fullscreenBubbleType_ = bubbleType;
-    [self enterPresentationMode];
+    exclusiveAccessBubbleType_ = bubbleType;
+    [self enterBrowserFullscreenWithToolbar:NO];
   } else {
     [self enterImmersiveFullscreen];
     DCHECK(!url.is_empty());
@@ -2127,7 +2135,7 @@ willAnimateFromState:(BookmarkBar::State)oldState
 }
 
 - (void)enterWebContentFullscreenForURL:(const GURL&)url
-                             bubbleType:(FullscreenExitBubbleType)bubbleType {
+                             bubbleType:(ExclusiveAccessBubbleType)bubbleType {
   [self enterImmersiveFullscreen];
   if (!url.is_empty())
     [self updateFullscreenExitBubbleURL:url bubbleType:bubbleType];

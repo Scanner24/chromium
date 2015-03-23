@@ -14,7 +14,9 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
+#include "device/bluetooth/bluetooth_export.h"
 
 namespace device {
 
@@ -24,6 +26,7 @@ class BluetoothGattDescriptor;
 class BluetoothGattService;
 class BluetoothSocket;
 class BluetoothUUID;
+struct BluetoothAdapterDeleter;
 
 // BluetoothAdapter represents a local Bluetooth adapter which may be used to
 // interact with remote Bluetooth devices. As well as providing support for
@@ -31,7 +34,9 @@ class BluetoothUUID;
 // this class also provides support for obtaining the list of remote devices
 // known to the adapter, discovering new devices, and providing notification of
 // updates to device information.
-class BluetoothAdapter : public base::RefCounted<BluetoothAdapter> {
+class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
+    : public base::RefCountedThreadSafe<BluetoothAdapter,
+                                        BluetoothAdapterDeleter> {
  public:
   // Interface for observing changes from bluetooth adapters.
   class Observer {
@@ -158,7 +163,7 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter> {
   };
 
   // Used to configure a listening servie.
-  struct ServiceOptions {
+  struct DEVICE_BLUETOOTH_EXPORT ServiceOptions {
     ServiceOptions();
     ~ServiceOptions();
 
@@ -186,6 +191,14 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter> {
 
   // Returns a weak pointer to an existing adapter for testing purposes only.
   base::WeakPtr<BluetoothAdapter> GetWeakPtrForTesting();
+
+#if defined(OS_CHROMEOS)
+  // Shutdown the adapter: tear down and clean up all objects owned by
+  // BluetoothAdapter. After this call, the BluetoothAdapter will behave as if
+  // no Bluetooth controller exists in the local system. |IsPresent| will return
+  // false.
+  virtual void Shutdown();
+#endif
 
   // Adds and removes observers for events on this bluetooth adapter. If
   // monitoring multiple adapters, check the |adapter| parameter of observer
@@ -230,7 +243,7 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter> {
 
   // Requests that the adapter change its discoverability state. If
   // |discoverable| is true, then it will be discoverable by other Bluetooth
-  // devices. On successly changing the adapter's discoverability, |callback|
+  // devices. On successfully changing the adapter's discoverability, |callback|
   // will be called. On failure, |error_callback| will be called.
   virtual void SetDiscoverable(bool discoverable,
                                const base::Closure& callback,
@@ -331,11 +344,28 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter> {
       const CreateServiceCallback& callback,
       const CreateServiceErrorCallback& error_callback) = 0;
 
+  // Creates and registers a BluetoothAudioSink with |options|. If the fields in
+  // |options| are not specified, the default values will be used. |callback|
+  // will be called on success with a BluetoothAudioSink which is to be owned by
+  // the caller of this method. |error_callback| will be called on failure with
+  // a message indicating the cause.
+  typedef base::Callback<void(scoped_refptr<BluetoothAudioSink>)>
+      AcquiredCallback;
+  virtual void RegisterAudioSink(
+      const BluetoothAudioSink::Options& options,
+      const AcquiredCallback& callback,
+      const BluetoothAudioSink::ErrorCallback& error_callback) = 0;
+
  protected:
-  friend class base::RefCounted<BluetoothAdapter>;
+  friend class base::RefCountedThreadSafe<BluetoothAdapter,
+                                          BluetoothAdapterDeleter>;
+  friend struct BluetoothAdapterDeleter;
   friend class BluetoothDiscoverySession;
   BluetoothAdapter();
   virtual ~BluetoothAdapter();
+
+  // Called by RefCountedThreadSafeDeleteOnCorrectThread to destroy this.
+  virtual void DeleteOnCorrectThread() const = 0;
 
   // Internal methods for initiating and terminating device discovery sessions.
   // An implementation of BluetoothAdapter keeps an internal reference count to
@@ -416,6 +446,13 @@ class BluetoothAdapter : public base::RefCounted<BluetoothAdapter> {
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<BluetoothAdapter> weak_ptr_factory_;
+};
+
+// Trait for RefCountedThreadSafe that deletes BluetoothAdapter.
+struct BluetoothAdapterDeleter {
+  static void Destruct(const BluetoothAdapter* adapter) {
+    adapter->DeleteOnCorrectThread();
+  }
 };
 
 }  // namespace device

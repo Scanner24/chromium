@@ -274,10 +274,9 @@ class InstallSigner::FetcherDelegate : public net::URLFetcherDelegate {
       : callback_(callback) {
   }
 
-  virtual ~FetcherDelegate() {
-  }
+  ~FetcherDelegate() override {}
 
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     callback_.Run();
   }
 
@@ -288,8 +287,9 @@ class InstallSigner::FetcherDelegate : public net::URLFetcherDelegate {
 
 // static
 ExtensionIdSet InstallSigner::GetForcedNotFromWebstore() {
-  std::string value = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-      switches::kExtensionsNotWebstore);
+  std::string value =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kExtensionsNotWebstore);
   if (value.empty())
     return ExtensionIdSet();
 

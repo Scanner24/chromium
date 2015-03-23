@@ -203,14 +203,14 @@ Status ParseProxy(const base::Value& option, Capabilities* capabilities) {
   } else if (proxy_type == "system") {
     // Chrome default.
   } else if (proxy_type == "pac") {
-    CommandLine::StringType proxy_pac_url;
+    base::CommandLine::StringType proxy_pac_url;
     if (!proxy_dict->GetString("proxyAutoconfigUrl", &proxy_pac_url))
       return Status(kUnknownError, "'proxyAutoconfigUrl' must be a string");
     capabilities->switches.SetSwitch("proxy-pac-url", proxy_pac_url);
   } else if (proxy_type == "autodetect") {
     capabilities->switches.SetSwitch("proxy-auto-detect");
   } else if (proxy_type == "manual") {
-    const char* proxy_servers_options[][2] = {
+    const char* const proxy_servers_options[][2] = {
         {"ftpProxy", "ftp"}, {"httpProxy", "http"}, {"sslProxy", "https"}};
     const base::Value* option_value = NULL;
     std::string proxy_servers;
@@ -354,8 +354,8 @@ Status ParsePerfLoggingPrefs(const base::Value& option,
      Status status = parser_map[it.key()].Run(it.value(), capabilities);
      if (status.IsError())
        return Status(kUnknownError, "cannot parse " + it.key(), status);
-   }
-   return Status(kOk);
+  }
+  return Status(kOk);
 }
 
 Status ParseChromeOptions(
@@ -506,7 +506,7 @@ size_t Switches::GetSize() const {
   return switch_map_.size();
 }
 
-void Switches::AppendToCommandLine(CommandLine* command) const {
+void Switches::AppendToCommandLine(base::CommandLine* command) const {
   for (SwitchMap::const_iterator iter = switch_map_.begin();
        iter != switch_map_.end();
        ++iter) {

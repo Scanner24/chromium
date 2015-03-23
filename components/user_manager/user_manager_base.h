@@ -17,6 +17,7 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_manager_export.h"
+#include "components/user_manager/user_type.h"
 
 class PrefService;
 class PrefRegistrySimple;
@@ -37,73 +38,73 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // |blocking_task_runner| for SequencedWorkerPool.
   UserManagerBase(scoped_refptr<base::TaskRunner> task_runner,
                   scoped_refptr<base::TaskRunner> blocking_task_runner);
-  virtual ~UserManagerBase();
+  ~UserManagerBase() override;
 
   // Registers UserManagerBase preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // UserManager implementation:
-  virtual void Shutdown() OVERRIDE;
-  virtual const UserList& GetUsers() const OVERRIDE;
-  virtual const UserList& GetLoggedInUsers() const OVERRIDE;
-  virtual const UserList& GetLRULoggedInUsers() const OVERRIDE;
-  virtual const std::string& GetOwnerEmail() const OVERRIDE;
-  virtual void UserLoggedIn(const std::string& user_id,
-                            const std::string& user_id_hash,
-                            bool browser_restart) OVERRIDE;
-  virtual void SwitchActiveUser(const std::string& user_id) OVERRIDE;
-  virtual void SwitchToLastActiveUser() OVERRIDE;
-  virtual void SessionStarted() OVERRIDE;
-  virtual void RemoveUser(const std::string& user_id,
-                          RemoveUserDelegate* delegate) OVERRIDE;
-  virtual void RemoveUserFromList(const std::string& user_id) OVERRIDE;
-  virtual bool IsKnownUser(const std::string& user_id) const OVERRIDE;
-  virtual const User* FindUser(const std::string& user_id) const OVERRIDE;
-  virtual User* FindUserAndModify(const std::string& user_id) OVERRIDE;
-  virtual const User* GetLoggedInUser() const OVERRIDE;
-  virtual User* GetLoggedInUser() OVERRIDE;
-  virtual const User* GetActiveUser() const OVERRIDE;
-  virtual User* GetActiveUser() OVERRIDE;
-  virtual const User* GetPrimaryUser() const OVERRIDE;
-  virtual void SaveUserOAuthStatus(
-      const std::string& user_id,
-      User::OAuthTokenStatus oauth_token_status) OVERRIDE;
-  virtual void SaveForceOnlineSignin(const std::string& user_id,
-                                     bool force_online_signin) OVERRIDE;
-  virtual void SaveUserDisplayName(const std::string& user_id,
-                                   const base::string16& display_name) OVERRIDE;
-  virtual base::string16 GetUserDisplayName(
-      const std::string& user_id) const OVERRIDE;
-  virtual void SaveUserDisplayEmail(const std::string& user_id,
-                                    const std::string& display_email) OVERRIDE;
-  virtual std::string GetUserDisplayEmail(
-      const std::string& user_id) const OVERRIDE;
-  virtual void UpdateUserAccountData(
-      const std::string& user_id,
-      const UserAccountData& account_data) OVERRIDE;
-  virtual bool IsCurrentUserOwner() const OVERRIDE;
-  virtual bool IsCurrentUserNew() const OVERRIDE;
-  virtual bool IsCurrentUserNonCryptohomeDataEphemeral() const OVERRIDE;
-  virtual bool CanCurrentUserLock() const OVERRIDE;
-  virtual bool IsUserLoggedIn() const OVERRIDE;
-  virtual bool IsLoggedInAsRegularUser() const OVERRIDE;
-  virtual bool IsLoggedInAsDemoUser() const OVERRIDE;
-  virtual bool IsLoggedInAsPublicAccount() const OVERRIDE;
-  virtual bool IsLoggedInAsGuest() const OVERRIDE;
-  virtual bool IsLoggedInAsSupervisedUser() const OVERRIDE;
-  virtual bool IsLoggedInAsKioskApp() const OVERRIDE;
-  virtual bool IsLoggedInAsStub() const OVERRIDE;
-  virtual bool IsSessionStarted() const OVERRIDE;
-  virtual bool IsUserNonCryptohomeDataEphemeral(
-      const std::string& user_id) const OVERRIDE;
-  virtual void AddObserver(UserManager::Observer* obs) OVERRIDE;
-  virtual void RemoveObserver(UserManager::Observer* obs) OVERRIDE;
-  virtual void AddSessionStateObserver(
-      UserManager::UserSessionStateObserver* obs) OVERRIDE;
-  virtual void RemoveSessionStateObserver(
-      UserManager::UserSessionStateObserver* obs) OVERRIDE;
-  virtual void NotifyLocalStateChanged() OVERRIDE;
-  virtual void ForceUpdateState() OVERRIDE;
+  void Shutdown() override;
+  const UserList& GetUsers() const override;
+  const UserList& GetLoggedInUsers() const override;
+  const UserList& GetLRULoggedInUsers() const override;
+  const std::string& GetOwnerEmail() const override;
+  void UserLoggedIn(const std::string& user_id,
+                    const std::string& user_id_hash,
+                    bool browser_restart) override;
+  void SwitchActiveUser(const std::string& user_id) override;
+  void SwitchToLastActiveUser() override;
+  void SessionStarted() override;
+  void RemoveUser(const std::string& user_id,
+                  RemoveUserDelegate* delegate) override;
+  void RemoveUserFromList(const std::string& user_id) override;
+  bool IsKnownUser(const std::string& user_id) const override;
+  const User* FindUser(const std::string& user_id) const override;
+  User* FindUserAndModify(const std::string& user_id) override;
+  const User* GetLoggedInUser() const override;
+  User* GetLoggedInUser() override;
+  const User* GetActiveUser() const override;
+  User* GetActiveUser() override;
+  const User* GetPrimaryUser() const override;
+  void SaveUserOAuthStatus(const std::string& user_id,
+                           User::OAuthTokenStatus oauth_token_status) override;
+  void SaveForceOnlineSignin(const std::string& user_id,
+                             bool force_online_signin) override;
+  void SaveUserDisplayName(const std::string& user_id,
+                           const base::string16& display_name) override;
+  base::string16 GetUserDisplayName(const std::string& user_id) const override;
+  void SaveUserDisplayEmail(const std::string& user_id,
+                            const std::string& display_email) override;
+  std::string GetUserDisplayEmail(const std::string& user_id) const override;
+  void SaveUserType(const std::string& user_id,
+                    const UserType& user_type) override;
+  void UpdateUserAccountData(const std::string& user_id,
+                             const UserAccountData& account_data) override;
+  bool IsCurrentUserOwner() const override;
+  bool IsCurrentUserNew() const override;
+  bool IsCurrentUserNonCryptohomeDataEphemeral() const override;
+  bool CanCurrentUserLock() const override;
+  bool IsUserLoggedIn() const override;
+  bool IsLoggedInAsUserWithGaiaAccount() const override;
+  bool IsLoggedInAsChildUser() const override;
+  bool IsLoggedInAsPublicAccount() const override;
+  bool IsLoggedInAsGuest() const override;
+  bool IsLoggedInAsSupervisedUser() const override;
+  bool IsLoggedInAsKioskApp() const override;
+  bool IsLoggedInAsStub() const override;
+  bool IsSessionStarted() const override;
+  bool IsUserNonCryptohomeDataEphemeral(
+      const std::string& user_id) const override;
+  void AddObserver(UserManager::Observer* obs) override;
+  void RemoveObserver(UserManager::Observer* obs) override;
+  void AddSessionStateObserver(
+      UserManager::UserSessionStateObserver* obs) override;
+  void RemoveSessionStateObserver(
+      UserManager::UserSessionStateObserver* obs) override;
+  void NotifyLocalStateChanged() override;
+  void ChangeUserChildStatus(User* user, bool is_child) override;
+
+  virtual void SetIsCurrentUserNew(bool is_new);
 
   // Helper function that copies users from |users_list| to |users_vector| and
   // |users_set|. Duplicates and users already present in |existing_users| are
@@ -137,7 +138,7 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
   // Loads |users_| from Local State if the list has not been loaded yet.
   // Subsequent calls have no effect. Must be called on the UI thread.
-  void EnsureUsersLoaded();
+  virtual void EnsureUsersLoaded();
 
   // Handle OAuth token |status| change for |user_id|.
   virtual void HandleUserOAuthTokenStatusChange(
@@ -229,9 +230,6 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Indicates that a regular user just logged in as ephemeral.
   virtual void RegularUserLoggedInAsEphemeral(const std::string& user_id);
 
-  // Indicates that a user just logged into a retail mode session.
-  virtual void RetailModeUserLoggedIn() = 0;
-
   // Indicates that a supervised user just logged in.
   virtual void SupervisedUserLoggedIn(const std::string& user_id) = 0;
 
@@ -241,8 +239,6 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
   virtual bool GetEphemeralUsersEnabled() const;
   virtual void SetEphemeralUsersEnabled(bool enabled);
-
-  virtual void SetIsCurrentUserNew(bool is_new);
 
   virtual void SetOwnerEmail(std::string owner_user_id);
 
@@ -264,6 +260,15 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // |UpdateAndCleanUpPublicAccounts|.
   UserList users_;
 
+  // List of all users that are logged in current session. These point to User
+  // instances in |users_|. Only one of them could be marked as active.
+  UserList logged_in_users_;
+
+  // A list of all users that are logged in the current session. In contrast to
+  // |logged_in_users|, the order of this list is least recently used so that
+  // the active user should always be the first one in the list.
+  UserList lru_logged_in_users_;
+
  private:
   // Stages of loading user list from preferences. Some methods can have
   // different behavior depending on stage.
@@ -279,7 +284,7 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
   // Returns |true| if user with the given id is found in the persistent list.
   // Returns |false| otherwise. Does not trigger user loading.
-  const bool UserExistsInList(const std::string& user_id) const;
+  bool UserExistsInList(const std::string& user_id) const;
 
   // Same as FindUserInList but returns non-const pointer to User object.
   User* FindUserInListAndModify(const std::string& user_id);
@@ -306,8 +311,8 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Insert |user| at the front of the LRU user list.
   void SetLRUUser(User* user);
 
-  // Sends metrics in response to a regular user logging in.
-  void SendRegularUserLoginMetrics(const std::string& user_id);
+  // Sends metrics in response to a user with gaia account (regular) logging in.
+  void SendGaiaUserLoginMetrics(const std::string& user_id);
 
   // Sets account locale for user with id |user_id|.
   virtual void UpdateUserAccountLocale(const std::string& user_id,
@@ -319,15 +324,6 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
   // Indicates stage of loading user from prefs.
   UserLoadStage user_loading_stage_;
-
-  // List of all users that are logged in current session. These point to User
-  // instances in |users_|. Only one of them could be marked as active.
-  UserList logged_in_users_;
-
-  // A list of all users that are logged in the current session. In contrast to
-  // |logged_in_users|, the order of this list is least recently used so that
-  // the active user should always be the first one in the list.
-  UserList lru_logged_in_users_;
 
   // True if SessionStarted() has been called.
   bool session_started_;

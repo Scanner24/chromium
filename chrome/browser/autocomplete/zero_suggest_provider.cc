@@ -19,10 +19,12 @@
 #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
@@ -31,7 +33,7 @@
 #include "components/omnibox/search_provider.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/variations/variations_http_header_provider.h"
+#include "components/variations/net/variations_http_header_provider.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
@@ -90,9 +92,11 @@ void ZeroSuggestProvider::RegisterProfilePrefs(
 }
 
 void ZeroSuggestProvider::Start(const AutocompleteInput& input,
-                                bool minimal_changes) {
+                                bool minimal_changes,
+                                bool called_due_to_focus) {
   matches_.clear();
-  if (input.type() == metrics::OmniboxInputType::INVALID)
+  if (!called_due_to_focus ||
+      input.type() == metrics::OmniboxInputType::INVALID)
     return;
 
   Stop(true);
@@ -116,19 +120,21 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
   if (!suggest_url.is_valid())
     return;
 
-  // No need to send the current page URL in personalized suggest field trial.
+  // No need to send the current page URL in personalized suggest or
+  // most visited field trials.
   if (CanSendURL(input.current_url(), suggest_url, default_provider,
                  current_page_classification_,
                  template_url_service_->search_terms_data(), client_.get()) &&
-      !OmniboxFieldTrial::InZeroSuggestPersonalizedFieldTrial()) {
+      !OmniboxFieldTrial::InZeroSuggestPersonalizedFieldTrial() &&
+      !OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial()) {
     // Update suggest_url to include the current_page_url.
     search_term_args.current_page_url = current_query_;
     suggest_url = GURL(default_provider->suggestions_url_ref().
                        ReplaceSearchTerms(
                            search_term_args,
                            template_url_service_->search_terms_data()));
-  } else if (!CanShowZeroSuggestWithoutSendingURL(suggest_url,
-                                                  input.current_url())) {
+  } else if (!ShouldShowNonContextualZeroSuggest(suggest_url,
+                                                 input.current_url())) {
     return;
   }
 
@@ -144,12 +150,13 @@ void ZeroSuggestProvider::Stop(bool clear_cached_results) {
   if (fetcher_)
     LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_INVALIDATED);
   fetcher_.reset();
+  waiting_for_most_visited_urls_request_ = false;
   done_ = true;
 
   if (clear_cached_results) {
     // We do not call Clear() on |results_| to retain |verbatim_relevance|
     // value in the |results_| object. |verbatim_relevance| is used at the
-    // beginning of the next StartZeroSuggest() call to determine the current
+    // beginning of the next OnOmniboxFocused() call to determine the current
     // url match relevance.
     results_.suggest_results.clear();
     results_.navigation_results.clear();
@@ -191,6 +198,7 @@ ZeroSuggestProvider::ZeroSuggestProvider(
       listener_(listener),
       profile_(profile),
       results_from_cache_(false),
+      waiting_for_most_visited_urls_request_(false),
       weak_ptr_factory_(this) {
 }
 
@@ -205,7 +213,7 @@ const TemplateURL* ZeroSuggestProvider::GetTemplateURL(bool is_keyword) const {
 
 const AutocompleteInput ZeroSuggestProvider::GetInput(bool is_keyword) const {
   return AutocompleteInput(
-      base::string16(), base::string16::npos, base::string16(),
+      base::string16(), base::string16::npos, std::string(),
       GURL(current_query_), current_page_classification_, true, false, false,
       true, ChromeAutocompleteSchemeClassifier(profile_));
 }
@@ -309,35 +317,43 @@ AutocompleteMatch ZeroSuggestProvider::NavigationToMatch(
 }
 
 void ZeroSuggestProvider::Run(const GURL& suggest_url) {
-  const int kFetcherID = 1;
-  fetcher_.reset(
-      net::URLFetcher::Create(kFetcherID,
-          suggest_url,
-          net::URLFetcher::GET, this));
-  fetcher_->SetRequestContext(profile_->GetRequestContext());
-  fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
-  // Add Chrome experiment state to the request headers.
-  net::HttpRequestHeaders headers;
-  variations::VariationsHttpHeaderProvider::GetInstance()->AppendHeaders(
-      fetcher_->GetOriginalURL(), profile_->IsOffTheRecord(), false, &headers);
-  fetcher_->SetExtraRequestHeaders(headers.ToString());
-  fetcher_->Start();
-
   if (OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial()) {
     most_visited_urls_.clear();
-    history::TopSites* ts = profile_->GetTopSites();
+    scoped_refptr<history::TopSites> ts =
+        TopSitesFactory::GetForProfile(profile_);
     if (ts) {
+      waiting_for_most_visited_urls_request_ = true;
       ts->GetMostVisitedURLs(
           base::Bind(&ZeroSuggestProvider::OnMostVisitedUrlsAvailable,
                      weak_ptr_factory_.GetWeakPtr()), false);
     }
+  } else {
+    const int kFetcherID = 1;
+    fetcher_.reset(
+        net::URLFetcher::Create(kFetcherID,
+            suggest_url,
+            net::URLFetcher::GET, this));
+    fetcher_->SetRequestContext(profile_->GetRequestContext());
+    fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
+    // Add Chrome experiment state to the request headers.
+    net::HttpRequestHeaders headers;
+    variations::VariationsHttpHeaderProvider::GetInstance()->AppendHeaders(
+        fetcher_->GetOriginalURL(), profile_->IsOffTheRecord(), false,
+        &headers);
+    fetcher_->SetExtraRequestHeaders(headers.ToString());
+    fetcher_->Start();
+    LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_SENT);
   }
-  LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_SENT);
 }
 
 void ZeroSuggestProvider::OnMostVisitedUrlsAvailable(
     const history::MostVisitedURLList& urls) {
+  if (!waiting_for_most_visited_urls_request_) return;
   most_visited_urls_ = urls;
+  waiting_for_most_visited_urls_request_ = false;
+  done_ = true;
+  ConvertResultsToAutocompleteMatches();
+  listener_->OnProviderUpdate(true);
 }
 
 void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
@@ -424,7 +440,7 @@ int ZeroSuggestProvider::GetVerbatimRelevance() const {
       results_.verbatim_relevance : kDefaultVerbatimZeroSuggestRelevance;
 }
 
-bool ZeroSuggestProvider::CanShowZeroSuggestWithoutSendingURL(
+bool ZeroSuggestProvider::ShouldShowNonContextualZeroSuggest(
     const GURL& suggest_url,
     const GURL& current_page_url) const {
   if (!ZeroSuggestEnabled(suggest_url,
@@ -447,6 +463,11 @@ bool ZeroSuggestProvider::CanShowZeroSuggestWithoutSendingURL(
   if (!current_page_url.is_valid() ||
       ((current_page_url.scheme() != url::kHttpScheme) &&
       (current_page_url.scheme() != url::kHttpsScheme)))
+    return false;
+
+  if (OmniboxFieldTrial::InZeroSuggestMostVisitedWithoutSerpFieldTrial() &&
+      template_url_service_->
+          IsSearchResultsPageFromDefaultSearchProvider(current_page_url))
     return false;
 
   return true;

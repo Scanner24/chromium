@@ -790,6 +790,12 @@ STDMETHODIMP NativeViewAccessibilityWin::accSelect(
 
 STDMETHODIMP NativeViewAccessibilityWin::get_accHelp(
     VARIANT var_id, BSTR* help) {
+  if (!IsValidId(var_id) || !help)
+    return E_INVALIDARG;
+
+  if (!view_)
+    return E_FAIL;
+
   base::string16 temp = base::UTF8ToUTF16(view_->GetClassName());
   *help = SysAllocString(temp.c_str());
   return S_OK;
@@ -1183,6 +1189,12 @@ STDMETHODIMP NativeViewAccessibilityWin::QueryService(
 
 STDMETHODIMP NativeViewAccessibilityWin::GetPatternProvider(
     PATTERNID id, IUnknown** provider) {
+  if (!view_)
+    return E_FAIL;
+
+  if (!provider)
+    return E_INVALIDARG;
+
   DVLOG(1) << "In Function: "
            << __FUNCTION__
            << " for pattern id: "
@@ -1204,6 +1216,12 @@ STDMETHODIMP NativeViewAccessibilityWin::GetPatternProvider(
 
 STDMETHODIMP NativeViewAccessibilityWin::GetPropertyValue(PROPERTYID id,
                                                           VARIANT* ret) {
+  if (!view_)
+    return E_FAIL;
+
+  if (!ret)
+    return E_INVALIDARG;
+
   DVLOG(1) << "In Function: "
            << __FUNCTION__
            << " for property id: "
@@ -1331,6 +1349,8 @@ int32 NativeViewAccessibilityWin::MSAARole(ui::AXRole role) {
       return ROLE_SYSTEM_TITLEBAR;
     case ui::AX_ROLE_TOOLBAR:
       return ROLE_SYSTEM_TOOLBAR;
+    case ui::AX_ROLE_WEB_VIEW:
+      return ROLE_SYSTEM_GROUPING;
     case ui::AX_ROLE_WINDOW:
       return ROLE_SYSTEM_WINDOW;
     case ui::AX_ROLE_CLIENT:
@@ -1491,13 +1511,11 @@ void NativeViewAccessibilityWin::PopulateChildWidgetVector(
     return;
 
   std::set<Widget*> child_widgets;
-  Widget::GetAllChildWidgets(widget->GetNativeView(), &child_widgets);
   Widget::GetAllOwnedWidgets(widget->GetNativeView(), &child_widgets);
   for (std::set<Widget*>::const_iterator iter = child_widgets.begin();
            iter != child_widgets.end(); ++iter) {
     Widget* child_widget = *iter;
-    if (child_widget == widget)
-      continue;
+    DCHECK_NE(widget, child_widget);
 
     if (!child_widget->IsVisible())
       continue;

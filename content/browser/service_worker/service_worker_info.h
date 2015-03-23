@@ -25,7 +25,6 @@ class CONTENT_EXPORT ServiceWorkerVersionInfo {
                            int devtools_agent_route_id);
   ~ServiceWorkerVersionInfo();
 
-  bool is_null;
   ServiceWorkerVersion::RunningStatus running_status;
   ServiceWorkerVersion::Status status;
   GURL script_url;
@@ -43,15 +42,17 @@ class CONTENT_EXPORT ServiceWorkerRegistrationInfo {
       int64 registration_id,
       const ServiceWorkerVersionInfo& active_version,
       const ServiceWorkerVersionInfo& waiting_version,
-      const ServiceWorkerVersionInfo& installing_version);
+      const ServiceWorkerVersionInfo& installing_version,
+      int64_t active_version_total_size_bytes);
   ~ServiceWorkerRegistrationInfo();
 
   GURL pattern;
   int64 registration_id;
-  ServiceWorkerVersionInfo controlling_version;
   ServiceWorkerVersionInfo active_version;
   ServiceWorkerVersionInfo waiting_version;
   ServiceWorkerVersionInfo installing_version;
+
+  int64_t stored_version_size_bytes;
 };
 
 }  // namespace content

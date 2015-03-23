@@ -23,11 +23,11 @@ class ArticleSpecifics;
 class AttachmentIdProto;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
+class AutofillWalletSpecifics;
 class BookmarkSpecifics;
 class ClientConfigParams;
 class ClientToServerMessage;
 class ClientToServerResponse;
-class CoalescedSyncedNotification;
 class CollapsedInfo;
 class DatatypeAssociationStats;
 class DebugEventInfo;
@@ -50,6 +50,7 @@ class Media;
 class ManagedUserSettingSpecifics;
 class ManagedUserSharedSettingSpecifics;
 class ManagedUserSpecifics;
+class ManagedUserWhitelistSpecifics;
 class NavigationRedirect;
 class NigoriSpecifics;
 class PasswordSpecifics;
@@ -64,20 +65,16 @@ class SessionWindow;
 class SimpleCollapsedLayout;
 class SyncCycleCompletedEventInfo;
 class SyncEntity;
-class SyncedNotification;
-class SyncedNotificationAction;
-class SyncedNotificationAppInfo;
 class SyncedNotificationAppInfoSpecifics;
-class SyncedNotificationDestination;
-class SyncedNotificationImage;
-class SyncedNotificationProfileImage;
-class SyncedNotificationRenderInfo;
 class SyncedNotificationSpecifics;
 class TabNavigation;
 class Target;
 class ThemeSpecifics;
 class TimeRangeDirective;
 class TypedUrlSpecifics;
+class WalletMaskedCreditCard;
+class WalletPostalAddress;
+class WifiCredentialSpecifics;
 }  // namespace sync_pb
 
 // Utility functions to convert sync protocol buffers to dictionaries.
@@ -146,41 +143,8 @@ base::DictionaryValue* TimeRangeDirectiveToValue(
 base::DictionaryValue* KeystoreEncryptionToValue(
     const sync_pb::KeystoreEncryptionFlagsSpecifics& proto);
 
-// Sub protocols of SyncedNotifications.
-
-base::DictionaryValue* SimpleCollapsedLayoutToValue(
-    const sync_pb::SimpleCollapsedLayout& proto);
-
-base::DictionaryValue* CollapsedInfoToValue(
-    const sync_pb::CollapsedInfo& proto);
-
-base::DictionaryValue* RenderInfoToValue(
-    const sync_pb::SyncedNotificationRenderInfo& proto);
-
-base::DictionaryValue* CoalescedNotificationToValue(
-    const sync_pb::CoalescedSyncedNotification& proto);
-
-base::DictionaryValue* SyncedNotificationActionToValue(
-    const sync_pb::SyncedNotificationAction& action);
-
-base::DictionaryValue* SyncedNotificationDestinationToValue(
-    const sync_pb::SyncedNotificationDestination& destination);
-
-base::DictionaryValue* SyncedNotificationToValue(
-    const sync_pb::SyncedNotification& notification);
-
 SYNC_EXPORT_PRIVATE base::DictionaryValue* SessionSpecificsToValue(
     const sync_pb::SessionSpecifics& session_specifics);
-
-SYNC_EXPORT_PRIVATE base::DictionaryValue* SyncedNotificationImageToValue(
-    const sync_pb::SyncedNotificationImage& image);
-
-SYNC_EXPORT_PRIVATE base::DictionaryValue*
-    SyncedNotificationProfileImageToValue(
-        const sync_pb::SyncedNotificationProfileImage& image);
-
-SYNC_EXPORT_PRIVATE base::DictionaryValue* TargetToValue(
-    const sync_pb::Target& target);
 
 // Main *SpecificsToValue functions.
 
@@ -201,6 +165,9 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue* AutofillSpecificsToValue(
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* AutofillProfileSpecificsToValue(
     const sync_pb::AutofillProfileSpecifics& autofill_profile_specifics);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* AutofillWalletSpecificsToValue(
+    const sync_pb::AutofillWalletSpecifics& autofill_wallet_specifics);
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* BookmarkSpecificsToValue(
     const sync_pb::BookmarkSpecifics& bookmark_specifics);
@@ -244,6 +211,10 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue*
         const sync_pb::ManagedUserSharedSettingSpecifics&
             managed_user_shared_setting_specifics);
 
+SYNC_EXPORT_PRIVATE base::DictionaryValue* ManagedUserWhitelistSpecificsToValue(
+    const sync_pb::ManagedUserWhitelistSpecifics&
+        managed_user_whitelist_specifics);
+
 SYNC_EXPORT_PRIVATE base::DictionaryValue* MediaToValue(
     const sync_pb::Media& media);
 
@@ -273,6 +244,15 @@ SYNC_EXPORT_PRIVATE base::DictionaryValue* ThemeSpecificsToValue(
 
 SYNC_EXPORT_PRIVATE base::DictionaryValue* TypedUrlSpecificsToValue(
     const sync_pb::TypedUrlSpecifics& typed_url_specifics);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* WalletMaskedCreditCardToValue(
+    const sync_pb::WalletMaskedCreditCard& wallet_masked_card);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* WalletPostalAddressToValue(
+    const sync_pb::WalletPostalAddress& wallet_postal_address);
+
+SYNC_EXPORT_PRIVATE base::DictionaryValue* WifiCredentialSpecificsToValue(
+    const sync_pb::WifiCredentialSpecifics& wifi_credential_specifics);
 
 // Any present extensions are mapped to sub-dictionary values with the
 // key equal to the extension name.

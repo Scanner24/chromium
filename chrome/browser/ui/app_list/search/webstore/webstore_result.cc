@@ -16,8 +16,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/search/common/url_icon_source.h"
+#include "chrome/browser/ui/app_list/search/search_util.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_installer.h"
-#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -35,15 +35,13 @@
 
 namespace {
 
-const int kLaunchEphemeralAppAction = 1;
-
 // BadgedImageSource adds a webstore badge to a webstore app icon.
 class BadgedIconSource : public gfx::CanvasImageSource {
  public:
   BadgedIconSource(const gfx::ImageSkia& icon, const gfx::Size& icon_size)
       : CanvasImageSource(icon_size, false), icon_(icon) {}
 
-  virtual void Draw(gfx::Canvas* canvas) OVERRIDE {
+  void Draw(gfx::Canvas* canvas) override {
     canvas->DrawImageInt(icon_, 0, 0);
     const gfx::ImageSkia& badge = *ui::ResourceBundle::GetSharedInstance().
          GetImageSkiaNamed(IDR_WEBSTORE_ICON_16);
@@ -105,16 +103,16 @@ WebstoreResult::~WebstoreResult() {
 }
 
 void WebstoreResult::Open(int event_flags) {
+  RecordHistogram(SEARCH_WEBSTORE_SEARCH_RESULT);
   const GURL store_url = net::AppendQueryParameter(
       GURL(extension_urls::GetWebstoreItemDetailURLPrefix() + app_id_),
       extension_urls::kWebstoreSourceField,
       extension_urls::kLaunchSourceAppListSearch);
 
-  chrome::NavigateParams params(profile_,
-                                store_url,
-                                ui::PAGE_TRANSITION_LINK);
-  params.disposition = ui::DispositionFromEventFlags(event_flags);
-  chrome::Navigate(&params);
+  controller_->OpenURL(profile_,
+                       store_url,
+                       ui::PAGE_TRANSITION_LINK,
+                       ui::DispositionFromEventFlags(event_flags));
 }
 
 void WebstoreResult::InvokeAction(int action_index, int event_flags) {
@@ -125,17 +123,17 @@ void WebstoreResult::InvokeAction(int action_index, int event_flags) {
     return;
   }
 
-  StartInstall(action_index == kLaunchEphemeralAppAction);
+  StartInstall();
 }
 
-scoped_ptr<ChromeSearchResult> WebstoreResult::Duplicate() {
-  return scoped_ptr<ChromeSearchResult>(new WebstoreResult(profile_,
-                                                           app_id_,
-                                                           localized_name_,
-                                                           icon_url_,
-                                                           is_paid_,
-                                                           item_type_,
-                                                           controller_)).Pass();
+scoped_ptr<SearchResult> WebstoreResult::Duplicate() const {
+  return scoped_ptr<SearchResult>(new WebstoreResult(profile_,
+                                                     app_id_,
+                                                     localized_name_,
+                                                     icon_url_,
+                                                     is_paid_,
+                                                     item_type_,
+                                                     controller_));
 }
 
 void WebstoreResult::InitAndStartObserving() {
@@ -164,23 +162,9 @@ void WebstoreResult::UpdateActions() {
       extensions::util::IsExtensionInstalledPermanently(app_id_, profile_);
 
   if (!is_otr && !is_installed && !is_installing()) {
-    if (EphemeralAppLauncher::IsFeatureEnabled()) {
-      actions.push_back(Action(
-          l10n_util::GetStringUTF16(IDS_WEBSTORE_RESULT_INSTALL),
-          l10n_util::GetStringUTF16(
-              IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE)));
-      if ((item_type_ == extensions::Manifest::TYPE_PLATFORM_APP ||
-           item_type_ == extensions::Manifest::TYPE_HOSTED_APP) &&
-          !is_paid_) {
-        actions.push_back(Action(
-            l10n_util::GetStringUTF16(IDS_WEBSTORE_RESULT_LAUNCH),
-            l10n_util::GetStringUTF16(IDS_WEBSTORE_RESULT_LAUNCH_APP_TOOLTIP)));
-      }
-    } else {
-      actions.push_back(Action(
-          l10n_util::GetStringUTF16(IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE),
-          base::string16()));
-    }
+    actions.push_back(Action(
+        l10n_util::GetStringUTF16(IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE),
+        base::string16()));
   }
 
   SetActions(actions);
@@ -209,21 +193,9 @@ void WebstoreResult::OnIconLoaded() {
   SetIcon(icon_);
 }
 
-void WebstoreResult::StartInstall(bool launch_ephemeral_app) {
+void WebstoreResult::StartInstall() {
   SetPercentDownloaded(0);
   SetIsInstalling(true);
-
-  if (launch_ephemeral_app) {
-    scoped_refptr<EphemeralAppLauncher> installer =
-        EphemeralAppLauncher::CreateForLauncher(
-            app_id_,
-            profile_,
-            controller_->GetAppListWindow(),
-            base::Bind(&WebstoreResult::LaunchCallback,
-                       weak_factory_.GetWeakPtr()));
-    installer->Start();
-    return;
-  }
 
   scoped_refptr<WebstoreInstaller> installer =
       new WebstoreInstaller(
@@ -299,10 +271,6 @@ void WebstoreResult::OnShutdown() {
 
 void WebstoreResult::OnShutdown(extensions::ExtensionRegistry* registry) {
   StopObservingRegistry();
-}
-
-ChromeSearchResultType WebstoreResult::GetType() {
-  return SEARCH_WEBSTORE_SEARCH_RESULT;
 }
 
 }  // namespace app_list

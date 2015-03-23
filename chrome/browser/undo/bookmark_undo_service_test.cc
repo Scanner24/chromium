@@ -14,6 +14,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 namespace {
 
@@ -21,8 +23,8 @@ class BookmarkUndoServiceTest : public testing::Test {
  public:
   BookmarkUndoServiceTest();
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   BookmarkModel* GetModel();
   BookmarkUndoService* GetUndoService();
@@ -39,7 +41,7 @@ BookmarkUndoServiceTest::BookmarkUndoServiceTest() {}
 void BookmarkUndoServiceTest::SetUp() {
   profile_.reset(new TestingProfile);
   profile_->CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(GetModel());
+  bookmarks::test::WaitForBookmarkModelToLoad(GetModel());
 }
 
 BookmarkModel* BookmarkUndoServiceTest::GetModel() {

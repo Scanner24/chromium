@@ -25,6 +25,10 @@ class TestOutputSurface : public OutputSurface {
   explicit TestOutputSurface(scoped_refptr<ContextProvider> context_provider)
       : OutputSurface(context_provider) {}
 
+  TestOutputSurface(scoped_refptr<ContextProvider> context_provider,
+                    scoped_refptr<ContextProvider> worker_context_provider)
+      : OutputSurface(worker_context_provider) {}
+
   explicit TestOutputSurface(scoped_ptr<SoftwareOutputDevice> software_device)
       : OutputSurface(software_device.Pass()) {}
 
@@ -32,9 +36,13 @@ class TestOutputSurface : public OutputSurface {
                     scoped_ptr<SoftwareOutputDevice> software_device)
       : OutputSurface(context_provider, software_device.Pass()) {}
 
-  bool InitializeNewContext3d(
-      scoped_refptr<ContextProvider> new_context_provider) {
-    return InitializeAndSetContext3d(new_context_provider);
+  void SwapBuffers(CompositorFrame* frame) override {
+    client_->DidSwapBuffers();
+    client_->DidSwapBuffersComplete();
+  }
+
+  bool InitializeNewContext3d(scoped_refptr<ContextProvider> context_provider) {
+    return InitializeAndSetContext3d(context_provider, nullptr);
   }
 
   using OutputSurface::ReleaseGL;
@@ -42,10 +50,6 @@ class TestOutputSurface : public OutputSurface {
   void CommitVSyncParametersForTesting(base::TimeTicks timebase,
                                        base::TimeDelta interval) {
     CommitVSyncParameters(timebase, interval);
-  }
-
-  void BeginFrameForTesting() {
-    client_->BeginFrame(CreateExpiredBeginFrameArgsForTesting());
   }
 
   void DidSwapBuffersForTesting() { client_->DidSwapBuffers(); }
@@ -58,11 +62,11 @@ class TestOutputSurface : public OutputSurface {
 class TestSoftwareOutputDevice : public SoftwareOutputDevice {
  public:
   TestSoftwareOutputDevice();
-  virtual ~TestSoftwareOutputDevice();
+  ~TestSoftwareOutputDevice() override;
 
   // Overriden from cc:SoftwareOutputDevice
-  virtual void DiscardBackbuffer() OVERRIDE;
-  virtual void EnsureBackbuffer() OVERRIDE;
+  void DiscardBackbuffer() override;
+  void EnsureBackbuffer() override;
 
   int discard_backbuffer_count() { return discard_backbuffer_count_; }
   int ensure_backbuffer_count() { return ensure_backbuffer_count_; }
@@ -105,6 +109,26 @@ TEST(OutputSurfaceTest, ClientPointerIndicatesBindToClientSuccess) {
   EXPECT_TRUE(client.did_lose_output_surface_called());
 }
 
+TEST(OutputSurfaceTest, ClientPointerIndicatesWorkerBindToClientSuccess) {
+  scoped_refptr<TestContextProvider> provider = TestContextProvider::Create();
+  scoped_refptr<TestContextProvider> worker_provider =
+      TestContextProvider::Create();
+  TestOutputSurface output_surface(provider, worker_provider);
+  EXPECT_FALSE(output_surface.HasClient());
+
+  FakeOutputSurfaceClient client;
+  EXPECT_TRUE(output_surface.BindToClient(&client));
+  EXPECT_TRUE(output_surface.HasClient());
+  EXPECT_FALSE(client.deferred_initialize_called());
+
+  // Verify DidLoseOutputSurface callback is hooked up correctly.
+  EXPECT_FALSE(client.did_lose_output_surface_called());
+  output_surface.context_provider()->ContextGL()->LoseContextCHROMIUM(
+      GL_GUILTY_CONTEXT_RESET_ARB, GL_INNOCENT_CONTEXT_RESET_ARB);
+  output_surface.context_provider()->ContextGL()->Flush();
+  EXPECT_TRUE(client.did_lose_output_surface_called());
+}
+
 TEST(OutputSurfaceTest, ClientPointerIndicatesBindToClientFailure) {
   scoped_refptr<TestContextProvider> context_provider =
       TestContextProvider::Create();
@@ -113,6 +137,23 @@ TEST(OutputSurfaceTest, ClientPointerIndicatesBindToClientFailure) {
   context_provider->UnboundTestContext3d()->set_context_lost(true);
 
   TestOutputSurface output_surface(context_provider);
+  EXPECT_FALSE(output_surface.HasClient());
+
+  FakeOutputSurfaceClient client;
+  EXPECT_FALSE(output_surface.BindToClient(&client));
+  EXPECT_FALSE(output_surface.HasClient());
+}
+
+TEST(OutputSurfaceTest, ClientPointerIndicatesWorkerBindToClientFailure) {
+  scoped_refptr<TestContextProvider> context_provider =
+      TestContextProvider::Create();
+  scoped_refptr<TestContextProvider> worker_context_provider =
+      TestContextProvider::Create();
+
+  // Lose the context so BindToClient fails.
+  worker_context_provider->UnboundTestContext3d()->set_context_lost(true);
+
+  TestOutputSurface output_surface(context_provider, worker_context_provider);
   EXPECT_FALSE(output_surface.HasClient());
 
   FakeOutputSurfaceClient client;
@@ -209,8 +250,7 @@ TEST(OutputSurfaceTest, SoftwareOutputDeviceBackbufferManagement) {
 
   // TestOutputSurface now owns software_output_device and has responsibility to
   // free it.
-  scoped_ptr<TestSoftwareOutputDevice> p(software_output_device);
-  TestOutputSurface output_surface(p.PassAs<SoftwareOutputDevice>());
+  TestOutputSurface output_surface(make_scoped_ptr(software_output_device));
 
   EXPECT_EQ(0, software_output_device->ensure_backbuffer_count());
   EXPECT_EQ(0, software_output_device->discard_backbuffer_count());

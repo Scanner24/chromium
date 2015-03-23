@@ -10,7 +10,9 @@ import os
 import re
 import shutil
 import subprocess
+import stat
 import sys
+import time
 
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
@@ -22,7 +24,7 @@ LLVM_WIN_REVISION = 'HEAD'
 # in bringup. Use a pinned revision to make it slightly more stable.
 if (re.search(r'\b(asan)=1', os.environ.get('GYP_DEFINES', '')) and
     not 'LLVM_FORCE_HEAD_REVISION' in os.environ):
-  LLVM_WIN_REVISION = '217738'
+  LLVM_WIN_REVISION = '229860'
 
 # Path constants. (All of these should be absolute paths.)
 THIS_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -32,8 +34,10 @@ LLVM_BUILD_DIR = os.path.join(CHROMIUM_DIR, 'third_party', 'llvm-build',
                               'Release+Asserts')
 COMPILER_RT_BUILD_DIR = os.path.join(LLVM_BUILD_DIR, '32bit-compiler-rt')
 CLANG_DIR = os.path.join(LLVM_DIR, 'tools', 'clang')
+LLD_DIR = os.path.join(LLVM_DIR, 'tools', 'lld')
 COMPILER_RT_DIR = os.path.join(LLVM_DIR, 'projects', 'compiler-rt')
 STAMP_FILE = os.path.join(LLVM_BUILD_DIR, 'cr_build_revision')
+VERSION = '3.7.0'
 
 LLVM_REPO_URL='https://llvm.org/svn/llvm-project'
 if 'LLVM_REPO_URL' in os.environ:
@@ -57,16 +61,16 @@ def WriteStampFile(s):
     f.write(s)
 
 
-def DeleteFiles(dir, pattern):
-  """Delete all files in dir matching pattern."""
-  n = 0
-  regex = re.compile(r'^' + pattern + r'$')
-  for root, _, files in os.walk(dir):
-    for f in files:
-      if regex.match(f):
-        os.remove(os.path.join(root, f))
-        n += 1
-  return n
+def RmTree(dir):
+  """Delete dir."""
+  def ChmodAndRetry(func, path, _):
+    # Subversion can leave read-only files around.
+    if not os.access(path, os.W_OK):
+      os.chmod(path, stat.S_IWUSR)
+      return func(path)
+    raise
+
+  shutil.rmtree(dir, onerror=ChmodAndRetry)
 
 
 def ClobberChromiumBuildFiles():
@@ -74,18 +78,21 @@ def ClobberChromiumBuildFiles():
   print 'Clobbering Chromium build files...'
   out_dir = os.path.join(CHROMIUM_DIR, 'out')
   if os.path.isdir(out_dir):
-    shutil.rmtree(out_dir)
+    RmTree(out_dir)
     print 'Removed Chromium out dir: %s.' % (out_dir)
 
 
-def RunCommand(command, tries=1):
-  """Run a command, possibly with multiple retries."""
-  for i in range(0, tries):
-    print 'Running %s (try #%d)' % (str(command), i + 1)
-    if subprocess.call(command, shell=True) == 0:
-      return
-    print 'Failed.'
-  sys.exit(1)
+def RunCommand(command, fail_hard=True):
+  """Run command and return success (True) or failure; or if fail_hard is
+     True, exit on failure."""
+
+  print 'Running %s' % (str(command))
+  if subprocess.call(command, shell=True) == 0:
+    return True
+  print 'Failed.'
+  if fail_hard:
+    sys.exit(1)
+  return False
 
 
 def CopyFile(src, dst):
@@ -109,8 +116,17 @@ def CopyDirectoryContents(src, dst, filename_filter=None):
 def Checkout(name, url, dir):
   """Checkout the SVN module at url into dir. Use name for the log message."""
   print "Checking out %s r%s into '%s'" % (name, LLVM_WIN_REVISION, dir)
-  RunCommand(['svn', 'checkout', '--force',
-              url + '@' + LLVM_WIN_REVISION, dir], tries=2)
+
+  command = ['svn', 'checkout', '--force', url + '@' + LLVM_WIN_REVISION, dir]
+  if RunCommand(command, fail_hard=False):
+    return
+
+  if os.path.isdir(dir):
+    print "Removing %s." % (dir)
+    RmTree(dir)
+
+  print "Retrying."
+  RunCommand(command)
 
 
 def AddCMakeToPath():
@@ -153,6 +169,18 @@ def GetVSVersion():
   return vs_version
 
 
+def SubversionCmakeArg():
+  # Since cmake's find_program can only find .exe and .com,
+  # svn.bat in depot_tools will be ignored.
+  default_pathext = ('.com', '.exe', '.bat', '.cmd')
+  for path in os.environ.get('PATH', '').split(os.pathsep):
+    for ext in default_pathext:
+      candidate = os.path.join(path, 'svn' + ext)
+      if os.path.isfile(candidate):
+        return '-DSubversion_SVN_EXECUTABLE=%s' % candidate
+  return ''
+
+
 def UpdateClang():
   print 'Updating Clang to %s...' % (LLVM_WIN_REVISION)
   if LLVM_WIN_REVISION != 'HEAD' and ReadStampFile() == LLVM_WIN_REVISION:
@@ -167,6 +195,7 @@ def UpdateClang():
 
   Checkout('LLVM', LLVM_REPO_URL + '/llvm/trunk', LLVM_DIR)
   Checkout('Clang', LLVM_REPO_URL + '/cfe/trunk', CLANG_DIR)
+  Checkout('LLD', LLVM_REPO_URL + '/lld/trunk', LLD_DIR)
   Checkout('compiler-rt', LLVM_REPO_URL + '/compiler-rt/trunk', COMPILER_RT_DIR)
 
   if not os.path.exists(LLVM_BUILD_DIR):
@@ -175,7 +204,7 @@ def UpdateClang():
 
   RunCommand(GetVSVersion().SetupScript('x64') +
              ['&&', 'cmake', '-GNinja', '-DCMAKE_BUILD_TYPE=Release',
-              '-DLLVM_ENABLE_ASSERTIONS=ON', LLVM_DIR])
+              '-DLLVM_ENABLE_ASSERTIONS=ON', SubversionCmakeArg(), LLVM_DIR])
   RunCommand(GetVSVersion().SetupScript('x64') + ['&&', 'ninja', 'all'])
 
   # Do an x86 build of compiler-rt to get the 32-bit ASan run-time.
@@ -188,28 +217,26 @@ def UpdateClang():
               '-DLLVM_ENABLE_ASSERTIONS=ON', LLVM_DIR])
   RunCommand(GetVSVersion().SetupScript('x86') + ['&&', 'ninja', 'compiler-rt'])
 
-  asan_rt_bin_src_dir = os.path.join(COMPILER_RT_BUILD_DIR, 'bin')
-  asan_rt_bin_dst_dir = os.path.join(LLVM_BUILD_DIR, 'bin')
-  CopyDirectoryContents(asan_rt_bin_src_dir, asan_rt_bin_dst_dir,
-                        r'^.*-i386\.dll$')
-
-  # TODO(hans): Make this (and the .gypi file) version number independent.
+  # TODO(hans): Make this (and the .gypi and .isolate files) version number
+  # independent.
   asan_rt_lib_src_dir = os.path.join(COMPILER_RT_BUILD_DIR, 'lib', 'clang',
-                                     '3.6.0', 'lib', 'windows')
+                                     VERSION, 'lib', 'windows')
   asan_rt_lib_dst_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang',
-                                     '3.6.0', 'lib', 'windows')
+                                     VERSION, 'lib', 'windows')
   CopyDirectoryContents(asan_rt_lib_src_dir, asan_rt_lib_dst_dir,
                         r'^.*-i386\.lib$')
+  CopyDirectoryContents(asan_rt_lib_src_dir, asan_rt_lib_dst_dir,
+                        r'^.*-i386\.dll$')
 
   CopyFile(os.path.join(asan_rt_lib_src_dir, '..', '..', 'asan_blacklist.txt'),
            os.path.join(asan_rt_lib_dst_dir, '..', '..'))
 
   # Make an extra copy of the sanitizer headers, to be put on the include path
   # of the fallback compiler.
-  sanitizer_include_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang', '3.6.0',
+  sanitizer_include_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang', VERSION,
                                        'include', 'sanitizer')
   aux_sanitizer_include_dir = os.path.join(LLVM_BUILD_DIR, 'lib', 'clang',
-                                           '3.6.0', 'include_sanitizer',
+                                           VERSION, 'include_sanitizer',
                                            'sanitizer')
   if not os.path.exists(aux_sanitizer_include_dir):
     os.makedirs(aux_sanitizer_include_dir)

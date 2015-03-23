@@ -87,6 +87,12 @@ import org.chromium.content_public.browser.NavigationHistory;
     }
 
     @Override
+    public boolean isInitialNavigation() {
+        return mNativeNavigationControllerAndroid != 0
+                && nativeIsInitialNavigation(mNativeNavigationControllerAndroid);
+    }
+
+    @Override
     public void loadIfNecessary() {
         if (mNativeNavigationControllerAndroid != 0) {
             nativeLoadIfNecessary(mNativeNavigationControllerAndroid);
@@ -202,12 +208,37 @@ import org.chromium.content_public.browser.NavigationHistory;
     }
 
     @Override
+    public NavigationEntry getEntryAtIndex(int index) {
+        if (mNativeNavigationControllerAndroid != 0) {
+            return nativeGetEntryAtIndex(mNativeNavigationControllerAndroid, index);
+        }
+
+        return null;
+    }
+
+    @Override
     public NavigationEntry getPendingEntry() {
         if (mNativeNavigationControllerAndroid != 0) {
             return nativeGetPendingEntry(mNativeNavigationControllerAndroid);
         }
 
         return null;
+    }
+
+    @Override
+    public int getLastCommittedEntryIndex() {
+        if (mNativeNavigationControllerAndroid != 0) {
+            return nativeGetLastCommittedEntryIndex(mNativeNavigationControllerAndroid);
+        }
+        return -1;
+    }
+
+    @Override
+    public boolean removeEntryAtIndex(int index) {
+        if (mNativeNavigationControllerAndroid != 0) {
+            return nativeRemoveEntryAtIndex(mNativeNavigationControllerAndroid, index);
+        }
+        return false;
     }
 
     @CalledByNative
@@ -223,6 +254,7 @@ import org.chromium.content_public.browser.NavigationHistory;
 
     private native boolean nativeCanGoBack(long nativeNavigationControllerAndroid);
     private native boolean nativeCanGoForward(long nativeNavigationControllerAndroid);
+    private native boolean nativeIsInitialNavigation(long nativeNavigationControllerAndroid);
     private native void nativeLoadIfNecessary(long nativeNavigationControllerAndroid);
     private native void nativeRequestRestoreLoad(long nativeNavigationControllerAndroid);
     private native boolean nativeCanGoToOffset(
@@ -263,5 +295,10 @@ import org.chromium.content_public.browser.NavigationHistory;
     private native boolean nativeGetUseDesktopUserAgent(long nativeNavigationControllerAndroid);
     private native void nativeSetUseDesktopUserAgent(long nativeNavigationControllerAndroid,
             boolean override, boolean reloadOnChange);
+    private native NavigationEntry nativeGetEntryAtIndex(
+            long nativeNavigationControllerAndroid, int index);
     private native NavigationEntry nativeGetPendingEntry(long nativeNavigationControllerAndroid);
+    private native int nativeGetLastCommittedEntryIndex(long nativeNavigationControllerAndroid);
+    private native boolean nativeRemoveEntryAtIndex(long nativeNavigationControllerAndroid,
+            int index);
 }

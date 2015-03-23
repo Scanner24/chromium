@@ -11,7 +11,7 @@
 #include "base/threading/thread.h"
 #include "third_party/WebKit/public/platform/WebThread.h"
 
-namespace mojo {
+namespace html_viewer {
 
 class WebThreadBase : public blink::WebThread {
  public:
@@ -38,6 +38,12 @@ class WebThreadImpl : public WebThreadBase {
   explicit WebThreadImpl(const char* name);
   virtual ~WebThreadImpl();
 
+  virtual void postTask(const blink::WebTraceLocation& location, Task* task);
+  virtual void postDelayedTask(const blink::WebTraceLocation& location,
+                               Task* task,
+                               long long delay_ms);
+
+  // TODO(skyostil): Remove once blink has migrated.
   virtual void postTask(Task* task);
   virtual void postDelayedTask(Task* task, long long delay_ms);
 
@@ -59,6 +65,12 @@ class WebThreadImplForMessageLoop : public WebThreadBase {
       base::MessageLoopProxy* message_loop);
   virtual ~WebThreadImplForMessageLoop();
 
+  virtual void postTask(const blink::WebTraceLocation& location, Task* task);
+  virtual void postDelayedTask(const blink::WebTraceLocation& location,
+                               Task* task,
+                               long long delay_ms);
+
+  // TODO(skyostil): Remove once blink has migrated.
   virtual void postTask(Task* task);
   virtual void postDelayedTask(Task* task, long long delay_ms);
 
@@ -73,6 +85,6 @@ class WebThreadImplForMessageLoop : public WebThreadBase {
   blink::PlatformThreadId thread_id_;
 };
 
-}  // namespace mojo
+}  // namespace html_viewer
 
 #endif  // MOJO_SERVICES_HTML_VIEWER_WEBTHREAD_IMPL_H_

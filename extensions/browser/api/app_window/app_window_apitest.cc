@@ -13,7 +13,7 @@
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "ui/base/base_window.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
@@ -29,12 +29,12 @@ class TestAppWindowRegistryObserver : public AppWindowRegistry::Observer {
       : profile_(profile), icon_updates_(0) {
     AppWindowRegistry::Get(profile_)->AddObserver(this);
   }
-  virtual ~TestAppWindowRegistryObserver() {
+  ~TestAppWindowRegistryObserver() override {
     AppWindowRegistry::Get(profile_)->RemoveObserver(this);
   }
 
   // Overridden from AppWindowRegistry::Observer:
-  virtual void OnAppWindowIconChanged(AppWindow* app_window) OVERRIDE {
+  void OnAppWindowIconChanged(AppWindow* app_window) override {
     ++icon_updates_;
   }
 
@@ -112,8 +112,15 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiGet) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShape) {
-  EXPECT_TRUE(RunPlatformAppTest("platform_apps/windows_api_shape"))
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShapeHasPerm) {
+  EXPECT_TRUE(
+      RunPlatformAppTest("platform_apps/windows_api_shape/has_permission"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShapeNoPerm) {
+  EXPECT_TRUE(
+      RunPlatformAppTest("platform_apps/windows_api_shape/no_permission"))
       << message_;
 }
 
@@ -167,5 +174,30 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
       "platform_apps/windows_api_visible_on_all_workspaces/in_stable"))
       << message_;
 }
+
+#if defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       WindowsApiImeWindowHasPermissions) {
+  EXPECT_TRUE(RunComponentExtensionTest(
+      "platform_apps/windows_api_ime/has_permissions_whitelisted"))
+      << message_;
+
+  EXPECT_TRUE(RunPlatformAppTestWithFlags(
+      "platform_apps/windows_api_ime/has_permissions_platform_app",
+      kFlagIgnoreManifestWarnings))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       WindowsApiImeWindowNoPermissions) {
+  EXPECT_TRUE(RunComponentExtensionTest(
+      "platform_apps/windows_api_ime/no_permissions_whitelisted"))
+      << message_;
+
+  EXPECT_TRUE(RunPlatformAppTest(
+      "platform_apps/windows_api_ime/no_permissions_platform_app"))
+      << message_;
+}
+#endif  // OS_CHROMEOS
 
 }  // namespace extensions

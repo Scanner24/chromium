@@ -12,10 +12,11 @@
 #include "cc/debug/lap_timer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/resources/raster_worker_pool.h"
+#include "cc/resources/tile_task_worker_pool.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
-#include "ui/gfx/rect.h"
+#include "cc/trees/layer_tree_impl.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
 
@@ -23,68 +24,45 @@ namespace {
 
 const int kDefaultRasterizeRepeatCount = 100;
 
-class BenchmarkRasterTask : public Task {
- public:
-  BenchmarkRasterTask(PicturePileImpl* picture_pile,
-                      const gfx::Rect& content_rect,
-                      float contents_scale,
-                      size_t repeat_count)
-      : picture_pile_(picture_pile),
-        content_rect_(content_rect),
-        contents_scale_(contents_scale),
-        repeat_count_(repeat_count),
-        is_solid_color_(false),
-        best_time_(base::TimeDelta::Max()) {}
+void RunBenchmark(RasterSource* raster_source,
+                  const gfx::Rect& content_rect,
+                  float contents_scale,
+                  size_t repeat_count,
+                  base::TimeDelta* min_time,
+                  bool* is_solid_color) {
+  // Parameters for LapTimer.
+  const int kTimeLimitMillis = 1;
+  const int kWarmupRuns = 0;
+  const int kTimeCheckInterval = 1;
 
-  // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {
-    // Parameters for LapTimer.
-    const int kTimeLimitMillis = 1;
-    const int kWarmupRuns = 0;
-    const int kTimeCheckInterval = 1;
+  *min_time = base::TimeDelta::Max();
+  for (size_t i = 0; i < repeat_count; ++i) {
+    // Run for a minimum amount of time to avoid problems with timer
+    // quantization when the layer is very small.
+    LapTimer timer(kWarmupRuns,
+                   base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+                   kTimeCheckInterval);
+    do {
+      SkBitmap bitmap;
+      bitmap.allocPixels(SkImageInfo::MakeN32Premul(content_rect.width(),
+                                                    content_rect.height()));
+      SkCanvas canvas(bitmap);
+      RasterSource::SolidColorAnalysis analysis;
 
-    for (size_t i = 0; i < repeat_count_; ++i) {
-      // Run for a minimum amount of time to avoid problems with timer
-      // quantization when the layer is very small.
-      LapTimer timer(kWarmupRuns,
-                     base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
-                     kTimeCheckInterval);
-      do {
-        SkBitmap bitmap;
-        bitmap.allocPixels(SkImageInfo::MakeN32Premul(content_rect_.width(),
-                                                      content_rect_.height()));
-        SkCanvas canvas(bitmap);
-        PicturePileImpl::Analysis analysis;
+      raster_source->PerformSolidColorAnalysis(content_rect, contents_scale,
+                                               &analysis);
+      raster_source->PlaybackToCanvas(&canvas, content_rect, contents_scale);
 
-        picture_pile_->AnalyzeInRect(
-            content_rect_, contents_scale_, &analysis, NULL);
-        picture_pile_->RasterToBitmap(
-            &canvas, content_rect_, contents_scale_, NULL);
+      *is_solid_color = analysis.is_solid_color;
 
-        is_solid_color_ = analysis.is_solid_color;
-
-        timer.NextLap();
-      } while (!timer.HasTimeLimitExpired());
-      base::TimeDelta duration =
-          base::TimeDelta::FromMillisecondsD(timer.MsPerLap());
-      if (duration < best_time_)
-        best_time_ = duration;
-    }
+      timer.NextLap();
+    } while (!timer.HasTimeLimitExpired());
+    base::TimeDelta duration =
+        base::TimeDelta::FromMillisecondsD(timer.MsPerLap());
+    if (duration < *min_time)
+      *min_time = duration;
   }
-
-  bool IsSolidColor() const { return is_solid_color_; }
-  base::TimeDelta GetBestTime() const { return best_time_; }
-
- private:
-  virtual ~BenchmarkRasterTask() {}
-
-  PicturePileImpl* picture_pile_;
-  gfx::Rect content_rect_;
-  float contents_scale_;
-  size_t repeat_count_;
-  bool is_solid_color_;
-  base::TimeDelta best_time_;
-};
+}
 
 class FixedInvalidationPictureLayerTilingClient
     : public PictureLayerTilingClient {
@@ -94,48 +72,38 @@ class FixedInvalidationPictureLayerTilingClient
       const Region invalidation)
       : base_client_(base_client), invalidation_(invalidation) {}
 
-  virtual scoped_refptr<Tile> CreateTile(
-      PictureLayerTiling* tiling,
-      const gfx::Rect& content_rect) OVERRIDE {
-    return base_client_->CreateTile(tiling, content_rect);
+  scoped_refptr<Tile> CreateTile(float contents_scale,
+                                 const gfx::Rect& content_rect) override {
+    return base_client_->CreateTile(contents_scale, content_rect);
   }
 
-  virtual PicturePileImpl* GetPile() OVERRIDE {
-    return base_client_->GetPile();
-  }
-
-  virtual gfx::Size CalculateTileSize(
-      const gfx::Size& content_bounds) const OVERRIDE {
+  gfx::Size CalculateTileSize(const gfx::Size& content_bounds) const override {
     return base_client_->CalculateTileSize(content_bounds);
   }
 
   // This is the only function that returns something different from the base
-  // client.
-  virtual const Region* GetInvalidation() OVERRIDE { return &invalidation_; }
+  // client. Avoids sharing tiles in this area.
+  const Region* GetPendingInvalidation() override { return &invalidation_; }
 
-  virtual const PictureLayerTiling* GetTwinTiling(
-      const PictureLayerTiling* tiling) const OVERRIDE {
-    return base_client_->GetTwinTiling(tiling);
+  const PictureLayerTiling* GetPendingOrActiveTwinTiling(
+      const PictureLayerTiling* tiling) const override {
+    return base_client_->GetPendingOrActiveTwinTiling(tiling);
   }
 
-  virtual PictureLayerTiling* GetRecycledTwinTiling(
-      const PictureLayerTiling* tiling) OVERRIDE {
+  PictureLayerTiling* GetRecycledTwinTiling(
+      const PictureLayerTiling* tiling) override {
     return base_client_->GetRecycledTwinTiling(tiling);
   }
 
-  virtual size_t GetMaxTilesForInterestArea() const OVERRIDE {
-    return base_client_->GetMaxTilesForInterestArea();
+  TilePriority::PriorityBin GetMaxTilePriorityBin() const override {
+    return base_client_->GetMaxTilePriorityBin();
   }
 
-  virtual float GetSkewportTargetTimeInSeconds() const OVERRIDE {
-    return base_client_->GetSkewportTargetTimeInSeconds();
-  }
+  WhichTree GetTree() const override { return base_client_->GetTree(); }
 
-  virtual int GetSkewportExtrapolationLimitInContentPixels() const OVERRIDE {
-    return base_client_->GetSkewportExtrapolationLimitInContentPixels();
+  bool RequiresHighResToDraw() const override {
+    return base_client_->RequiresHighResToDraw();
   }
-
-  virtual WhichTree GetTree() const OVERRIDE { return base_client_->GetTree(); }
 
  private:
   PictureLayerTilingClient* base_client_;
@@ -150,7 +118,7 @@ RasterizeAndRecordBenchmarkImpl::RasterizeAndRecordBenchmarkImpl(
     const MicroBenchmarkImpl::DoneCallback& callback)
     : MicroBenchmarkImpl(callback, origin_loop),
       rasterize_repeat_count_(kDefaultRasterizeRepeatCount) {
-  base::DictionaryValue* settings = NULL;
+  base::DictionaryValue* settings = nullptr;
   value->GetAsDictionary(&settings);
   if (!settings)
     return;
@@ -171,6 +139,8 @@ void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetDouble("rasterize_time_ms",
                     rasterize_results_.total_best_time.InMillisecondsF());
+  result->SetDouble("total_pictures_in_pile_size",
+                    rasterize_results_.total_memory_usage);
   result->SetInteger("pixels_rasterized", rasterize_results_.pixels_rasterized);
   result->SetInteger("pixels_rasterized_with_non_solid_color",
                      rasterize_results_.pixels_rasterized_with_non_solid_color);
@@ -184,7 +154,7 @@ void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
   result->SetInteger("total_picture_layers_off_screen",
                      rasterize_results_.total_picture_layers_off_screen);
 
-  NotifyDone(result.PassAs<base::Value>());
+  NotifyDone(result.Pass());
 }
 
 void RasterizeAndRecordBenchmarkImpl::Run(LayerImpl* layer) {
@@ -194,7 +164,7 @@ void RasterizeAndRecordBenchmarkImpl::Run(LayerImpl* layer) {
 
 void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
   rasterize_results_.total_picture_layers++;
-  if (!layer->DrawsContent()) {
+  if (!layer->CanHaveTilings()) {
     rasterize_results_.total_picture_layers_with_no_content++;
     return;
   }
@@ -203,17 +173,20 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
     return;
   }
 
-  TaskGraphRunner* task_graph_runner = RasterWorkerPool::GetTaskGraphRunner();
-  DCHECK(task_graph_runner);
-
-  if (!task_namespace_.IsValid())
-    task_namespace_ = task_graph_runner->GetNamespaceToken();
-
   FixedInvalidationPictureLayerTilingClient client(
       layer, gfx::Rect(layer->content_bounds()));
-  PictureLayerTilingSet tiling_set(&client, layer->content_bounds());
 
-  PictureLayerTiling* tiling = tiling_set.AddTiling(layer->contents_scale_x());
+  // In this benchmark, we will create a local tiling set and measure how long
+  // it takes to rasterize content. As such, the actual settings used here don't
+  // really matter.
+  const LayerTreeSettings& settings = layer->layer_tree_impl()->settings();
+  scoped_ptr<PictureLayerTilingSet> tiling_set = PictureLayerTilingSet::Create(
+      &client, settings.max_tiles_for_interest_area,
+      settings.skewport_target_time_in_seconds,
+      settings.skewport_extrapolation_limit_in_content_pixels);
+
+  PictureLayerTiling* tiling = tiling_set->AddTiling(layer->contents_scale_x(),
+                                                     layer->GetRasterSource());
   tiling->CreateAllTilesForTesting();
   for (PictureLayerTiling::CoverageIterator it(
            tiling, layer->contents_scale_x(), layer->visible_content_rect());
@@ -221,55 +194,41 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
        ++it) {
     DCHECK(*it);
 
-    PicturePileImpl* picture_pile = (*it)->picture_pile();
+    RasterSource* raster_source = (*it)->raster_source();
     gfx::Rect content_rect = (*it)->content_rect();
     float contents_scale = (*it)->contents_scale();
 
-    scoped_refptr<BenchmarkRasterTask> benchmark_raster_task(
-        new BenchmarkRasterTask(picture_pile,
-                                content_rect,
-                                contents_scale,
-                                rasterize_repeat_count_));
-
-    TaskGraph graph;
-
-    graph.nodes.push_back(
-        TaskGraph::Node(benchmark_raster_task.get(),
-                        RasterWorkerPool::kBenchmarkRasterTaskPriority,
-                        0u));
-
-    task_graph_runner->ScheduleTasks(task_namespace_, &graph);
-    task_graph_runner->WaitForTasksToFinishRunning(task_namespace_);
-
-    Task::Vector completed_tasks;
-    task_graph_runner->CollectCompletedTasks(task_namespace_, &completed_tasks);
-    DCHECK_EQ(1u, completed_tasks.size());
-    DCHECK_EQ(completed_tasks[0], benchmark_raster_task);
+    base::TimeDelta min_time;
+    bool is_solid_color = false;
+    RunBenchmark(raster_source, content_rect, contents_scale,
+                 rasterize_repeat_count_, &min_time, &is_solid_color);
 
     int tile_size = content_rect.width() * content_rect.height();
-    base::TimeDelta min_time = benchmark_raster_task->GetBestTime();
-    bool is_solid_color = benchmark_raster_task->IsSolidColor();
-
     if (layer->contents_opaque())
       rasterize_results_.pixels_rasterized_as_opaque += tile_size;
 
-    if (!is_solid_color) {
+    if (!is_solid_color)
       rasterize_results_.pixels_rasterized_with_non_solid_color += tile_size;
-    }
 
     rasterize_results_.pixels_rasterized += tile_size;
     rasterize_results_.total_best_time += min_time;
   }
+
+  const RasterSource* layer_raster_source = layer->GetRasterSource();
+  rasterize_results_.total_memory_usage +=
+      layer_raster_source->GetPictureMemoryUsage();
 }
 
 RasterizeAndRecordBenchmarkImpl::RasterizeResults::RasterizeResults()
     : pixels_rasterized(0),
       pixels_rasterized_with_non_solid_color(0),
       pixels_rasterized_as_opaque(0),
+      total_memory_usage(0),
       total_layers(0),
       total_picture_layers(0),
       total_picture_layers_with_no_content(0),
-      total_picture_layers_off_screen(0) {}
+      total_picture_layers_off_screen(0) {
+}
 
 RasterizeAndRecordBenchmarkImpl::RasterizeResults::~RasterizeResults() {}
 

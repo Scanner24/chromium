@@ -26,9 +26,15 @@ class ProfileMetrics {
     size_t supervised;
     size_t unused;
     size_t gaia_icon;
+    size_t auth_errors;
 
     ProfileCounts()
-        : total(0), signedin(0), supervised(0), unused(0), gaia_icon(0) {}
+        : total(0),
+          signedin(0),
+          supervised(0),
+          unused(0),
+          gaia_icon(0),
+          auth_errors(0) {}
   };
 
   // Enum for counting the ways users were added.
@@ -49,8 +55,8 @@ class ProfileMetrics {
 
   // Enum for counting the ways user profiles and menus were opened.
   enum ProfileOpen {
-    NTP_AVATAR_BUBBLE = 0,    // User opens avatar icon menu from NTP
-    ICON_AVATAR_BUBBLE,       // User opens avatar icon menu from icon
+    NTP_AVATAR_BUBBLE = 0,    // User opens avatar menu from NTP
+    ICON_AVATAR_BUBBLE,       // User opens the avatar menu from button
     SWITCH_PROFILE_ICON,      // User switches profiles from icon menu
     SWITCH_PROFILE_MENU,      // User switches profiles from menu bar
     SWITCH_PROFILE_DOCK,      // User switches profiles from dock (Mac-only)
@@ -118,31 +124,39 @@ class ProfileMetrics {
     PROFILE_DESKTOP_MENU_EDIT_IMAGE,
     // User opened the user menu, and opened the user manager.
     PROFILE_DESKTOP_MENU_OPEN_USER_MANAGER,
+    // User opened the user menu, and selected Go Incognito.
+    PROFILE_DESKTOP_MENU_GO_INCOGNITO,
     NUM_PROFILE_DESKTOP_MENU_METRICS,
   };
 
 #if defined(OS_ANDROID)
-  // TODO(aruslan): http://crbug.com/379987 Move to a generator.
   // Enum for tracking user interactions with the account management menu
   // on Android.
-  // This should match its counterpart in AccountManagementScreenHelper.java.
+  //
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.profiles
+  // GENERATED_JAVA_CLASS_NAME_OVERRIDE: ProfileAccountManagementMetrics
+  // GENERATED_JAVA_PREFIX_TO_STRIP: PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_
   enum ProfileAndroidAccountManagementMenu {
     // User arrived at the Account management screen.
     PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_VIEW = 0,
     // User arrived at the Account management screen, and clicked Add account.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_ADD_ACCOUNT,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_ADD_ACCOUNT = 1,
     // User arrived at the Account management screen, and clicked Go incognito.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_GO_INCOGNITO,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_GO_INCOGNITO = 2,
     // User arrived at the Account management screen, and clicked on primary.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_CLICK_PRIMARY_ACCOUNT,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_CLICK_PRIMARY_ACCOUNT = 3,
     // User arrived at the Account management screen, and clicked on secondary.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_CLICK_SECONDARY_ACCOUNT,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_CLICK_SECONDARY_ACCOUNT = 4,
     // User arrived at the Account management screen, toggled Chrome signout.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_TOGGLE_SIGNOUT,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_TOGGLE_SIGNOUT = 5,
     // User toggled Chrome signout, and clicked Signout.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_SIGNOUT_SIGNOUT,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_SIGNOUT_SIGNOUT = 6,
     // User toggled Chrome signout, and clicked Cancel.
-    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_SIGNOUT_CANCEL,
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_SIGNOUT_CANCEL = 7,
+    // User arrived at the android Account management screen directly from some
+    // Gaia requests.
+    PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_DIRECT_ADD_ACCOUNT = 8,
     NUM_PROFILE_ANDROID_ACCOUNT_MANAGEMENT_MENU_METRICS,
   };
 #endif  // defined(OS_ANDROID)
@@ -193,13 +207,16 @@ class ProfileMetrics {
   static bool CountProfileInformation(ProfileManager* manager,
                                       ProfileCounts* counts);
 
+  static void LogNumberOfProfileSwitches();
   static void LogNumberOfProfiles(ProfileManager* manager);
   static void LogProfileAddNewUser(ProfileAdd metric);
   static void LogProfileAvatarSelection(size_t icon_index);
   static void LogProfileDeleteUser(ProfileDelete metric);
   static void LogProfileOpenMethod(ProfileOpen metric);
+  static void LogProfileSwitch(ProfileOpen metric,
+                               ProfileManager* manager,
+                               const base::FilePath& profile_path);
   static void LogProfileSwitchGaia(ProfileGaia metric);
-  static void LogProfileSwitchUser(ProfileOpen metric);
   static void LogProfileSyncInfo(ProfileSync metric);
   static void LogProfileAuthResult(ProfileAuth metric);
   static void LogProfileDesktopMenu(ProfileDesktopMenu metric,

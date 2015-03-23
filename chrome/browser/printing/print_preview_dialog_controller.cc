@@ -28,6 +28,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -40,6 +41,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/webplugininfo.h"
+#include "extensions/browser/guest_view/guest_view_base.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 
 using content::NavigationController;
@@ -50,9 +52,8 @@ namespace {
 
 void EnableInternalPDFPluginForContents(WebContents* preview_dialog) {
   // Always enable the internal PDF plugin for the print preview page.
-  base::FilePath pdf_plugin_path;
-  if (!PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_plugin_path))
-    return;
+  base::FilePath pdf_plugin_path = base::FilePath::FromUTF8Unsafe(
+      ChromeContentClient::kPDFPluginPath);
 
   content::WebPluginInfo pdf_plugin;
   if (!content::PluginService::GetInstance()->GetPluginInfoByPath(
@@ -69,19 +70,18 @@ void EnableInternalPDFPluginForContents(WebContents* preview_dialog) {
 class PrintPreviewDialogDelegate : public ui::WebDialogDelegate {
  public:
   explicit PrintPreviewDialogDelegate(WebContents* initiator);
-  virtual ~PrintPreviewDialogDelegate();
+  ~PrintPreviewDialogDelegate() override;
 
-  virtual ui::ModalType GetDialogModalType() const OVERRIDE;
-  virtual base::string16 GetDialogTitle() const OVERRIDE;
-  virtual GURL GetDialogContentURL() const OVERRIDE;
-  virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
-  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
-  virtual std::string GetDialogArgs() const OVERRIDE;
-  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
-  virtual void OnCloseContents(WebContents* source,
-                               bool* out_close_dialog) OVERRIDE;
-  virtual bool ShouldShowDialogTitle() const OVERRIDE;
+  ui::ModalType GetDialogModalType() const override;
+  base::string16 GetDialogTitle() const override;
+  GURL GetDialogContentURL() const override;
+  void GetWebUIMessageHandlers(
+      std::vector<WebUIMessageHandler*>* handlers) const override;
+  void GetDialogSize(gfx::Size* size) const override;
+  std::string GetDialogArgs() const override;
+  void OnDialogClosed(const std::string& json_retval) override;
+  void OnCloseContents(WebContents* source, bool* out_close_dialog) override;
+  bool ShouldShowDialogTitle() const override;
 
  private:
   WebContents* initiator_;
@@ -123,7 +123,15 @@ void PrintPreviewDialogDelegate::GetDialogSize(gfx::Size* size) const {
   *size = kMinDialogSize;
 
   web_modal::WebContentsModalDialogHost* host = NULL;
-  Browser* browser = chrome::FindBrowserWithWebContents(initiator_);
+  content::WebContents* outermost_web_contents = initiator_;
+  const extensions::GuestViewBase* guest_view =
+      extensions::GuestViewBase::FromWebContents(outermost_web_contents);
+  while (guest_view && guest_view->attached()) {
+    outermost_web_contents = guest_view->embedder_web_contents();
+    guest_view =
+        extensions::GuestViewBase::FromWebContents(outermost_web_contents);
+  }
+  Browser* browser = chrome::FindBrowserWithWebContents(outermost_web_contents);
   if (browser)
     host = browser->window()->GetWebContentsModalDialogHost();
 
@@ -131,7 +139,7 @@ void PrintPreviewDialogDelegate::GetDialogSize(gfx::Size* size) const {
     size->SetToMax(host->GetMaximumDialogSize());
     size->Enlarge(-2 * kBorder, -kBorder);
   } else {
-    size->SetToMax(initiator_->GetContainerBounds().size());
+    size->SetToMax(outermost_web_contents->GetContainerBounds().size());
     size->Enlarge(-2 * kBorder, -2 * kBorder);
   }
 
@@ -371,11 +379,18 @@ WebContents* PrintPreviewDialogController::CreatePrintPreviewDialog(
 
   // The dialog delegates are deleted when the dialog is closed.
   ConstrainedWebDialogDelegate* web_dialog_delegate =
-      CreateConstrainedWebDialog(initiator->GetBrowserContext(),
-                                 new PrintPreviewDialogDelegate(initiator),
-                                 initiator);
+      ShowConstrainedWebDialog(initiator->GetBrowserContext(),
+                               new PrintPreviewDialogDelegate(initiator),
+                               initiator);
 
   WebContents* preview_dialog = web_dialog_delegate->GetWebContents();
+
+  // Clear the zoom level for the print preview dialog so it isn't affected by
+  // the default zoom level. This also controls the zoom level of the OOP PDF
+  // extension when iframed by the print preview dialog.
+  GURL print_url(chrome::kChromeUIPrintURL);
+  content::HostZoomMap::Get(preview_dialog->GetSiteInstance())
+      ->SetZoomLevelForHostAndScheme(print_url.scheme(), print_url.host(), 0);
   EnableInternalPDFPluginForContents(preview_dialog);
   PrintViewManager::CreateForWebContents(preview_dialog);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(

@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/views/settings_api_bubble_helper_views.h"
 #include "chrome/browser/ui/views/toolbar/home_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "chrome/common/extensions/manifest_handlers/settings_overrides_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_url_handler.h"
@@ -34,12 +35,8 @@ void ShowSettingsApiBubble(SettingsApiOverrideType type,
     return;
 
   SettingsApiBubbleController* controller = settings_api_bubble.get();
-  ExtensionMessageBubbleView* bubble_delegate =
-      new ExtensionMessageBubbleView(
-          anchor_view,
-          arrow,
-          settings_api_bubble.PassAs<
-              ExtensionMessageBubbleController>());
+  ExtensionMessageBubbleView* bubble_delegate = new ExtensionMessageBubbleView(
+      anchor_view, arrow, settings_api_bubble.Pass());
   views::BubbleDelegateView::CreateBubble(bubble_delegate);
   controller->Show(bubble_delegate);
 }
@@ -119,12 +116,10 @@ void MaybeShowExtensionControlledNewTabPage(
     return;
 
   NtpOverriddenBubbleController* controller = ntp_overridden_bubble.get();
-  ExtensionMessageBubbleView* bubble_delegate =
-      new ExtensionMessageBubbleView(
-          BrowserView::GetBrowserViewForBrowser(browser)->toolbar()->app_menu(),
-          views::BubbleBorder::TOP_RIGHT,
-          ntp_overridden_bubble.PassAs<
-              ExtensionMessageBubbleController>());
+  ExtensionMessageBubbleView* bubble_delegate = new ExtensionMessageBubbleView(
+      BrowserView::GetBrowserViewForBrowser(browser)->toolbar()->app_menu(),
+      views::BubbleBorder::TOP_RIGHT,
+      ntp_overridden_bubble.Pass());
   views::BubbleDelegateView::CreateBubble(bubble_delegate);
   controller->Show(bubble_delegate);
 }

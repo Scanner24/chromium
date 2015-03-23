@@ -19,8 +19,6 @@
 #include "base/stl_util.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -33,6 +31,8 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/prefetch_messages.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -175,22 +175,22 @@ class GetURLForURLIDTask : public history::HistoryDBTask {
         start_time_(base::Time::Now()) {
   }
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     DoURLLookup(db, &request_->source_url_);
     for (int i = 0; i < static_cast<int>(request_->candidate_urls_.size()); i++)
       DoURLLookup(db, &request_->candidate_urls_[i]);
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
+  void DoneRunOnMainThread() override {
     callback_.Run();
     TIMING_HISTOGRAM("Prerender.LocalPredictorURLLookupTime",
                      base::Time::Now() - start_time_);
   }
 
  private:
-  virtual ~GetURLForURLIDTask() {}
+  ~GetURLForURLIDTask() override {}
 
   void DoURLLookup(history::HistoryDatabase* db,
                    PrerenderLocalPredictor::LocalPredictorURLInfo* request) {
@@ -216,18 +216,18 @@ class GetVisitHistoryTask : public history::HistoryDBTask {
         visit_history_(new vector<history::BriefVisitInfo>) {
   }
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     db->GetBriefVisitInfoOfMostRecentVisits(max_visits_, visit_history_.get());
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
+  void DoneRunOnMainThread() override {
     local_predictor_->OnGetInitialVisitHistory(visit_history_.Pass());
   }
 
  private:
-  virtual ~GetVisitHistoryTask() {}
+  ~GetVisitHistoryTask() override {}
 
   PrerenderLocalPredictor* local_predictor_;
   int max_visits_;
@@ -292,7 +292,7 @@ bool IsExtendedRootURL(const GURL& url) {
 }
 
 bool IsRootPageURL(const GURL& url) {
-  return (url.path() == "/" || url.path() == "" || IsExtendedRootURL(url)) &&
+  return (url.path() == "/" || url.path().empty() || IsExtendedRootURL(url)) &&
       (!url.has_query()) && (!url.has_ref());
 }
 
@@ -307,14 +307,14 @@ bool IsLogOutURL(const GURL& url) {
 }
 
 int64 URLHashToInt64(const unsigned char* data) {
-  COMPILE_ASSERT(kURLHashSize < sizeof(int64), url_hash_must_fit_in_int64);
+  static_assert(kURLHashSize < sizeof(int64), "url hash must fit in int64");
   int64 value = 0;
   memcpy(&value, data, kURLHashSize);
   return value;
 }
 
 int64 GetInt64URLHashForURL(const GURL& url) {
-  COMPILE_ASSERT(kURLHashSize < sizeof(int64), url_hash_must_fit_in_int64);
+  static_assert(kURLHashSize < sizeof(int64), "url hash must fit in int64");
   scoped_ptr<crypto::SecureHash> hash(
       crypto::SecureHash::Create(crypto::SecureHash::SHA256));
   int64 hash_value = 0;
@@ -528,9 +528,9 @@ class PrerenderLocalPredictor::PrefetchList {
 PrerenderLocalPredictor::PrerenderLocalPredictor(
     PrerenderManager* prerender_manager)
     : prerender_manager_(prerender_manager),
-      is_visit_database_observer_(false),
-      weak_factory_(this),
-      prefetch_list_(new PrefetchList()) {
+      prefetch_list_(new PrefetchList()),
+      history_service_observer_(this),
+      weak_factory_(this) {
   RecordEvent(EVENT_CONSTRUCTED);
   if (base::MessageLoop::current()) {
     timer_.Start(FROM_HERE,
@@ -583,15 +583,11 @@ PrerenderLocalPredictor::~PrerenderLocalPredictor() {
 
 void PrerenderLocalPredictor::Shutdown() {
   timer_.Stop();
-  if (is_visit_database_observer_) {
-    HistoryService* history = GetHistoryIfExists();
-    CHECK(history);
-    history->RemoveVisitDatabaseObserver(this);
-    is_visit_database_observer_ = false;
-  }
+  history_service_observer_.RemoveAll();
 }
 
-void PrerenderLocalPredictor::OnAddVisit(const history::BriefVisitInfo& info) {
+void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
+                                         const history::BriefVisitInfo& info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordEvent(EVENT_ADD_VISIT);
   if (!visit_history_.get())
@@ -1138,13 +1134,12 @@ void PrerenderLocalPredictor::Init() {
   }
   HistoryService* history = GetHistoryIfExists();
   if (history) {
-    CHECK(!is_visit_database_observer_);
+    CHECK(!history_service_observer_.IsObserving(history));
     history->ScheduleDBTask(
         scoped_ptr<history::HistoryDBTask>(
             new GetVisitHistoryTask(this, kMaxVisitHistory)),
         &history_db_tracker_);
-    history->AddVisitDatabaseObserver(this);
-    is_visit_database_observer_ = true;
+    history_service_observer_.Add(history);
   } else {
     RecordEvent(EVENT_INIT_FAILED_NO_HISTORY);
   }
@@ -1529,52 +1524,7 @@ void PrerenderLocalPredictor::OnTabHelperURLSeen(
         RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MATCH_ENTRY);
       if (browser_navigate_initiated)
         RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MATCH_BROWSER_NAVIGATE);
-    } else {
-      SessionStorageNamespace* prerender_session_storage_namespace =
-          best_matched_prerender->prerender_handle->
-          GetSessionStorageNamespace();
-      if (!prerender_session_storage_namespace) {
-        RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MISMATCH_NO_NAMESPACE);
-      } else {
-        RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MISMATCH_MERGE_ISSUED);
-        prerender_session_storage_namespace->Merge(
-            false,
-            best_matched_prerender->prerender_handle->GetChildId(),
-            tab_session_storage_namespace,
-            base::Bind(&PrerenderLocalPredictor::ProcessNamespaceMergeResult,
-                       weak_factory_.GetWeakPtr()));
-      }
     }
-  }
-}
-
-void PrerenderLocalPredictor::ProcessNamespaceMergeResult(
-    content::SessionStorageNamespace::MergeResult result) {
-  RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_RECEIVED);
-  switch (result) {
-    case content::SessionStorageNamespace::MERGE_RESULT_NAMESPACE_NOT_FOUND:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NAMESPACE_NOT_FOUND);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NAMESPACE_NOT_ALIAS:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NAMESPACE_NOT_ALIAS);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NOT_LOGGING:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NOT_LOGGING);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NO_TRANSACTIONS:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NO_TRANSACTIONS);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_TOO_MANY_TRANSACTIONS:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_TOO_MANY_TRANSACTIONS);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NOT_MERGEABLE:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NOT_MERGEABLE);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_MERGEABLE:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_MERGEABLE);
-      break;
-    default:
-      NOTREACHED();
   }
 }
 

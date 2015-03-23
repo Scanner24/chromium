@@ -45,6 +45,9 @@ class PPAPI_PROXY_EXPORT UDPSocketResourceBase: public PluginResource {
   // The maximum number of received packets that we allow instances of this
   // class to buffer.
   static const size_t kPluginReceiveBufferSlots;
+  // The maximum number of buffers that we allow instances of this class to be
+  // sending before we block the plugin.
+  static const size_t kPluginSendBufferSlots;
 
  protected:
   UDPSocketResourceBase(Connection connection,
@@ -54,6 +57,7 @@ class PPAPI_PROXY_EXPORT UDPSocketResourceBase: public PluginResource {
 
   int32_t SetOptionImpl(PP_UDPSocket_Option name,
                         const PP_Var& value,
+                        bool check_bind_state,
                         scoped_refptr<TrackedCallback> callback);
   int32_t BindImpl(const PP_NetAddress_Private* addr,
                    scoped_refptr<TrackedCallback> callback);
@@ -79,7 +83,7 @@ class PPAPI_PROXY_EXPORT UDPSocketResourceBase: public PluginResource {
 
   // Resource overrides.
   virtual void OnReplyReceived(const ResourceMessageReplyParams& params,
-                               const IPC::Message& msg) OVERRIDE;
+                               const IPC::Message& msg) override;
 
   void PostAbortIfNecessary(scoped_refptr<TrackedCallback>* callback);
 
@@ -106,12 +110,16 @@ class PPAPI_PROXY_EXPORT UDPSocketResourceBase: public PluginResource {
                             PP_Resource* output_addr);
 
   bool private_api_;
+
+  // |bind_called_| is true after Bind() is called, while |bound_| is true,
+  // after Bind() succeeds. Bind() is an asynchronous method, so the timing
+  // on which of these is set is slightly different.
+  bool bind_called_;
   bool bound_;
   bool closed_;
 
   scoped_refptr<TrackedCallback> bind_callback_;
   scoped_refptr<TrackedCallback> recvfrom_callback_;
-  scoped_refptr<TrackedCallback> sendto_callback_;
 
   char* read_buffer_;
   int32_t bytes_to_read_;
@@ -121,6 +129,8 @@ class PPAPI_PROXY_EXPORT UDPSocketResourceBase: public PluginResource {
   PP_NetAddress_Private bound_addr_;
 
   std::queue<RecvBuffer> recv_buffers_;
+
+  std::queue<scoped_refptr<TrackedCallback>> sendto_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(UDPSocketResourceBase);
 };

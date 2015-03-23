@@ -6,8 +6,8 @@
 
 #include "base/logging.h"
 #include "base/time/time.h"
-#include "mojo/services/public/interfaces/input_events/input_event_constants.mojom.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/mojo_services/src/input_events/public/interfaces/input_event_constants.mojom.h"
 
 namespace mojo {
 namespace {
@@ -107,7 +107,7 @@ scoped_ptr<blink::WebInputEvent> BuildWebMouseEventFrom(const EventPtr& event) {
 
   web_event->clickCount = GetClickCount(event->flags);
 
-  return web_event.PassAs<blink::WebInputEvent>();
+  return web_event.Pass();
 }
 
 scoped_ptr<blink::WebInputEvent> BuildWebKeyboardEvent(
@@ -139,7 +139,7 @@ scoped_ptr<blink::WebInputEvent> BuildWebKeyboardEvent(
   web_event->unmodifiedText[0] = event->key_data->unmodified_text;
 
   web_event->setKeyIdentifierFromWindowsKeyCode();
-  return web_event.PassAs<blink::WebInputEvent>();
+  return web_event.Pass();
 }
 
 scoped_ptr<blink::WebInputEvent> BuildWebMouseWheelEventFrom(
@@ -173,7 +173,7 @@ scoped_ptr<blink::WebInputEvent> BuildWebMouseWheelEventFrom(
   web_event->wheelTicksX = web_event->deltaX / kPixelsPerTick;
   web_event->wheelTicksY = web_event->deltaY / kPixelsPerTick;
 
-  return web_event.PassAs<blink::WebInputEvent>();
+  return web_event.Pass();
 }
 
 }  // namespace

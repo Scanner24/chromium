@@ -44,9 +44,6 @@ class OmniboxView {
   CommandUpdater* command_updater() { return command_updater_; }
   const CommandUpdater* command_updater() const { return command_updater_; }
 
-  // Handle mouse release events concerning the origin chip.
-  void HandleOriginChipMouseRelease();
-
   // Shared cross-platform focus handling.
   void OnDidKillFocus();
 
@@ -57,11 +54,14 @@ class OmniboxView {
   // Called when the window's active tab changes.
   virtual void OnTabChanged(const content::WebContents* web_contents) = 0;
 
+  // Called to clear the saved state for |web_contents|.
+  virtual void ResetTabState(content::WebContents* web_contents) = 0;
+
   // Called when any relevant state changes other than changing tabs.
   virtual void Update() = 0;
 
-  // Updates the placeholder text with the value of GetHintText() if the
-  // origin chip is enabled.
+  // Updates the placeholder text with the value of GetHintText() if hint texts
+  // are enabled.
   virtual void UpdatePlaceholderText() = 0;
 
   // Asks the browser to load the specified match, using the supplied

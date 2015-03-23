@@ -14,7 +14,7 @@
  *      component extension.
  *  - Settings for enabling and disabling the hotword extension has moved to
  *      Chrome settings.
- *  - Newtab page is served via chrome://newtab/
+ *  - NewTab page is served via chrome://newtab/
  *
  */
 
@@ -29,6 +29,14 @@ var OptInManager = function() {};
  * @private
  */
 OptInManager.HOTWORD_EXTENSION_ID_ = 'bepbmhgboaologfdajaanbcjmnhjmhfn';
+
+
+/**
+ * Test extension ID.
+ * @const {string}
+ * @private
+ */
+OptInManager.TEST_EXTENSION_ID_ = 'cpfhkdbjfdgdebcjlifoldbijinjfifp';
 
 
 /**
@@ -58,19 +66,27 @@ OptInManager.CommandFromPage = {
  */
 OptInManager.prototype.injectTab_ = function(
     tab, sendResponse, hotwordStatus) {
-  if (tab.incognito || !hotwordStatus.available) {
-    sendResponse({'doNotShowOptinMessage': true});
-    return;
+  var response = {'doNotShowOptinMessage': true};
+
+  if (!tab.incognito && hotwordStatus.available) {
+    if (!hotwordStatus.enabledSet)
+      response = hotwordStatus;
+    else if (hotwordStatus.enabled)
+      chrome.tabs.executeScript(tab.id, {'file': 'audio_client.js'});
   }
 
-  if (!hotwordStatus.enabledSet) {
-    sendResponse(hotwordStatus);
-    return;
+  try {
+    sendResponse(response);
+  } catch (err) {
+    // Suppress the exception thrown by sendResponse() when the page doesn't
+    // specify a response callback in the call to chrome.runtime.sendMessage().
+    // Unfortunately, there doesn't appear to be a way to detect one-way
+    // messages without explicitly saying in the message itself.  This message
+    // is defined as a constant in extensions/renderer/messaging_bindings.cc
+    if (err.message == 'Attempting to use a disconnected port object')
+      return;
+    throw err;
   }
-
-  if (hotwordStatus.enabled)
-    chrome.tabs.executeScript(tab.id, {'file': 'audio_client.js'});
-  sendResponse({'doNotShowOptinMessage': true});
 };
 
 
@@ -88,11 +104,14 @@ OptInManager.prototype.handleMessage_ = function(
   switch (request.type) {
     case OptInManager.CommandFromPage.PAGE_WAKEUP:
       if (((sender.tab && this.isEligibleUrl(sender.tab.url)) ||
-          sender.id == OptInManager.HOTWORD_EXTENSION_ID_) &&
+          sender.id == OptInManager.HOTWORD_EXTENSION_ID_ ||
+          sender.id == OptInManager.TEST_EXTENSION_ID_) &&
           chrome.hotwordPrivate && chrome.hotwordPrivate.getStatus) {
         chrome.hotwordPrivate.getStatus(
-            this.injectTab_.bind(this, request.tab || sender.tab,
-                                 sendResponse));
+            this.injectTab_.bind(
+                this,
+                request.tab || sender.tab || {incognito: true},
+                sendResponse));
         return true;
       }
       break;

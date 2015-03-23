@@ -48,14 +48,12 @@ namespace {
 class TestDelegate : public views::WidgetDelegateView {
  public:
   explicit TestDelegate(bool system_modal) : system_modal_(system_modal) {}
-  virtual ~TestDelegate() {}
+  ~TestDelegate() override {}
 
   // Overridden from views::WidgetDelegate:
-  virtual views::View* GetContentsView() OVERRIDE {
-    return this;
-  }
+  views::View* GetContentsView() override { return this; }
 
-  virtual ui::ModalType GetModalType() const OVERRIDE {
+  ui::ModalType GetModalType() const override {
     return system_modal_ ? ui::MODAL_TYPE_SYSTEM : ui::MODAL_TYPE_NONE;
   }
 
@@ -69,7 +67,7 @@ class DeleteOnBlurDelegate : public aura::test::TestWindowDelegate,
                              public aura::client::FocusChangeObserver {
  public:
   DeleteOnBlurDelegate() : window_(NULL) {}
-  virtual ~DeleteOnBlurDelegate() {}
+  ~DeleteOnBlurDelegate() override {}
 
   void SetWindow(aura::Window* window) {
     window_ = window;
@@ -78,13 +76,11 @@ class DeleteOnBlurDelegate : public aura::test::TestWindowDelegate,
 
  private:
   // aura::test::TestWindowDelegate overrides:
-  virtual bool CanFocus() OVERRIDE {
-    return true;
-  }
+  bool CanFocus() override { return true; }
 
   // aura::client::FocusChangeObserver implementation:
-  virtual void OnWindowFocused(aura::Window* gained_focus,
-                               aura::Window* lost_focus) OVERRIDE {
+  void OnWindowFocused(aura::Window* gained_focus,
+                       aura::Window* lost_focus) override {
     if (window_ == lost_focus)
       delete window_;
   }
@@ -380,8 +376,7 @@ TEST_F(RootWindowControllerTest, ModalContainerNotLoggedInLoggedIn) {
 
 TEST_F(RootWindowControllerTest, ModalContainerBlockedSession) {
   UpdateDisplay("600x600");
-  Shell* shell = Shell::GetInstance();
-  RootWindowController* controller = shell->GetPrimaryRootWindowController();
+  RootWindowController* controller = Shell::GetPrimaryRootWindowController();
   aura::Window* lock_container =
       controller->GetContainer(kShellWindowId_LockScreenContainer);
   for (int block_reason = FIRST_BLOCK_REASON;
@@ -526,9 +521,7 @@ TEST_F(RootWindowControllerTest, FocusBlockedWindow) {
 class DestroyedWindowObserver : public aura::WindowObserver {
  public:
   DestroyedWindowObserver() : destroyed_(false), window_(NULL) {}
-  virtual ~DestroyedWindowObserver() {
-    Shutdown();
-  }
+  ~DestroyedWindowObserver() override { Shutdown(); }
 
   void SetWindow(Window* window) {
     window_ = window;
@@ -538,7 +531,7 @@ class DestroyedWindowObserver : public aura::WindowObserver {
   bool destroyed() const { return destroyed_; }
 
   // WindowObserver overrides:
-  virtual void OnWindowDestroying(Window* window) OVERRIDE {
+  void OnWindowDestroying(Window* window) override {
     destroyed_ = true;
     Shutdown();
   }
@@ -614,11 +607,11 @@ TEST_F(NoSessionRootWindowControllerTest, Event) {
 class VirtualKeyboardRootWindowControllerTest
     : public RootWindowControllerTest {
  public:
-  VirtualKeyboardRootWindowControllerTest() {};
-  virtual ~VirtualKeyboardRootWindowControllerTest() {};
+  VirtualKeyboardRootWindowControllerTest() {}
+  ~VirtualKeyboardRootWindowControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
+  void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
         keyboard::switches::kEnableVirtualKeyboard);
     test::AshTestBase::SetUp();
     Shell::GetPrimaryRootWindowController()->ActivateKeyboard(
@@ -634,7 +627,7 @@ class MockTextInputClient : public ui::DummyTextInputClient {
   MockTextInputClient() :
       ui::DummyTextInputClient(ui::TEXT_INPUT_TYPE_TEXT) {}
 
-  virtual void EnsureCaretInRect(const gfx::Rect& rect) OVERRIDE {
+  void EnsureCaretInRect(const gfx::Rect& rect) override {
     visible_rect_ = rect;
   }
 
@@ -653,7 +646,7 @@ class TargetHitTestEventHandler : public ui::test::TestEventHandler {
   TargetHitTestEventHandler() {}
 
   // ui::test::TestEventHandler overrides.
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->type() == ui::ET_MOUSE_PRESSED)
       ui::test::TestEventHandler::OnMouseEvent(event);
     event->StopPropagation();

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_observer.h"
 #include "chrome/browser/ui/views/touch_uma/touch_uma.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/theme_resources.h"
@@ -40,12 +42,12 @@
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/masked_targeter_delegate.h"
@@ -58,6 +60,7 @@
 #include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
+#include "ui/gfx/win/dpi.h"
 #include "ui/gfx/win/hwnd_util.h"
 #include "ui/views/widget/monitor_win.h"
 #include "ui/views/win/hwnd_util.h"
@@ -134,9 +137,9 @@ base::string16 GetClipboardText() {
 class TabAnimationDelegate : public gfx::AnimationDelegate {
  public:
   TabAnimationDelegate(TabStrip* tab_strip, Tab* tab);
-  virtual ~TabAnimationDelegate();
+  ~TabAnimationDelegate() override;
 
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  void AnimationProgressed(const gfx::Animation* animation) override;
 
  protected:
   TabStrip* tab_strip() { return tab_strip_; }
@@ -167,10 +170,10 @@ void TabAnimationDelegate::AnimationProgressed(
 class ResetDraggingStateDelegate : public TabAnimationDelegate {
  public:
   ResetDraggingStateDelegate(TabStrip* tab_strip, Tab* tab);
-  virtual ~ResetDraggingStateDelegate();
+  ~ResetDraggingStateDelegate() override;
 
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationCanceled(const gfx::Animation* animation) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ResetDraggingStateDelegate);
@@ -236,7 +239,7 @@ class NewTabButton : public views::ImageButton,
                      public views::MaskedTargeterDelegate {
  public:
   NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener);
-  virtual ~NewTabButton();
+  ~NewTabButton() override;
 
   // Set the background offset used to match the background image to the frame
   // image.
@@ -247,16 +250,16 @@ class NewTabButton : public views::ImageButton,
  protected:
   // views::View:
 #if defined(OS_WIN)
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) override;
 #endif
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // ui::EventHandler:
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
  private:
   // views::MaskedTargeterDelegate:
-  virtual bool GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+  bool GetHitTestMask(gfx::Path* mask) const override;
 
   bool ShouldWindowContentsBeTransparent() const;
   gfx::ImageSkia GetBackgroundImage(views::CustomButton::ButtonState state,
@@ -297,6 +300,7 @@ void NewTabButton::OnMouseReleased(const ui::MouseEvent& event) {
   if (event.IsOnlyRightMouseButton()) {
     gfx::Point point = event.location();
     views::View::ConvertPointToScreen(this, &point);
+    point = gfx::win::DIPToScreenPoint(point);
     bool destroyed = false;
     destroyed_ = &destroyed;
     gfx::ShowSystemMenuAtPoint(views::HWNDForView(this), point);
@@ -476,8 +480,8 @@ class TabStrip::RemoveTabDelegate : public TabAnimationDelegate {
  public:
   RemoveTabDelegate(TabStrip* tab_strip, Tab* tab);
 
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationCanceled(const gfx::Animation* animation) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RemoveTabDelegate);
@@ -965,6 +969,30 @@ bool TabStrip::SupportsMultipleSelection() {
   return touch_layout_ == NULL;
 }
 
+// TODO(tdanderson): Modify this logic and clean up related code once a
+//                   decision has been made on the experimental
+//                   flag --tab-close-buttons-hidden-with-touch.
+bool TabStrip::ShouldHideCloseButtonForInactiveTab(const Tab* tab) {
+  DCHECK(!tab->IsActive());
+
+  // Do not force the close button to hide if mouse was used as
+  // the last input type to interact with the tab strip.
+  if (!stacked_layout_)
+    return false;
+
+  std::string switch_value =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kTabCloseButtonsHiddenWithTouch);
+  int width = tab->width();
+  if (switch_value == "always" ||
+      (switch_value == "narrow" && width < Tab::GetStandardSize().width()) ||
+      (switch_value == "stacked" && width <= Tab::GetTouchWidth())) {
+    return true;
+  }
+
+  return false;
+}
+
 void TabStrip::SelectTab(Tab* tab) {
   int model_index = GetModelIndexOfTab(tab);
   if (IsValidModelIndex(model_index))
@@ -1294,8 +1322,16 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas,
     paint.setColor(SkColorSetARGB(alpha, 255, 255, 255));
     paint.setXfermodeMode(SkXfermode::kDstIn_Mode);
     paint.setStyle(SkPaint::kFill_Style);
+
+    // The tab graphics include some shadows at the top, so the actual
+    // tabstrip top is 4 px. above the apparent top of the tab, to provide room
+    // to draw these. Exclude this region when trying to make tabs transparent
+    // as it's transparent enough already, and drawing in this region can
+    // overlap the avatar button, leading to visual artifacts.
+    const int kTopOffset = 4;
     // The tabstrip area overlaps the toolbar area by 2 px.
-    canvas->DrawRect(gfx::Rect(0, 0, width(), height() - 2), paint);
+    canvas->DrawRect(
+        gfx::Rect(0, kTopOffset, width(), height() - kTopOffset - 2), paint);
   }
 
   // Now selected but not active. We don't want these dimmed if using native

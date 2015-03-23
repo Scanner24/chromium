@@ -44,7 +44,9 @@ RenderFrameProxyHost::RenderFrameProxyHost(SiteInstance* site_instance,
                                            FrameTreeNode* frame_tree_node)
     : routing_id_(site_instance->GetProcess()->GetNextRoutingID()),
       site_instance_(site_instance),
-      frame_tree_node_(frame_tree_node) {
+      process_(site_instance->GetProcess()),
+      frame_tree_node_(frame_tree_node),
+      render_frame_proxy_created_(false) {
   GetProcess()->AddRoute(routing_id_, this);
   CHECK(g_routing_id_frame_proxy_map.Get().insert(
       std::make_pair(
@@ -68,8 +70,14 @@ RenderFrameProxyHost::RenderFrameProxyHost(SiteInstance* site_instance,
 }
 
 RenderFrameProxyHost::~RenderFrameProxyHost() {
-  if (GetProcess()->HasConnection())
-    Send(new FrameMsg_DeleteProxy(routing_id_));
+  if (GetProcess()->HasConnection()) {
+    // TODO(nasko): For now, don't send this IPC for top-level frames, as
+    // the top-level RenderFrame will delete the RenderFrameProxy.
+    // This can be removed once we don't have a swapped out state on
+    // RenderFrame. See https://crbug.com/357747
+    if (!frame_tree_node_->IsMainFrame())
+      Send(new FrameMsg_DeleteProxy(routing_id_));
+  }
 
   GetProcess()->RemoveRoute(routing_id_);
   g_routing_id_frame_proxy_map.Get().erase(
@@ -86,16 +94,18 @@ RenderViewHostImpl* RenderFrameProxyHost::GetRenderViewHost() {
       site_instance_.get());
 }
 
+void RenderFrameProxyHost::TakeFrameHostOwnership(
+    scoped_ptr<RenderFrameHostImpl> render_frame_host) {
+  render_frame_host_ = render_frame_host.Pass();
+  render_frame_host_->set_render_frame_proxy_host(this);
+}
+
 scoped_ptr<RenderFrameHostImpl> RenderFrameProxyHost::PassFrameHostOwnership() {
   render_frame_host_->set_render_frame_proxy_host(NULL);
   return render_frame_host_.Pass();
 }
 
 bool RenderFrameProxyHost::Send(IPC::Message *msg) {
-  // TODO(nasko): For now, RenderFrameHost uses this object to send IPC messages
-  // while swapped out. This can be removed once we don't have a swapped out
-  // state on RenderFrameHosts. See https://crbug.com/357747.
-  msg->set_routing_id(routing_id_);
   return GetProcess()->Send(msg);
 }
 
@@ -104,20 +114,21 @@ bool RenderFrameProxyHost::OnMessageReceived(const IPC::Message& msg) {
       cross_process_frame_connector_->OnMessageReceived(msg))
     return true;
 
-  // TODO(nasko): This can be removed once we don't have a swapped out state on
-  // RenderFrameHosts. See https://crbug.com/357747.
-  if (render_frame_host_.get())
-    return render_frame_host_->OnMessageReceived(msg);
-
-  return false;
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderFrameProxyHost, msg)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_OpenURL, OnOpenURL)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 bool RenderFrameProxyHost::InitRenderFrameProxy() {
+  DCHECK(!render_frame_proxy_created_);
   // The process may (if we're sharing a process with another host that already
   // initialized it) or may not (we have our own process or the old process
   // crashed) have been initialized. Calling Init multiple times will be
   // ignored, so this is safe.
-  if (!site_instance_->GetProcess()->Init())
+  if (!GetProcess()->Init())
     return false;
 
   DCHECK(GetProcess()->HasConnection());
@@ -134,13 +145,21 @@ bool RenderFrameProxyHost::InitRenderFrameProxy() {
                                   parent_routing_id,
                                   frame_tree_node_->frame_tree()
                                       ->GetRenderViewHost(site_instance_.get())
-                                      ->GetRoutingID()));
+                                      ->GetRoutingID(),
+                                  frame_tree_node_
+                                      ->current_replication_state()));
 
+  render_frame_proxy_created_ = true;
   return true;
 }
 
 void RenderFrameProxyHost::DisownOpener() {
   Send(new FrameMsg_DisownOpener(GetRoutingID()));
+}
+
+void RenderFrameProxyHost::OnOpenURL(
+    const FrameHostMsg_OpenURL_Params& params) {
+  frame_tree_node_->current_frame_host()->OpenURL(params, site_instance_.get());
 }
 
 }  // namespace content

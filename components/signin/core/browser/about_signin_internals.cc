@@ -5,13 +5,13 @@
 #include "components/signin/core/browser/about_signin_internals.h"
 
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/hash.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_internals_util.h"
@@ -209,8 +209,10 @@ void AboutSigninInternals::Initialize(SigninClient* client) {
   signin_manager_->AddSigninDiagnosticsObserver(this);
   token_service_->AddDiagnosticsObserver(this);
   cookie_changed_subscription_ = client_->AddCookieChangedCallback(
-     base::Bind(&AboutSigninInternals::OnCookieChanged,
-     base::Unretained(this)));
+      GaiaUrls::GetInstance()->gaia_url(),
+      "LSID",
+      base::Bind(&AboutSigninInternals::OnCookieChanged,
+                 base::Unretained(this)));
 }
 
 void AboutSigninInternals::Shutdown() {
@@ -220,8 +222,13 @@ void AboutSigninInternals::Shutdown() {
 }
 
 void AboutSigninInternals::NotifyObservers() {
+  if (!signin_observers_.might_have_observers())
+    return;
+
+  const std::string product_version = client_->GetProductVersion();
   scoped_ptr<base::DictionaryValue> signin_status_value =
-      signin_status_.ToValue(client_->GetProductVersion());
+      signin_status_.ToValue(product_version);
+
   FOR_EACH_OBSERVER(AboutSigninInternals::Observer,
                     signin_observers_,
                     OnSigninStateChanged(signin_status_value.get()));
@@ -285,12 +292,11 @@ void AboutSigninInternals::OnAuthenticationResultReceived(std::string status) {
   NotifySigninValueChanged(AUTHENTICATION_RESULT_RECEIVED, status);
 }
 
-void AboutSigninInternals::OnCookieChanged(
-    const net::CanonicalCookie* cookie) {
-  if (cookie->Name() == "LSID" &&
-      cookie->Domain() == GaiaUrls::GetInstance()->gaia_url().host() &&
-      cookie->IsSecure() &&
-      cookie->IsHttpOnly()) {
+void AboutSigninInternals::OnCookieChanged(const net::CanonicalCookie& cookie,
+                                           bool removed) {
+  DCHECK_EQ("LSID", cookie.Name());
+  DCHECK_EQ(GaiaUrls::GetInstance()->gaia_url().host(), cookie.Domain());
+  if (cookie.IsSecure() && cookie.IsHttpOnly()) {
     GetCookieAccountsAsync();
   }
 }
@@ -358,7 +364,8 @@ AboutSigninInternals::TokenInfo::~TokenInfo() {}
 
 bool AboutSigninInternals::TokenInfo::LessThan(const TokenInfo* a,
                                                const TokenInfo* b) {
-  return a->consumer_id < b->consumer_id || a->scopes < b->scopes;
+  return a->consumer_id < b->consumer_id ||
+      (a->consumer_id == b->consumer_id && a->scopes < b->scopes);
 }
 
 void AboutSigninInternals::TokenInfo::Invalidate() { removed_ = true; }
@@ -443,6 +450,8 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
   AddSectionEntry(basic_info, "Signin Status", signin_status_string);
   AddSectionEntry(basic_info, "Web Based Signin Enabled?",
       switches::IsEnableWebBasedSignin() == true ? "True" : "False");
+  AddSectionEntry(basic_info, "Webview Based Signin Enabled?",
+      switches::IsEnableWebviewBasedSignin() == true ? "True" : "False");
   AddSectionEntry(basic_info, "New Avatar Menu Enabled?",
       switches::IsNewAvatarMenu() == true ? "True" : "False");
   AddSectionEntry(basic_info, "New Profile Management Enabled?",
@@ -479,9 +488,9 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
        it != token_info_map.end();
        ++it) {
     base::ListValue* token_details = AddSection(token_info, it->first);
-
     std::sort(it->second.begin(), it->second.end(), TokenInfo::LessThan);
     const std::vector<TokenInfo*>& tokens = it->second;
+
     for (size_t i = 0; i < tokens.size(); ++i) {
       base::DictionaryValue* token_info = tokens[i]->ToValue();
       token_details->Append(token_info);

@@ -23,9 +23,14 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/schema.h"
+#include "components/rappor/rappor_pref_names.h"
 #include "components/search_engines/default_search_policy_handler.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "policy/policy_constants.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/search/contextual_search_policy_handler_android.h"
+#endif
 
 #if !defined(OS_IOS)
 #include "chrome/browser/net/disk_cache_dir_policy_handler.h"
@@ -37,11 +42,12 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/magnifier/magnifier_constants.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
+#include "chromeos/chromeos_pref_names.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "ui/chromeos/accessibility_types.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -93,6 +99,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kForceSafeSearch,
     prefs::kForceSafeSearch,
     base::Value::TYPE_BOOLEAN },
+  { key::kForceGoogleSafeSearch,
+    prefs::kForceGoogleSafeSearch,
+    base::Value::TYPE_BOOLEAN },
+  { key::kForceYouTubeSafetyMode,
+    prefs::kForceYouTubeSafetyMode,
+    base::Value::TYPE_BOOLEAN },
   { key::kPasswordManagerEnabled,
     password_manager::prefs::kPasswordManagerSavingEnabled,
     base::Value::TYPE_BOOLEAN },
@@ -107,6 +119,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_BOOLEAN },
   { key::kMetricsReportingEnabled,
     prefs::kMetricsReportingEnabled,
+    base::Value::TYPE_BOOLEAN },
+  { key::kMetricsReportingEnabled,
+    rappor::prefs::kRapporEnabled,
     base::Value::TYPE_BOOLEAN },
   { key::kApplicationLocaleValue,
     prefs::kApplicationLocale,
@@ -249,33 +264,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDefaultBrowserSettingEnabled,
     prefs::kDefaultBrowserSettingEnabled,
     base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostFirewallTraversal,
-    prefs::kRemoteAccessHostFirewallTraversal,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostRequireTwoFactor,
-    prefs::kRemoteAccessHostRequireTwoFactor,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostDomain,
-    prefs::kRemoteAccessHostDomain,
-    base::Value::TYPE_STRING },
-  { key::kRemoteAccessHostTalkGadgetPrefix,
-    prefs::kRemoteAccessHostTalkGadgetPrefix,
-    base::Value::TYPE_STRING },
-  { key::kRemoteAccessHostRequireCurtain,
-    prefs::kRemoteAccessHostRequireCurtain,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostAllowClientPairing,
-    prefs::kRemoteAccessHostAllowClientPairing,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostAllowGnubbyAuth,
-    prefs::kRemoteAccessHostAllowGnubbyAuth,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostAllowRelayedConnection,
-    prefs::kRemoteAccessHostAllowRelayedConnection,
-    base::Value::TYPE_BOOLEAN },
-  { key::kRemoteAccessHostUdpPortRange,
-    prefs::kRemoteAccessHostUdpPortRange,
-    base::Value::TYPE_STRING },
   { key::kCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled,
     base::Value::TYPE_BOOLEAN },
@@ -336,9 +324,13 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisableSafeBrowsingProceedAnyway,
     prefs::kSafeBrowsingProceedAnywayDisabled,
     base::Value::TYPE_BOOLEAN },
+
+#if defined(ENABLE_SPELLCHECK)
   { key::kSpellCheckServiceEnabled,
     prefs::kSpellCheckUseSpellingService,
     base::Value::TYPE_BOOLEAN },
+#endif  // defined(ENABLE_SPELLCHECK)
+
   { key::kDisableScreenshots,
     prefs::kDisableScreenshots,
     base::Value::TYPE_BOOLEAN },
@@ -401,7 +393,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kExternalStorageDisabled,
     base::Value::TYPE_BOOLEAN },
   { key::kAudioOutputAllowed,
-    prefs::kAudioOutputAllowed,
+    chromeos::prefs::kAudioOutputAllowed,
     base::Value::TYPE_BOOLEAN },
   { key::kShowLogoutButtonInTray,
     prefs::kShowLogoutButtonInTray,
@@ -524,7 +516,7 @@ void GetDeprecatedFeaturesMap(
     ScopedVector<StringMappingListPolicyHandler::MappingEntry>* result) {
   // Maps feature tags as specified in policy to the corresponding switch to
   // re-enable them.
-  // TODO: Remove after 2015-04-30 per http://crbug.com/374782.
+  // TODO(atwilson): Remove after 2015-04-30 per http://crbug.com/374782.
   result->push_back(new StringMappingListPolicyHandler::MappingEntry(
       "ShowModalDialog_EffectiveUntil20150430",
       scoped_ptr<base::Value>(new base::StringValue(
@@ -571,6 +563,11 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
       new URLBlacklistPolicyHandler()));
 
+#if defined(OS_ANDROID)
+  handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
+      new ContextualSearchPolicyHandlerAndroid()));
+#endif
+
 #if !defined(OS_IOS)
   handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
       new FileSelectionDialogsPolicyHandler()));
@@ -612,6 +609,8 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
           key::kExtensionAllowedTypes,
           extensions::pref_names::kAllowedTypes,
           base::Bind(GetExtensionAllowedTypesMap))));
+  handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
+      new extensions::ExtensionSettingsPolicyHandler(chrome_schema)));
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -771,7 +770,7 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
           key::kDeviceLoginScreenDefaultScreenMagnifierType,
           NULL,
           0,
-          ash::MAGNIFIER_FULL,
+          ui::MAGNIFIER_FULL,
           false)));
   // TODO(binjin): Remove LegacyPoliciesDeprecatingPolicyHandler for these two
   // policies once deprecation of legacy power management policies is done.

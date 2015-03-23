@@ -36,16 +36,38 @@
 #include "ui/compositor/test/test_layers.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
-#include "ui/gfx/vector2d.h"
 
 DECLARE_WINDOW_PROPERTY_TYPE(const char*)
-DECLARE_WINDOW_PROPERTY_TYPE(int)
+
+namespace {
+
+class TestProperty {
+ public:
+  TestProperty() {}
+  ~TestProperty() {
+    last_deleted_ = this;
+  }
+  static TestProperty* last_deleted() { return last_deleted_; }
+
+ private:
+  static TestProperty* last_deleted_;
+  DISALLOW_COPY_AND_ASSIGN(TestProperty);
+};
+
+TestProperty* TestProperty::last_deleted_ = nullptr;
+
+DEFINE_OWNED_WINDOW_PROPERTY_KEY(TestProperty, kOwnedKey, NULL);
+
+}  // namespace
+
+DECLARE_WINDOW_PROPERTY_TYPE(TestProperty*);
 
 namespace aura {
 namespace test {
@@ -55,23 +77,23 @@ class WindowTest : public AuraTestBase {
   WindowTest() : max_separation_(0) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AuraTestBase::SetUp();
     // TODO: there needs to be an easier way to do this.
-    max_separation_ = ui::GestureConfiguration::
-        max_separation_for_gesture_touches_in_pixels();
-    ui::GestureConfiguration::
-        set_max_separation_for_gesture_touches_in_pixels(0);
+    max_separation_ = ui::GestureConfiguration::GetInstance()
+                          ->max_separation_for_gesture_touches_in_pixels();
+    ui::GestureConfiguration::GetInstance()
+        ->set_max_separation_for_gesture_touches_in_pixels(0);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     AuraTestBase::TearDown();
-    ui::GestureConfiguration::
-        set_max_separation_for_gesture_touches_in_pixels(max_separation_);
+    ui::GestureConfiguration::GetInstance()
+        ->set_max_separation_for_gesture_touches_in_pixels(max_separation_);
   }
 
  private:
-  int max_separation_;
+  float max_separation_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTest);
 };
@@ -94,13 +116,13 @@ class DestroyTrackingDelegateImpl : public TestWindowDelegate {
 
   bool in_destroying() const { return in_destroying_; }
 
-  virtual void OnWindowDestroying(Window* window) OVERRIDE {
+  void OnWindowDestroying(Window* window) override {
     EXPECT_FALSE(in_destroying_);
     in_destroying_ = true;
     destroying_count_++;
   }
 
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE {
+  void OnWindowDestroyed(Window* window) override {
     EXPECT_TRUE(in_destroying_);
     in_destroying_ = false;
     destroyed_count_++;
@@ -123,7 +145,7 @@ class ChildWindowDelegateImpl : public DestroyTrackingDelegateImpl {
       : parent_delegate_(parent_delegate) {
   }
 
-  virtual void OnWindowDestroying(Window* window) OVERRIDE {
+  void OnWindowDestroying(Window* window) override {
     EXPECT_TRUE(parent_delegate_->in_destroying());
     DestroyTrackingDelegateImpl::OnWindowDestroying(window);
   }
@@ -143,7 +165,7 @@ class DestroyOrphanDelegate : public TestWindowDelegate {
 
   void set_window(Window* window) { window_ = window; }
 
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE {
+  void OnWindowDestroyed(Window* window) override {
     EXPECT_FALSE(window_->parent());
   }
 
@@ -175,20 +197,16 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
   int touch_event_count() const { return touch_event_count_; }
   int gesture_event_count() const { return gesture_event_count_; }
 
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
       capture_changed_event_count_++;
     mouse_event_count_++;
   }
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE {
-    touch_event_count_++;
-  }
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
+  void OnTouchEvent(ui::TouchEvent* event) override { touch_event_count_++; }
+  void OnGestureEvent(ui::GestureEvent* event) override {
     gesture_event_count_++;
   }
-  virtual void OnCaptureLost() OVERRIDE {
-    capture_lost_count_++;
-  }
+  void OnCaptureLost() override { capture_lost_count_++; }
 
  private:
   int capture_changed_event_count_;
@@ -205,7 +223,7 @@ class GestureTrackPositionDelegate : public TestWindowDelegate {
  public:
   GestureTrackPositionDelegate() {}
 
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
+  void OnGestureEvent(ui::GestureEvent* event) override {
     position_ = event->location();
     event->StopPropagation();
   }
@@ -226,9 +244,9 @@ class SelfEventHandlingWindowDelegate : public TestWindowDelegate {
  public:
   SelfEventHandlingWindowDelegate() {}
 
-  virtual bool ShouldDescendIntoChildForEventHandling(
+  bool ShouldDescendIntoChildForEventHandling(
       Window* child,
-      const gfx::Point& location) OVERRIDE {
+      const gfx::Point& location) override {
     return false;
   }
 
@@ -242,15 +260,19 @@ class DestroyWindowDelegate : public TestWindowDelegate {
   DestroyWindowDelegate() {}
 
  private:
-  virtual ~DestroyWindowDelegate() {}
+  ~DestroyWindowDelegate() override {}
 
   // Overridden from WindowDelegate.
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE {
-    delete this;
-  }
+  void OnWindowDestroyed(Window* window) override { delete this; }
 
   DISALLOW_COPY_AND_ASSIGN(DestroyWindowDelegate);
 };
+
+void OffsetBounds(Window* window, int horizontal, int vertical) {
+  gfx::Rect bounds = window->bounds();
+  bounds.Offset(horizontal, vertical);
+  window->SetBounds(bounds);
+}
 
 }  // namespace
 
@@ -457,6 +479,14 @@ TEST_F(WindowTest, MoveCursorToWithComplexTransform) {
       gfx::Screen::GetScreenFor(root)->GetCursorScreenPoint().ToString());
 }
 
+// Tests that we do not crash when a Window is destroyed by going out of
+// scope (as opposed to being explicitly deleted by its WindowDelegate).
+TEST_F(WindowTest, NoCrashOnWindowDelete) {
+  CaptureWindowDelegateImpl delegate;
+  scoped_ptr<Window> window(CreateTestWindowWithDelegate(
+      &delegate, 0, gfx::Rect(0, 0, 20, 20), root_window()));
+}
+
 TEST_F(WindowTest, GetEventHandlerForPoint) {
   scoped_ptr<Window> w1(
       CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 500, 500),
@@ -576,9 +606,7 @@ class AddedToRootWindowObserver : public WindowObserver {
  public:
   AddedToRootWindowObserver() : called_(false) {}
 
-  virtual void OnWindowAddedToRootWindow(Window* window) OVERRIDE {
-    called_ = true;
-  }
+  void OnWindowAddedToRootWindow(Window* window) override { called_ = true; }
 
   bool called() const { return called_; }
 
@@ -832,13 +860,13 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
   delegate1.ResetCounts();
   delegate2.ResetCounts();
 
-  // Events now go to w2.
+  // Events are now untargetted.
   ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(10, 20), 0, getTime());
   DispatchEventUsingWindowDispatcher(&move);
   EXPECT_EQ(0, delegate1.gesture_event_count());
   EXPECT_EQ(0, delegate1.touch_event_count());
   EXPECT_EQ(0, delegate2.gesture_event_count());
-  EXPECT_EQ(1, delegate2.touch_event_count());
+  EXPECT_EQ(0, delegate2.touch_event_count());
 
   ui::TouchEvent release(
       ui::ET_TOUCH_RELEASED, gfx::Point(10, 20), 0, getTime());
@@ -1083,11 +1111,81 @@ TEST_F(WindowTest, GetBoundsInRootWindow) {
   EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
 }
 
+TEST_F(WindowTest, GetBoundsInRootWindowWithLayers) {
+  scoped_ptr<Window> viewport(
+      CreateTestWindowWithBounds(gfx::Rect(0, 0, 300, 300), root_window()));
+
+  scoped_ptr<Window> widget(
+      CreateTestWindowWithBounds(gfx::Rect(0, 0, 200, 200), viewport.get()));
+
+  scoped_ptr<Window> child(
+      CreateTestWindowWithBounds(gfx::Rect(0, 0, 100, 100), widget.get()));
+
+  // Sanity check.
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
+
+  // The |child| window's screen bounds should move along with the |viewport|.
+  OffsetBounds(viewport.get(), -100, -100);
+  EXPECT_EQ("-100,-100 100x100", child->GetBoundsInRootWindow().ToString());
+
+  OffsetBounds(widget.get(), 50, 50);
+  EXPECT_EQ("-50,-50 100x100", child->GetBoundsInRootWindow().ToString());
+
+  // The |child| window is moved to the 0,0 in screen coordinates.
+  // |GetBoundsInRootWindow()| should return 0,0.
+  OffsetBounds(child.get(), 50, 50);
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
+}
+
+TEST_F(WindowTest, GetBoundsInRootWindowWithLayersAndTranslations) {
+  scoped_ptr<Window> viewport(
+      CreateTestWindowWithBounds(gfx::Rect(0, 0, 300, 300), root_window()));
+
+  scoped_ptr<Window> widget(
+      CreateTestWindowWithBounds(gfx::Rect(0, 0, 200, 200), viewport.get()));
+
+  scoped_ptr<Window> child(
+      CreateTestWindowWithBounds(gfx::Rect(0, 0, 100, 100), widget.get()));
+
+  // Sanity check.
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
+
+  // The |child| window's screen bounds should move along with the |viewport|.
+  viewport->SetBounds(gfx::Rect(-100, -100, 300, 300));
+  EXPECT_EQ("-100,-100 100x100", child->GetBoundsInRootWindow().ToString());
+
+  widget->SetBounds(gfx::Rect(50, 50, 200, 200));
+  EXPECT_EQ("-50,-50 100x100", child->GetBoundsInRootWindow().ToString());
+
+  // The |child| window is moved to the 0,0 in screen coordinates.
+  // |GetBoundsInRootWindow()| should return 0,0.
+  child->SetBounds(gfx::Rect(50, 50, 100, 100));
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
+
+  gfx::Transform transform1;
+  transform1.Translate(-10, 20);
+  viewport->SetTransform(transform1);
+  EXPECT_EQ("-10,20 100x100", child->GetBoundsInRootWindow().ToString());
+
+  gfx::Transform transform2;
+  transform2.Translate(40, 100);
+  widget->SetTransform(transform2);
+  EXPECT_EQ("30,120 100x100", child->GetBoundsInRootWindow().ToString());
+
+  // Testing potentially buggy place
+  gfx::Transform transform3;
+  transform3.Translate(-30, -120);
+  child->SetTransform(transform3);
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
+}
+
+// TODO(tdanderson): Remove this class and use
+//                   test::EventCountDelegate in its place.
 class MouseEnterExitWindowDelegate : public TestWindowDelegate {
  public:
   MouseEnterExitWindowDelegate() : entered_(false), exited_(false) {}
 
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     switch (event->type()) {
       case ui::ET_MOUSE_ENTERED:
         EXPECT_TRUE(event->flags() & ui::EF_IS_SYNTHESIZED);
@@ -1117,7 +1215,6 @@ class MouseEnterExitWindowDelegate : public TestWindowDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(MouseEnterExitWindowDelegate);
 };
-
 
 // Verifies that the WindowDelegate receives MouseExit and MouseEnter events for
 // mouse transitions from window to window.
@@ -1158,8 +1255,8 @@ TEST_F(WindowTest, WindowTreeHostExit) {
   EXPECT_FALSE(d1.exited());
   d1.ResetExpectations();
 
-  ui::MouseEvent exit_event(
-      ui::ET_MOUSE_EXITED, gfx::Point(), gfx::Point(), 0, 0);
+  ui::MouseEvent exit_event(ui::ET_MOUSE_EXITED, gfx::Point(), gfx::Point(),
+                            ui::EventTimeForNow(), 0, 0);
   DispatchEventUsingWindowDispatcher(&exit_event);
   EXPECT_FALSE(d1.entered());
   EXPECT_TRUE(d1.exited());
@@ -1224,14 +1321,16 @@ TEST_F(WindowTest, MouseEnterExitWhenDeleteWithCapture) {
   EXPECT_FALSE(delegate.exited());
 }
 
-// Verifies that enter / exits are sent if windows appear and are deleted
-// under the current mouse position..
-TEST_F(WindowTest, MouseEnterExitWithDelete) {
+// Verifies that the correct enter / exits are sent if windows appear and are
+// deleted under the current mouse position.
+TEST_F(WindowTest, MouseEnterExitWithWindowAppearAndDelete) {
   MouseEnterExitWindowDelegate d1;
   scoped_ptr<Window> w1(
       CreateTestWindowWithDelegate(&d1, 1, gfx::Rect(10, 10, 50, 50),
                                    root_window()));
 
+  // The cursor is moved into the bounds of |w1|. We expect the delegate
+  // of |w1| to see an ET_MOUSE_ENTERED event.
   ui::test::EventGenerator generator(root_window());
   generator.MoveMouseToCenterOf(w1.get());
   EXPECT_TRUE(d1.entered());
@@ -1245,6 +1344,9 @@ TEST_F(WindowTest, MouseEnterExitWithDelete) {
                                      root_window()));
     // Enters / exits can be sent asynchronously.
     RunAllPendingInMessageLoop();
+
+    // |w2| appears over top of |w1|. We expect the delegate of |w1| to see
+    // an ET_MOUSE_EXITED and the delegate of |w2| to see an ET_MOUSE_ENTERED.
     EXPECT_FALSE(d1.entered());
     EXPECT_TRUE(d1.exited());
     EXPECT_TRUE(d2.entered());
@@ -1252,10 +1354,16 @@ TEST_F(WindowTest, MouseEnterExitWithDelete) {
     d1.ResetExpectations();
     d2.ResetExpectations();
   }
+
   // Enters / exits can be sent asynchronously.
   RunAllPendingInMessageLoop();
-  EXPECT_TRUE(d2.exited());
+
+  // |w2| has been destroyed, so its delegate should see no further events.
+  // The delegate of |w1| should see an ET_MOUSE_ENTERED event.
   EXPECT_TRUE(d1.entered());
+  EXPECT_FALSE(d1.exited());
+  EXPECT_FALSE(d2.entered());
+  EXPECT_FALSE(d2.exited());
 }
 
 // Verifies that enter / exits are sent if windows appear and are hidden
@@ -1333,8 +1441,13 @@ TEST_F(WindowTest, MouseEnterExitWithParentDelete) {
   d2.ResetExpectations();
   w1.reset();
   RunAllPendingInMessageLoop();
+
+  // Both windows are in the process of destroying, so their delegates should
+  // not see any mouse events.
+  EXPECT_FALSE(d1.entered());
+  EXPECT_FALSE(d1.exited());
   EXPECT_FALSE(d2.entered());
-  EXPECT_TRUE(d2.exited());
+  EXPECT_FALSE(d2.exited());
 }
 
 // Creates a window with a delegate (w111) that can handle events at a lower
@@ -1372,7 +1485,7 @@ class VisibilityWindowDelegate : public TestWindowDelegate {
     hidden_ = 0;
   }
 
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {
+  void OnWindowTargetVisibilityChanged(bool visible) override {
     if (visible)
       shown_++;
     else
@@ -1565,27 +1678,6 @@ TEST_F(WindowTest, Property) {
   EXPECT_EQ(std::string("squeamish"), w->GetProperty(kStringKey));
 }
 
-namespace {
-
-class TestProperty {
- public:
-  TestProperty() {}
-  virtual ~TestProperty() {
-    last_deleted_ = this;
-  }
-  static TestProperty* last_deleted() { return last_deleted_; }
-
- private:
-  static TestProperty* last_deleted_;
-  DISALLOW_COPY_AND_ASSIGN(TestProperty);
-};
-
-TestProperty* TestProperty::last_deleted_ = NULL;
-
-DEFINE_OWNED_WINDOW_PROPERTY_KEY(TestProperty, kOwnedKey, NULL);
-
-}  // namespace
-
 TEST_F(WindowTest, OwnedProperty) {
   scoped_ptr<Window> w(CreateTestWindowWithId(0, root_window()));
   EXPECT_EQ(NULL, w->GetProperty(kOwnedKey));
@@ -1665,6 +1757,7 @@ class WindowObserverTest : public WindowTest,
   struct VisibilityInfo {
     bool window_visible;
     bool visible_param;
+    int changed_count;
   };
 
   WindowObserverTest()
@@ -1674,7 +1767,7 @@ class WindowObserverTest : public WindowTest,
         old_property_value_(-3) {
   }
 
-  virtual ~WindowObserverTest() {}
+  ~WindowObserverTest() override {}
 
   const VisibilityInfo* GetVisibilityInfo() const {
     return visibility_info_.get();
@@ -1720,35 +1813,33 @@ class WindowObserverTest : public WindowTest,
   }
 
  private:
-  virtual void OnWindowAdded(Window* new_window) OVERRIDE {
-    added_count_++;
-  }
+  void OnWindowAdded(Window* new_window) override { added_count_++; }
 
-  virtual void OnWillRemoveWindow(Window* window) OVERRIDE {
-    removed_count_++;
-  }
+  void OnWillRemoveWindow(Window* window) override { removed_count_++; }
 
-  virtual void OnWindowVisibilityChanged(Window* window,
-                                         bool visible) OVERRIDE {
-    visibility_info_.reset(new VisibilityInfo);
+  void OnWindowVisibilityChanged(Window* window, bool visible) override {
+    if (!visibility_info_) {
+      visibility_info_.reset(new VisibilityInfo);
+      visibility_info_->changed_count = 0;
+    }
     visibility_info_->window_visible = window->IsVisible();
     visibility_info_->visible_param = visible;
+    visibility_info_->changed_count++;
   }
 
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE {
+  void OnWindowDestroyed(Window* window) override {
     EXPECT_FALSE(window->parent());
     destroyed_count_++;
   }
 
-  virtual void OnWindowPropertyChanged(Window* window,
-                                       const void* key,
-                                       intptr_t old) OVERRIDE {
+  void OnWindowPropertyChanged(Window* window,
+                               const void* key,
+                               intptr_t old) override {
     property_key_ = key;
     old_property_value_ = old;
   }
 
-  virtual void OnAncestorWindowTransformed(Window* source,
-                                           Window* window) OVERRIDE {
+  void OnAncestorWindowTransformed(Window* source, Window* window) override {
     transform_notifications_.push_back(
         std::make_pair(source->id(), window->id()));
   }
@@ -1804,6 +1895,7 @@ TEST_F(WindowObserverTest, WindowVisibility) {
     return;
   EXPECT_FALSE(GetVisibilityInfo()->window_visible);
   EXPECT_FALSE(GetVisibilityInfo()->visible_param);
+  EXPECT_EQ(1, GetVisibilityInfo()->changed_count);
 
   // If parent isn't visible, showing window won't make the window visible, but
   // passed visible value must be true.
@@ -1816,6 +1908,7 @@ TEST_F(WindowObserverTest, WindowVisibility) {
     return;
   EXPECT_FALSE(GetVisibilityInfo()->window_visible);
   EXPECT_TRUE(GetVisibilityInfo()->visible_param);
+  EXPECT_EQ(1, GetVisibilityInfo()->changed_count);
 
   // If parent is visible, showing window will make the window
   // visible and the passed visible value is true.
@@ -1828,6 +1921,15 @@ TEST_F(WindowObserverTest, WindowVisibility) {
     return;
   EXPECT_TRUE(GetVisibilityInfo()->window_visible);
   EXPECT_TRUE(GetVisibilityInfo()->visible_param);
+  EXPECT_EQ(1, GetVisibilityInfo()->changed_count);
+
+  // Verify that the OnWindowVisibilityChanged only once
+  // per visibility change.
+  w2->Hide();
+  EXPECT_EQ(2, GetVisibilityInfo()->changed_count);
+
+  w2->Hide();
+  EXPECT_EQ(2, GetVisibilityInfo()->changed_count);
 }
 
 // Test if OnWindowDestroyed is invoked as expected.
@@ -1992,42 +2094,20 @@ TEST_F(WindowTest, AcquireThenRecreateLayer) {
   w.reset();
 }
 
-TEST_F(WindowTest, StackWindowAtBottomBelowWindowWhoseLayerHasNoDelegate) {
-  scoped_ptr<Window> window1(CreateTestWindowWithId(1, root_window()));
-  window1->layer()->set_name("1");
-  scoped_ptr<Window> window2(CreateTestWindowWithId(2, root_window()));
-  window2->layer()->set_name("2");
-  scoped_ptr<Window> window3(CreateTestWindowWithId(3, root_window()));
-  window3->layer()->set_name("3");
-
-  EXPECT_EQ("1 2 3", ChildWindowIDsAsString(root_window()));
-  EXPECT_EQ("1 2 3",
-            ui::test::ChildLayerNamesAsString(*root_window()->layer()));
-  window1->layer()->set_delegate(NULL);
-  root_window()->StackChildAtBottom(window3.get());
-
-  // Window 3 should have moved to the bottom.
-  EXPECT_EQ("3 1 2", ChildWindowIDsAsString(root_window()));
-  EXPECT_EQ("3 1 2",
-            ui::test::ChildLayerNamesAsString(*root_window()->layer()));
-}
-
 class TestVisibilityClient : public client::VisibilityClient {
  public:
   explicit TestVisibilityClient(Window* root_window)
       : ignore_visibility_changes_(false) {
     client::SetVisibilityClient(root_window, this);
   }
-  virtual ~TestVisibilityClient() {
-  }
+  ~TestVisibilityClient() override {}
 
   void set_ignore_visibility_changes(bool ignore_visibility_changes) {
     ignore_visibility_changes_ = ignore_visibility_changes;
   }
 
   // Overridden from client::VisibilityClient:
-  virtual void UpdateLayerVisibility(aura::Window* window,
-                                     bool visible) OVERRIDE {
+  void UpdateLayerVisibility(aura::Window* window, bool visible) override {
     if (!ignore_visibility_changes_)
       window->layer()->SetVisible(visible);
   }
@@ -2055,8 +2135,9 @@ TEST_F(WindowTest, VisibilityClientIsVisible) {
   EXPECT_TRUE(window->layer()->visible());
 }
 
-// Tests mouse events on window change.
-TEST_F(WindowTest, MouseEventsOnWindowChange) {
+// Tests the mouse events seen by WindowDelegates in a Window hierarchy when
+// changing the properties of a leaf Window.
+TEST_F(WindowTest, MouseEventsOnLeafWindowChange) {
   gfx::Size size = host()->GetBounds().size();
 
   ui::test::EventGenerator generator(root_window());
@@ -2066,10 +2147,10 @@ TEST_F(WindowTest, MouseEventsOnWindowChange) {
   scoped_ptr<Window> w1(CreateTestWindowWithDelegate(&d1, 1,
       gfx::Rect(0, 0, 100, 100), root_window()));
   RunAllPendingInMessageLoop();
-  // The format of result is "Enter/Mouse/Leave".
+  // The format of result is "Enter/Move/Leave".
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
 
-  // Adding new window.
+  // Add new window |w11| on top of |w1| which contains the cursor.
   EventCountDelegate d11;
   scoped_ptr<Window> w11(CreateTestWindowWithDelegate(
       &d11, 1, gfx::Rect(0, 0, 100, 100), w1.get()));
@@ -2077,42 +2158,43 @@ TEST_F(WindowTest, MouseEventsOnWindowChange) {
   EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
-  // Move bounds.
+  // Resize |w11| so that it does not contain the cursor.
   w11->SetBounds(gfx::Rect(0, 0, 10, 10));
   RunAllPendingInMessageLoop();
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
 
+  // Resize |w11| so that it does contain the cursor.
   w11->SetBounds(gfx::Rect(0, 0, 60, 60));
   RunAllPendingInMessageLoop();
   EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
-  // Detach, then re-attach.
+  // Detach |w11| from |w1|.
   w1->RemoveChild(w11.get());
   RunAllPendingInMessageLoop();
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
-  // Window is detached, so no event is set.
   EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
 
+  // Re-attach |w11| to |w1|.
   w1->AddChild(w11.get());
   RunAllPendingInMessageLoop();
   EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
-  // Window is detached, so no event is set.
   EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
-  // Visibility Change
+  // Hide |w11|.
   w11->Hide();
   RunAllPendingInMessageLoop();
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
 
+  // Show |w11|.
   w11->Show();
   RunAllPendingInMessageLoop();
   EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
-  // Transform: move d11 by 100 100.
+  // Translate |w11| so that it does not contain the mouse cursor.
   gfx::Transform transform;
   transform.Translate(100, 100);
   w11->SetTransform(transform);
@@ -2120,39 +2202,86 @@ TEST_F(WindowTest, MouseEventsOnWindowChange) {
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
 
+  // Clear the transform on |w11| so that it does contain the cursor.
   w11->SetTransform(gfx::Transform());
   RunAllPendingInMessageLoop();
   EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
-  // Closing a window.
+  // Close |w11|. Note that since |w11| is being destroyed, its delegate should
+  // not see any further events.
   w11.reset();
   RunAllPendingInMessageLoop();
   EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 0", d11.GetMouseMotionCountsAndReset());
 
-  // Make sure we don't synthesize events if the mouse
-  // is outside of the root window.
+  // Move the mouse outside the bounds of the root window. Since the mouse
+  // cursor is no longer within their bounds, the delegates of the child
+  // windows should not see any mouse events.
   generator.MoveMouseTo(-10, -10);
   EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 0", d11.GetMouseMotionCountsAndReset());
 
-  // Adding new windows.
+  // Add |w11|.
   w11.reset(CreateTestWindowWithDelegate(
       &d11, 1, gfx::Rect(0, 0, 100, 100), w1.get()));
   RunAllPendingInMessageLoop();
   EXPECT_EQ("0 0 0", d1.GetMouseMotionCountsAndReset());
-  EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 0", d11.GetMouseMotionCountsAndReset());
 
-  // Closing windows
+  // Close |w11|.
   w11.reset();
   RunAllPendingInMessageLoop();
   EXPECT_EQ("0 0 0", d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 0", d11.GetMouseMotionCountsAndReset());
 }
 
+// Tests the mouse events seen by WindowDelegates in a Window hierarchy when
+// deleting a non-leaf Window.
+TEST_F(WindowTest, MouseEventsOnNonLeafWindowDelete) {
+  gfx::Size size = host()->GetBounds().size();
+
+  ui::test::EventGenerator generator(root_window());
+  generator.MoveMouseTo(50, 50);
+
+  EventCountDelegate d1;
+  scoped_ptr<Window> w1(CreateTestWindowWithDelegate(&d1, 1,
+      gfx::Rect(0, 0, 100, 100), root_window()));
+  RunAllPendingInMessageLoop();
+  // The format of result is "Enter/Move/Leave".
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
+
+  // Add new window |w2| on top of |w1| which contains the cursor.
+  EventCountDelegate d2;
+  scoped_ptr<Window> w2(CreateTestWindowWithDelegate(
+      &d2, 1, gfx::Rect(0, 0, 100, 100), w1.get()));
+  RunAllPendingInMessageLoop();
+  EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("1 1 0", d2.GetMouseMotionCountsAndReset());
+
+  // Add new window on top of |w2| which contains the cursor.
+  EventCountDelegate d3;
+  CreateTestWindowWithDelegate(
+      &d3, 1, gfx::Rect(0, 0, 100, 100), w2.get());
+  RunAllPendingInMessageLoop();
+  EXPECT_EQ("0 0 0", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 1", d2.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("1 1 0", d3.GetMouseMotionCountsAndReset());
+
+  // Delete |w2|, which will also delete its owned child window. Since |w2| and
+  // its child are in the process of being destroyed, their delegates should
+  // not see any further events.
+  w2.reset();
+  RunAllPendingInMessageLoop();
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 0", d2.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 0", d3.GetMouseMotionCountsAndReset());
+}
+
 class RootWindowAttachmentObserver : public WindowObserver {
  public:
   RootWindowAttachmentObserver() : added_count_(0), removed_count_(0) {}
-  virtual ~RootWindowAttachmentObserver() {}
+  ~RootWindowAttachmentObserver() override {}
 
   int added_count() const { return added_count_; }
   int removed_count() const { return removed_count_; }
@@ -2163,11 +2292,9 @@ class RootWindowAttachmentObserver : public WindowObserver {
   }
 
   // Overridden from WindowObserver:
-  virtual void OnWindowAddedToRootWindow(Window* window) OVERRIDE {
-    ++added_count_;
-  }
-  virtual void OnWindowRemovingFromRootWindow(Window* window,
-                                              Window* new_root) OVERRIDE {
+  void OnWindowAddedToRootWindow(Window* window) override { ++added_count_; }
+  void OnWindowRemovingFromRootWindow(Window* window,
+                                      Window* new_root) override {
     ++removed_count_;
   }
 
@@ -2247,9 +2374,9 @@ class BoundsChangedWindowObserver : public WindowObserver {
  public:
   BoundsChangedWindowObserver() : root_set_(false) {}
 
-  virtual void OnWindowBoundsChanged(Window* window,
-                                     const gfx::Rect& old_bounds,
-                                     const gfx::Rect& new_bounds) OVERRIDE {
+  void OnWindowBoundsChanged(Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override {
     root_set_ = window->GetRootWindow() != NULL;
   }
 
@@ -2328,9 +2455,7 @@ class OwningWindowDelegate : public TestWindowDelegate {
     owned_window_.reset(window);
   }
 
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE {
-    owned_window_.reset(NULL);
-  }
+  void OnWindowDestroyed(Window* window) override { owned_window_.reset(NULL); }
 
  private:
   scoped_ptr<Window> owned_window_;
@@ -2373,8 +2498,8 @@ class BoundsChangeDelegate : public TestWindowDelegate {
   }
 
   // Window
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds) OVERRIDE {
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override {
     bounds_changed_ = true;
   }
 
@@ -2482,11 +2607,9 @@ class AddChildNotificationsObserver : public WindowObserver {
   }
 
   // WindowObserver overrides:
-  virtual void OnWindowAddedToRootWindow(Window* window) OVERRIDE {
-    added_count_++;
-  }
-  virtual void OnWindowRemovingFromRootWindow(Window* window,
-                                              Window* new_root) OVERRIDE {
+  void OnWindowAddedToRootWindow(Window* window) override { added_count_++; }
+  void OnWindowRemovingFromRootWindow(Window* window,
+                                      Window* new_root) override {
     removed_count_++;
   }
 
@@ -2531,9 +2654,7 @@ class HierarchyObserver : public WindowObserver {
   HierarchyObserver(Window* target) : target_(target) {
     target_->AddObserver(this);
   }
-  virtual ~HierarchyObserver() {
-    target_->RemoveObserver(this);
-  }
+  ~HierarchyObserver() override { target_->RemoveObserver(this); }
 
   void ValidateState(
       int index,
@@ -2547,12 +2668,10 @@ class HierarchyObserver : public WindowObserver {
 
  private:
   // Overridden from WindowObserver:
-  virtual void OnWindowHierarchyChanging(
-      const HierarchyChangeParams& params) OVERRIDE {
+  void OnWindowHierarchyChanging(const HierarchyChangeParams& params) override {
     params_.push_back(params);
   }
-  virtual void OnWindowHierarchyChanged(
-      const HierarchyChangeParams& params) OVERRIDE {
+  void OnWindowHierarchyChanged(const HierarchyChangeParams& params) override {
     params_.push_back(params);
   }
 
@@ -2919,7 +3038,7 @@ namespace {
 class PaintWindowDelegate : public TestWindowDelegate {
  public:
   PaintWindowDelegate() : paint_count_(0) {}
-  virtual ~PaintWindowDelegate() {}
+  ~PaintWindowDelegate() override {}
 
   const gfx::Rect& most_recent_paint_clip_bounds() const {
     return most_recent_paint_clip_bounds_;
@@ -2933,7 +3052,7 @@ class PaintWindowDelegate : public TestWindowDelegate {
   int paint_count() const { return paint_count_; }
 
   // TestWindowDelegate::
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {
     paint_count_++;
     canvas->GetClipBounds(&most_recent_paint_clip_bounds_);
     const SkMatrix& matrix = canvas->sk_canvas()->getTotalMatrix();
@@ -3349,7 +3468,7 @@ TEST_F(WindowTest, StackChildAtLayerless) {
       "21 11 12",
     },
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     test::TestWindowDelegate delegate;
     Window root(NULL);
     root.Init(WINDOW_LAYER_NOT_DRAWN);
@@ -3396,7 +3515,7 @@ class TestLayerAnimationObserver : public ui::LayerAnimationObserver {
   TestLayerAnimationObserver()
       : animation_completed_(false),
         animation_aborted_(false) {}
-  virtual ~TestLayerAnimationObserver() {}
+  ~TestLayerAnimationObserver() override {}
 
   bool animation_completed() const { return animation_completed_; }
   bool animation_aborted() const { return animation_aborted_; }
@@ -3408,19 +3527,16 @@ class TestLayerAnimationObserver : public ui::LayerAnimationObserver {
 
  private:
   // ui::LayerAnimationObserver:
-  virtual void OnLayerAnimationEnded(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
+  void OnLayerAnimationEnded(ui::LayerAnimationSequence* sequence) override {
     animation_completed_ = true;
   }
 
-  virtual void OnLayerAnimationAborted(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
+  void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) override {
     animation_aborted_ = true;
   }
 
-  virtual void OnLayerAnimationScheduled(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
-  }
+  void OnLayerAnimationScheduled(
+      ui::LayerAnimationSequence* sequence) override {}
 
   bool animation_completed_;
   bool animation_aborted_;

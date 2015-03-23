@@ -101,22 +101,19 @@ namespace {
 class TypeDebugInfoCache : public TypeDebugInfoObserver {
  public:
   TypeDebugInfoCache();
-  virtual ~TypeDebugInfoCache();
+  ~TypeDebugInfoCache() override;
 
   CommitCounters GetLatestCommitCounters(ModelType type) const;
   UpdateCounters GetLatestUpdateCounters(ModelType type) const;
   StatusCounters GetLatestStatusCounters(ModelType type) const;
 
   // TypeDebugInfoObserver implementation.
-  virtual void OnCommitCountersUpdated(
-      syncer::ModelType type,
-      const CommitCounters& counters) OVERRIDE;
-  virtual void OnUpdateCountersUpdated(
-      syncer::ModelType type,
-      const UpdateCounters& counters) OVERRIDE;
-  virtual void OnStatusCountersUpdated(
-      syncer::ModelType type,
-      const StatusCounters& counters) OVERRIDE;
+  void OnCommitCountersUpdated(syncer::ModelType type,
+                               const CommitCounters& counters) override;
+  void OnUpdateCountersUpdated(syncer::ModelType type,
+                               const UpdateCounters& counters) override;
+  void OnStatusCountersUpdated(syncer::ModelType type,
+                               const StatusCounters& counters) override;
 
  private:
   std::map<ModelType, CommitCounters> commit_counters_map_;
@@ -193,27 +190,24 @@ class SyncerTest : public testing::Test,
 }
 
   // SyncSession::Delegate implementation.
-  virtual void OnThrottled(const base::TimeDelta& throttle_duration) OVERRIDE {
+  void OnThrottled(const base::TimeDelta& throttle_duration) override {
     FAIL() << "Should not get silenced.";
   }
-  virtual void OnTypesThrottled(
-      ModelTypeSet types,
-      const base::TimeDelta& throttle_duration) OVERRIDE {
+  void OnTypesThrottled(ModelTypeSet types,
+                        const base::TimeDelta& throttle_duration) override {
     FAIL() << "Should not get silenced.";
   }
-  virtual bool IsCurrentlyThrottled() OVERRIDE {
-    return false;
-  }
-  virtual void OnReceivedLongPollIntervalUpdate(
-      const base::TimeDelta& new_interval) OVERRIDE {
+  bool IsCurrentlyThrottled() override { return false; }
+  void OnReceivedLongPollIntervalUpdate(
+      const base::TimeDelta& new_interval) override {
     last_long_poll_interval_received_ = new_interval;
   }
-  virtual void OnReceivedShortPollIntervalUpdate(
-      const base::TimeDelta& new_interval) OVERRIDE {
+  void OnReceivedShortPollIntervalUpdate(
+      const base::TimeDelta& new_interval) override {
     last_short_poll_interval_received_ = new_interval;
   }
-  virtual void OnReceivedCustomNudgeDelays(
-      const std::map<ModelType, base::TimeDelta>& delay_map) OVERRIDE {
+  void OnReceivedCustomNudgeDelays(
+      const std::map<ModelType, base::TimeDelta>& delay_map) override {
     std::map<ModelType, base::TimeDelta>::const_iterator iter =
         delay_map.find(SESSIONS);
     if (iter != delay_map.end() && iter->second > base::TimeDelta())
@@ -222,14 +216,13 @@ class SyncerTest : public testing::Test,
     if (iter != delay_map.end() && iter->second > base::TimeDelta())
       last_bookmarks_commit_delay_ = iter->second;
   }
-  virtual void OnReceivedClientInvalidationHintBufferSize(
-      int size) OVERRIDE {
+  void OnReceivedClientInvalidationHintBufferSize(int size) override {
     last_client_invalidation_hint_buffer_size_ = size;
   }
-  virtual void OnReceivedGuRetryDelay(const base::TimeDelta& delay) OVERRIDE {}
-  virtual void OnReceivedMigrationRequest(ModelTypeSet types) OVERRIDE {}
-  virtual void OnProtocolEvent(const ProtocolEvent& event) OVERRIDE {}
-  virtual void OnSyncProtocolError(const SyncProtocolError& error) OVERRIDE {}
+  void OnReceivedGuRetryDelay(const base::TimeDelta& delay) override {}
+  void OnReceivedMigrationRequest(ModelTypeSet types) override {}
+  void OnProtocolEvent(const ProtocolEvent& event) override {}
+  void OnSyncProtocolError(const SyncProtocolError& error) override {}
 
   void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
     // We're just testing the sync engine here, so we shunt everything to
@@ -240,7 +233,7 @@ class SyncerTest : public testing::Test,
     }
   }
 
-  virtual void OnSyncCycleEvent(const SyncCycleEvent& event) OVERRIDE {
+  void OnSyncCycleEvent(const SyncCycleEvent& event) override {
     DVLOG(1) << "HandleSyncEngineEvent in unittest " << event.what_happened;
     // we only test for entry-specific events, not status changed ones.
     switch (event.what_happened) {
@@ -254,10 +247,10 @@ class SyncerTest : public testing::Test,
     saw_syncer_event_ = true;
   }
 
-  virtual void OnActionableError(const SyncProtocolError& error) OVERRIDE {}
-  virtual void OnRetryTimeChanged(base::Time retry_time) OVERRIDE {}
-  virtual void OnThrottledTypesChanged(ModelTypeSet throttled_types) OVERRIDE {}
-  virtual void OnMigrationRequested(ModelTypeSet types) OVERRIDE {}
+  void OnActionableError(const SyncProtocolError& error) override {}
+  void OnRetryTimeChanged(base::Time retry_time) override {}
+  void OnThrottledTypesChanged(ModelTypeSet throttled_types) override {}
+  void OnMigrationRequested(ModelTypeSet types) override {}
 
   void ResetSession() {
     session_.reset(SyncSession::Build(context_.get(), this));
@@ -269,11 +262,8 @@ class SyncerTest : public testing::Test,
     // Pretend we've seen a local change, to make the nudge_tracker look normal.
     nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS));
 
-    EXPECT_TRUE(
-        syncer_->NormalSyncShare(
-            context_->GetEnabledTypes(),
-            nudge_tracker_,
-            session_.get()));
+    EXPECT_TRUE(syncer_->NormalSyncShare(context_->GetEnabledTypes(),
+                                         &nudge_tracker_, session_.get()));
   }
 
   void SyncShareConfigure() {
@@ -284,7 +274,7 @@ class SyncerTest : public testing::Test,
             session_.get()));
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     dir_maker_.SetUp();
     mock_server_.reset(new MockConnectionManager(directory(),
                                                  &cancelation_signal_));
@@ -331,7 +321,7 @@ class SyncerTest : public testing::Test,
     mock_server_->SetKeystoreKey("encryption_key");
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     model_type_registry_->UnregisterDirectoryTypeDebugInfoObserver(
         &debug_info_cache_);
     mock_server_.reset();
@@ -649,8 +639,7 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   ResetSession();
   syncer_->NormalSyncShare(
       Difference(context_->GetEnabledTypes(), ModelTypeSet(BOOKMARKS)),
-      nudge_tracker_,
-      session_.get());
+      &nudge_tracker_, session_.get());
 
   {
     // Nothing should have been committed as bookmarks is throttled.
@@ -860,6 +849,47 @@ TEST_F(SyncerTest, GetCommitIds_VerifyDeletionCommitOrder) {
 
     Entry entry3(&trans, GET_BY_HANDLE, result_handles[3]);
     EXPECT_EQ(ids_.FromNumber(4), entry3.GetId());
+  }
+}
+
+// Verify that if there are more deleted items than the maximum number of
+// entries, child to parent order is still preserved.
+TEST_F(SyncerTest, GetCommitIds_VerifyDeletionCommitOrderMaxEntries) {
+  {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+
+    // Create a bookmark tree with one root, two second level, and three third
+    // level bookmarks, all folders.
+    for (int i = 1; i <= 6; ++i) {
+      MutableEntry entry(&trans, CREATE, BOOKMARKS, trans.root_id(), "");
+      entry.PutId(ids_.FromNumber(i));
+      entry.PutIsDir(true);
+      entry.PutBaseVersion(5);
+      entry.PutServerVersion(5);
+      entry.PutParentId(ids_.FromNumber(i/2));
+      entry.PutServerParentId(ids_.FromNumber(i/2));
+      entry.PutServerIsDir(true);
+      entry.PutIsUnsynced(true);
+      entry.PutSpecifics(DefaultBookmarkSpecifics());
+      entry.PutIsDel(true);
+    }
+  }
+
+  {
+    // Run GetCommitIds with a limit of 2 entries to commit.
+    syncable::Directory::Metahandles result_handles;
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    GetCommitIdsForType(&trans, BOOKMARKS, 2, &result_handles);
+
+    // Now verify the output.  We expect two results in child to parent order
+    // (descending id order).
+    ASSERT_EQ(2U, result_handles.size());
+
+    Entry entry0(&trans, GET_BY_HANDLE, result_handles[0]);
+    EXPECT_EQ(ids_.FromNumber(6), entry0.GetId());
+
+    Entry entry1(&trans, GET_BY_HANDLE, result_handles[1]);
+    EXPECT_EQ(ids_.FromNumber(5), entry1.GetId());
   }
 }
 
@@ -1227,13 +1257,10 @@ TEST_F(SyncerTest, TestPurgeWithJournal) {
 }
 
 TEST_F(SyncerTest, ResetVersions) {
-  // Download the top level pref node and some pref items.
-  mock_server_->AddUpdateDirectory(
-      parent_id_, root_id_, "prefs", 1, 10, std::string(), std::string());
-  mock_server_->SetLastUpdateServerTag(ModelTypeToRootTag(PREFERENCES));
-  mock_server_->AddUpdatePref("id1", parent_id_.GetServerId(), "tag1", 20, 20);
-  mock_server_->AddUpdatePref("id2", parent_id_.GetServerId(), "tag2", 30, 30);
-  mock_server_->AddUpdatePref("id3", parent_id_.GetServerId(), "tag3", 40, 40);
+  // Download some pref items.
+  mock_server_->AddUpdatePref("id1", "", "tag1", 20, 20);
+  mock_server_->AddUpdatePref("id2", "", "tag2", 30, 30);
+  mock_server_->AddUpdatePref("id3", "", "tag3", 40, 40);
   SyncShareNudge();
 
   {
@@ -1246,7 +1273,7 @@ TEST_F(SyncerTest, ResetVersions) {
     MutableEntry entry2(&wtrans, GET_BY_CLIENT_TAG, "tag2");
     entry2.PutIsUnappliedUpdate(true);
 
-    MutableEntry entry4(&wtrans, CREATE, PREFERENCES, parent_id_, "name");
+    MutableEntry entry4(&wtrans, CREATE, PREFERENCES, "name");
     entry4.PutUniqueClientTag("tag4");
     entry4.PutIsUnsynced(true);
   }
@@ -2452,12 +2479,17 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
 }
 
 TEST_F(SyncerTest, ParentAndChildBothMatch) {
+  // Disable PREFERENCES which is enabled at the setup step to avoid
+  // auto-creating
+  // PREFERENCES root folder and failing the test below that verifies the number
+  // of children at the root.
+  DisableDatatype(PREFERENCES);
+
   const FullModelTypeSet all_types = FullModelTypeSet::All();
   syncable::Id parent_id = ids_.NewServerId();
   syncable::Id child_id = ids_.NewServerId();
   syncable::Id parent_local_id;
   syncable::Id child_local_id;
-
 
   {
     WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
@@ -2829,6 +2861,25 @@ TEST_F(SyncerTest, SendDebugInfoEventsOnGetUpdates_PostFailsDontDrop) {
   EXPECT_EQ(3U, mock_server_->requests().size());
   ASSERT_TRUE(mock_server_->last_request().has_get_updates());
   EXPECT_EQ(0, mock_server_->last_request().debug_info().events_size());
+}
+
+// Tests that commit failure with conflict will trigger GetUpdates for next
+// sycle of sync
+TEST_F(SyncerTest, CommitFailureWithConflict) {
+  ConfigureNoGetUpdatesRequired();
+  CreateUnsyncedDirectory("X", "id_X");
+  EXPECT_FALSE(nudge_tracker_.IsGetUpdatesRequired());
+
+  SyncShareNudge();
+  EXPECT_FALSE(nudge_tracker_.IsGetUpdatesRequired());
+
+  CreateUnsyncedDirectory("Y", "id_Y");
+  mock_server_->set_conflict_n_commits(1);
+  SyncShareNudge();
+  EXPECT_TRUE(nudge_tracker_.IsGetUpdatesRequired());
+
+  nudge_tracker_.RecordSuccessfulSyncCycle();
+  EXPECT_FALSE(nudge_tracker_.IsGetUpdatesRequired());
 }
 
 // Tests that sending debug info events on Commit works.
@@ -4052,12 +4103,10 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
   EXPECT_TRUE(ids_.FromNumber(3) < ids_.FromNumber(4));
 
   syncable::Id id1 = TestIdFactory::MakeServer("1");
-  mock_server_->AddUpdatePref(id1.GetServerId(), ids_.root().GetServerId(),
-                              "tag1", 10, 100);
+  mock_server_->AddUpdatePref(id1.GetServerId(), "", "tag1", 10, 100);
 
   syncable::Id id4 = TestIdFactory::MakeServer("4");
-  mock_server_->AddUpdatePref(id4.GetServerId(), ids_.root().GetServerId(),
-                              "tag2", 11, 110);
+  mock_server_->AddUpdatePref(id4.GetServerId(), "", "tag2", 11, 110);
 
   mock_server_->set_conflict_all_commits(true);
 
@@ -4090,17 +4139,19 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
     EXPECT_EQ("tag2", tag2.GetUniqueClientTag());
     tag2_metahandle = tag2.GetMetahandle();
 
+    // Preferences type root should have been created by the updates above.
+    Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
+    ASSERT_TRUE(pref_root.good());
+
     syncable::Directory::Metahandles children;
-    directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
+    directory()->GetChildHandlesById(&trans, pref_root.GetId(), &children);
     ASSERT_EQ(2U, children.size());
   }
 
   syncable::Id id2 = TestIdFactory::MakeServer("2");
-  mock_server_->AddUpdatePref(id2.GetServerId(), ids_.root().GetServerId(),
-                              "tag1", 12, 120);
+  mock_server_->AddUpdatePref(id2.GetServerId(), "", "tag1", 12, 120);
   syncable::Id id3 = TestIdFactory::MakeServer("3");
-  mock_server_->AddUpdatePref(id3.GetServerId(), ids_.root().GetServerId(),
-                              "tag2", 13, 130);
+  mock_server_->AddUpdatePref(id3.GetServerId(), "", "tag2", 13, 130);
   SyncShareNudge();
 
   {
@@ -4130,8 +4181,12 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
     EXPECT_EQ("tag2", tag2.GetUniqueClientTag());
     EXPECT_EQ(tag2_metahandle, tag2.GetMetahandle());
 
+    // Preferences type root should have been created by the updates above.
+    Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
+    ASSERT_TRUE(pref_root.good());
+
     syncable::Directory::Metahandles children;
-    directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
+    directory()->GetChildHandlesById(&trans, pref_root.GetId(), &children);
     ASSERT_EQ(2U, children.size());
   }
 }
@@ -4143,34 +4198,33 @@ TEST_F(SyncerTest, ClientTagClashWithinBatchOfUpdates) {
   EXPECT_TRUE(ids_.FromNumber(201) < ids_.FromNumber(205));
 
   // Least ID: winner.
-  mock_server_->AddUpdatePref(ids_.FromNumber(1).GetServerId(),
-                              ids_.root().GetServerId(), "tag a", 1, 10);
-  mock_server_->AddUpdatePref(ids_.FromNumber(2).GetServerId(),
-                              ids_.root().GetServerId(), "tag a", 11, 110);
-  mock_server_->AddUpdatePref(ids_.FromNumber(3).GetServerId(),
-                              ids_.root().GetServerId(), "tag a", 12, 120);
-  mock_server_->AddUpdatePref(ids_.FromNumber(4).GetServerId(),
-                              ids_.root().GetServerId(), "tag a", 13, 130);
-
-  mock_server_->AddUpdatePref(ids_.FromNumber(105).GetServerId(),
-                              ids_.root().GetServerId(), "tag b", 14, 140);
-  mock_server_->AddUpdatePref(ids_.FromNumber(102).GetServerId(),
-                              ids_.root().GetServerId(), "tag b", 15, 150);
+  mock_server_->AddUpdatePref(ids_.FromNumber(1).GetServerId(), "", "tag a", 1,
+                              10);
+  mock_server_->AddUpdatePref(ids_.FromNumber(2).GetServerId(), "", "tag a", 11,
+                              110);
+  mock_server_->AddUpdatePref(ids_.FromNumber(3).GetServerId(), "", "tag a", 12,
+                              120);
+  mock_server_->AddUpdatePref(ids_.FromNumber(4).GetServerId(), "", "tag a", 13,
+                              130);
+  mock_server_->AddUpdatePref(ids_.FromNumber(105).GetServerId(), "", "tag b",
+                              14, 140);
+  mock_server_->AddUpdatePref(ids_.FromNumber(102).GetServerId(), "", "tag b",
+                              15, 150);
   // Least ID: winner.
-  mock_server_->AddUpdatePref(ids_.FromNumber(101).GetServerId(),
-                              ids_.root().GetServerId(), "tag b", 16, 160);
-  mock_server_->AddUpdatePref(ids_.FromNumber(104).GetServerId(),
-                              ids_.root().GetServerId(), "tag b", 17, 170);
+  mock_server_->AddUpdatePref(ids_.FromNumber(101).GetServerId(), "", "tag b",
+                              16, 160);
+  mock_server_->AddUpdatePref(ids_.FromNumber(104).GetServerId(), "", "tag b",
+                              17, 170);
 
-  mock_server_->AddUpdatePref(ids_.FromNumber(205).GetServerId(),
-                              ids_.root().GetServerId(), "tag c", 18, 180);
-  mock_server_->AddUpdatePref(ids_.FromNumber(202).GetServerId(),
-                              ids_.root().GetServerId(), "tag c", 19, 190);
-  mock_server_->AddUpdatePref(ids_.FromNumber(204).GetServerId(),
-                              ids_.root().GetServerId(), "tag c", 20, 200);
+  mock_server_->AddUpdatePref(ids_.FromNumber(205).GetServerId(), "", "tag c",
+                              18, 180);
+  mock_server_->AddUpdatePref(ids_.FromNumber(202).GetServerId(), "", "tag c",
+                              19, 190);
+  mock_server_->AddUpdatePref(ids_.FromNumber(204).GetServerId(), "", "tag c",
+                              20, 200);
   // Least ID: winner.
-  mock_server_->AddUpdatePref(ids_.FromNumber(201).GetServerId(),
-                              ids_.root().GetServerId(), "tag c", 21, 210);
+  mock_server_->AddUpdatePref(ids_.FromNumber(201).GetServerId(), "", "tag c",
+                              21, 210);
 
   mock_server_->set_conflict_all_commits(true);
 
@@ -4209,9 +4263,65 @@ TEST_F(SyncerTest, ClientTagClashWithinBatchOfUpdates) {
     EXPECT_EQ(21, tag_c.GetBaseVersion());
     EXPECT_EQ("tag c", tag_c.GetUniqueClientTag());
 
+    // Preferences type root should have been created by the updates above.
+    Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
+    ASSERT_TRUE(pref_root.good());
+
+    // Verify that we have exactly 3 tagged nodes under the type root.
     syncable::Directory::Metahandles children;
-    directory()->GetChildHandlesById(&trans, trans.root_id(), &children);
+    directory()->GetChildHandlesById(&trans, pref_root.GetId(), &children);
     ASSERT_EQ(3U, children.size());
+  }
+}
+
+// This verifies transition to implicit permanent folders.
+TEST_F(SyncerTest, EntryWithParentIdUpdatedWithEntryWithoutParentId) {
+  // Make sure SPECIFICS root exists so that we can get its parent ID.
+  mock_server_->AddUpdateSpecifics(1, 0, "Folder", 10, 10, true, 1,
+                                   DefaultPreferencesSpecifics());
+  mock_server_->SetLastUpdateServerTag(ModelTypeToRootTag(PREFERENCES));
+  SyncShareNudge();
+
+  Id pref_root_id;
+  {
+    // Preferences type root should have been created by the update above.
+    // We need it in order to get its ID.
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
+    ASSERT_TRUE(pref_root.good());
+    pref_root_id = pref_root.GetId();
+  }
+
+  // Add a preference item with explicit parent ID.
+  mock_server_->AddUpdatePref(ids_.FromNumber(2).GetServerId(),
+                              ids_.FromNumber(1).GetServerId(), "tag", 1, 10);
+
+  SyncShareNudge();
+
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry pref_entry(&trans, GET_BY_CLIENT_TAG, "tag");
+    ASSERT_TRUE(pref_entry.good());
+    ASSERT_EQ(pref_root_id, pref_entry.GetParentId());
+  }
+
+  // Make another update where the same item get updated, this time
+  // with implicit parent ID.
+  mock_server_->AddUpdatePref(ids_.FromNumber(2).GetServerId(), "", "tag", 2,
+                              20);
+
+  SyncShareNudge();
+
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry pref_entry(&trans, GET_BY_CLIENT_TAG, "tag");
+    ASSERT_TRUE(pref_entry.good());
+    ASSERT_TRUE(pref_entry.GetParentId().IsNull());
+
+    // Verify that there is still one node under the type root.
+    syncable::Directory::Metahandles children;
+    directory()->GetChildHandlesById(&trans, pref_root_id, &children);
+    ASSERT_EQ(1U, children.size());
   }
 }
 
@@ -4455,6 +4565,217 @@ TEST_F(SyncerTest, GetKeyEmpty) {
   }
 }
 
+// Tests specifically related to bookmark (and therefore no client tags) sync
+// logic. Entities without client tags have custom logic in parts of the code,
+// and hence are not covered by e.g. the Undeletion tests below.
+class SyncerBookmarksTest : public SyncerTest {
+ public:
+  SyncerBookmarksTest() : metahandle_(syncable::kInvalidMetaHandle) {
+  }
+
+  void Create() {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    MutableEntry bookmark(
+        &trans, CREATE, BOOKMARKS, ids_.root(), "clientname");
+    ASSERT_TRUE(bookmark.good());
+    bookmark.PutIsUnsynced(true);
+    bookmark.PutSyncing(false);
+    bookmark.PutSpecifics(DefaultBookmarkSpecifics());
+    EXPECT_FALSE(bookmark.GetIsUnappliedUpdate());
+    EXPECT_FALSE(bookmark.GetId().ServerKnows());
+    metahandle_ = bookmark.GetMetahandle();
+    local_id_ = bookmark.GetId();
+  }
+
+  void Delete() {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    MutableEntry entry(&trans, GET_BY_HANDLE, metahandle_);
+    ASSERT_TRUE(entry.good());
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    // The order of setting IS_UNSYNCED vs IS_DEL matters. See
+    // WriteNode::Tombstone().
+    entry.PutIsUnsynced(true);
+    entry.PutIsDel(true);
+    entry.PutSyncing(false);
+  }
+
+  void Undelete() {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    MutableEntry entry(&trans, GET_BY_HANDLE, metahandle_);
+    ASSERT_TRUE(entry.good());
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_TRUE(entry.GetIsDel());
+    entry.PutIsDel(false);
+    entry.PutIsUnsynced(true);
+    entry.PutSyncing(false);
+  }
+
+  int64 GetMetahandleOfTag() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+    EXPECT_TRUE(entry.good());
+    if (!entry.good()) {
+      return syncable::kInvalidMetaHandle;
+    }
+    return entry.GetMetahandle();
+  }
+
+  Id GetServerId() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+    EXPECT_TRUE(entry.good());
+    if (!entry.good()) {
+      return Id();
+    }
+    return entry.GetId();
+  }
+
+  void ExpectUnsyncedCreation() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_FALSE(entry.GetIsDel());
+    EXPECT_FALSE(entry.GetServerIsDel());  // Never been committed.
+    EXPECT_LT(entry.GetBaseVersion(), 0);
+    EXPECT_TRUE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+  }
+
+  void ExpectUnsyncedUndeletion() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_FALSE(entry.GetIsDel());
+    EXPECT_TRUE(entry.GetServerIsDel());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_TRUE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    EXPECT_TRUE(entry.GetId().ServerKnows());
+  }
+
+  void ExpectUnsyncedEdit() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_FALSE(entry.GetIsDel());
+    EXPECT_FALSE(entry.GetServerIsDel());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_TRUE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    EXPECT_TRUE(entry.GetId().ServerKnows());
+  }
+
+  void ExpectUnsyncedDeletion() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_TRUE(entry.GetIsDel());
+    EXPECT_FALSE(entry.GetServerIsDel());
+    EXPECT_TRUE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_GE(entry.GetServerVersion(), 0);
+  }
+
+  void ExpectSyncedAndCreated() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_FALSE(entry.GetIsDel());
+    EXPECT_FALSE(entry.GetServerIsDel());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_EQ(entry.GetBaseVersion(), entry.GetServerVersion());
+    EXPECT_FALSE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+  }
+
+  void ExpectSyncedAndDeleted() {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_TRUE(entry.GetIsDel());
+    EXPECT_TRUE(entry.GetServerIsDel());
+    EXPECT_FALSE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_GE(entry.GetServerVersion(), 0);
+  }
+
+ protected:
+  syncable::Id local_id_;
+  int64 metahandle_;
+};
+
+TEST_F(SyncerBookmarksTest, CreateSyncThenDeleteSync) {
+  Create();
+  ExpectUnsyncedCreation();
+  SyncShareNudge();
+  ExpectSyncedAndCreated();
+  Delete();
+  ExpectUnsyncedDeletion();
+  SyncShareNudge();
+  ExpectSyncedAndDeleted();
+}
+
+TEST_F(SyncerBookmarksTest, CreateThenDeleteBeforeSync) {
+  Create();
+  ExpectUnsyncedCreation();
+  Delete();
+
+  // Deleting before the initial commit should result in not needing to send
+  // the delete to the server. It will still be in an unsynced state, but with
+  // IS_UNSYNCED set to false.
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
+
+    EXPECT_EQ(metahandle_, entry.GetMetahandle());
+    EXPECT_TRUE(entry.GetIsDel());
+    EXPECT_FALSE(entry.GetServerIsDel());
+    EXPECT_FALSE(entry.GetIsUnsynced());
+    EXPECT_FALSE(entry.GetIsUnappliedUpdate());
+    EXPECT_EQ(entry.GetBaseVersion(), -1);
+    EXPECT_EQ(entry.GetServerVersion(), 0);
+  }
+}
+
+TEST_F(SyncerBookmarksTest, LocalDeleteRemoteChangeConflict) {
+  Create();
+  ExpectUnsyncedCreation();
+  SyncShareNudge();
+  ExpectSyncedAndCreated();
+  Delete();
+  ExpectUnsyncedDeletion();
+
+  // Trigger a getupdates that modifies the bookmark. The update should  be
+  // clobbered by the local delete.
+  mock_server_->AddUpdateBookmark(GetServerId(), Id::GetRoot(), "dummy", 10, 10,
+                                  local_cache_guid(), local_id_.GetServerId());
+
+  SyncShareNudge();
+  ExpectSyncedAndDeleted();
+}
+
+TEST_F(SyncerBookmarksTest, CreateThenDeleteDuringCommit) {
+  Create();
+  ExpectUnsyncedCreation();
+
+  // In the middle of the initial creation commit, perform a deletion.
+  // This should trigger performing two consecutive commit cycles, resulting
+  // in the bookmark being both deleted and synced.
+  mock_server_->SetMidCommitCallback(
+      base::Bind(&SyncerBookmarksTest::Delete, base::Unretained(this)));
+
+  SyncShareNudge();
+  ExpectSyncedAndDeleted();
+}
+
 // Test what happens if a client deletes, then recreates, an object very
 // quickly.  It is possible that the deletion gets sent as a commit, and
 // the undelete happens during the commit request.  The principle here
@@ -4484,12 +4805,12 @@ class SyncerUndeletionTest : public SyncerTest {
   void Create() {
     WriteTransaction trans(FROM_HERE, UNITTEST, directory());
     MutableEntry perm_folder(
-        &trans, CREATE, BOOKMARKS, ids_.root(), "clientname");
+        &trans, CREATE, PREFERENCES, ids_.root(), "clientname");
     ASSERT_TRUE(perm_folder.good());
     perm_folder.PutUniqueClientTag(client_tag_);
     perm_folder.PutIsUnsynced(true);
     perm_folder.PutSyncing(false);
-    perm_folder.PutSpecifics(DefaultBookmarkSpecifics());
+    perm_folder.PutSpecifics(DefaultPreferencesSpecifics());
     EXPECT_FALSE(perm_folder.GetIsUnappliedUpdate());
     EXPECT_FALSE(perm_folder.GetId().ServerKnows());
     metahandle_ = perm_folder.GetMetahandle();
@@ -4501,8 +4822,10 @@ class SyncerUndeletionTest : public SyncerTest {
     MutableEntry entry(&trans, GET_BY_CLIENT_TAG, client_tag_);
     ASSERT_TRUE(entry.good());
     EXPECT_EQ(metahandle_, entry.GetMetahandle());
-    entry.PutIsDel(true);
+    // The order of setting IS_UNSYNCED vs IS_DEL matters. See
+    // WriteNode::Tombstone().
     entry.PutIsUnsynced(true);
+    entry.PutIsDel(true);
     entry.PutSyncing(false);
   }
 
@@ -4534,7 +4857,7 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_EQ(metahandle_, entry.GetMetahandle());
     EXPECT_FALSE(entry.GetIsDel());
     EXPECT_FALSE(entry.GetServerIsDel());  // Never been committed.
-    EXPECT_GE(0, entry.GetBaseVersion());
+    EXPECT_LT(entry.GetBaseVersion(), 0);
     EXPECT_TRUE(entry.GetIsUnsynced());
     EXPECT_FALSE(entry.GetIsUnappliedUpdate());
   }
@@ -4546,7 +4869,7 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_EQ(metahandle_, entry.GetMetahandle());
     EXPECT_FALSE(entry.GetIsDel());
     EXPECT_TRUE(entry.GetServerIsDel());
-    EXPECT_EQ(0, entry.GetBaseVersion());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
     EXPECT_TRUE(entry.GetIsUnsynced());
     EXPECT_FALSE(entry.GetIsUnappliedUpdate());
     EXPECT_TRUE(entry.GetId().ServerKnows());
@@ -4559,7 +4882,7 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_EQ(metahandle_, entry.GetMetahandle());
     EXPECT_FALSE(entry.GetIsDel());
     EXPECT_FALSE(entry.GetServerIsDel());
-    EXPECT_LT(0, entry.GetBaseVersion());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
     EXPECT_TRUE(entry.GetIsUnsynced());
     EXPECT_FALSE(entry.GetIsUnappliedUpdate());
     EXPECT_TRUE(entry.GetId().ServerKnows());
@@ -4574,8 +4897,8 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_FALSE(entry.GetServerIsDel());
     EXPECT_TRUE(entry.GetIsUnsynced());
     EXPECT_FALSE(entry.GetIsUnappliedUpdate());
-    EXPECT_LT(0, entry.GetBaseVersion());
-    EXPECT_LT(0, entry.GetServerVersion());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_GE(entry.GetServerVersion(), 0);
   }
 
   void ExpectSyncedAndCreated() {
@@ -4585,7 +4908,7 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_EQ(metahandle_, entry.GetMetahandle());
     EXPECT_FALSE(entry.GetIsDel());
     EXPECT_FALSE(entry.GetServerIsDel());
-    EXPECT_LT(0, entry.GetBaseVersion());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
     EXPECT_EQ(entry.GetBaseVersion(), entry.GetServerVersion());
     EXPECT_FALSE(entry.GetIsUnsynced());
     EXPECT_FALSE(entry.GetIsUnappliedUpdate());
@@ -4600,8 +4923,8 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_TRUE(entry.GetServerIsDel());
     EXPECT_FALSE(entry.GetIsUnsynced());
     EXPECT_FALSE(entry.GetIsUnappliedUpdate());
-    EXPECT_GE(0, entry.GetBaseVersion());
-    EXPECT_GE(0, entry.GetServerVersion());
+    EXPECT_GE(entry.GetBaseVersion(), 0);
+    EXPECT_GE(entry.GetServerVersion(), 0);
   }
 
  protected:
@@ -4800,7 +5123,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletes) {
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, metahandle_);
-    mock_server_->AddUpdateTombstone(entry.GetId());
+    mock_server_->AddUpdateTombstone(entry.GetId(), PREFERENCES);
   }
   SyncShareNudge();
 
@@ -4842,7 +5165,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletesImmediately) {
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, metahandle_);
-    mock_server_->AddUpdateTombstone(entry.GetId());
+    mock_server_->AddUpdateTombstone(entry.GetId(), PREFERENCES);
   }
   SyncShareNudge();
 
@@ -4910,22 +5233,16 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletes) {
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, metahandle_);
-    mock_server_->AddUpdateBookmark(
-        entry.GetId(),
-        entry.GetParentId(),
-        "Thadeusz", 100, 1000,
-        local_cache_guid(), local_id_.GetServerId());
+    mock_server_->AddUpdatePref(
+        entry.GetId().GetServerId(),
+        entry.GetParentId().GetServerId(),
+        client_tag_, 100, 1000);
   }
   mock_server_->SetLastUpdateClientTag(client_tag_);
   SyncShareNudge();
   EXPECT_EQ(0, session_->status_controller().TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
-  {
-    syncable::ReadTransaction trans(FROM_HERE, directory());
-    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
-    EXPECT_EQ("Thadeusz", entry.GetNonUniqueName());
-  }
 }
 
 TEST_F(SyncerUndeletionTest, OtherClientUndeletesImmediately) {
@@ -4965,22 +5282,16 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletesImmediately) {
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry(&trans, GET_BY_HANDLE, metahandle_);
-    mock_server_->AddUpdateBookmark(
-        entry.GetId(),
-        entry.GetParentId(),
-        "Thadeusz", 100, 1000,
-        local_cache_guid(), local_id_.GetServerId());
+    mock_server_->AddUpdatePref(
+        entry.GetId().GetServerId(),
+        entry.GetParentId().GetServerId(),
+        client_tag_, 100, 1000);
   }
   mock_server_->SetLastUpdateClientTag(client_tag_);
   SyncShareNudge();
   EXPECT_EQ(0, session_->status_controller().TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
-  {
-    syncable::ReadTransaction trans(FROM_HERE, directory());
-    Entry entry(&trans, GET_BY_HANDLE, metahandle_);
-    EXPECT_EQ("Thadeusz", entry.GetNonUniqueName());
-  }
 }
 
 enum {

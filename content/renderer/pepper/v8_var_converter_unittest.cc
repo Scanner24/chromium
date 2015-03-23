@@ -50,22 +50,22 @@ void FromV8ValueComplete(const ScopedPPVar& scoped_var,
 
 class MockResourceConverter : public content::ResourceConverter {
  public:
-  virtual ~MockResourceConverter() {}
-  virtual void Reset() OVERRIDE {}
-  virtual bool NeedsFlush() OVERRIDE { return false; }
-  virtual void Flush(const base::Callback<void(bool)>& callback) OVERRIDE {
+  ~MockResourceConverter() override {}
+  void Reset() override {}
+  bool NeedsFlush() override { return false; }
+  void Flush(const base::Callback<void(bool)>& callback) override {
     NOTREACHED();
   }
-  virtual bool FromV8Value(v8::Handle<v8::Object> val,
-                           v8::Handle<v8::Context> context,
-                           PP_Var* result,
-                           bool* was_resource) OVERRIDE {
+  bool FromV8Value(v8::Handle<v8::Object> val,
+                   v8::Handle<v8::Context> context,
+                   PP_Var* result,
+                   bool* was_resource) override {
     *was_resource = false;
     return true;
   }
-  virtual bool ToV8Value(const PP_Var& var,
-                         v8::Handle<v8::Context> context,
-                         v8::Handle<v8::Value>* result) OVERRIDE {
+  bool ToV8Value(const PP_Var& var,
+                 v8::Handle<v8::Context> context,
+                 v8::Handle<v8::Value>* result) override {
     return false;
   }
 };
@@ -83,25 +83,27 @@ bool Equals(const PP_Var& var,
     (*visited_ids)[var.value.as_id] = val;
   }
 
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
   if (val->IsUndefined()) {
     return var.type == PP_VARTYPE_UNDEFINED;
   } else if (val->IsNull()) {
     return var.type == PP_VARTYPE_NULL;
   } else if (val->IsBoolean() || val->IsBooleanObject()) {
     return var.type == PP_VARTYPE_BOOL &&
-           PP_FromBool(val->ToBoolean()->Value()) == var.value.as_bool;
+           PP_FromBool(val->ToBoolean(isolate)->Value()) == var.value.as_bool;
   } else if (val->IsInt32()) {
     return var.type == PP_VARTYPE_INT32 &&
-           val->ToInt32()->Value() == var.value.as_int;
+           val->ToInt32(isolate)->Value() == var.value.as_int;
   } else if (val->IsNumber() || val->IsNumberObject()) {
     return var.type == PP_VARTYPE_DOUBLE &&
-           fabs(val->ToNumber()->Value() - var.value.as_double) <= 1.0e-4;
+           fabs(val->ToNumber(isolate)->Value() - var.value.as_double) <=
+               1.0e-4;
   } else if (val->IsString() || val->IsStringObject()) {
     if (var.type != PP_VARTYPE_STRING)
       return false;
     StringVar* string_var = StringVar::FromPPVar(var);
     DCHECK(string_var);
-    v8::String::Utf8Value utf8(val->ToString());
+    v8::String::Utf8Value utf8(val);
     return std::string(*utf8, utf8.length()) == string_var->value();
   } else if (val->IsArray()) {
     if (var.type != PP_VARTYPE_ARRAY)
@@ -123,7 +125,7 @@ bool Equals(const PP_Var& var,
       NOTIMPLEMENTED();
       return false;
     } else {
-      v8::Handle<v8::Object> v8_object = val->ToObject();
+      v8::Handle<v8::Object> v8_object = val.As<v8::Object>();
       if (var.type != PP_VARTYPE_DICTIONARY)
         return false;
       DictionaryVar* dict_var = DictionaryVar::FromPPVar(var);
@@ -138,7 +140,7 @@ bool Equals(const PP_Var& var,
           return false;
         v8::Handle<v8::Value> child_v8 = v8_object->Get(key);
 
-        v8::String::Utf8Value name_utf8(key->ToString());
+        v8::String::Utf8Value name_utf8(key);
         ScopedPPVar release_key(ScopedPPVar::PassRef(),
                                 StringVar::StringToPPVar(std::string(
                                     *name_utf8, name_utf8.length())));
@@ -169,16 +171,16 @@ class V8VarConverterTest : public testing::Test {
         dummy,
         scoped_ptr<ResourceConverter>(new MockResourceConverter).Pass()));
   }
-  virtual ~V8VarConverterTest() {}
+  ~V8VarConverterTest() override {}
 
   // testing::Test implementation.
-  virtual void SetUp() {
+  void SetUp() override {
     ProxyLock::Acquire();
     v8::HandleScope handle_scope(isolate_);
     v8::Handle<v8::ObjectTemplate> global = v8::ObjectTemplate::New(isolate_);
     context_.Reset(isolate_, v8::Context::New(isolate_, NULL, global));
   }
-  virtual void TearDown() {
+  void TearDown() override {
     context_.Reset();
     ASSERT_TRUE(PpapiGlobals::Get()->GetVarTracker()->GetLiveVars().empty());
     ProxyLock::Release();

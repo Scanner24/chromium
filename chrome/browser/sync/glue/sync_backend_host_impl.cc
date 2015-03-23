@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -107,6 +108,9 @@ void SyncBackendHostImpl::Initialize(
     syncer::ReportUnrecoverableErrorFunction
         report_unrecoverable_error_function,
     syncer::NetworkResources* network_resources) {
+  // TODO(pavely): Remove ScopedTracker below once crbug.com/426272 is fixed.
+  tracked_objects::ScopedTracker tracker1(FROM_HERE_WITH_EXPLICIT_FUNCTION(
+      "426272 SyncBackendHostImpl::Initialize registrar"));
   registrar_.reset(new browser_sync::SyncBackendRegistrar(name_,
                                             profile_,
                                             sync_thread.Pass()));
@@ -115,17 +119,23 @@ void SyncBackendHostImpl::Initialize(
   frontend_ = frontend;
   DCHECK(frontend);
 
+  // TODO(pavely): Remove ScopedTracker below once crbug.com/426272 is fixed.
+  tracked_objects::ScopedTracker tracker2(FROM_HERE_WITH_EXPLICIT_FUNCTION(
+      "426272 SyncBackendHostImpl::Initialize locks"));
   syncer::ModelSafeRoutingInfo routing_info;
   std::vector<scoped_refptr<syncer::ModelSafeWorker> > workers;
   registrar_->GetModelSafeRoutingInfo(&routing_info);
   registrar_->GetWorkers(&workers);
+  // TODO(pavely): Remove ScopedTracker below once crbug.com/426272 is fixed.
+  tracked_objects::ScopedTracker tracker3(FROM_HERE_WITH_EXPLICIT_FUNCTION(
+      "426272 SyncBackendHostImpl::Initialize init"));
 
   InternalComponentsFactory::Switches factory_switches = {
     InternalComponentsFactory::ENCRYPTION_KEYSTORE,
     InternalComponentsFactory::BACKOFF_NORMAL
   };
 
-  CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kSyncShortInitialRetryOverride)) {
     factory_switches.backoff_override =
         InternalComponentsFactory::BACKOFF_SHORT_INITIAL_RETRY_OVERRIDE;
@@ -507,6 +517,12 @@ void SyncBackendHostImpl::GetModelSafeRoutingInfo(
   }
 }
 
+void SyncBackendHostImpl::FlushDirectory() const {
+  DCHECK(initialized());
+  registrar_->sync_thread()->message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncBackendHostCore::SaveChanges, core_));
+}
+
 void SyncBackendHostImpl::RequestBufferedProtocolEventsAndEnableForwarding() {
   registrar_->sync_thread()->message_loop()->PostTask(
       FROM_HERE,
@@ -593,6 +609,11 @@ void SyncBackendHostImpl::FinishConfigureDataTypesOnFrontendLoop(
     const syncer::ModelTypeSet failed_configuration_types,
     const base::Callback<void(syncer::ModelTypeSet,
                               syncer::ModelTypeSet)>& ready_task) {
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/458406 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 SyncBackendHostImpl::FinishConfigureDataTOFL"));
   if (!frontend_)
     return;
 
@@ -602,6 +623,11 @@ void SyncBackendHostImpl::FinishConfigureDataTypesOnFrontendLoop(
         ModelTypeSetToObjectIdSet(enabled_types));
   }
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/458406 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "458406 SyncBackendHostImpl::FinishConfigureDataTOFL::ReadyTask"));
   if (!ready_task.is_null())
     ready_task.Run(succeeded_configuration_types, failed_configuration_types);
 }
@@ -624,14 +650,6 @@ void SyncBackendHostImpl::AddExperimentalTypes() {
   syncer::Experiments experiments;
   if (core_->sync_manager()->ReceivedExperiment(&experiments))
     frontend_->OnExperimentsChanged(experiments);
-}
-
-void SyncBackendHostImpl::HandleControlTypesDownloadRetry() {
-  DCHECK_EQ(base::MessageLoop::current(), frontend_loop_);
-  if (!frontend_)
-    return;
-
-  frontend_->OnSyncConfigureRetry();
 }
 
 void SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop(

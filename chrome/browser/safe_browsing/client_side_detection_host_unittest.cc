@@ -44,7 +44,7 @@ using ::testing::SaveArg;
 using ::testing::SetArgumentPointee;
 using ::testing::StrictMock;
 using content::BrowserThread;
-using content::RenderViewHostTester;
+using content::RenderFrameHostTester;
 using content::ResourceType;
 using content::WebContents;
 
@@ -201,7 +201,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
  public:
   typedef SafeBrowsingUIManager::UnsafeResource UnsafeResource;
 
-  virtual void SetUp() {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 
     // Inject service classes.
@@ -222,7 +222,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     csd_host_->browse_info_.reset(new BrowseInfo);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     // Delete the host object on the UI thread and release the
     // SafeBrowsingService.
     BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE,
@@ -233,7 +233,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     ChromeRenderViewHostTestHarness::TearDown();
   }
 
-  virtual content::BrowserContext* CreateBrowserContext() OVERRIDE {
+  content::BrowserContext* CreateBrowserContext() override {
     // Set custom profile object so that we can mock calls to IsOffTheRecord.
     // This needs to happen before we call the parent SetUp() function.  We use
     // a nice mock because other parts of the code are calling IsOffTheRecord.
@@ -330,9 +330,9 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
         SafeBrowsingMsg_StartPhishingDetection::ID);
     if (url) {
       ASSERT_TRUE(msg);
-      Tuple1<GURL> actual_url;
+      Tuple<GURL> actual_url;
       SafeBrowsingMsg_StartPhishingDetection::Read(msg, &actual_url);
-      EXPECT_EQ(*url, actual_url.a);
+      EXPECT_EQ(*url, get<0>(actual_url));
       EXPECT_EQ(rvh()->GetRoutingID(), msg->routing_id());
       process()->sink().ClearMessages();
     } else {
@@ -946,7 +946,8 @@ TEST_F(ClientSideDetectionHostTest,
 TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckXHTML) {
   // Check that XHTML is supported, in addition to the default HTML type.
   GURL url("http://host.com/xhtml");
-  rvh_tester()->SetContentsMimeType("application/xhtml+xml");
+  RenderFrameHostTester::For(web_contents()->GetMainFrame())->
+      SetContentsMimeType("application/xhtml+xml");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
                                 &kFalse, &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);
@@ -985,7 +986,8 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckMimeType) {
   // same domain as the previous URL, otherwise it will create a new
   // RenderViewHost that won't have the mime type set.
   GURL url("http://host2.com/image.jpg");
-  rvh_tester()->SetContentsMimeType("image/jpeg");
+  RenderFrameHostTester::For(web_contents()->GetMainFrame())->
+      SetContentsMimeType("image/jpeg");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
                                 &kFalse, &kFalse, &kFalse, &kFalse);
   NavigateAndCommit(url);

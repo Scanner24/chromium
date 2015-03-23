@@ -44,10 +44,10 @@ class BluetoothPrivateApiTest : public ExtensionApiTest {
         adapter_powered_(false),
         adapter_discoverable_(false) {}
 
-  virtual ~BluetoothPrivateApiTest() {}
+  ~BluetoothPrivateApiTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+  void SetUpOnMainThread() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kWhitelistedExtensionID, kTestExtensionId);
     mock_adapter_ = new NiceMock<MockBluetoothAdapter>();
     event_router()->SetAdapterForTest(mock_adapter_.get());
@@ -62,7 +62,7 @@ class BluetoothPrivateApiTest : public ExtensionApiTest {
     ON_CALL(*mock_adapter_.get(), IsPresent()).WillByDefault(Return(true));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {}
+  void TearDownOnMainThread() override {}
 
   BluetoothEventRouter* event_router() {
     return BluetoothAPI::Get(browser()->profile())->event_router();
@@ -119,6 +119,12 @@ class BluetoothPrivateApiTest : public ExtensionApiTest {
   scoped_refptr<NiceMock<MockBluetoothAdapter> > mock_adapter_;
   scoped_ptr<NiceMock<MockBluetoothDevice> > mock_device_;
 };
+
+ACTION_TEMPLATE(InvokeCallbackArgument,
+                HAS_1_TEMPLATE_PARAMS(int, k),
+                AND_0_VALUE_PARAMS()) {
+  ::std::tr1::get<k>(args).Run();
+}
 
 IN_PROC_BROWSER_TEST_F(BluetoothPrivateApiTest, SetAdapterState) {
   ON_CALL(*mock_adapter_.get(), GetName())
@@ -180,6 +186,22 @@ IN_PROC_BROWSER_TEST_F(BluetoothPrivateApiTest, PasskeyPairing) {
   EXPECT_CALL(*mock_device_, ExpectingPasskey()).WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_device_, SetPasskey(900531));
   ASSERT_TRUE(RunComponentExtensionTest("bluetooth_private/passkey_pairing"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(BluetoothPrivateApiTest, DisconnectAll) {
+  EXPECT_CALL(*mock_device_, IsConnected())
+      .Times(6)
+      .WillOnce(Return(false))
+      .WillOnce(Return(true))
+      .WillOnce(Return(false))
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_device_, Disconnect(_, _))
+      .Times(3)
+      .WillOnce(InvokeCallbackArgument<1>())
+      .WillOnce(InvokeCallbackArgument<1>())
+      .WillOnce(InvokeCallbackArgument<0>());
+  ASSERT_TRUE(RunComponentExtensionTest("bluetooth_private/disconnect"))
       << message_;
 }
 

@@ -18,7 +18,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 #if defined(OS_CHROMEOS)
 #include "ui/display/chromeos/display_configurator.h"
@@ -48,9 +48,9 @@ class LockStateControllerTest : public AshTestBase {
                               lock_state_controller_delegate_(NULL),
                               test_animator_(NULL) {
   }
-  virtual ~LockStateControllerTest() {}
+  ~LockStateControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AshTestBase::SetUp();
 
     scoped_ptr<LockStateControllerDelegate> lock_state_controller_delegate(

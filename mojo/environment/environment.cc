@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "mojo/public/cpp/environment/environment.h"
+#include "third_party/mojo/src/mojo/public/cpp/environment/environment.h"
 
 #include "mojo/environment/default_async_waiter_impl.h"
 #include "mojo/environment/default_logger_impl.h"
+#include "mojo/environment/default_run_loop_impl.h"
 
 namespace mojo {
 
@@ -31,6 +32,16 @@ const MojoAsyncWaiter* Environment::GetDefaultAsyncWaiter() {
 // static
 const MojoLogger* Environment::GetDefaultLogger() {
   return internal::GetDefaultLoggerImpl();
+}
+
+// static
+void Environment::InstantiateDefaultRunLoop() {
+  internal::InstantiateDefaultRunLoopImpl();
+}
+
+// static
+void Environment::DestroyDefaultRunLoop() {
+  internal::DestroyDefaultRunLoopImpl();
 }
 
 }  // namespace mojo

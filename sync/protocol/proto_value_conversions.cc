@@ -38,8 +38,6 @@
 #include "sync/protocol/search_engine_specifics.pb.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/protocol/synced_notification_app_info_specifics.pb.h"
-#include "sync/protocol/synced_notification_specifics.pb.h"
 #include "sync/protocol/theme_specifics.pb.h"
 #include "sync/protocol/typed_url_specifics.pb.h"
 #include "sync/protocol/unique_position.pb.h"
@@ -177,6 +175,7 @@ base::DictionaryValue* SessionTabToValue(const sync_pb::SessionTab& proto) {
   SET_BYTES(favicon);
   SET_ENUM(favicon_type, GetFaviconTypeString);
   SET_STR(favicon_source);
+  SET_REP(variation_id, MakeInt64Value);
   return value;
 }
 
@@ -212,10 +211,11 @@ base::DictionaryValue* TabNavigationToValue(
   SET_ENUM(blocked_state, GetBlockedStateString);
   SET_STR_REP(content_pack_categories);
   SET_INT32(http_status_code);
-  SET_INT32(referrer_policy);
+  SET_INT32(obsolete_referrer_policy);
   SET_BOOL(is_restored);
   SET_REP(navigation_redirect, NavigationRedirectToValue);
   SET_STR(last_navigation_redirect_url);
+  SET_INT32(correct_referrer_policy);
   return value;
 }
 
@@ -266,127 +266,6 @@ base::DictionaryValue* TimeRangeDirectiveToValue(
   return value;
 }
 
-base::DictionaryValue* SyncedNotificationAppInfoToValue(
-    const sync_pb::SyncedNotificationAppInfo& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR_REP(app_id);
-  SET_STR(settings_display_name);
-  SET_STR(app_name);
-  SET_STR(settings_url);
-  SET_STR(info_url);
-  SET(icon, SyncedNotificationImageToValue);
-  // TODO(petewil): Add fields for the monochrome icon when it is available.
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationImageToValue(
-    const sync_pb::SyncedNotificationImage& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(url);
-  SET_STR(alt_text);
-  SET_INT32(preferred_width);
-  SET_INT32(preferred_height);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationProfileImageToValue(
-    const sync_pb::SyncedNotificationProfileImage& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(image_url);
-  SET_STR(oid);
-  SET_STR(display_name);
-  return value;
-}
-
-base::DictionaryValue* MediaToValue(
-    const sync_pb::Media& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(image, SyncedNotificationImageToValue);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationActionToValue(
-    const sync_pb::SyncedNotificationAction& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(text);
-  SET(icon, SyncedNotificationImageToValue);
-  SET_STR(url);
-  SET_STR(request_data);
-  SET_STR(accessibility_label);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationDestiationToValue(
-    const sync_pb::SyncedNotificationDestination& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(text);
-  SET(icon, SyncedNotificationImageToValue);
-  SET_STR(url);
-  SET_STR(accessibility_label);
-  return value;
-}
-
-base::DictionaryValue* TargetToValue(
-    const sync_pb::Target& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(destination, SyncedNotificationDestiationToValue);
-  SET(action, SyncedNotificationActionToValue);
-  SET_STR(target_key);
-  return value;
-}
-
-base::DictionaryValue* SimpleCollapsedLayoutToValue(
-    const sync_pb::SimpleCollapsedLayout& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(app_icon, SyncedNotificationImageToValue);
-  SET_REP(profile_image, SyncedNotificationProfileImageToValue);
-  SET_STR(heading);
-  SET_STR(description);
-  SET_STR(annotation);
-  SET_REP(media, MediaToValue);
-  return value;
-}
-
-base::DictionaryValue* CollapsedInfoToValue(
-    const sync_pb::CollapsedInfo& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(simple_collapsed_layout, SimpleCollapsedLayoutToValue);
-  SET_INT64(creation_timestamp_usec);
-  SET(default_destination, SyncedNotificationDestiationToValue);
-  SET_REP(target, TargetToValue);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationToValue(
-    const sync_pb::SyncedNotification& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(type);
-  SET_STR(external_id);
-  // TODO(petewil) Add SyncedNotificationCreator here if we ever need it.
-  return value;
-}
-
-base::DictionaryValue* RenderInfoToValue(
-    const sync_pb::SyncedNotificationRenderInfo& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  // TODO(petewil): Add the expanded info values once we start using them.
-  SET(collapsed_info, CollapsedInfoToValue);
-  return value;
-}
-
-base::DictionaryValue* CoalescedNotificationToValue(
-    const sync_pb::CoalescedSyncedNotification& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(key);
-  SET_STR(app_id);
-  SET_REP(notification, SyncedNotificationToValue);
-  SET(render_info, RenderInfoToValue);
-  SET_INT32(read_state);
-  SET_INT64(creation_time_msec);
-  SET_INT32(priority);
-  return value;
-}
-
 base::DictionaryValue* AppListSpecificsToValue(
     const sync_pb::AppListSpecifics& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
@@ -394,7 +273,6 @@ base::DictionaryValue* AppListSpecificsToValue(
   SET_ENUM(item_type, GetAppListItemTypeString);
   SET_STR(item_name);
   SET_STR(parent_id);
-  SET_STR(page_ordinal);
   SET_STR(item_ordinal);
 
   return value;
@@ -449,6 +327,8 @@ base::DictionaryValue* AutofillProfileSpecificsToValue(
   base::DictionaryValue* value = new base::DictionaryValue();
   SET_STR(guid);
   SET_STR(origin);
+  SET_INT64(use_count);
+  SET_INT64(use_date);
 
   SET_STR_REP(name_first);
   SET_STR_REP(name_middle);
@@ -470,6 +350,21 @@ base::DictionaryValue* AutofillProfileSpecificsToValue(
   SET_STR(address_home_language_code);
 
   SET_STR_REP(phone_home_whole_number);
+  return value;
+}
+
+base::DictionaryValue* AutofillWalletSpecificsToValue(
+    const sync_pb::AutofillWalletSpecifics& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+
+  SET_ENUM(type, GetWalletInfoTypeString);
+  if (proto.type() == sync_pb::AutofillWalletSpecifics::MASKED_CREDIT_CARD) {
+    value->Set("masked_card",
+               WalletMaskedCreditCardToValue(proto.masked_card()));
+  } else if (proto.type() == sync_pb::AutofillWalletSpecifics::POSTAL_ADDRESS) {
+    value->Set("masked_card",
+               WalletPostalAddressToValue(proto.address()));
+  }
   return value;
 }
 
@@ -544,6 +439,7 @@ base::DictionaryValue* ExperimentsSpecificsToValue(
   SET_EXPERIMENT_ENABLED_FIELD(gcm_channel);
   SET(enhanced_bookmarks, EnhancedBookmarksFlagsToValue);
   SET_EXPERIMENT_ENABLED_FIELD(gcm_invalidations);
+  SET_EXPERIMENT_ENABLED_FIELD(wallet_sync);
   return value;
 }
 
@@ -566,6 +462,7 @@ base::DictionaryValue* ExtensionSpecificsToValue(
   SET_BOOL(incognito_enabled);
   SET_BOOL(remote_install);
   SET_BOOL(installed_by_custodian);
+  SET_BOOL(all_urls_enabled);
   SET_STR(name);
   return value;
 }
@@ -639,6 +536,14 @@ base::DictionaryValue* ManagedUserSharedSettingSpecificsToValue(
   return value;
 }
 
+base::DictionaryValue* ManagedUserWhitelistSpecificsToValue(
+    const sync_pb::ManagedUserWhitelistSpecifics& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(id);
+  SET_STR(name);
+  return value;
+}
+
 base::DictionaryValue* NigoriSpecificsToValue(
     const sync_pb::NigoriSpecifics& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
@@ -709,17 +614,12 @@ base::DictionaryValue* PriorityPreferenceSpecificsToValue(
 base::DictionaryValue* SyncedNotificationAppInfoSpecificsToValue(
     const sync_pb::SyncedNotificationAppInfoSpecifics& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
-  SET_REP(synced_notification_app_info, SyncedNotificationAppInfoToValue);
   return value;
 }
 
 base::DictionaryValue* SyncedNotificationSpecificsToValue(
     const sync_pb::SyncedNotificationSpecifics& proto) {
-  // There is a lot of data, for now just use heading, description, key, and
-  // the read state.
-  // TODO(petewil): Eventually add more data here.
   base::DictionaryValue* value = new base::DictionaryValue();
-  SET(coalesced_notification, CoalescedNotificationToValue);
   return value;
 }
 
@@ -784,6 +684,44 @@ base::DictionaryValue* TypedUrlSpecificsToValue(
   return value;
 }
 
+base::DictionaryValue* WalletMaskedCreditCardToValue(
+    const sync_pb::WalletMaskedCreditCard& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(id);
+  SET_ENUM(status, GetWalletCardStatusString);
+  SET_STR(name_on_card);
+  SET_ENUM(type, GetWalletCardTypeString);
+  SET_STR(last_four);
+  SET_INT32(exp_month);
+  SET_INT32(exp_year);
+  return value;
+}
+
+base::DictionaryValue* WalletPostalAddressToValue(
+    const sync_pb::WalletPostalAddress& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(company_name);
+  SET_STR_REP(street_address);
+  SET_STR(address_1);
+  SET_STR(address_2);
+  SET_STR(address_3);
+  SET_STR(address_4);
+  SET_STR(postal_code);
+  SET_STR(sorting_code);
+  SET_STR(country_code);
+  SET_STR(language_code);
+  return value;
+}
+
+base::DictionaryValue* WifiCredentialSpecificsToValue(
+    const sync_pb::WifiCredentialSpecifics& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_BYTES(ssid);
+  SET_ENUM(security_class, GetWifiCredentialSecurityClassString);
+  SET_BYTES(passphrase);
+  return value;
+}
+
 base::DictionaryValue* EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics) {
   base::DictionaryValue* value = new base::DictionaryValue();
@@ -794,6 +732,7 @@ base::DictionaryValue* EntitySpecificsToValue(
   SET_FIELD(article, ArticleSpecificsToValue);
   SET_FIELD(autofill, AutofillSpecificsToValue);
   SET_FIELD(autofill_profile, AutofillProfileSpecificsToValue);
+  SET_FIELD(autofill_wallet, AutofillWalletSpecificsToValue);
   SET_FIELD(bookmark, BookmarkSpecificsToValue);
   SET_FIELD(device_info, DeviceInfoSpecificsToValue);
   SET_FIELD(dictionary, DictionarySpecificsToValue);
@@ -807,6 +746,7 @@ base::DictionaryValue* EntitySpecificsToValue(
   SET_FIELD(managed_user_shared_setting,
             ManagedUserSharedSettingSpecificsToValue);
   SET_FIELD(managed_user, ManagedUserSpecificsToValue);
+  SET_FIELD(managed_user_whitelist, ManagedUserWhitelistSpecificsToValue);
   SET_FIELD(nigori, NigoriSpecificsToValue);
   SET_FIELD(password, PasswordSpecificsToValue);
   SET_FIELD(preference, PreferenceSpecificsToValue);
@@ -818,6 +758,7 @@ base::DictionaryValue* EntitySpecificsToValue(
             SyncedNotificationAppInfoSpecificsToValue);
   SET_FIELD(theme, ThemeSpecificsToValue);
   SET_FIELD(typed_url, TypedUrlSpecificsToValue);
+  SET_FIELD(wifi_credential, WifiCredentialSpecificsToValue);
   return value;
 }
 

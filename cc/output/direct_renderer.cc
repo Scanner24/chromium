@@ -9,8 +9,8 @@
 
 #include "base/containers/hash_tables.h"
 #include "base/containers/scoped_ptr_hash_map.h"
-#include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/quads/draw_quad.h"
@@ -82,12 +82,11 @@ void DirectRenderer::InitializeViewport(DrawingFrame* frame,
                                         const gfx::Rect& draw_rect,
                                         const gfx::Rect& viewport_rect,
                                         const gfx::Size& surface_size) {
-  bool flip_y = FlippedFramebuffer();
-
   DCHECK_GE(viewport_rect.x(), 0);
   DCHECK_GE(viewport_rect.y(), 0);
   DCHECK_LE(viewport_rect.right(), surface_size.width());
   DCHECK_LE(viewport_rect.bottom(), surface_size.height());
+  bool flip_y = FlippedFramebuffer(frame);
   if (flip_y) {
     frame->projection_matrix = OrthoProjectionMatrix(draw_rect.x(),
                                                      draw_rect.right(),
@@ -115,17 +114,18 @@ void DirectRenderer::InitializeViewport(DrawingFrame* frame,
 }
 
 gfx::Rect DirectRenderer::MoveFromDrawToWindowSpace(
+    const DrawingFrame* frame,
     const gfx::Rect& draw_rect) const {
   gfx::Rect window_rect = draw_rect;
   window_rect -= current_draw_rect_.OffsetFromOrigin();
   window_rect += current_viewport_rect_.OffsetFromOrigin();
-  if (FlippedFramebuffer())
+  if (FlippedFramebuffer(frame))
     window_rect.set_y(current_surface_size_.height() - window_rect.bottom());
   return window_rect;
 }
 
 DirectRenderer::DirectRenderer(RendererClient* client,
-                               const LayerTreeSettings* settings,
+                               const RendererSettings* settings,
                                OutputSurface* output_surface,
                                ResourceProvider* resource_provider)
     : Renderer(client, settings),
@@ -235,7 +235,7 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
              pass->copy_requests.begin();
          it != pass->copy_requests.end();
          ++it) {
-      if (i > 0) {
+      if (it != pass->copy_requests.begin()) {
         // Doing a readback is destructive of our state on Mac, so make sure
         // we restore the state between readbacks. http://crbug.com/99393.
         UseRenderPass(&frame, pass);
@@ -279,7 +279,7 @@ bool DirectRenderer::NeedDeviceClip(const DrawingFrame* frame) const {
 gfx::Rect DirectRenderer::DeviceClipRectInWindowSpace(const DrawingFrame* frame)
     const {
   gfx::Rect device_clip_rect = frame->device_clip_rect;
-  if (FlippedFramebuffer())
+  if (FlippedFramebuffer(frame))
     device_clip_rect.set_y(current_surface_size_.height() -
                            device_clip_rect.bottom());
   return device_clip_rect;
@@ -321,7 +321,8 @@ void DirectRenderer::SetScissorStateForQuadWithRenderPassScissor(
 void DirectRenderer::SetScissorTestRectInDrawSpace(
     const DrawingFrame* frame,
     const gfx::Rect& draw_space_rect) {
-  gfx::Rect window_space_rect = MoveFromDrawToWindowSpace(draw_space_rect);
+  gfx::Rect window_space_rect =
+      MoveFromDrawToWindowSpace(frame, draw_space_rect);
   if (NeedDeviceClip(frame))
     window_space_rect.Intersect(DeviceClipRectInWindowSpace(frame));
   SetScissorTestRect(window_space_rect);
@@ -368,10 +369,9 @@ void DirectRenderer::DrawRenderPass(DrawingFrame* frame,
   }
 
   const QuadList& quad_list = render_pass->quad_list;
-  for (QuadList::ConstBackToFrontIterator it = quad_list.BackToFrontBegin();
-       it != quad_list.BackToFrontEnd();
+  for (auto it = quad_list.BackToFrontBegin(); it != quad_list.BackToFrontEnd();
        ++it) {
-    const DrawQuad& quad = *it;
+    const DrawQuad& quad = **it;
     bool should_skip_quad = false;
 
     if (using_scissor_as_optimization) {
@@ -409,7 +409,7 @@ bool DirectRenderer::UseRenderPass(DrawingFrame* frame,
                enlarge_pass_texture_amount_.y());
   if (!texture->id())
     texture->Allocate(
-        size, ResourceProvider::TextureHintImmutableFramebuffer, RGBA_8888);
+        size, ResourceProvider::TEXTURE_HINT_IMMUTABLE_FRAMEBUFFER, RGBA_8888);
   DCHECK(texture->id());
 
   return BindFramebufferToTexture(frame, texture, render_pass->output_rect);

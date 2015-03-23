@@ -29,17 +29,19 @@ class MEDIA_EXPORT DecryptingVideoDecoder : public VideoDecoder {
   DecryptingVideoDecoder(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       const SetDecryptorReadyCB& set_decryptor_ready_cb);
-  virtual ~DecryptingVideoDecoder();
+  ~DecryptingVideoDecoder() override;
 
   // VideoDecoder implementation.
-  virtual std::string GetDisplayName() const OVERRIDE;
-  virtual void Initialize(const VideoDecoderConfig& config,
-                          bool low_delay,
-                          const PipelineStatusCB& status_cb,
-                          const OutputCB& output_cb) OVERRIDE;
-  virtual void Decode(const scoped_refptr<DecoderBuffer>& buffer,
-                      const DecodeCB& decode_cb) OVERRIDE;
-  virtual void Reset(const base::Closure& closure) OVERRIDE;
+  std::string GetDisplayName() const override;
+  void Initialize(const VideoDecoderConfig& config,
+                  bool low_delay,
+                  const PipelineStatusCB& status_cb,
+                  const OutputCB& output_cb) override;
+  void Decode(const scoped_refptr<DecoderBuffer>& buffer,
+              const DecodeCB& decode_cb) override;
+  void Reset(const base::Closure& closure) override;
+
+  static const char kDecoderName[];
 
  private:
   // For a detailed state diagram please see this link: http://goo.gl/8jAok
@@ -108,9 +110,8 @@ class MEDIA_EXPORT DecryptingVideoDecoder : public VideoDecoder {
   // matching DecryptCB call (in DoDeliverFrame()).
   uint32 trace_id_;
 
-  // NOTE: Weak pointers must be invalidated before all other member variables.
-  base::WeakPtrFactory<DecryptingVideoDecoder> weak_factory_;
   base::WeakPtr<DecryptingVideoDecoder> weak_this_;
+  base::WeakPtrFactory<DecryptingVideoDecoder> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DecryptingVideoDecoder);
 };

@@ -50,11 +50,11 @@ class TestMetroViewerProcessHost;
 class AshTestBase : public testing::Test {
  public:
   AshTestBase();
-  virtual ~AshTestBase();
+  ~AshTestBase() override;
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   // Update the display configuration as given in |display_specs|.
   // See ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
@@ -117,6 +117,7 @@ class AshTestBase : public testing::Test {
   // Utility methods to emulate user logged in or not, session started or not
   // and user able to lock screen or not cases.
   void SetSessionStarted(bool session_started);
+  void SetSessionStarting();
   void SetUserLoggedIn(bool user_logged_in);
   void SetCanLockScreen(bool can_lock_screen);
   void SetShouldLockScreenBeforeSuspending(bool should_lock);
@@ -151,7 +152,7 @@ class NoSessionAshTestBase : public AshTestBase {
   NoSessionAshTestBase() {
     set_start_session(false);
   }
-  virtual ~NoSessionAshTestBase() {}
+  ~NoSessionAshTestBase() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NoSessionAshTestBase);

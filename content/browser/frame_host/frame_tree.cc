@@ -43,23 +43,14 @@ bool FrameTreeNodeForId(int64 frame_tree_node_id,
   return true;
 }
 
-// Iterate over the FrameTree to reset any node affected by the loss of the
-// given RenderViewHost's process.
-bool ResetNodesForNewProcess(RenderViewHost* render_view_host,
-                             FrameTreeNode* node) {
-  if (render_view_host == node->current_frame_host()->render_view_host())
-    node->ResetForNewProcess();
-  return true;
-}
-
-bool CreateProxyForSiteInstance(FrameTreeNode* source_node,
-                                const scoped_refptr<SiteInstance>& instance,
+bool CreateProxyForSiteInstance(const scoped_refptr<SiteInstance>& instance,
                                 FrameTreeNode* node) {
-  // Skip the node that initiated the creation.
-  if (source_node == node)
-    return true;
-
-  node->render_manager()->CreateRenderFrameProxy(instance.get());
+  // If a new frame is created in the current SiteInstance, other frames in
+  // that SiteInstance don't need a proxy for the new frame.
+  SiteInstance* current_instance =
+      node->render_manager()->current_frame_host()->GetSiteInstance();
+  if (current_instance != instance.get())
+    node->render_manager()->CreateRenderFrameProxy(instance.get());
   return true;
 }
 
@@ -106,7 +97,7 @@ FrameTreeNode* FrameTree::FindByID(int64 frame_tree_node_id) {
   return node;
 }
 
-FrameTreeNode* FrameTree::FindByRoutingID(int routing_id, int process_id) {
+FrameTreeNode* FrameTree::FindByRoutingID(int process_id, int routing_id) {
   RenderFrameHostImpl* render_frame_host =
       RenderFrameHostImpl::FromID(process_id, routing_id);
   if (render_frame_host) {
@@ -128,12 +119,21 @@ FrameTreeNode* FrameTree::FindByRoutingID(int routing_id, int process_id) {
 
 void FrameTree::ForEach(
     const base::Callback<bool(FrameTreeNode*)>& on_node) const {
+  ForEach(on_node, NULL);
+}
+
+void FrameTree::ForEach(
+    const base::Callback<bool(FrameTreeNode*)>& on_node,
+    FrameTreeNode* skip_this_subtree) const {
   std::queue<FrameTreeNode*> queue;
   queue.push(root_.get());
 
   while (!queue.empty()) {
     FrameTreeNode* node = queue.front();
     queue.pop();
+    if (skip_this_subtree == node)
+      continue;
+
     if (!on_node.Run(node))
       break;
 
@@ -150,6 +150,8 @@ RenderFrameHostImpl* FrameTree::AddFrame(FrameTreeNode* parent,
   // it is in the same SiteInstance as the parent frame. Ensure that the process
   // which requested a child frame to be added is the same as the process of the
   // parent node.
+  // We return nullptr if this is not the case, which can happen in a race if an
+  // old RFH sends a CreateChildFrame message as we're swapping to a new RFH.
   if (parent->current_frame_host()->GetProcess()->GetID() != process_id)
     return nullptr;
 
@@ -192,31 +194,26 @@ void FrameTree::CreateProxiesForSiteInstance(
     RenderViewHostImpl* render_view_host =
         source->frame_tree()->GetRenderViewHost(site_instance);
     if (!render_view_host) {
-      root()->render_manager()->CreateRenderFrame(site_instance,
-                                                  MSG_ROUTING_NONE,
-                                                  true,
-                                                  false,
-                                                  true);
+      root()->render_manager()->CreateRenderFrame(
+          site_instance, nullptr, MSG_ROUTING_NONE,
+          CREATE_RF_SWAPPED_OUT | CREATE_RF_HIDDEN, nullptr);
+    } else {
+      root()->render_manager()->EnsureRenderViewInitialized(
+          source, render_view_host, site_instance);
     }
   }
 
   scoped_refptr<SiteInstance> instance(site_instance);
-  ForEach(base::Bind(&CreateProxyForSiteInstance, source, instance));
+
+  // Proxies are created in the FrameTree in response to a node navigating to a
+  // new SiteInstance. Since |source|'s navigation will replace the currently
+  // loaded document, the entire subtree under |source| will be removed.
+  ForEach(base::Bind(&CreateProxyForSiteInstance, instance), source);
 }
 
 void FrameTree::ResetForMainFrameSwap() {
   root_->ResetForNewProcess();
   focused_frame_tree_node_id_ = -1;
-}
-
-void FrameTree::RenderProcessGone(RenderViewHost* render_view_host) {
-  // Walk the full tree looking for nodes that may be affected.  Once a frame
-  // crashes, all of its child FrameTreeNodes go away.
-  // Note that the helper function may call ResetForNewProcess on a node, which
-  // clears its children before we iterate over them.  That's ok, because
-  // ForEach does not add a node's children to the queue until after visiting
-  // the node itself.
-  ForEach(base::Bind(&ResetNodesForNewProcess, render_view_host));
 }
 
 RenderFrameHostImpl* FrameTree::GetMainFrame() const {
@@ -245,11 +242,13 @@ RenderViewHostImpl* FrameTree::CreateRenderViewHost(SiteInstance* site_instance,
   RenderViewHostMap::iterator iter =
       render_view_host_map_.find(site_instance->GetId());
   if (iter != render_view_host_map_.end()) {
-    // If a RenderViewHost is pending shutdown for this |site_instance|, put it
-    // in the map of RenderViewHosts pending shutdown. Otherwise return the
-    // existing RenderViewHost for the SiteInstance.
-    if (iter->second->rvh_state() ==
-        RenderViewHostImpl::STATE_PENDING_SHUTDOWN) {
+    // If a RenderViewHost's main frame is pending deletion for this
+    // |site_instance|, put it in the map of RenderViewHosts pending shutdown.
+    // Otherwise return the existing RenderViewHost for the SiteInstance.
+    RenderFrameHostImpl* main_frame = static_cast<RenderFrameHostImpl*>(
+        iter->second->GetMainFrame());
+    if (main_frame->frame_tree_node()->render_manager()->IsPendingDeletion(
+            main_frame)) {
       render_view_host_pending_shutdown_map_.insert(
           std::pair<int, RenderViewHostImpl*>(site_instance->GetId(),
                                               iter->second));
@@ -282,8 +281,7 @@ RenderViewHostImpl* FrameTree::GetRenderViewHost(SiteInstance* site_instance) {
 
 void FrameTree::RegisterRenderFrameHost(
     RenderFrameHostImpl* render_frame_host) {
-  SiteInstance* site_instance =
-      render_frame_host->render_view_host()->GetSiteInstance();
+  SiteInstance* site_instance = render_frame_host->GetSiteInstance();
   RenderViewHostMap::iterator iter =
       render_view_host_map_.find(site_instance->GetId());
   CHECK(iter != render_view_host_map_.end());
@@ -293,8 +291,7 @@ void FrameTree::RegisterRenderFrameHost(
 
 void FrameTree::UnregisterRenderFrameHost(
     RenderFrameHostImpl* render_frame_host) {
-  SiteInstance* site_instance =
-      render_frame_host->render_view_host()->GetSiteInstance();
+  SiteInstance* site_instance = render_frame_host->GetSiteInstance();
   int32 site_instance_id = site_instance->GetId();
   RenderViewHostMap::iterator iter =
       render_view_host_map_.find(site_instance_id);

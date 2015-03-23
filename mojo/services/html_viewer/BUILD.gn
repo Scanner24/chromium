@@ -2,22 +2,48 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: mojo/mojo_services.gypi:mojo_html_viewer
-shared_library("html_viewer") {
-  output_name = "mojo_html_viewer"
+import("//testing/test.gni")
+import("//third_party/mojo/src/mojo/public/mojo.gni")
+import("//third_party/mojo/src/mojo/public/mojo_application.gni")
 
+action("generate_blink_resource_map") {
+  script = "//mojo/services/html_viewer/generate_blink_resource_map.py"
+  args = [
+    "--pak-file",
+    rebase_path("$root_out_dir/gen/blink/public/resources/blink_resources.pak"),
+    "--header",
+    rebase_path("$target_gen_dir/blink_resource_map.h"),
+    "--cpp",
+    rebase_path("$target_gen_dir/blink_resource_map.cc"),
+  ]
+  outputs = [
+    "$target_gen_dir/blink_resource_map.cc",
+    "$target_gen_dir/blink_resource_map.h",
+  ]
+  public_deps = [
+    "//third_party/WebKit/public:resources",
+  ]
+}
+
+source_set("lib") {
   sources = [
+    "$target_gen_dir/blink_resource_map.cc",
+    "$target_gen_dir/blink_resource_map.h",
+    "ax_provider_impl.cc",
+    "ax_provider_impl.h",
     "blink_basic_type_converters.cc",
     "blink_basic_type_converters.h",
     "blink_input_events_type_converters.cc",
     "blink_input_events_type_converters.h",
     "blink_platform_impl.cc",
     "blink_platform_impl.h",
+    "blink_resource_constants.h",
     "blink_url_request_type_converters.cc",
     "blink_url_request_type_converters.h",
-    "html_viewer.cc",
-    "html_document_view.cc",
-    "html_document_view.h",
+    "html_document.cc",
+    "html_document.h",
+    "mojo_blink_platform_impl.cc",
+    "mojo_blink_platform_impl.h",
     "webclipboard_impl.cc",
     "webclipboard_impl.h",
     "webcookiejar_impl.cc",
@@ -48,31 +74,56 @@ shared_library("html_viewer") {
     "//cc",
     "//cc/blink",
     "//cc/surfaces",
+    "//gin",
     "//media",
-    "//media/audio",
-    "//media/base",
     "//media/blink",
+    "//media/mojo",
+    "//mojo/application",
     "//mojo/cc",
     "//mojo/common",
-    "//mojo/application",
-    "//mojo/public/c/system:for_shared_library",
-    "//mojo/public/cpp/bindings",
-    "//mojo/public/cpp/utility",
-    "//mojo/public/interfaces/application",
-    "//mojo/services/public/cpp/network",
-    "//mojo/services/public/cpp/view_manager",
-    "//mojo/services/public/interfaces/clipboard",
-    "//mojo/services/public/interfaces/content_handler",
-    "//mojo/services/public/interfaces/gpu",
-    "//mojo/services/public/interfaces/input_events:input_events",
-    "//mojo/services/public/interfaces/navigation",
-    "//mojo/services/public/interfaces/network",
-    "//mojo/services/public/interfaces/surfaces",
-    "//mojo/services/public/cpp/surfaces",
+    "//mojo/converters/surfaces",
+    "//mojo/services/network/public/cpp",
+    "//mojo/services/network/public/interfaces",
     "//net",
     "//skia",
-    "//third_party/WebKit/public:blink",
+    "//third_party/mojo/src/mojo/public/c/system:for_shared_library",
+    "//third_party/mojo/src/mojo/public/cpp/utility",
+    "//third_party/mojo/src/mojo/public/interfaces/application",
+    "//third_party/mojo_services/src/accessibility/public/interfaces",
+    "//third_party/mojo_services/src/clipboard/public/interfaces",
+    "//third_party/mojo_services/src/content_handler/public/interfaces",
+    "//third_party/mojo_services/src/gpu/public/interfaces",
+    "//third_party/mojo_services/src/input_events/public/interfaces",
+    "//third_party/mojo_services/src/navigation/public/interfaces",
+    "//third_party/mojo_services/src/surfaces/public/interfaces",
     "//ui/native_theme",
     "//url",
+  ]
+
+  public_deps = [
+    "//third_party/WebKit/public:blink",
+    "//third_party/mojo/src/mojo/public/cpp/bindings",
+    "//third_party/mojo_services/src/view_manager/public/cpp",
+    ":generate_blink_resource_map",
+  ]
+}
+
+mojo_native_application("html_viewer") {
+  sources = [
+    "html_viewer.cc",
+  ]
+  deps = [
+    ":lib",
+  ]
+}
+
+test("tests") {
+  output_name = "html_viewer_unittests"
+  sources = [
+    "ax_provider_impl_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base/test:run_all_unittests",
   ]
 }

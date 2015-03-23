@@ -68,10 +68,13 @@
 #include "ppapi/c/ppb_var_array_buffer.h"
 #include "ppapi/c/ppb_var_dictionary.h"
 #include "ppapi/c/ppb_video_decoder.h"
+#include "ppapi/c/ppb_video_encoder.h"
 #include "ppapi/c/ppb_video_frame.h"
 #include "ppapi/c/ppb_view.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/private/ppb_camera_capabilities_private.h"
+#include "ppapi/c/private/ppb_camera_device_private.h"
 #include "ppapi/c/private/ppb_content_decryptor_private.h"
 #include "ppapi/c/private/ppb_ext_crx_file_system_private.h"
 #include "ppapi/c/private/ppb_file_io_private.h"
@@ -333,7 +336,7 @@ void InterfaceList::SetProcessGlobalPermissions(
 
 InterfaceProxy::Factory InterfaceList::GetFactoryForID(ApiID id) const {
   int index = static_cast<int>(id);
-  COMPILE_ASSERT(API_ID_NONE == 0, none_must_be_zero);
+  static_assert(API_ID_NONE == 0, "none must be zero");
   if (id <= 0 || id >= API_ID_COUNT)
     return NULL;
   return id_to_factory_[index];

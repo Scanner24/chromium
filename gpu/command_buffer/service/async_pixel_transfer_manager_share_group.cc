@@ -7,8 +7,6 @@
 #include <list>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_synthetic_delay.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -18,6 +16,8 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_synthetic_delay.h"
 #include "gpu/command_buffer/service/async_pixel_transfer_delegate.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -51,7 +51,7 @@ class TransferThread : public base::Thread {
 #endif
   }
 
-  virtual ~TransferThread() {
+  ~TransferThread() override {
     // The only instance of this class was declared leaky.
     NOTREACHED();
   }
@@ -71,7 +71,7 @@ class TransferThread : public base::Thread {
     wait_for_init.Wait();
   }
 
-  virtual void CleanUp() OVERRIDE {
+  void CleanUp() override {
     surface_ = NULL;
     context_ = NULL;
   }
@@ -293,7 +293,7 @@ class TransferStateInternal
 
     base::TimeTicks begin_time;
     if (texture_upload_stats.get())
-      begin_time = base::TimeTicks::HighResNow();
+      begin_time = base::TimeTicks::Now();
 
     void* data = mem_params.GetDataAddress();
 
@@ -312,8 +312,7 @@ class TransferStateInternal
     }
 
     if (texture_upload_stats.get()) {
-      texture_upload_stats->AddUpload(base::TimeTicks::HighResNow() -
-                                      begin_time);
+      texture_upload_stats->AddUpload(base::TimeTicks::Now() - begin_time);
     }
   }
 
@@ -331,7 +330,7 @@ class TransferStateInternal
 
     base::TimeTicks begin_time;
     if (texture_upload_stats.get())
-      begin_time = base::TimeTicks::HighResNow();
+      begin_time = base::TimeTicks::Now();
 
     void* data = mem_params.GetDataAddress();
     {
@@ -349,8 +348,7 @@ class TransferStateInternal
     }
 
     if (texture_upload_stats.get()) {
-      texture_upload_stats->AddUpload(base::TimeTicks::HighResNow() -
-                                      begin_time);
+      texture_upload_stats->AddUpload(base::TimeTicks::Now() - begin_time);
     }
   }
 
@@ -377,20 +375,18 @@ class AsyncPixelTransferDelegateShareGroup
       AsyncPixelTransferManagerShareGroup::SharedState* shared_state,
       GLuint texture_id,
       const AsyncTexImage2DParams& define_params);
-  virtual ~AsyncPixelTransferDelegateShareGroup();
+  ~AsyncPixelTransferDelegateShareGroup() override;
 
   void BindTransfer() { state_->BindTransfer(); }
 
   // Implement AsyncPixelTransferDelegate:
-  virtual void AsyncTexImage2D(
-      const AsyncTexImage2DParams& tex_params,
-      const AsyncMemoryParams& mem_params,
-      const base::Closure& bind_callback) OVERRIDE;
-  virtual void AsyncTexSubImage2D(
-      const AsyncTexSubImage2DParams& tex_params,
-      const AsyncMemoryParams& mem_params) OVERRIDE;
-  virtual bool TransferIsInProgress() OVERRIDE;
-  virtual void WaitForTransferCompletion() OVERRIDE;
+  void AsyncTexImage2D(const AsyncTexImage2DParams& tex_params,
+                       const AsyncMemoryParams& mem_params,
+                       const base::Closure& bind_callback) override;
+  void AsyncTexSubImage2D(const AsyncTexSubImage2DParams& tex_params,
+                          const AsyncMemoryParams& mem_params) override;
+  bool TransferIsInProgress() override;
+  void WaitForTransferCompletion() override;
 
  private:
   // A raw pointer is safe because the SharedState is owned by the Manager,

@@ -8,10 +8,10 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_memory_manager_client.h"
 #include "content/common/gpu/gpu_memory_tracking.h"
@@ -100,7 +100,7 @@ void GpuMemoryManager::UpdateAvailableGpuMemory() {
   client_hard_limit_bytes_ = bytes_min;
   // Clamp the observed value to a specific range on Android.
   client_hard_limit_bytes_ = std::max(client_hard_limit_bytes_,
-                                      static_cast<uint64>(16 * 1024 * 1024));
+                                      static_cast<uint64>(8 * 1024 * 1024));
   client_hard_limit_bytes_ = std::min(client_hard_limit_bytes_,
                                       static_cast<uint64>(256 * 1024 * 1024));
 #else

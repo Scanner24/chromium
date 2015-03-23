@@ -7,7 +7,6 @@
 #include "base/files/file_path.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/native_library.h"
-#include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/win/pe_image.h"
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_unittest_util_win.h"
@@ -87,12 +86,15 @@ class SafeBrowsingModuleVerifierWinTest : public testing::Test {
   scoped_ptr<base::win::PEImage> mem_peimage_ptr_;
 };
 
+// Don't run these tests under AddressSanitizer as it patches the modules on
+// startup, thus interferes with all these test expectations.
+#if !defined(ADDRESS_SANITIZER)
 TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleUnmodified) {
   std::set<std::string> modified_exports;
   // Call VerifyModule before the module has been loaded, should fail.
-  EXPECT_EQ(MODULE_STATE_UNKNOWN,
+  ASSERT_EQ(MODULE_STATE_UNKNOWN,
             VerifyModule(kTestDllNames[0], &modified_exports));
-  EXPECT_EQ(0, modified_exports.size());
+  ASSERT_EQ(0, modified_exports.size());
 
   // On loading, the module should be identical (up to relocations) in memory as
   // on disk.
@@ -106,13 +108,13 @@ TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleModified) {
   std::set<std::string> modified_exports;
   // Confirm the module is identical in memory as on disk before we begin.
   SetUpTestDllAndPEImages();
-  EXPECT_EQ(MODULE_STATE_UNMODIFIED,
+  ASSERT_EQ(MODULE_STATE_UNMODIFIED,
             VerifyModule(kTestDllNames[0], &modified_exports));
 
   uint8_t* mem_code_addr = NULL;
   uint8_t* disk_code_addr = NULL;
   uint32_t code_size = 0;
-  EXPECT_TRUE(GetCodeAddrsAndSize(*mem_peimage_ptr_,
+  ASSERT_TRUE(GetCodeAddrsAndSize(*mem_peimage_ptr_,
                                   *disk_peimage_ptr_,
                                   &mem_code_addr,
                                   &disk_code_addr,
@@ -138,7 +140,7 @@ TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleExportModified) {
   std::set<std::string> modified_exports;
   // Confirm the module is identical in memory as on disk before we begin.
   SetUpTestDllAndPEImages();
-  EXPECT_EQ(MODULE_STATE_UNMODIFIED,
+  ASSERT_EQ(MODULE_STATE_UNMODIFIED,
             VerifyModule(kTestDllNames[0], &modified_exports));
   modified_exports.clear();
 
@@ -147,8 +149,9 @@ TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleExportModified) {
   EditExport();
   EXPECT_EQ(MODULE_STATE_MODIFIED,
             VerifyModule(kTestDllNames[0], &modified_exports));
-  EXPECT_EQ(1, modified_exports.size());
+  ASSERT_EQ(1, modified_exports.size());
   EXPECT_EQ(0, std::string(kTestExportName).compare(*modified_exports.begin()));
 }
+#endif  // ADDRESS_SANITIZER
 
 }  // namespace safe_browsing

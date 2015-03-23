@@ -12,86 +12,10 @@ import sys
 import unittest
 
 import PRESUBMIT
-
+from PRESUBMIT_test_mocks import MockChange, MockFile, MockAffectedFile
+from PRESUBMIT_test_mocks import MockInputApi, MockOutputApi
 
 _TEST_DATA_DIR = 'base/test/data/presubmit'
-
-
-class MockInputApi(object):
-  def __init__(self):
-    self.json = json
-    self.re = re
-    self.os_path = os.path
-    self.python_executable = sys.executable
-    self.subprocess = subprocess
-    self.files = []
-    self.is_committing = False
-
-  def AffectedFiles(self, file_filter=None):
-    return self.files
-
-  def PresubmitLocalPath(self):
-    return os.path.dirname(__file__)
-
-  def ReadFile(self, filename, mode='rU'):
-    for file_ in self.files:
-      if file_.LocalPath() == filename:
-        return '\n'.join(file_.NewContents())
-    # Otherwise, file is not in our mock API.
-    raise IOError, "No such file or directory: '%s'" % filename
-
-
-class MockOutputApi(object):
-  class PresubmitResult(object):
-    def __init__(self, message, items=None, long_text=''):
-      self.message = message
-      self.items = items
-      self.long_text = long_text
-
-  class PresubmitError(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
-      MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
-      self.type = 'error'
-
-  class PresubmitPromptWarning(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
-      MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
-      self.type = 'warning'
-
-  class PresubmitNotifyResult(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
-      MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
-      self.type = 'notify'
-
-  class PresubmitPromptOrNotify(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
-      MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
-      self.type = 'promptOrNotify'
-
-
-class MockFile(object):
-  def __init__(self, local_path, new_contents):
-    self._local_path = local_path
-    self._new_contents = new_contents
-    self._changed_contents = [(i + 1, l) for i, l in enumerate(new_contents)]
-
-  def ChangedContents(self):
-    return self._changed_contents
-
-  def NewContents(self):
-    return self._new_contents
-
-  def LocalPath(self):
-    return self._local_path
-
-
-class MockChange(object):
-  def __init__(self, changed_files):
-    self._changed_files = changed_files
-
-  def LocalPaths(self):
-    return self._changed_files
-
 
 class IncludeOrderTest(unittest.TestCase):
   def testSystemHeaderOrder(self):
@@ -346,6 +270,73 @@ class VersionControlConflictsTest(unittest.TestCase):
     self.assertTrue('3' in errors[1])
     self.assertTrue('5' in errors[2])
 
+class UmaHistogramChangeMatchedOrNotTest(unittest.TestCase):
+  def testTypicalCorrectlyMatchedChange(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    diff_xml = ['<histogram name="Bla.Foo.Dummy"> </histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(0, len(warnings))
+
+  def testTypicalNotMatchedChange(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [MockFile('some/path/foo.cc', diff_cc)]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual('warning', warnings[0].type)
+
+  def testTypicalNotMatchedChangeViaSuffixes(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    diff_xml = ['<histogram_suffixes name="SuperHistogram">',
+                '  <suffix name="Dummy"/>',
+                '  <affected-histogram name="Snafu.Dummy"/>',
+                '</histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual('warning', warnings[0].type)
+
+  def testTypicalCorrectlyMatchedChangeViaSuffixes(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Bla.Foo.Dummy", true)']
+    diff_xml = ['<histogram_suffixes name="SuperHistogram">',
+                '  <suffix name="Dummy"/>',
+                '  <affected-histogram name="Bla.Foo"/>',
+                '</histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(0, len(warnings))
+
+  def testTypicalCorrectlyMatchedChangeViaSuffixesWithSeparator(self):
+    diff_cc = ['UMA_HISTOGRAM_BOOL("Snafu_Dummy", true)']
+    diff_xml = ['<histogram_suffixes name="SuperHistogram" separator="_">',
+                '  <suffix name="Dummy"/>',
+                '  <affected-histogram name="Snafu"/>',
+                '</histogram>']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('some/path/foo.cc', diff_cc),
+      MockFile('tools/metrics/histograms/histograms.xml', diff_xml),
+    ]
+    warnings = PRESUBMIT._CheckUmaHistogramChanges(mock_input_api,
+                                                   MockOutputApi())
+    self.assertEqual(0, len(warnings))
 
 class BadExtensionsTest(unittest.TestCase):
   def testBadRejFile(self):
@@ -393,6 +384,33 @@ class BadExtensionsTest(unittest.TestCase):
     self.assertEqual({}, results)
 
 
+class CheckSingletonInHeadersTest(unittest.TestCase):
+  def testSingletonInArbitraryHeader(self):
+    diff_singleton_h = ['base::subtle::AtomicWord '
+                        'Singleton<Type, Traits, DifferentiatingType>::']
+    diff_foo_h = ['// Singleton<Foo> in comment.',
+                  'friend class Singleton<Foo>']
+    diff_bad_h = ['Foo* foo = Singleton<Foo>::get();']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [MockAffectedFile('base/memory/singleton.h',
+                                     diff_singleton_h),
+                            MockAffectedFile('foo.h', diff_foo_h),
+                            MockAffectedFile('bad.h', diff_bad_h)]
+    warnings = PRESUBMIT._CheckSingletonInHeaders(mock_input_api,
+                                                  MockOutputApi())
+    self.assertEqual(1, len(warnings))
+    self.assertEqual('error', warnings[0].type)
+    self.assertTrue('Found Singleton<T>' in warnings[0].message)
+
+  def testSingletonInCC(self):
+    diff_cc = ['Foo* foo = Singleton<Foo>::get();']
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [MockAffectedFile('some/path/foo.cc', diff_cc)]
+    warnings = PRESUBMIT._CheckSingletonInHeaders(mock_input_api,
+                                                  MockOutputApi())
+    self.assertEqual(0, len(warnings))
+
+
 class InvalidOSMacroNamesTest(unittest.TestCase):
   def testInvalidOSMacroNames(self):
     lines = ['#if defined(OS_WINDOWS)',
@@ -410,6 +428,28 @@ class InvalidOSMacroNamesTest(unittest.TestCase):
     lines = ['#if defined(%s)' % m for m in PRESUBMIT._VALID_OS_MACROS]
     errors = PRESUBMIT._CheckForInvalidOSMacrosInFile(
         MockInputApi(), MockFile('some/path/foo_platform.cc', lines))
+    self.assertEqual(0, len(errors))
+
+
+class InvalidIfDefinedMacroNamesTest(unittest.TestCase):
+  def testInvalidIfDefinedMacroNames(self):
+    lines = ['#if defined(TARGET_IPHONE_SIMULATOR)',
+             '#if !defined(TARGET_IPHONE_SIMULATOR)',
+             '#elif defined(TARGET_IPHONE_SIMULATOR)',
+             '#ifdef TARGET_IPHONE_SIMULATOR',
+             ' # ifdef TARGET_IPHONE_SIMULATOR',
+             '# if defined(VALID) || defined(TARGET_IPHONE_SIMULATOR)',
+             '# else  // defined(TARGET_IPHONE_SIMULATOR)',
+             '#endif  // defined(TARGET_IPHONE_SIMULATOR)',]
+    errors = PRESUBMIT._CheckForInvalidIfDefinedMacrosInFile(
+        MockInputApi(), MockFile('some/path/source.mm', lines))
+    self.assertEqual(len(lines), len(errors))
+
+  def testValidIfDefinedMacroNames(self):
+    lines = ['#if defined(FOO)',
+             '#ifdef BAR',]
+    errors = PRESUBMIT._CheckForInvalidIfDefinedMacrosInFile(
+        MockInputApi(), MockFile('some/path/source.cc', lines))
     self.assertEqual(0, len(errors))
 
 
@@ -651,14 +691,6 @@ class IDLParsingTest(unittest.TestCase):
 class TryServerMasterTest(unittest.TestCase):
   def testTryServerMasters(self):
     bots = {
-        'tryserver.chromium.gpu': [
-            'mac_gpu',
-            'mac_gpu_triggered_tests',
-            'linux_gpu',
-            'linux_gpu_triggered_tests',
-            'win_gpu',
-            'win_gpu_triggered_tests',
-        ],
         'tryserver.chromium.mac': [
             'ios_dbg_simulator',
             'ios_rel_device',
@@ -669,7 +701,6 @@ class TryServerMasterTest(unittest.TestCase):
             'mac_chromium_compile_rel',
             'mac_chromium_dbg',
             'mac_chromium_rel',
-            'mac_chromium_rel_swarming',
             'mac_nacl_sdk',
             'mac_nacl_sdk_build',
             'mac_rel_naclmore',
@@ -697,24 +728,17 @@ class TryServerMasterTest(unittest.TestCase):
             'chromium_presubmit',
             'linux_arm_cross_compile',
             'linux_arm_tester',
-            'linux_asan',
-            'linux_browser_asan',
             'linux_chromeos_asan',
             'linux_chromeos_browser_asan',
             'linux_chromeos_valgrind',
-            'linux_chromium_chromeos_clang_dbg',
-            'linux_chromium_chromeos_clang_rel',
             'linux_chromium_chromeos_dbg',
             'linux_chromium_chromeos_rel',
-            'linux_chromium_clang_dbg',
-            'linux_chromium_clang_rel',
             'linux_chromium_compile_dbg',
             'linux_chromium_compile_rel',
             'linux_chromium_dbg',
             'linux_chromium_gn_dbg',
             'linux_chromium_gn_rel',
             'linux_chromium_rel',
-            'linux_chromium_rel_swarming',
             'linux_chromium_trusty32_dbg',
             'linux_chromium_trusty32_rel',
             'linux_chromium_trusty_dbg',
@@ -744,8 +768,6 @@ class TryServerMasterTest(unittest.TestCase):
             'win_chromium_dbg',
             'win_chromium_rel',
             'win_chromium_rel',
-            'win_chromium_rel_swarming',
-            'win_chromium_rel_swarming',
             'win_chromium_x64_dbg',
             'win_chromium_x64_rel',
             'win_drmemory',

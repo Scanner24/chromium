@@ -7,8 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_impl.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -16,16 +14,21 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_impl.h"
 #include "base/values.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/net_log.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::debug::TraceLog;
+using base::trace_event::TraceLog;
 
 namespace net {
 
 namespace {
+
+// TraceLog category for NetLog events.
+const char kNetLogTracingCategory[] = TRACE_DISABLED_BY_DEFAULT("netlog");
 
 struct TraceEntryInfo {
   std::string category;
@@ -57,7 +60,7 @@ class TraceNetLogObserverTest : public testing::Test {
     trace_events_.reset(new base::ListValue());
   }
 
-  virtual ~TraceNetLogObserverTest() {
+  ~TraceNetLogObserverTest() override {
     DCHECK(!TraceLog::GetInstance()->IsEnabled());
   }
 
@@ -86,9 +89,10 @@ class TraceNetLogObserverTest : public testing::Test {
   }
 
   static void EnableTraceLog() {
-    TraceLog::GetInstance()->SetEnabled(base::debug::CategoryFilter("netlog"),
-                                        TraceLog::RECORDING_MODE,
-                                        base::debug::TraceOptions());
+    TraceLog::GetInstance()->SetEnabled(
+        base::trace_event::CategoryFilter(kNetLogTracingCategory),
+        TraceLog::RECORDING_MODE,
+        base::trace_event::TraceOptions());
   }
 
   void EndTraceAndFlush() {
@@ -120,7 +124,7 @@ class TraceNetLogObserverTest : public testing::Test {
             << "Unexpected item without a category field in trace_events";
         continue;
       }
-      if (category != "netlog")
+      if (category != kNetLogTracingCategory)
         continue;
       filtered_trace_events->Append(dict->DeepCopy());
     }
@@ -141,8 +145,8 @@ class TraceNetLogObserverTest : public testing::Test {
 
  private:
   scoped_ptr<base::ListValue> trace_events_;
-  base::debug::TraceResultBuffer trace_buffer_;
-  base::debug::TraceResultBuffer::SimpleOutput json_output_;
+  base::trace_event::TraceResultBuffer trace_buffer_;
+  base::trace_event::TraceResultBuffer::SimpleOutput json_output_;
   CapturingNetLog net_log_;
   scoped_ptr<TraceNetLogObserver> trace_net_log_observer_;
 };
@@ -185,7 +189,7 @@ TEST_F(TraceNetLogObserverTest, TraceEventCaptured) {
   TraceEntryInfo actual_item1 = GetTraceEntryInfoFromValue(*item1);
   TraceEntryInfo actual_item2 = GetTraceEntryInfoFromValue(*item2);
   TraceEntryInfo actual_item3 = GetTraceEntryInfoFromValue(*item3);
-  EXPECT_EQ("netlog", actual_item1.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item1.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[0].source.id), actual_item1.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT),
             actual_item1.phase);
@@ -194,7 +198,7 @@ TEST_F(TraceNetLogObserverTest, TraceEventCaptured) {
   EXPECT_EQ(NetLog::SourceTypeToString(entries[0].source.type),
             actual_item1.source_type);
 
-  EXPECT_EQ("netlog", actual_item2.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item2.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[1].source.id), actual_item2.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN),
             actual_item2.phase);
@@ -203,7 +207,7 @@ TEST_F(TraceNetLogObserverTest, TraceEventCaptured) {
   EXPECT_EQ(NetLog::SourceTypeToString(entries[1].source.type),
             actual_item2.source_type);
 
-  EXPECT_EQ("netlog", actual_item3.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item3.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[2].source.id), actual_item3.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_END),
             actual_item3.phase);
@@ -236,7 +240,7 @@ TEST_F(TraceNetLogObserverTest, EnableAndDisableTracing) {
 
   TraceEntryInfo actual_item1 = GetTraceEntryInfoFromValue(*item1);
   TraceEntryInfo actual_item2 = GetTraceEntryInfoFromValue(*item2);
-  EXPECT_EQ("netlog", actual_item1.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item1.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[0].source.id), actual_item1.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT),
             actual_item1.phase);
@@ -245,7 +249,7 @@ TEST_F(TraceNetLogObserverTest, EnableAndDisableTracing) {
   EXPECT_EQ(NetLog::SourceTypeToString(entries[0].source.type),
             actual_item1.source_type);
 
-  EXPECT_EQ("netlog", actual_item2.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item2.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[2].source.id), actual_item2.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT),
             actual_item2.phase);
@@ -274,7 +278,7 @@ TEST_F(TraceNetLogObserverTest, DestroyObserverWhileTracing) {
   ASSERT_TRUE(trace_events()->GetDictionary(0, &item1));
 
   TraceEntryInfo actual_item1 = GetTraceEntryInfoFromValue(*item1);
-  EXPECT_EQ("netlog", actual_item1.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item1.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[0].source.id), actual_item1.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT),
             actual_item1.phase);
@@ -342,7 +346,7 @@ TEST_F(TraceNetLogObserverTest, EventsWithAndWithoutParameters) {
 
   TraceEntryInfo actual_item1 = GetTraceEntryInfoFromValue(*item1);
   TraceEntryInfo actual_item2 = GetTraceEntryInfoFromValue(*item2);
-  EXPECT_EQ("netlog", actual_item1.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item1.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[0].source.id), actual_item1.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT),
             actual_item1.phase);
@@ -351,7 +355,7 @@ TEST_F(TraceNetLogObserverTest, EventsWithAndWithoutParameters) {
   EXPECT_EQ(NetLog::SourceTypeToString(entries[0].source.type),
             actual_item1.source_type);
 
-  EXPECT_EQ("netlog", actual_item2.category);
+  EXPECT_EQ(kNetLogTracingCategory, actual_item2.category);
   EXPECT_EQ(base::StringPrintf("0x%d", entries[1].source.id), actual_item2.id);
   EXPECT_EQ(std::string(1, TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT),
             actual_item2.phase);

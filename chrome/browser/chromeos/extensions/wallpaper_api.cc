@@ -4,10 +4,12 @@
 
 #include "chrome/browser/chromeos/extensions/wallpaper_api.h"
 
+#include <string>
+#include <vector>
+
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/worker_pool.h"
@@ -19,6 +21,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "components/wallpaper/wallpaper_layout.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
@@ -38,7 +41,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
  public:
   WallpaperFetcher() {}
 
-  virtual ~WallpaperFetcher() {}
+  ~WallpaperFetcher() override {}
 
   void FetchWallpaper(const GURL& url, FetchCallback callback) {
     CancelPreviousFetch();
@@ -54,7 +57,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
 
  private:
   // URLFetcherDelegate overrides:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     DCHECK(url_fetcher_.get() == source);
 
     bool success = source->GetStatus().is_success() &&
@@ -125,17 +128,16 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
   chromeos::WallpaperManager* wallpaper_manager =
       chromeos::WallpaperManager::Get();
   base::FilePath thumbnail_path = wallpaper_manager->GetCustomWallpaperPath(
-      chromeos::kThumbnailWallpaperSubDir,
-      user_id_hash_,
+      wallpaper::kThumbnailWallpaperSubDir, user_id_hash_,
       params_->details.filename);
 
-  sequence_token_ = BrowserThread::GetBlockingPool()->
-      GetNamedSequenceToken(chromeos::kWallpaperSequenceTokenName);
+  sequence_token_ = BrowserThread::GetBlockingPool()->GetNamedSequenceToken(
+      wallpaper::kWallpaperSequenceTokenName);
   scoped_refptr<base::SequencedTaskRunner> task_runner =
       BrowserThread::GetBlockingPool()->
           GetSequencedTaskRunnerWithShutdownBehavior(sequence_token_,
               base::SequencedWorkerPool::BLOCK_SHUTDOWN);
-  ash::WallpaperLayout layout = wallpaper_api_util::GetLayoutEnum(
+  wallpaper::WallpaperLayout layout = wallpaper_api_util::GetLayoutEnum(
       set_wallpaper::Params::Details::ToString(params_->details.layout));
   bool update_wallpaper =
       user_id_ == user_manager::UserManager::Get()->GetActiveUser()->email();
@@ -184,12 +186,9 @@ void WallpaperSetWallpaperFunction::GenerateThumbnail(
 
   scoped_refptr<base::RefCountedBytes> data;
   chromeos::WallpaperManager::Get()->ResizeImage(
-      *image,
-      ash::WALLPAPER_LAYOUT_STRETCH,
-      chromeos::kWallpaperThumbnailWidth,
-      chromeos::kWallpaperThumbnailHeight,
-      &data,
-      NULL);
+      *image, wallpaper::WALLPAPER_LAYOUT_STRETCH,
+      wallpaper::kWallpaperThumbnailWidth, wallpaper::kWallpaperThumbnailHeight,
+      &data, NULL);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(
@@ -209,7 +208,8 @@ void WallpaperSetWallpaperFunction::OnWallpaperFetched(
     bool success,
     const std::string& response) {
   if (success) {
-    params_->details.data.reset(new std::string(response));
+    params_->details.data.reset(
+        new std::vector<char>(response.begin(), response.end()));
     StartDecode(*params_->details.data);
   } else {
     SetError(response);

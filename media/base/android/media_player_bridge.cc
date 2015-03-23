@@ -15,6 +15,7 @@
 #include "media/base/android/media_player_manager.h"
 #include "media/base/android/media_resource_getter.h"
 #include "media/base/android/media_url_interceptor.h"
+#include "media/base/buffers.h"
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ScopedJavaLocalRef;
@@ -63,7 +64,7 @@ MediaPlayerBridge::~MediaPlayerBridge() {
 
 void MediaPlayerBridge::Initialize() {
   cookies_.clear();
-  if (url_.SchemeIsFile()) {
+  if (url_.SchemeIsFile() || url_.SchemeIs("data")) {
     ExtractMediaMetadata(url_.spec());
     return;
   }
@@ -102,21 +103,6 @@ void MediaPlayerBridge::CreateJavaMediaPlayerBridge() {
     SetVolume(volume_);
 
   AttachListener(j_media_player_bridge_.obj());
-}
-
-void MediaPlayerBridge::SetJavaMediaPlayerBridge(
-    jobject j_media_player_bridge) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  CHECK(env);
-
-  j_media_player_bridge_.Reset(env, j_media_player_bridge);
-}
-
-base::android::ScopedJavaLocalRef<jobject> MediaPlayerBridge::
-    GetJavaMediaPlayerBridge() {
-  base::android::ScopedJavaLocalRef<jobject> j_bridge(
-      j_media_player_bridge_);
-  return j_bridge;
 }
 
 void MediaPlayerBridge::SetDuration(base::TimeDelta duration) {
@@ -359,9 +345,10 @@ base::TimeDelta MediaPlayerBridge::GetDuration() {
   if (!prepared_)
     return duration_;
   JNIEnv* env = base::android::AttachCurrentThread();
-  return base::TimeDelta::FromMilliseconds(
-      Java_MediaPlayerBridge_getDuration(
-          env, j_media_player_bridge_.obj()));
+  const int duration_ms =
+      Java_MediaPlayerBridge_getDuration(env, j_media_player_bridge_.obj());
+  return duration_ms < 0 ? media::kInfiniteDuration()
+                         : base::TimeDelta::FromMilliseconds(duration_ms);
 }
 
 void MediaPlayerBridge::Release() {
@@ -502,9 +489,7 @@ void MediaPlayerBridge::OnTimeUpdateTimerFired() {
 }
 
 bool MediaPlayerBridge::RegisterMediaPlayerBridge(JNIEnv* env) {
-  bool ret = RegisterNativesImpl(env);
-  DCHECK(g_MediaPlayerBridge_clazz);
-  return ret;
+  return RegisterNativesImpl(env);
 }
 
 bool MediaPlayerBridge::CanPause() {

@@ -18,13 +18,13 @@ class CHROMEOS_EXPORT DeviceState : public ManagedState {
   typedef std::vector<CellularScanResult> CellularScanResults;
 
   explicit DeviceState(const std::string& path);
-  virtual ~DeviceState();
+  ~DeviceState() override;
 
   // ManagedState overrides
-  virtual bool PropertyChanged(const std::string& key,
-                               const base::Value& value) OVERRIDE;
-  virtual bool InitialPropertiesReceived(
-      const base::DictionaryValue& properties) OVERRIDE;
+  bool PropertyChanged(const std::string& key,
+                       const base::Value& value) override;
+  bool InitialPropertiesReceived(
+      const base::DictionaryValue& properties) override;
 
   void IPConfigPropertiesChanged(const std::string& ip_config_path,
                                  const base::DictionaryValue& properties);

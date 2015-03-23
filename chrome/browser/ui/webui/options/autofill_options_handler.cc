@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/strings/string16.h"
@@ -20,12 +21,14 @@
 #include "chrome/browser/ui/autofill/country_combobox_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/content/browser/wallet/wallet_service_url.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/phone_number_i18n.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "content/public/browser/web_ui.h"
 #include "third_party/libaddressinput/messages.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui.h"
@@ -329,8 +332,21 @@ void AutofillOptionsHandler::GetLocalizedValues(
                 IDS_AUTOFILL_OPTIONS_TITLE);
 
   localized_strings->SetString("helpUrl", autofill::kHelpURL);
+
+  personal_data_ = autofill::PersonalDataManagerFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()));
+
   SetAddressOverlayStrings(localized_strings);
   SetCreditCardOverlayStrings(localized_strings);
+
+  localized_strings->SetBoolean(
+      "enableAutofillWalletIntegration", false);
+  localized_strings->SetString(
+      "manageWalletAddressesUrl",
+      autofill::wallet::GetManageAddressesUrl(0).spec());
+  localized_strings->SetString(
+      "manageWalletPaymentMethodsUrl",
+      autofill::wallet::GetManageInstrumentsUrl(0).spec());
 }
 
 void AutofillOptionsHandler::InitializeHandler() {
@@ -345,9 +361,6 @@ void AutofillOptionsHandler::InitializePage() {
 }
 
 void AutofillOptionsHandler::RegisterMessages() {
-  personal_data_ = autofill::PersonalDataManagerFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()));
-
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   web_ui()->RegisterMessageCallback(
       "accessAddressBook",
@@ -380,6 +393,10 @@ void AutofillOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "validatePhoneNumbers",
       base::Bind(&AutofillOptionsHandler::ValidatePhoneNumbers,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "remaskServerCards",
+      base::Bind(&AutofillOptionsHandler::RemaskServerCards,
                  base::Unretained(this)));
 }
 
@@ -442,10 +459,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
   web_ui()->CallJavascriptFunction("AutofillOptions.setAddressList", addresses);
 
   base::ListValue credit_cards;
-  const std::vector<CreditCard*>& cards = personal_data_->GetCreditCards();
-  for (std::vector<CreditCard*>::const_iterator iter = cards.begin();
-       iter != cards.end(); ++iter) {
-    const CreditCard* card = *iter;
+  const std::vector<CreditCard*>& cards = personal_data_->GetLocalCreditCards();
+  for (const CreditCard* card : cards) {
     // TODO(estade): this should be a dictionary.
     base::ListValue* entry = new base::ListValue();
     entry->Append(new base::StringValue(card->guid()));
@@ -580,9 +595,9 @@ void AutofillOptionsHandler::SetAddress(const base::ListValue* args) {
   if (args->GetList(arg_counter++, &list_value)) {
     std::vector<base::string16> values;
     ListValueToStringVector(*list_value, &values);
-    profile.SetMultiInfo(AutofillType(autofill::NAME_FULL),
-                         values,
-                         g_browser_process->GetApplicationLocale());
+    AutofillProfile* old_profile = personal_data_->GetProfileByGUID(guid);
+    profile.CopyAndUpdateNameList(values, old_profile,
+                                  g_browser_process->GetApplicationLocale());
   }
 
   if (args->GetString(arg_counter++, &value))
@@ -673,6 +688,10 @@ void AutofillOptionsHandler::ValidatePhoneNumbers(const base::ListValue* args) {
 
   web_ui()->CallJavascriptFunction(
     "AutofillEditAddressOverlay.setValidatedPhoneNumbers", *list_value);
+}
+
+void AutofillOptionsHandler::RemaskServerCards(const base::ListValue* args) {
+  personal_data_->ResetFullServerCards();
 }
 
 bool AutofillOptionsHandler::IsPersonalDataLoaded() const {

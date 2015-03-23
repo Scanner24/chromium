@@ -13,6 +13,7 @@
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
 #include "media/base/buffering_state.h"
+#include "media/base/decryptor.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/renderer.h"
@@ -31,31 +32,33 @@ class WallClockTimeSource;
 
 class MEDIA_EXPORT RendererImpl : public Renderer {
  public:
-  // Renders audio/video streams in |demuxer_stream_provider| using
-  // |audio_renderer| and |video_renderer| provided. All methods except for
-  // GetMediaTime() run on the |task_runner|. GetMediaTime() runs on the render
-  // main thread because it's part of JS sync API.
+  // Renders audio/video streams using |audio_renderer| and |video_renderer|
+  // provided. All methods except for GetMediaTime() run on the |task_runner|.
+  // GetMediaTime() runs on the render main thread because it's part of JS sync
+  // API.
   RendererImpl(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-               DemuxerStreamProvider* demuxer_stream_provider,
                scoped_ptr<AudioRenderer> audio_renderer,
                scoped_ptr<VideoRenderer> video_renderer);
 
-  virtual ~RendererImpl();
+  ~RendererImpl() final;
 
   // Renderer implementation.
-  virtual void Initialize(const base::Closure& init_cb,
-                          const StatisticsCB& statistics_cb,
-                          const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb,
-                          const BufferingStateCB& buffering_state_cb) OVERRIDE;
-  virtual void Flush(const base::Closure& flush_cb) OVERRIDE;
-  virtual void StartPlayingFrom(base::TimeDelta time) OVERRIDE;
-  virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
-  virtual void SetVolume(float volume) OVERRIDE;
-  virtual base::TimeDelta GetMediaTime() OVERRIDE;
-  virtual bool HasAudio() OVERRIDE;
-  virtual bool HasVideo() OVERRIDE;
-  virtual void SetCdm(MediaKeys* cdm) OVERRIDE;
+  void Initialize(DemuxerStreamProvider* demuxer_stream_provider,
+                  const PipelineStatusCB& init_cb,
+                  const StatisticsCB& statistics_cb,
+                  const BufferingStateCB& buffering_state_cb,
+                  const PaintCB& paint_cb,
+                  const base::Closure& ended_cb,
+                  const PipelineStatusCB& error_cb) final;
+  void SetCdm(CdmContext* cdm_context,
+              const CdmAttachedCB& cdm_attached_cb) final;
+  void Flush(const base::Closure& flush_cb) final;
+  void StartPlayingFrom(base::TimeDelta time) final;
+  void SetPlaybackRate(float playback_rate) final;
+  void SetVolume(float volume) final;
+  base::TimeDelta GetMediaTime() final;
+  bool HasAudio() final;
+  bool HasVideo() final;
 
   // Helper functions for testing purposes. Must be called before Initialize().
   void DisableUnderflowForTesting();
@@ -71,6 +74,12 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
   };
 
   base::TimeDelta GetMediaTimeForSyncingVideo();
+
+  // Requests that this object notifies when a decryptor is ready through the
+  // |decryptor_ready_cb| provided.
+  // If |decryptor_ready_cb| is null, the existing callback will be fired with
+  // nullptr immediately and reset.
+  void SetDecryptorReadyCallback(const DecryptorReadyCB& decryptor_ready_cb);
 
   // Helper functions and callbacks for Initialize().
   void InitializeAudioRenderer();
@@ -111,8 +120,6 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
   // Callback executed when a runtime error happens.
   void OnError(PipelineStatus error);
 
-  void FireAllPendingCallbacks();
-
   State state_;
 
   // Task runner used to execute pipeline tasks.
@@ -125,9 +132,10 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
   base::Closure ended_cb_;
   PipelineStatusCB error_cb_;
   BufferingStateCB buffering_state_cb_;
+  PaintCB paint_cb_;
 
   // Temporary callback used for Initialize() and Flush().
-  base::Closure init_cb_;
+  PipelineStatusCB init_cb_;
   base::Closure flush_cb_;
 
   scoped_ptr<AudioRenderer> audio_renderer_;
@@ -148,12 +156,21 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
   bool audio_ended_;
   bool video_ended_;
 
+  CdmContext* cdm_context_;
+
+  // Callback registered by filters (decoder or demuxer) to be informed of a
+  // Decryptor.
+  // Note: We could have multiple filters registering this callback. One
+  // callback is okay because:
+  // 1, We always initialize filters in sequence.
+  // 2, Filter initialization will not finish until this callback is satisfied.
+  DecryptorReadyCB decryptor_ready_cb_;
+
   bool underflow_disabled_for_testing_;
   bool clockless_video_playback_enabled_for_testing_;
 
-  // NOTE: Weak pointers must be invalidated before all other member variables.
-  base::WeakPtrFactory<RendererImpl> weak_factory_;
   base::WeakPtr<RendererImpl> weak_this_;
+  base::WeakPtrFactory<RendererImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererImpl);
 };

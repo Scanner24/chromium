@@ -29,8 +29,6 @@ typedef enum {
   AUTOFILL_PROFILES_RESULT,    // WDResult<std::vector<AutofillProfile*>>
   AUTOFILL_CREDITCARD_RESULT,  // WDResult<CreditCard>
   AUTOFILL_CREDITCARDS_RESULT, // WDResult<std::vector<CreditCard*>>
-  WEB_INTENTS_RESULT,          // WDResult<std::vector<WebIntentServiceData>>
-  WEB_INTENTS_DEFAULTS_RESULT, // WDResult<std::vector<DefaultWebIntentService>>
 } WDResultType;
 
 
@@ -98,7 +96,7 @@ template <class T> class WDDestroyableResult : public WDTypedResult {
   }
 
 
-  virtual void Destroy()  OVERRIDE {
+  virtual void Destroy()  override {
     if (!callback_.is_null()) {
       callback_.Run(this);
     }

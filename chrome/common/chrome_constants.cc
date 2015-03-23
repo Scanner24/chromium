@@ -133,14 +133,10 @@ const wchar_t kTestingInterfaceDLL[] = L"testing_interface.dll";
 const char    kInitialProfile[] = "Default";
 const char    kMultiProfileDirPrefix[] = "Profile ";
 const base::FilePath::CharType kGuestProfileDir[] = FPL("Guest Profile");
+const base::FilePath::CharType kSystemProfileDir[] = FPL("System Profile");
 const wchar_t kBrowserResourcesDll[] = L"chrome.dll";
 
 // filenames
-#if defined(OS_ANDROID)
-const base::FilePath::CharType kAndroidCacheFilename[] = FPL("AndroidCache");
-#endif
-const base::FilePath::CharType kArchivedHistoryFilename[] =
-    FPL("Archived History");
 const base::FilePath::CharType kCacheDirname[] = FPL("Cache");
 const base::FilePath::CharType kChannelIDFilename[] = FPL("Origin Bound Certs");
 const base::FilePath::CharType kCookieFilename[] = FPL("Cookies");
@@ -152,10 +148,8 @@ const base::FilePath::CharType kExtensionActivityLogFilename[] =
     FPL("Extension Activity");
 const base::FilePath::CharType kExtensionsCookieFilename[] =
     FPL("Extension Cookies");
-const base::FilePath::CharType kFaviconsFilename[] = FPL("Favicons");
 const base::FilePath::CharType kFirstRunSentinel[] = FPL("First Run");
 const base::FilePath::CharType kGCMStoreDirname[] = FPL("GCM Store");
-const base::FilePath::CharType kHistoryFilename[] = FPL("History");
 const base::FilePath::CharType kJumpListIconDirname[] = FPL("JumpListIcons");
 const base::FilePath::CharType kLocalStateFilename[] = FPL("Local State");
 const base::FilePath::CharType kLocalStorePoolName[] = FPL("LocalStorePool");
@@ -185,7 +179,6 @@ const base::FilePath::CharType kSupervisedUserSettingsFilename[] =
 const base::FilePath::CharType kSyncCredentialsFilename[] =
     FPL("Sync Credentials");
 const base::FilePath::CharType kThemePackFilename[] = FPL("Cached Theme.pak");
-const base::FilePath::CharType kThumbnailsFilename[] = FPL("Thumbnails");
 const base::FilePath::CharType kTopSitesFilename[] = FPL("Top Sites");
 const base::FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
 
@@ -214,8 +207,6 @@ const wchar_t kUserDataDirname[] = L"User Data";
 
 const bool kRecordModeEnabled = true;
 
-const int kJavaScriptMessageExpectedDelay = 1000;
-
 #if defined(OS_ANDROID) || defined(OS_IOS)
 const bool kEnableTouchIcon = true;
 #else
@@ -223,9 +214,6 @@ const bool kEnableTouchIcon = false;
 #endif
 
 const float kMaxShareOfExtensionProcesses = 0.30f;
-
-// This is used by the PreRead experiment.
-const char kPreReadEnvironmentVariable[] = "CHROME_PRE_READ_EXPERIMENT";
 
 #if defined(OS_LINUX)
 const int kLowestRendererOomScore = 300;
@@ -243,7 +231,9 @@ const wchar_t kLaunchModeValue[] = L"launch_mode";
 // This is used by breakpad and the metrics reporting.
 const wchar_t kBrowserCrashDumpAttemptsRegistryPath[] =
     L"Software\\" PRODUCT_STRING_PATH L"\\BrowserCrashDumpAttempts";
-const char kSafeModeEnvVar[] = "CHROME_SAFE_MODE";
+// This is used by browser exit code metrics reporting.
+const wchar_t kBrowserExitCodesRegistryPath[] =
+    L"Software\\" PRODUCT_STRING_PATH L"\\BrowserExitCodes";
 #endif
 
 #if defined(OS_CHROMEOS)

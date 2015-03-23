@@ -48,9 +48,9 @@ class WindowPlacementPrefUpdate : public DictionaryPrefUpdate {
       : DictionaryPrefUpdate(service, prefs::kAppWindowPlacement),
         window_name_(window_name) {}
 
-  virtual ~WindowPlacementPrefUpdate() {}
+  ~WindowPlacementPrefUpdate() override {}
 
-  virtual base::DictionaryValue* Get() OVERRIDE {
+  base::DictionaryValue* Get() override {
     base::DictionaryValue* all_apps_dict = DictionaryPrefUpdate::Get();
     base::DictionaryValue* this_app_dict = NULL;
     if (!all_apps_dict->GetDictionary(window_name_, &this_app_dict)) {
@@ -138,7 +138,8 @@ void GetSavedWindowBoundsAndShowState(const Browser* browser,
                                                   bounds,
                                                   show_state);
 
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& parsed_command_line =
+      *base::CommandLine::ForCurrentProcess();
   bool record_mode = parsed_command_line.HasSwitch(switches::kRecordMode);
   bool playback_mode = parsed_command_line.HasSwitch(switches::kPlaybackMode);
   if (record_mode || playback_mode) {

@@ -35,23 +35,27 @@ intptr_t SurfaceFactoryOzone::GetNativeDisplay() {
   return 0;
 }
 
+int SurfaceFactoryOzone::GetDrmFd() {
+  return -1;
+}
+
 scoped_ptr<SurfaceOzoneEGL> SurfaceFactoryOzone::CreateEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
   NOTIMPLEMENTED();
-  return scoped_ptr<SurfaceOzoneEGL>();
+  return nullptr;
 }
 
 scoped_ptr<SurfaceOzoneEGL>
 SurfaceFactoryOzone::CreateSurfacelessEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
   NOTIMPLEMENTED();
-  return scoped_ptr<SurfaceOzoneEGL>();
+  return nullptr;
 }
 
 scoped_ptr<SurfaceOzoneCanvas> SurfaceFactoryOzone::CreateCanvasForWidget(
     gfx::AcceleratedWidget widget) {
   NOTIMPLEMENTED();
-  return scoped_ptr<SurfaceOzoneCanvas>();
+  return nullptr;
 }
 
 const int32* SurfaceFactoryOzone::GetEGLSurfaceProperties(
@@ -65,8 +69,10 @@ ui::OverlayCandidatesOzone* SurfaceFactoryOzone::GetOverlayCandidates(
 }
 
 scoped_refptr<ui::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
+    gfx::AcceleratedWidget widget,
     gfx::Size size,
-    BufferFormat format) {
+    BufferFormat format,
+    BufferUsage usage) {
   return NULL;
 }
 
@@ -83,4 +89,9 @@ bool SurfaceFactoryOzone::ScheduleOverlayPlane(
 bool SurfaceFactoryOzone::CanShowPrimaryPlaneAsOverlay() {
   return false;
 }
+
+bool SurfaceFactoryOzone::CanCreateNativePixmap(BufferUsage usage) {
+  return false;
+}
+
 }  // namespace ui

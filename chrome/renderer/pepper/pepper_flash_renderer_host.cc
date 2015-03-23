@@ -32,7 +32,7 @@
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkTemplates.h"
 #include "third_party/skia/include/core/SkTypeface.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 
 using ppapi::thunk::EnterResourceNoLock;
@@ -50,7 +50,7 @@ namespace {
 //
 // TODO(yzshen): We should be able to remove the histogram recording code once
 // we get the answer.
-const char* kRejectedHttpRequestHeaders[] = {
+const char* const kRejectedHttpRequestHeaders[] = {
     "authorization",     //
     "cache-control",     //
     "content-encoding",  //

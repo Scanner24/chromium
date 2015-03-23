@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_platform_file.h"
+#include "native_client/src/public/nacl_desc.h"
 #include "native_client/src/trusted/desc/nacl_desc_base.h"
 #include "native_client/src/trusted/desc/nacl_desc_custom.h"
 #include "native_client/src/trusted/desc/nacl_desc_imc_shm.h"
@@ -23,9 +24,7 @@
 #include "native_client/src/trusted/desc/nacl_desc_quota.h"
 #include "native_client/src/trusted/desc/nacl_desc_quota_interface.h"
 #include "native_client/src/trusted/desc/nacl_desc_sync_socket.h"
-#include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "native_client/src/trusted/service_runtime/include/sys/fcntl.h"
-#include "native_client/src/trusted/validator/rich_file_info.h"
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_handle.h"
@@ -386,8 +385,8 @@ int NaClIPCAdapter::Send(const NaClImcTypedMsgHdr* msg) {
     // we know that data_len < max size (checked above) and our current
     // accumulated value is also < max size, we just need to make sure that
     // 2x max size can never overflow.
-    COMPILE_ASSERT(IPC::Channel::kMaximumMessageSize < (UINT_MAX / 2),
-                   MaximumMessageSizeWillOverflow);
+    static_assert(IPC::Channel::kMaximumMessageSize < (UINT_MAX / 2),
+                  "kMaximumMessageSize is too large, and may overflow");
     size_t new_size = locked_data_.to_be_sent_.size() + input_data_len;
     if (new_size > IPC::Channel::kMaximumMessageSize) {
       ClearToBeSent();
@@ -460,7 +459,7 @@ NaClDesc* NaClIPCAdapter::MakeNaClDesc() {
 }
 
 #if defined(OS_POSIX)
-int NaClIPCAdapter::TakeClientFileDescriptor() {
+base::ScopedFD NaClIPCAdapter::TakeClientFileDescriptor() {
   return io_thread_data_.channel_->TakeClientFileDescriptor();
 }
 #endif
@@ -665,33 +664,15 @@ void NaClIPCAdapter::OnFileTokenResolved(const IPC::Message& orig_msg,
   std::string file_path_str = file_path.AsUTF8Unsafe();
   base::PlatformFile handle =
       IPC::PlatformFileForTransitToPlatformFile(ipc_fd);
-  // The file token was resolved successfully, so we populate the new
-  // NaClDesc with that information.
-  char* alloc_file_path = static_cast<char*>(
-      malloc(file_path_str.length() + 1));
-  strcpy(alloc_file_path, file_path_str.c_str());
-  scoped_ptr<NaClDescWrapper> desc_wrapper(new NaClDescWrapper(
-      NaClDescIoDescFromHandleAllocCtor(handle, NACL_ABI_O_RDONLY)));
-
-  // Mark the desc as OK for mapping as executable memory.
-  NaClDescMarkSafeForMmap(desc_wrapper->desc());
-
-  // Provide metadata for validation.
-  struct NaClRichFileInfo info;
-  NaClRichFileInfoCtor(&info);
-  info.known_file = 1;
-  info.file_path = alloc_file_path;  // Takes ownership.
-  info.file_path_length =
-      static_cast<uint32_t>(file_path_str.length());
-  NaClSetFileOriginInfo(desc_wrapper->desc(), &info);
-  NaClRichFileInfoDtor(&info);
 
   ppapi::proxy::SerializedHandle sh;
   sh.set_file_handle(ipc_fd, PP_FILEOPENFLAG_READ, 0);
   scoped_ptr<IPC::Message> new_msg = CreateOpenResourceReply(orig_msg, sh);
   scoped_refptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
 
-  rewritten_msg->AddDescriptor(desc_wrapper.release());
+  struct NaClDesc* desc =
+      NaClDescCreateWithFilePathMetadata(handle, file_path_str.c_str());
+  rewritten_msg->AddDescriptor(new NaClDescWrapper(desc));
   {
     base::AutoLock lock(lock_);
     SaveMessage(*new_msg, rewritten_msg.get());
@@ -824,7 +805,7 @@ void NaClIPCAdapter::SaveMessage(const IPC::Message& msg,
   header.routing = msg.routing_id();
   header.type = msg.type();
   header.flags = msg.flags();
-  header.num_fds = static_cast<int>(rewritten_msg->desc_count());
+  header.num_fds = static_cast<uint16>(rewritten_msg->desc_count());
 
   rewritten_msg->SetData(header, msg.payload(), msg.payload_size());
   locked_data_.to_be_received_.push(rewritten_msg);

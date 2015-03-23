@@ -5,7 +5,7 @@
 #include "net/quic/quic_server_session.h"
 
 #include "base/logging.h"
-#include "net/quic/crypto/source_address_token.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/quic_spdy_server_stream.h"
@@ -13,14 +13,14 @@
 
 namespace net {
 
-QuicServerSession::QuicServerSession(
-    const QuicConfig& config,
-    QuicConnection* connection,
-    QuicServerSessionVisitor* visitor)
+QuicServerSession::QuicServerSession(const QuicConfig& config,
+                                     QuicConnection* connection,
+                                     QuicServerSessionVisitor* visitor)
     : QuicSession(connection, config),
       visitor_(visitor),
       bandwidth_estimate_sent_to_client_(QuicBandwidth::Zero()),
-      last_server_config_update_time_(QuicTime::Zero()) {}
+      last_scup_time_(QuicTime::Zero()),
+      last_scup_sequence_number_(0) {}
 
 QuicServerSession::~QuicServerSession() {}
 
@@ -37,14 +37,29 @@ QuicCryptoServerStream* QuicServerSession::CreateQuicCryptoServerStream(
 
 void QuicServerSession::OnConfigNegotiated() {
   QuicSession::OnConfigNegotiated();
-  if (!FLAGS_enable_quic_fec ||
-      !config()->HasReceivedConnectionOptions() ||
-      !ContainsQuicTag(config()->ReceivedConnectionOptions(), kFHDR)) {
+
+  if (!config()->HasReceivedConnectionOptions()) {
     return;
   }
-  // kFHDR config maps to FEC protection always for headers stream.
-  // TODO(jri): Add crypto stream in addition to headers for kHDR.
-  headers_stream_->set_fec_policy(FEC_PROTECT_ALWAYS);
+
+  // If the client has provided a bandwidth estimate from the same serving
+  // region, then pass it to the sent packet manager in preparation for possible
+  // bandwidth resumption.
+  const CachedNetworkParameters* cached_network_params =
+      crypto_stream_->previous_cached_network_params();
+  if (FLAGS_quic_enable_bandwidth_resumption_experiment &&
+      cached_network_params != nullptr &&
+      ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE) &&
+      cached_network_params->serving_region() == serving_region_) {
+    connection()->ResumeConnectionState(*cached_network_params);
+  }
+
+  if (FLAGS_enable_quic_fec &&
+      ContainsQuicTag(config()->ReceivedConnectionOptions(), kFHDR)) {
+    // kFHDR config maps to FEC protection always for headers stream.
+    // TODO(jri): Add crypto stream in addition to headers for kHDR.
+    headers_stream_->set_fec_policy(FEC_PROTECT_ALWAYS);
+  }
 }
 
 void QuicServerSession::OnConnectionClosed(QuicErrorCode error,
@@ -52,7 +67,7 @@ void QuicServerSession::OnConnectionClosed(QuicErrorCode error,
   QuicSession::OnConnectionClosed(error, from_peer);
   // In the unlikely event we get a connection close while doing an asynchronous
   // crypto event, make sure we cancel the callback.
-  if (crypto_stream_.get() != NULL) {
+  if (crypto_stream_.get() != nullptr) {
     crypto_stream_->CancelOutstandingCallbacks();
   }
   visitor_->OnConnectionClosed(connection()->connection_id(), error);
@@ -64,19 +79,24 @@ void QuicServerSession::OnWriteBlocked() {
 }
 
 void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
-  if (connection()->version() <= QUIC_VERSION_21) {
+  // Only send updates when the application has no data to write.
+  if (HasDataToWrite()) {
     return;
   }
 
   // If not enough time has passed since the last time we sent an update to the
-  // client, then return early.
+  // client, or not enough packets have been sent, then return early.
   const QuicSentPacketManager& sent_packet_manager =
       connection()->sent_packet_manager();
   int64 srtt_ms =
-      sent_packet_manager.GetRttStats()->SmoothedRtt().ToMilliseconds();
-  int64 now_ms = now.Subtract(last_server_config_update_time_).ToMilliseconds();
+      sent_packet_manager.GetRttStats()->smoothed_rtt().ToMilliseconds();
+  int64 now_ms = now.Subtract(last_scup_time_).ToMilliseconds();
+  int64 packets_since_last_scup =
+      connection()->sequence_number_of_last_sent_packet() -
+      last_scup_sequence_number_;
   if (now_ms < (kMinIntervalBetweenServerConfigUpdatesRTTs * srtt_ms) ||
-      now_ms < kMinIntervalBetweenServerConfigUpdatesMs) {
+      now_ms < kMinIntervalBetweenServerConfigUpdatesMs ||
+      packets_since_last_scup < kMinPacketsBetweenServerConfigUpdates) {
     return;
   }
 
@@ -128,12 +148,16 @@ void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
       bandwidth_recorder.EstimateRecordedDuringSlowStart()
           ? CachedNetworkParameters::SLOW_START
           : CachedNetworkParameters::CONGESTION_AVOIDANCE);
+  cached_network_params.set_timestamp(
+      connection()->clock()->WallNow().ToUNIXSeconds());
   if (!serving_region_.empty()) {
     cached_network_params.set_serving_region(serving_region_);
   }
 
   crypto_stream_->SendServerConfigUpdate(&cached_network_params);
-  last_server_config_update_time_ = now;
+  last_scup_time_ = now;
+  last_scup_sequence_number_ =
+      connection()->sequence_number_of_last_sent_packet();
 }
 
 bool QuicServerSession::ShouldCreateIncomingDataStream(QuicStreamId id) {
@@ -155,7 +179,7 @@ bool QuicServerSession::ShouldCreateIncomingDataStream(QuicStreamId id) {
 QuicDataStream* QuicServerSession::CreateIncomingDataStream(
     QuicStreamId id) {
   if (!ShouldCreateIncomingDataStream(id)) {
-    return NULL;
+    return nullptr;
   }
 
   return new QuicSpdyServerStream(id, this);
@@ -163,7 +187,7 @@ QuicDataStream* QuicServerSession::CreateIncomingDataStream(
 
 QuicDataStream* QuicServerSession::CreateOutgoingDataStream() {
   DLOG(ERROR) << "Server push not yet supported";
-  return NULL;
+  return nullptr;
 }
 
 QuicCryptoServerStream* QuicServerSession::GetCryptoStream() {

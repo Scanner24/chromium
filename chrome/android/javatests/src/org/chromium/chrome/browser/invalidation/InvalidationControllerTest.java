@@ -6,26 +6,20 @@ package org.chromium.chrome.browser.invalidation;
 
 import android.accounts.Account;
 import android.app.Activity;
-import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
-
-import com.google.ipc.invalidation.external.client.types.ObjectId;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CollectionUtil;
-import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
+import org.chromium.components.invalidation.InvalidationClientService;
+import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.internal_api.pub.base.ModelType;
 import org.chromium.sync.notifier.InvalidationIntentProtocol;
 import org.chromium.sync.notifier.InvalidationPreferences;
-import org.chromium.sync.notifier.InvalidationService;
-import org.chromium.sync.notifier.SyncStatusHelper;
 import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.sync.test.util.MockSyncContentResolverDelegate;
@@ -52,7 +46,7 @@ public class InvalidationControllerTest extends InstrumentationTestCase {
         MockSyncContentResolverDelegate delegate = new MockSyncContentResolverDelegate();
         // Android master sync can safely always be on.
         delegate.setMasterSyncAutomatically(true);
-        SyncStatusHelper.overrideSyncStatusHelperForTests(mContext, delegate);
+        AndroidSyncSettings.overrideAndroidSyncSettingsForTests(mContext, delegate);
     }
 
     @SmallTest
@@ -123,11 +117,11 @@ public class InvalidationControllerTest extends InstrumentationTestCase {
         Account account = AccountManagerHelper.createAccountFromName("test@gmail.com");
         ChromeSigninController chromeSigninController = ChromeSigninController.get(mContext);
         chromeSigninController.setSignedInAccountName(account.name);
-        SyncStatusHelper syncStatusHelper = SyncStatusHelper.get(mContext);
+        AndroidSyncSettings androidSyncSettings = AndroidSyncSettings.get(mContext);
         if (syncEnabled) {
-            syncStatusHelper.enableAndroidSync(account);
+            androidSyncSettings.enableChromeSync(account);
         } else {
-            syncStatusHelper.disableAndroidSync(account);
+            androidSyncSettings.disableChromeSync(account);
         }
     }
 
@@ -288,67 +282,13 @@ public class InvalidationControllerTest extends InstrumentationTestCase {
         assertEquals(true, resultAllTypes.get());
     }
 
-    @SmallTest
-    @Feature({"Sync"})
-    public void testSetRegisteredObjectIds() {
-        InvalidationController controller = new InvalidationController(mContext);
-        ObjectId bookmark = ModelType.BOOKMARK.toObjectId();
-        controller.setRegisteredObjectIds(new int[] {1, 2, bookmark.getSource()},
-                                          new String[] {"a", "b", new String(bookmark.getName())});
-        assertEquals(1, mContext.getNumStartedIntents());
-
-        // Validate destination.
-        Intent intent = mContext.getStartedIntent(0);
-        validateIntentComponent(intent);
-        assertEquals(InvalidationIntentProtocol.ACTION_REGISTER, intent.getAction());
-
-        // Validate registered object ids. The bookmark object should not be registered since it is
-        // a Sync type.
-        assertNull(intent.getStringArrayListExtra(
-                                InvalidationIntentProtocol.EXTRA_REGISTERED_TYPES));
-        Set<ObjectId> objectIds = InvalidationIntentProtocol.getRegisteredObjectIds(intent);
-        assertEquals(2, objectIds.size());
-        assertTrue(objectIds.contains(ObjectId.newInstance(1, "a".getBytes())));
-        assertTrue(objectIds.contains(ObjectId.newInstance(2, "b".getBytes())));
-    }
-
     /**
      * Asserts that {@code intent} is destined for the correct component.
      */
     private static void validateIntentComponent(Intent intent) {
         assertNotNull(intent.getComponent());
-        assertEquals(InvalidationService.class.getName(),
+        assertEquals(InvalidationClientService.class.getName(),
                 intent.getComponent().getClassName());
-    }
-
-    /**
-     * Mock context that saves all intents given to {@code startService}.
-     */
-    private static class IntentSavingContext extends AdvancedMockContext {
-        private final List<Intent> mStartedIntents = new ArrayList<Intent>();
-
-        IntentSavingContext(Context targetContext) {
-            super(targetContext);
-        }
-
-        @Override
-        public ComponentName startService(Intent intent) {
-            mStartedIntents.add(intent);
-            return new ComponentName(this, getClass());
-        }
-
-        int getNumStartedIntents() {
-            return mStartedIntents.size();
-        }
-
-        Intent getStartedIntent(int idx) {
-            return mStartedIntents.get(idx);
-        }
-
-        @Override
-        public PackageManager getPackageManager() {
-            return getBaseContext().getPackageManager();
-        }
     }
 
 }

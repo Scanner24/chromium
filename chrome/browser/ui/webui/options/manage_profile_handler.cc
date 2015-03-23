@@ -34,6 +34,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/google_chrome_strings.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
@@ -83,8 +84,6 @@ void ManageProfileHandler::GetLocalizedValues(
 
   static OptionsStringResource resources[] = {
     { "manageProfilesNameLabel", IDS_PROFILES_MANAGE_NAME_LABEL },
-    { "manageProfilesDuplicateNameError",
-        IDS_PROFILES_MANAGE_DUPLICATE_NAME_ERROR },
     { "manageProfilesIconLabel", IDS_PROFILES_MANAGE_ICON_LABEL },
     { "manageProfilesExistingSupervisedUser",
         IDS_PROFILES_CREATE_EXISTING_SUPERVISED_USER_ERROR },
@@ -120,6 +119,8 @@ void ManageProfileHandler::GetLocalizedValues(
   RegisterTitle(localized_strings, "manageProfile", IDS_PROFILES_MANAGE_TITLE);
   RegisterTitle(localized_strings, "createProfile", IDS_PROFILES_CREATE_TITLE);
 
+  localized_strings->SetBoolean("newAvatarMenuEnabled",
+                                switches::IsNewAvatarMenu());
   localized_strings->SetBoolean("profileShortcutsEnabled",
                                 ProfileShortcutManager::IsFeatureEnabled());
 
@@ -359,10 +360,13 @@ void ManageProfileHandler::SetProfileIconAndName(const base::ListValue* args) {
     pref_service->SetInteger(prefs::kProfileAvatarIndex, new_icon_index);
     pref_service->SetBoolean(prefs::kProfileUsingDefaultAvatar, false);
     pref_service->SetBoolean(prefs::kProfileUsingGAIAAvatar, false);
+  } else {
+    // Only default avatars and Gaia account photos are supported.
+    CHECK(false);
   }
   ProfileMetrics::LogProfileUpdate(profile_file_path);
 
-  if (profile->IsSupervised())
+  if (profile->IsLegacySupervised())
     return;
 
   base::string16 new_profile_name;
@@ -469,8 +473,14 @@ void ManageProfileHandler::RequestCreateProfileUpdate(
       base::UTF8ToUTF16(manager->GetAuthenticatedUsername());
   ProfileSyncService* service =
      ProfileSyncServiceFactory::GetForProfile(profile);
-  GoogleServiceAuthError::State state = service->GetAuthError().state();
-  bool has_error = (state == GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
+  GoogleServiceAuthError::State state = GoogleServiceAuthError::NONE;
+
+  // |service| might be null if Sync is disabled from the command line.
+  if (service)
+    state = service->GetAuthError().state();
+
+  bool has_error = (!service ||
+                    state == GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
                     state == GoogleServiceAuthError::USER_NOT_SIGNED_UP ||
                     state == GoogleServiceAuthError::ACCOUNT_DELETED ||
                     state == GoogleServiceAuthError::ACCOUNT_DISABLED);
@@ -530,7 +540,7 @@ void ManageProfileHandler::RemoveProfileShortcut(const base::ListValue* args) {
 }
 
 void ManageProfileHandler::RefreshGaiaPicture(const base::ListValue* args) {
-  profiles::UpdateGaiaProfilePhotoIfNeeded(Profile::FromWebUI(web_ui()));
+  profiles::UpdateGaiaProfileInfoIfNeeded(Profile::FromWebUI(web_ui()));
 }
 
 }  // namespace options

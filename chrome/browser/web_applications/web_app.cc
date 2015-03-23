@@ -6,15 +6,19 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
@@ -119,6 +123,19 @@ void IgnoreFileHandlersInfo(
     const web_app::ShortcutInfo& shortcut_info,
     const extensions::FileHandlersInfo& file_handlers_info) {
   shortcut_info_callback.Run(shortcut_info);
+}
+
+void ScheduleCreatePlatformShortcut(
+    web_app::ShortcutCreationReason reason,
+    const web_app::ShortcutLocations& locations,
+    const web_app::ShortcutInfo& shortcut_info,
+    const extensions::FileHandlersInfo& file_handlers_info) {
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(
+          base::IgnoreResult(&web_app::internals::CreatePlatformShortcuts),
+          GetShortcutDataDir(shortcut_info), shortcut_info, file_handlers_info,
+          locations, reason));
 }
 
 }  // namespace
@@ -266,11 +283,32 @@ void GetShortcutInfoForApp(const extensions::Extension* extension,
       extension, profile, base::Bind(&IgnoreFileHandlersInfo, callback));
 }
 
-bool ShouldCreateShortcutFor(Profile* profile,
+bool ShouldCreateShortcutFor(web_app::ShortcutCreationReason reason,
+                             Profile* profile,
                              const extensions::Extension* extension) {
-  return extension->is_platform_app() &&
-         extension->location() != extensions::Manifest::COMPONENT &&
-         extensions::ui_util::CanDisplayInAppLauncher(extension, profile);
+  // Shortcuts should never be created for component apps, or for apps that
+  // cannot be shown in the launcher.
+  if (extension->location() == extensions::Manifest::COMPONENT ||
+      !extensions::ui_util::CanDisplayInAppLauncher(extension, profile)) {
+    return false;
+  }
+
+  // Otherwise, always create shortcuts for v2 packaged apps.
+  if (extension->is_platform_app())
+    return true;
+
+#if defined(OS_MACOSX)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableHostedAppShimCreation)) {
+    return extension->is_hosted_app();
+  }
+
+  return false;
+#else
+  // For other platforms, allow shortcut creation if it was explicitly
+  // requested by the user (i.e. is not automatic).
+  return reason == SHORTCUT_CREATION_BY_USER;
+#endif
 }
 
 base::FilePath GetWebAppDataDirectory(const base::FilePath& profile_path,
@@ -343,15 +381,33 @@ void CreateShortcutsWithInfo(
     const extensions::FileHandlersInfo& file_handlers_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  BrowserThread::PostTask(
-      BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(base::IgnoreResult(&internals::CreatePlatformShortcuts),
-                 GetShortcutDataDir(shortcut_info),
-                 shortcut_info,
-                 file_handlers_info,
-                 locations,
-                 reason));
+  // If the shortcut is for an application shortcut with the new bookmark app
+  // flow disabled, there will be no corresponding extension.
+  if (!shortcut_info.extension_id.empty()) {
+    // It's possible for the extension to be deleted before we get here.
+    // For example, creating a hosted app from a website. Double check that
+    // it still exists.
+    Profile* profile = g_browser_process->profile_manager()->GetProfileByPath(
+        shortcut_info.profile_path);
+    if (!profile)
+      return;
+
+    extensions::ExtensionRegistry* registry =
+        extensions::ExtensionRegistry::Get(profile);
+    const extensions::Extension* extension = registry->GetExtensionById(
+        shortcut_info.extension_id, extensions::ExtensionRegistry::EVERYTHING);
+    if (!extension)
+      return;
+  }
+
+  ScheduleCreatePlatformShortcut(reason, locations, shortcut_info,
+                                 file_handlers_info);
+}
+
+void CreateNonAppShortcut(const ShortcutLocations& locations,
+                          const ShortcutInfo& shortcut_info) {
+  ScheduleCreatePlatformShortcut(SHORTCUT_CREATION_AUTOMATED, locations,
+                                 shortcut_info, extensions::FileHandlersInfo());
 }
 
 void CreateShortcuts(ShortcutCreationReason reason,
@@ -360,7 +416,7 @@ void CreateShortcuts(ShortcutCreationReason reason,
                      const extensions::Extension* app) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (!ShouldCreateShortcutFor(profile, app))
+  if (!ShouldCreateShortcutFor(reason, profile, app))
     return;
 
   GetInfoForApp(

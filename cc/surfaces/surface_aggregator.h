@@ -32,33 +32,55 @@ class CC_SURFACES_EXPORT SurfaceAggregator {
   ~SurfaceAggregator();
 
   scoped_ptr<CompositorFrame> Aggregate(SurfaceId surface_id);
+  void ReleaseResources(SurfaceId surface_id);
   SurfaceIndexMap& previous_contained_surfaces() {
     return previous_contained_surfaces_;
   }
 
  private:
+  struct ClipData {
+    ClipData() : is_clipped(false) {}
+    ClipData(bool is_clipped, const gfx::Rect& rect)
+        : is_clipped(is_clipped), rect(rect) {}
+
+    bool is_clipped;
+    gfx::Rect rect;
+  };
+
+  ClipData CalculateClipRect(const ClipData& surface_clip,
+                             const ClipData& quad_clip,
+                             const gfx::Transform& content_to_target_transform);
+
   RenderPassId RemapPassId(RenderPassId surface_local_pass_id,
                            SurfaceId surface_id);
 
   void HandleSurfaceQuad(const SurfaceDrawQuad* surface_quad,
+                         const gfx::Transform& content_to_target_transform,
+                         const ClipData& clip_rect,
                          RenderPass* dest_pass);
   void CopySharedQuadState(const SharedQuadState* source_sqs,
                            const gfx::Transform& content_to_target_transform,
+                           const ClipData& clip_rect,
                            RenderPass* dest_render_pass);
   void CopyQuadsToPass(const QuadList& source_quad_list,
                        const SharedQuadStateList& source_shared_quad_state_list,
                        const gfx::Transform& content_to_target_transform,
+                       const ClipData& clip_rect,
                        RenderPass* dest_pass,
                        SurfaceId surface_id);
-  void CopyPasses(const RenderPassList& source_pass_list,
-                  const Surface* surface);
+  void CopyPasses(const DelegatedFrameData* frame_data, Surface* surface);
+
+  // Remove Surfaces that were referenced before but aren't currently
+  // referenced from the ResourceProvider.
+  void RemoveUnreferencedChildren();
 
   bool TakeResources(Surface* surface,
                      const DelegatedFrameData* frame_data,
                      RenderPassList* render_pass_list);
   int ChildIdForSurface(Surface* surface);
   gfx::Rect DamageRectForSurface(const Surface* surface,
-                                 const RenderPass& source);
+                                 const RenderPass& source,
+                                 const gfx::Rect& full_rect);
 
   SurfaceManager* manager_;
   ResourceProvider* provider_;
@@ -67,6 +89,7 @@ class CC_SURFACES_EXPORT SurfaceAggregator {
   typedef base::ScopedPtrHashMap<SurfaceId, RenderPassIdAllocator>
       RenderPassIdAllocatorMap;
   RenderPassIdAllocatorMap render_pass_allocator_map_;
+  int next_render_pass_id_;
 
   typedef base::hash_map<SurfaceId, int> SurfaceToResourceChildIdMap;
   SurfaceToResourceChildIdMap surface_id_to_resource_child_id_;

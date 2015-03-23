@@ -34,21 +34,13 @@ class ResourceChangeObserver : public TaskManagerModelObserver {
         required_count_(required_count),
         title_pattern_(title_pattern) {}
 
-  virtual void OnModelChanged() OVERRIDE {
-    OnResourceChange();
-  }
+  void OnModelChanged() override { OnResourceChange(); }
 
-  virtual void OnItemsChanged(int start, int length) OVERRIDE {
-    OnResourceChange();
-  }
+  void OnItemsChanged(int start, int length) override { OnResourceChange(); }
 
-  virtual void OnItemsAdded(int start, int length) OVERRIDE {
-    OnResourceChange();
-  }
+  void OnItemsAdded(int start, int length) override { OnResourceChange(); }
 
-  virtual void OnItemsRemoved(int start, int length) OVERRIDE {
-    OnResourceChange();
-  }
+  void OnItemsRemoved(int start, int length) override { OnResourceChange(); }
 
   void RunUntilSatisfied() {
     // See if the condition is satisfied without having to run the loop. This
@@ -191,6 +183,15 @@ base::string16 MatchPrint(const char* title) {
 }
 
 base::string16 MatchAnyPrint() { return MatchPrint("*"); }
+
+base::string16 MatchSubframe(const char* title) {
+  return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_SUBFRAME_PREFIX,
+                                    base::ASCIIToUTF16(title));
+}
+
+base::string16 MatchAnySubframe() {
+  return MatchSubframe("*");
+}
 
 }  // namespace browsertest_util
 }  // namespace task_manager

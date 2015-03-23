@@ -22,33 +22,47 @@ class SuddenMotionSensor;
 
 namespace content {
 
+#if defined(OS_CHROMEOS)
+class SensorManagerChromeOS;
+#elif defined(OS_MACOSX)
+class AmbientLightSensor;
+#endif
+
 class CONTENT_EXPORT DataFetcherSharedMemory
     : public DataFetcherSharedMemoryBase {
 
  public:
   DataFetcherSharedMemory();
-  virtual ~DataFetcherSharedMemory();
+  ~DataFetcherSharedMemory() override;
+
+#if defined(OS_ANDROID)
+  void Shutdown() override;
+#endif
 
  private:
-  virtual bool Start(ConsumerType consumer_type, void* buffer) OVERRIDE;
-  virtual bool Stop(ConsumerType consumer_type) OVERRIDE;
+  bool Start(ConsumerType consumer_type, void* buffer) override;
+  bool Stop(ConsumerType consumer_type) override;
 
 #if !defined(OS_ANDROID)
   DeviceMotionHardwareBuffer* motion_buffer_;
   DeviceOrientationHardwareBuffer* orientation_buffer_;
   DeviceLightHardwareBuffer* light_buffer_;
 #endif
-#if defined(OS_MACOSX)
-  virtual void Fetch(unsigned consumer_bitmask) OVERRIDE;
-  virtual FetcherType GetType() const OVERRIDE;
 
+#if defined(OS_CHROMEOS)
+  scoped_ptr<SensorManagerChromeOS> sensor_manager_;
+#elif defined(OS_MACOSX)
+  void Fetch(unsigned consumer_bitmask) override;
+  FetcherType GetType() const override;
+
+  scoped_ptr<AmbientLightSensor> ambient_light_sensor_;
   scoped_ptr<SuddenMotionSensor> sudden_motion_sensor_;
 #elif defined(OS_WIN)
   class SensorEventSink;
   class SensorEventSinkMotion;
   class SensorEventSinkOrientation;
 
-  virtual FetcherType GetType() const OVERRIDE;
+  virtual FetcherType GetType() const override;
 
   bool RegisterForSensor(REFSENSOR_TYPE_ID sensor_type, ISensor** sensor,
       scoped_refptr<SensorEventSink> event_sink);

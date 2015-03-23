@@ -32,19 +32,20 @@ class UsbDeviceImpl : public UsbDevice {
  public:
 // UsbDevice implementation:
 #if defined(OS_CHROMEOS)
-  virtual void RequestUsbAccess(
+  void RequestUsbAccess(
       int interface_id,
-      const base::Callback<void(bool success)>& callback) OVERRIDE;
+      const base::Callback<void(bool success)>& callback) override;
 #endif  // OS_CHROMEOS
-  virtual scoped_refptr<UsbDeviceHandle> Open() OVERRIDE;
-  virtual bool Close(scoped_refptr<UsbDeviceHandle> handle) OVERRIDE;
-  virtual const UsbConfigDescriptor& GetConfiguration() OVERRIDE;
-  virtual bool GetManufacturer(base::string16* manufacturer) OVERRIDE;
-  virtual bool GetProduct(base::string16* product) OVERRIDE;
-  virtual bool GetSerialNumber(base::string16* serial_number) OVERRIDE;
+  scoped_refptr<UsbDeviceHandle> Open() override;
+  bool Close(scoped_refptr<UsbDeviceHandle> handle) override;
+  const UsbConfigDescriptor* GetConfiguration() override;
+  bool GetManufacturer(base::string16* manufacturer) override;
+  bool GetProduct(base::string16* product) override;
+  bool GetSerialNumber(base::string16* serial_number) override;
 
  protected:
   friend class UsbServiceImpl;
+  friend class UsbDeviceHandleImpl;
 
   // Called by UsbServiceImpl only;
   UsbDeviceImpl(scoped_refptr<UsbContext> context,
@@ -54,28 +55,40 @@ class UsbDeviceImpl : public UsbDevice {
                 uint16 product_id,
                 uint32 unique_id);
 
-  virtual ~UsbDeviceImpl();
+  ~UsbDeviceImpl() override;
 
-  // Called only be UsbService.
+  // Called only by UsbServiceImpl.
   void OnDisconnect();
+
+  // Called by UsbDeviceHandleImpl.
+  void RefreshConfiguration();
 
  private:
   base::ThreadChecker thread_checker_;
   PlatformUsbDevice platform_device_;
 
-#if defined(USE_UDEV)
   // On Linux these properties are read from sysfs when the device is enumerated
   // to avoid hitting the permission broker on Chrome OS for a real string
   // descriptor request.
-  std::string manufacturer_;
-  std::string product_;
-  std::string serial_number_;
+  base::string16 manufacturer_;
+  base::string16 product_;
+  base::string16 serial_number_;
+#if !defined(USE_UDEV)
+  // On other platforms the device must be opened in order to cache them. This
+  // should be delayed until the strings are needed to avoid poor interactions
+  // with other applications.
+  void CacheStrings();
+  bool strings_cached_;
+#endif
+#if defined(OS_CHROMEOS)
+  // On Chrome OS save the devnode string for requesting path access from
+  // permission broker.
+  std::string devnode_;
 #endif
 
-  // The active configuration descriptor is not read immediately but cached for
-  // later use.
-  bool current_configuration_cached_;
-  UsbConfigDescriptor current_configuration_;
+  // The current device configuration descriptor. May be null if the device is
+  // in an unconfigured state.
+  scoped_ptr<UsbConfigDescriptor> configuration_;
 
   // Retain the context so that it will not be released before UsbDevice.
   scoped_refptr<UsbContext> context_;

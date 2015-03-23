@@ -17,6 +17,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/audio/chromeos_sounds.h"
+#include "components/login/localized_values_builder.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
 #include "google_apis/gaia/gaia_auth_util.h"
@@ -48,7 +49,7 @@ SupervisedUserCreationScreenHandler::~SupervisedUserCreationScreenHandler() {
 }
 
 void SupervisedUserCreationScreenHandler::DeclareLocalizedValues(
-    LocalizedValuesBuilder* builder) {
+    ::login::LocalizedValuesBuilder* builder) {
   builder->Add(
       "supervisedUserCreationFlowRetryButtonTitle",
       IDS_CREATE_SUPERVISED_USER_CREATION_ERROR_RETRY_BUTTON_TITLE);
@@ -211,15 +212,13 @@ void SupervisedUserCreationScreenHandler::Show() {
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
   scoped_ptr<base::ListValue> users_list(new base::ListValue());
   const user_manager::UserList& users =
-      user_manager::UserManager::Get()->GetUsers();
+      ChromeUserManager::Get()->GetUsersAllowedForSupervisedUsersCreation();
   std::string owner;
   chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner, &owner);
 
   for (user_manager::UserList::const_iterator it = users.begin();
        it != users.end();
        ++it) {
-    if ((*it)->GetType() != user_manager::USER_TYPE_REGULAR)
-      continue;
     bool is_owner = ((*it)->email() == owner);
     base::DictionaryValue* user_dict = new base::DictionaryValue();
     UserSelectionScreen::FillUserDictionary(
@@ -422,16 +421,11 @@ void SupervisedUserCreationScreenHandler::HandlePhotoTaken
 }
 
 void SupervisedUserCreationScreenHandler::HandleTakePhoto() {
-#if !defined(USE_ATHENA)
-  // crbug.com/408733
   ash::PlaySystemSoundIfSpokenFeedback(SOUND_CAMERA_SNAP);
-#endif
 }
 
 void SupervisedUserCreationScreenHandler::HandleDiscardPhoto() {
-#if !defined(USE_ATHENA)
   ash::PlaySystemSoundIfSpokenFeedback(SOUND_OBJECT_DELETE);
-#endif
 }
 
 void SupervisedUserCreationScreenHandler::HandleSelectImage(

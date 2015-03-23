@@ -10,6 +10,7 @@ import android.text.InputType;
 import android.text.Selection;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.BaseInputConnection;
@@ -18,6 +19,9 @@ import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 
 import org.chromium.base.VisibleForTesting;
+import org.chromium.blink_public.web.WebInputEventType;
+import org.chromium.blink_public.web.WebTextInputFlags;
+import org.chromium.ui.base.ime.TextInputType;
 
 /**
  * InputConnection is created by ContentView.onCreateInputConnection.
@@ -27,6 +31,7 @@ import org.chromium.base.VisibleForTesting;
 public class AdapterInputConnection extends BaseInputConnection {
     private static final String TAG = "AdapterInputConnection";
     private static final boolean DEBUG = false;
+    private static final int NO_ACCENT = 0;
     /**
      * Selection value should be -1 if not known. See EditorInfo.java for details.
      */
@@ -39,6 +44,7 @@ public class AdapterInputConnection extends BaseInputConnection {
 
     private boolean mSingleLine;
     private int mNumNestedBatchEdits = 0;
+    private int mPendingAccent;
 
     private int mLastUpdateSelectionStart = INVALID_SELECTION;
     private int mLastUpdateSelectionEnd = INVALID_SELECTION;
@@ -65,51 +71,51 @@ public class AdapterInputConnection extends BaseInputConnection {
 
         int inputType = imeAdapter.getTextInputType();
         int inputFlags = imeAdapter.getTextInputFlags();
-        if ((inputFlags & imeAdapter.sTextInputFlagAutocompleteOff) != 0) {
+        if ((inputFlags & WebTextInputFlags.AutocompleteOff) != 0) {
             outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
 
-        if (inputType == ImeAdapter.sTextInputTypeText) {
+        if (inputType == TextInputType.TEXT) {
             // Normal text field
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-            if ((inputFlags & imeAdapter.sTextInputFlagAutocorrectOff) == 0) {
+            if ((inputFlags & WebTextInputFlags.AutocorrectOff) == 0) {
                 outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT;
             }
-        } else if (inputType == ImeAdapter.sTextInputTypeTextArea ||
-                inputType == ImeAdapter.sTextInputTypeContentEditable) {
+        } else if (inputType == TextInputType.TEXT_AREA
+                || inputType == TextInputType.CONTENT_EDITABLE) {
             // TextArea or contenteditable.
             outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE
                     | EditorInfo.TYPE_TEXT_FLAG_CAP_SENTENCES;
-            if ((inputFlags & imeAdapter.sTextInputFlagAutocorrectOff) == 0) {
+            if ((inputFlags & WebTextInputFlags.AutocorrectOff) == 0) {
                 outAttrs.inputType |= EditorInfo.TYPE_TEXT_FLAG_AUTO_CORRECT;
             }
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_NONE;
             mSingleLine = false;
-        } else if (inputType == ImeAdapter.sTextInputTypePassword) {
+        } else if (inputType == TextInputType.PASSWORD) {
             // Password
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT
                     | InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-        } else if (inputType == ImeAdapter.sTextInputTypeSearch) {
+        } else if (inputType == TextInputType.SEARCH) {
             // Search
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_SEARCH;
-        } else if (inputType == ImeAdapter.sTextInputTypeUrl) {
+        } else if (inputType == TextInputType.URL) {
             // Url
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT
                     | InputType.TYPE_TEXT_VARIATION_URI;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-        } else if (inputType == ImeAdapter.sTextInputTypeEmail) {
+        } else if (inputType == TextInputType.EMAIL) {
             // Email
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT
                     | InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_GO;
-        } else if (inputType == ImeAdapter.sTextInputTypeTel) {
+        } else if (inputType == TextInputType.TELEPHONE) {
             // Telephone
             // Number and telephone do not have both a Tab key and an
             // action in default OSK, so set the action to NEXT
             outAttrs.inputType = InputType.TYPE_CLASS_PHONE;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_NEXT;
-        } else if (inputType == ImeAdapter.sTextInputTypeNumber) {
+        } else if (inputType == TextInputType.NUMBER) {
             // Number
             outAttrs.inputType = InputType.TYPE_CLASS_NUMBER
                     | InputType.TYPE_NUMBER_VARIATION_NORMAL
@@ -118,11 +124,21 @@ public class AdapterInputConnection extends BaseInputConnection {
         }
         outAttrs.initialSelStart = Selection.getSelectionStart(mEditable);
         outAttrs.initialSelEnd = Selection.getSelectionEnd(mEditable);
-        mLastUpdateSelectionStart = Selection.getSelectionStart(mEditable);
-        mLastUpdateSelectionEnd = Selection.getSelectionEnd(mEditable);
+        mLastUpdateSelectionStart = outAttrs.initialSelStart;
+        mLastUpdateSelectionEnd = outAttrs.initialSelEnd;
 
         Selection.setSelection(mEditable, outAttrs.initialSelStart, outAttrs.initialSelEnd);
         updateSelectionIfRequired();
+    }
+
+    public static int maybeAddAccentToCharacter(int accentChar, int unicodeChar) {
+        if (accentChar != NO_ACCENT) {
+            int combinedChar = KeyEvent.getDeadChar(accentChar, unicodeChar);
+            if (combinedChar != 0) {
+                return combinedChar;
+            }
+        }
+        return unicodeChar;
     }
 
     /**
@@ -197,10 +213,10 @@ public class AdapterInputConnection extends BaseInputConnection {
         int compositionStart = getComposingSpanStart(mEditable);
         int compositionEnd = getComposingSpanEnd(mEditable);
         // Avoid sending update if we sent an exact update already previously.
-        if (mLastUpdateSelectionStart == selectionStart &&
-                mLastUpdateSelectionEnd == selectionEnd &&
-                mLastUpdateCompositionStart == compositionStart &&
-                mLastUpdateCompositionEnd == compositionEnd) {
+        if (mLastUpdateSelectionStart == selectionStart
+                && mLastUpdateSelectionEnd == selectionEnd
+                && mLastUpdateCompositionStart == compositionStart
+                && mLastUpdateCompositionEnd == compositionEnd) {
             return;
         }
         if (DEBUG) {
@@ -215,6 +231,8 @@ public class AdapterInputConnection extends BaseInputConnection {
         mLastUpdateSelectionEnd = selectionEnd;
         mLastUpdateCompositionStart = compositionStart;
         mLastUpdateCompositionEnd = compositionEnd;
+        // Change in selection or cursor position invalidates any pending accent.
+        mPendingAccent = NO_ACCENT;
     }
 
     /**
@@ -253,7 +271,7 @@ public class AdapterInputConnection extends BaseInputConnection {
             // Send TAB key event
             long timeStampMs = SystemClock.uptimeMillis();
             mImeAdapter.sendSyntheticKeyEvent(
-                    ImeAdapter.sEventTypeRawKeyDown, timeStampMs, KeyEvent.KEYCODE_TAB, 0, 0);
+                    WebInputEventType.RawKeyDown, timeStampMs, KeyEvent.KEYCODE_TAB, 0, 0);
         } else {
             mImeAdapter.sendKeyEventWithKeyCode(KeyEvent.KEYCODE_ENTER,
                     KeyEvent.FLAG_SOFT_KEYBOARD | KeyEvent.FLAG_KEEP_TOUCH_MODE
@@ -341,18 +359,19 @@ public class AdapterInputConnection extends BaseInputConnection {
         // code. For multi-character deletion, executes deletion by calling
         // |ImeAdapter.deleteSurroundingText| and sends synthetic key events with a dummy key code.
         int keyCode = KeyEvent.KEYCODE_UNKNOWN;
-        if (originalBeforeLength == 1 && originalAfterLength == 0)
+        if (originalBeforeLength == 1 && originalAfterLength == 0) {
             keyCode = KeyEvent.KEYCODE_DEL;
-        else if (originalBeforeLength == 0 && originalAfterLength == 1)
+        } else if (originalBeforeLength == 0 && originalAfterLength == 1) {
             keyCode = KeyEvent.KEYCODE_FORWARD_DEL;
+        }
 
         boolean result = true;
         if (keyCode == KeyEvent.KEYCODE_UNKNOWN) {
             result = mImeAdapter.sendSyntheticKeyEvent(
-                    ImeAdapter.sEventTypeRawKeyDown, SystemClock.uptimeMillis(), keyCode, 0, 0);
+                    WebInputEventType.RawKeyDown, SystemClock.uptimeMillis(), keyCode, 0, 0);
             result &= mImeAdapter.deleteSurroundingText(beforeLength, afterLength);
             result &= mImeAdapter.sendSyntheticKeyEvent(
-                    ImeAdapter.sEventTypeKeyUp, SystemClock.uptimeMillis(), keyCode, 0, 0);
+                    WebInputEventType.KeyUp, SystemClock.uptimeMillis(), keyCode, 0, 0);
         } else {
             mImeAdapter.sendKeyEventWithKeyCode(
                     keyCode, KeyEvent.FLAG_SOFT_KEYBOARD | KeyEvent.FLAG_KEEP_TOUCH_MODE);
@@ -368,6 +387,22 @@ public class AdapterInputConnection extends BaseInputConnection {
         if (DEBUG) {
             Log.w(TAG, "sendKeyEvent [" + event.getAction() + "] [" + event.getKeyCode() + "]");
         }
+
+        // Short-cut modifier keys so they're not affected by accents.
+        if (KeyEvent.isModifierKey(event.getKeyCode())) {
+            return mImeAdapter.translateAndSendNativeEvents(event, NO_ACCENT);
+        }
+
+        // Some keys we just want to pass events straight through.  This allows
+        // proper "repeating key" behavior with physical keyboards.
+        int eventKeyCode = event.getKeyCode();
+        if (eventKeyCode == KeyEvent.KEYCODE_DEL || eventKeyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
+            mPendingAccent = 0;
+            return mImeAdapter.translateAndSendNativeEvents(event, NO_ACCENT);
+        }
+
+        int unicodeChar = event.getUnicodeChar();
+
         // If this is a key-up, and backspace/del or if the key has a character representation,
         // need to update the underlying Editable (i.e. the local representation of the text
         // being edited).
@@ -378,26 +413,24 @@ public class AdapterInputConnection extends BaseInputConnection {
             } else if (event.getKeyCode() == KeyEvent.KEYCODE_FORWARD_DEL) {
                 deleteSurroundingText(0, 1);
                 return true;
-            } else {
-                int unicodeChar = event.getUnicodeChar();
-                if (unicodeChar != 0) {
-                    int selectionStart = Selection.getSelectionStart(mEditable);
-                    int selectionEnd = Selection.getSelectionEnd(mEditable);
-                    if (selectionStart > selectionEnd) {
-                        int temp = selectionStart;
-                        selectionStart = selectionEnd;
-                        selectionEnd = temp;
-                    }
-                    mEditable.replace(selectionStart, selectionEnd,
-                            Character.toString((char) unicodeChar));
+            } else if (unicodeChar != 0) {
+                int selectionStart = Selection.getSelectionStart(mEditable);
+                int selectionEnd = Selection.getSelectionEnd(mEditable);
+                if (selectionStart > selectionEnd) {
+                    int temp = selectionStart;
+                    selectionStart = selectionEnd;
+                    selectionEnd = temp;
                 }
+                int combinedChar = maybeAddAccentToCharacter(mPendingAccent, unicodeChar);
+                mEditable.replace(selectionStart, selectionEnd,
+                        Character.toString((char) combinedChar));
             }
         } else if (event.getAction() == KeyEvent.ACTION_DOWN) {
             // TODO(aurimas): remove this workaround when crbug.com/278584 is fixed.
             if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
                 beginBatchEdit();
                 finishComposingText();
-                mImeAdapter.translateAndSendNativeEvents(event);
+                mImeAdapter.translateAndSendNativeEvents(event, 0);
                 endBatchEdit();
                 return true;
             } else if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
@@ -406,7 +439,46 @@ public class AdapterInputConnection extends BaseInputConnection {
                 return true;
             }
         }
-        mImeAdapter.translateAndSendNativeEvents(event);
+
+        // Physical keyboards also have their events come through here though not
+        // by BaseInputConnection.  In order to support "accent" key sequences
+        // such as "~n" or "^o" we have to record that one has been pressed
+        // and, if an accentable letter follows, delete the accent glyph and
+        // insert the composed character.
+
+        // Copy class variable to local because class version may get indirectly
+        // cleared by the deleteSurroundingText() call below.
+        int pendingAccent = mPendingAccent;
+        int nextAccent = mPendingAccent;
+
+        if ((unicodeChar & KeyCharacterMap.COMBINING_ACCENT) != 0) {
+            pendingAccent = NO_ACCENT;
+            nextAccent = unicodeChar & KeyCharacterMap.COMBINING_ACCENT_MASK;
+        } else if (pendingAccent != NO_ACCENT) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                int combined = KeyEvent.getDeadChar(pendingAccent, unicodeChar);
+                if (combined != 0) {
+                    // Previous accent combines with new character to create
+                    // a new accented character.  First delete the displayed
+                    // accent so it appears overwritten by the composition.
+                    super.deleteSurroundingText(1, 0);
+                    mImeAdapter.deleteSurroundingText(1, 0);
+                } else {
+                    // Previous accent doesn't combine with this character
+                    // so assume both are completely independent.
+                    pendingAccent = NO_ACCENT;
+                    nextAccent = NO_ACCENT;
+                }
+            }
+
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                // Forget accent after release of key being accented.
+                nextAccent = NO_ACCENT;
+            }
+        }
+
+        mImeAdapter.translateAndSendNativeEvents(event, pendingAccent);
+        mPendingAccent = nextAccent;
         return true;
     }
 
@@ -448,6 +520,7 @@ public class AdapterInputConnection extends BaseInputConnection {
         if (DEBUG) Log.w(TAG, "restartInput");
         getInputMethodManagerWrapper().restartInput(mInternalView);
         mNumNestedBatchEdits = 0;
+        mPendingAccent = NO_ACCENT;
     }
 
     /**

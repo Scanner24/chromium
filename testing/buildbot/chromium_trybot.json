@@ -3,8 +3,40 @@
     "all"
   ],
   "gtest_tests": [
-    "accessibility_unittests",
-    "app_list_unittests",
+    {
+      "test": "accessibility_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "app_installer_unittests",
+      "platforms": ["win"]
+    },
+    {
+      "test": "app_list_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "ash_unittests",
+      "chromium_configs": [
+        "chromium_chromeos",
+        "chromium_chromeos_clang",
+        "chromium_chromeos_ozone"
+      ],
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "ash_unittests",
+      "platforms": ["win"],
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "base_unittests",
       "swarming": {
@@ -15,29 +47,49 @@
       "test": "browser_tests",
       "swarming": {
         "can_use_on_swarming_builders": true,
-        "shards": 5
+        "shards": 8
       }
     },
     "cacheinvalidation_unittests",
     "cast_unittests",
-    "cc_unittests",
+    {
+      "test": "cc_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     "chromedriver_unittests",
     {
       "test": "chromevox_tests",
-      "chromium_configs": ["chromium_chromeos", "chromium_chromeos_clang"]
+      "chromium_configs": [
+        "chromium_chromeos",
+        "chromium_chromeos_clang",
+        "chromium_chromeos_ozone"
+      ]
     },
     {
       "test": "chrome_elf_unittests",
       "platforms": ["win"]
     },
-    "components_browsertests",
-    "components_unittests",
+    {
+      "test": "components_browsertests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "components_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "compositor_unittests",
       "platforms": ["linux", "win"]
     },
     {
       "test": "courgette_unittests",
+      "can_use_on_swarming_builders": true,
       "platforms": ["win"]
     },
     {
@@ -52,21 +104,41 @@
         "can_use_on_swarming_builders": true
       }
     },
-    "crypto_unittests",
+    {
+      "test": "crypto_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "dbus_unittests",
       "platforms": ["linux"]
     },
     "device_unittests",
-    "events_unittests",
+    {
+      "test": "events_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "extensions_unittests",
       "platforms": ["win", "mac", "linux"]
     },
     "gcm_unit_tests",
-    "gfx_unittests",
+    {
+      "test": "gfx_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     "google_apis_unittests",
-    "gpu_unittests",
+    {
+      "test": "gpu_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "interactive_ui_tests",
       "swarming": {
@@ -89,28 +161,25 @@
       "platforms": ["linux", "win"]
     },
     "media_perftests",
-    "media_unittests",
-    "message_center_unittests",
-    "mojo_apps_js_unittests",
+    {
+      "test": "media_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "message_center_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     "mojo_common_unittests",
-    "mojo_js_unittests",
     "mojo_public_bindings_unittests",
     "mojo_public_environment_unittests",
     "mojo_public_system_unittests",
     "mojo_public_utility_unittests",
-    {
-      "test": "mojo_application_manager_unittests",
-      "platforms": ["linux"]
-    },
-    {
-      "test": "mojo_shell_tests",
-      "platforms": ["linux"]
-    },
     "mojo_system_unittests",
-    {
-      "test": "nacl_loader_unittests",
-      "platforms": ["linux"]
-    },
+    "nacl_loader_unittests",
     {
       "test": "net_unittests",
       "swarming": {
@@ -141,7 +210,18 @@
       }
     },
     "sync_unit_tests",
-    "ui_unittests",
+    {
+      "test": "ui_base_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "ui_touch_selection_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "unit_tests",
       "swarming": {
@@ -149,30 +229,35 @@
         "shards": 2
       }
     },
+    {
+      "test": "ui_chromeos_unittests",
+      "platforms": ["linux"],
+      "chromium_configs": [
+        "chromium_chromeos",
+        "chromium_chromeos_clang",
+        "chromium_chromeos_ozone"
+      ]
+    },
     "url_unittests",
+    "skia_unittests",
     {
       "test": "wm_unittests",
-      "platforms": ["linux"]
+      "platforms": ["linux", "win"]
     },
     {
-      "test": "app_shell_browsertests",
-      "platforms": ["linux"]
+      "test": "extensions_browsertests",
+      "platforms": ["linux", "win"],
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
     },
     {
-      "test": "ash_unittests",
-      "chromium_configs": ["chromium_chromeos", "chromium_chromeos_clang"]
-    },
-    {
-      "test": "ash_unittests",
-      "platforms": ["win"]
+      "test": "app_shell_unittests",
+      "platforms": ["linux", "win"]
     },
     {
       "test": "aura_unittests",
       "platforms": ["linux", "win"]
-    },
-    {
-      "test": "mojo_view_manager_unittests",
-      "platforms": ["linux"]
     },
     {
       "test": "views_unittests",
@@ -190,12 +275,11 @@
     {
       "test": "chromeos_unittests",
       "platforms": ["linux"],
-      "chromium_configs": ["chromium_chromeos", "chromium_chromeos_clang"]
-    },
-    {
-      "test": "athena_unittests",
-      "platforms": ["linux"],
-      "chromium_configs": ["chromium_chromeos", "chromium_chromeos_clang"]
+      "chromium_configs": [
+        "chromium_chromeos",
+        "chromium_chromeos_clang",
+        "chromium_chromeos_ozone"
+      ]
     },
     {
       "test": "display_unittests",

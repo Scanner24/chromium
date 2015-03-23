@@ -110,7 +110,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
                            const PageState& state) {}
 
   // The destination URL has changed should be updated.
-  virtual void UpdateTargetURL(const GURL& url) {}
+  virtual void UpdateTargetURL(RenderViewHost* render_view_host,
+                               const GURL& url) {}
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -138,10 +139,6 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   virtual RendererPreferences GetRendererPrefs(
       BrowserContext* browser_context) const = 0;
 
-  // Computes a WebPreferences object that will be used by the renderer
-  // associated with the owning render view host.
-  virtual WebPreferences ComputeWebkitPrefs();
-
   // Notification the user has made a gesture while focus was on the
   // page. This is used to avoid uninitiated user downloads (aka carpet
   // bombing), see DownloadRequestLimiter for details.
@@ -155,9 +152,7 @@ class CONTENT_EXPORT RenderViewHostDelegate {
 
   // Notification that the renderer has become unresponsive. The
   // delegate can use this notification to show a warning to the user.
-  virtual void RendererUnresponsive(RenderViewHost* render_view_host,
-                                    bool is_during_before_unload,
-                                    bool is_during_unload) {}
+  virtual void RendererUnresponsive(RenderViewHost* render_view_host) {}
 
   // Notification that a previously unresponsive renderer has become
   // responsive again. The delegate can use this notification to end the
@@ -193,8 +188,7 @@ class CONTENT_EXPORT RenderViewHostDelegate {
       RenderViewHost* render_view_host,
       const FileChooserParams& params) {}
 
-  // Notification that the page wants to go into or out of fullscreen mode.
-  virtual void ToggleFullscreenMode(bool enter_fullscreen) {}
+  // Returns whether the associated tab is in fullscreen mode.
   virtual bool IsFullscreenForCurrentTab() const;
 
   // The contents' preferred size changed.
@@ -252,13 +246,13 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // the Windows function which is actually a #define.
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
+                                 const gfx::Rect& initial_rect,
                                  bool user_gesture) {}
 
   // Show the newly created widget with the specified bounds.
   // The widget is identified by the route_id passed to CreateNewWidget.
   virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) {}
+                                 const gfx::Rect& initial_rect) {}
 
   // Show the newly created full screen widget. Similar to above.
   virtual void ShowCreatedFullscreenWidget(int route_id) {}

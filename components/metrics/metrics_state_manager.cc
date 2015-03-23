@@ -219,9 +219,6 @@ void MetricsStateManager::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 void MetricsStateManager::BackUpCurrentClientInfo() {
-  // TODO(gayane): Eliminate use of ScopedAllowIO. crbug.com/413783
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-
   ClientInfo client_info;
   client_info.client_id = client_id_;
   client_info.installation_date = local_state_->GetInt64(prefs::kInstallDate);
@@ -231,7 +228,7 @@ void MetricsStateManager::BackUpCurrentClientInfo() {
 }
 
 scoped_ptr<ClientInfo> MetricsStateManager::LoadClientInfoAndMaybeMigrate() {
-  scoped_ptr<metrics::ClientInfo> client_info = load_client_info_.Run();
+  scoped_ptr<ClientInfo> client_info = load_client_info_.Run();
 
   // Prior to 2014-07, the client ID was stripped of its dashes before being
   // saved. Migrate back to a proper GUID if this is the case. This migration
@@ -270,7 +267,7 @@ int MetricsStateManager::GetLowEntropySource() {
   if (low_entropy_source_ != kLowEntropySourceNotSet)
     return low_entropy_source_;
 
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
+  const base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
   // Only try to load the value from prefs if the user did not request a
   // reset.
   // Otherwise, skip to generating a new value.

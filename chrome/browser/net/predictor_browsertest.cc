@@ -10,6 +10,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "net/base/net_errors.h"
 #include "net/dns/host_resolver_proc.h"
 #include "net/dns/mock_host_resolver.h"
@@ -20,6 +21,8 @@ using testing::HasSubstr;
 
 namespace {
 
+const char kChromiumHostname[] = "chromium.org";
+
 // Records a history of all hostnames for which resolving has been requested,
 // and immediately fails the resolution requests themselves.
 class HostResolutionRequestRecorder : public net::HostResolverProc {
@@ -29,11 +32,11 @@ class HostResolutionRequestRecorder : public net::HostResolverProc {
         is_waiting_for_hostname_(false) {
   }
 
-  virtual int Resolve(const std::string& host,
-                      net::AddressFamily address_family,
-                      net::HostResolverFlags host_resolver_flags,
-                      net::AddressList* addrlist,
-                      int* os_error) OVERRIDE {
+  int Resolve(const std::string& host,
+              net::AddressFamily address_family,
+              net::HostResolverFlags host_resolver_flags,
+              net::AddressList* addrlist,
+              int* os_error) override {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
@@ -61,7 +64,7 @@ class HostResolutionRequestRecorder : public net::HostResolverProc {
   }
 
  private:
-  virtual ~HostResolutionRequestRecorder() {}
+  ~HostResolutionRequestRecorder() override {}
 
   void AddToHistory(const std::string& hostname) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -102,13 +105,13 @@ class PredictorBrowserTest : public InProcessBrowserTest {
   }
 
  protected:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     scoped_host_resolver_proc_.reset(new net::ScopedDefaultHostResolverProc(
         host_resolution_request_recorder_.get()));
     InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  void TearDownInProcessBrowserTestFixture() override {
     InProcessBrowserTest::TearDownInProcessBrowserTestFixture();
     scoped_host_resolver_proc_.reset();
   }
@@ -187,6 +190,14 @@ IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, ShutdownStartupCycle) {
   PrepareFrameSubresources(referring_url_);
   WaitUntilHostHasBeenRequested(startup_url_.host());
   WaitUntilHostHasBeenRequested(target_url_.host());
+}
+
+IN_PROC_BROWSER_TEST_F(PredictorBrowserTest, DnsPrefetch) {
+  ASSERT_TRUE(test_server()->Start());
+  ui_test_utils::NavigateToURL(
+      browser(),
+      GURL(test_server()->GetURL("files/predictor/dns_prefetch.html")));
+  WaitUntilHostHasBeenRequested(kChromiumHostname);
 }
 
 }  // namespace chrome_browser_net

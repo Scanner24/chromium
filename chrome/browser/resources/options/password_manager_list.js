@@ -24,7 +24,8 @@ cr.define('options.passwordManager', function() {
     el.dataItem = entry;
     el.dataModel = dataModel;
     el.__proto__ = PasswordListItem.prototype;
-    el.decorate(showPasswords);
+    el.showPasswords_ = showPasswords;
+    el.decorate();
 
     return el;
   }
@@ -33,7 +34,7 @@ cr.define('options.passwordManager', function() {
     __proto__: DeletableItem.prototype,
 
     /** @override */
-    decorate: function(showPasswords) {
+    decorate: function() {
       DeletableItem.prototype.decorate.call(this);
 
       // The URL of the site.
@@ -69,12 +70,17 @@ cr.define('options.passwordManager', function() {
       passwordInput.type = 'password';
       passwordInput.className = 'inactive-password';
       passwordInput.readOnly = true;
-      passwordInput.value = showPasswords ? this.password : '********';
+      passwordInput.value = this.showPasswords_ ? this.password : '********';
       passwordInputDiv.appendChild(passwordInput);
+      var deletableItem = this;
+      passwordInput.addEventListener('focus', function() {
+        deletableItem.handleFocus();
+      });
       this.passwordField = passwordInput;
+      this.setFocusable_(false);
 
       // The show/hide button.
-      if (showPasswords) {
+      if (this.showPasswords_) {
         var button = this.ownerDocument.createElement('button');
         button.hidden = true;
         button.className = 'list-inline-button custom-appearance';
@@ -86,6 +92,9 @@ cr.define('options.passwordManager', function() {
           // Don't handle list item selection. It causes focus change.
           event.stopPropagation();
         }, false);
+        button.addEventListener('focus', function() {
+          deletableItem.handleFocus();
+        });
         passwordInputDiv.appendChild(button);
         this.passwordShowButton = button;
       }
@@ -103,11 +112,24 @@ cr.define('options.passwordManager', function() {
 
       if (this.selected) {
         input.classList.remove('inactive-password');
+        this.setFocusable_(true);
         button.hidden = false;
+        input.focus();
       } else {
         input.classList.add('inactive-password');
+        this.setFocusable_(false);
         button.hidden = true;
       }
+    },
+
+    /**
+     * Set the focusability of this row.
+     * @param {boolean} focusable
+     * @private
+     */
+    setFocusable_: function(focusable) {
+      var tabIndex = focusable ? 0 : -1;
+      this.passwordField.tabIndex = this.closeButtonElement.tabIndex = tabIndex;
     },
 
     /**
@@ -267,6 +289,7 @@ cr.define('options.passwordManager', function() {
       Preferences.getInstance().addEventListener(
           'profile.password_manager_allow_show_passwords',
           this.onPreferenceChanged_.bind(this));
+      this.addEventListener('focus', this.onFocus_.bind(this));
     },
 
     /**
@@ -308,12 +331,23 @@ cr.define('options.passwordManager', function() {
     get length() {
       return this.dataModel.length;
     },
+
+    /**
+     * Will make to first row focusable if none are selected. This makes it
+     * possible to tab into the rows without pressing up/down first.
+     * @param {Event} e The focus event.
+     * @private
+     */
+    onFocus_: function(e) {
+      if (!this.selectedItem && this.items)
+        this.items[0].setFocusable_(true);
+    },
   };
 
   /**
    * Create a new passwords list.
    * @constructor
-   * @extends {cr.ui.List}
+   * @extends {options.DeletableItemList}
    */
   var PasswordExceptionsList = cr.ui.define('list');
 

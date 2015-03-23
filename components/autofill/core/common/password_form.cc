@@ -5,6 +5,7 @@
 #include <ostream>
 
 #include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/password_form.h"
 
@@ -12,14 +13,15 @@ namespace autofill {
 
 PasswordForm::PasswordForm()
     : scheme(SCHEME_HTML),
+      username_marked_by_site(false),
       password_autocomplete_set(true),
       ssl_valid(false),
       preferred(false),
       blacklisted_by_user(false),
       type(TYPE_MANUAL),
       times_used(0),
-      use_additional_authentication(false),
-      is_zero_click(false) {
+      generation_upload_status(NO_SIGNAL_SENT),
+      skip_zero_click(false) {
 }
 
 PasswordForm::~PasswordForm() {
@@ -35,6 +37,7 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
       action == form.action &&
       submit_element == form.submit_element &&
       username_element == form.username_element &&
+      username_marked_by_site == form.username_marked_by_site &&
       username_value == form.username_value &&
       other_possible_usernames == form.other_possible_usernames &&
       password_element == form.password_element &&
@@ -49,12 +52,12 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
       blacklisted_by_user == form.blacklisted_by_user &&
       type == form.type &&
       times_used == form.times_used &&
-      use_additional_authentication == form.use_additional_authentication &&
-      form_data == form.form_data &&
+      form_data.SameFormAs(form.form_data) &&
+      generation_upload_status == form.generation_upload_status &&
       display_name == form.display_name &&
       avatar_url == form.avatar_url &&
       federation_url == form.federation_url &&
-      is_zero_click == form.is_zero_click;
+      skip_zero_click == form.skip_zero_click;
 }
 
 bool PasswordForm::operator!=(const PasswordForm& form) const {
@@ -68,6 +71,7 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
             << " action: " << form.action
             << " submit_element: " << base::UTF16ToUTF8(form.submit_element)
             << " username_elem: " << base::UTF16ToUTF8(form.username_element)
+            << " username_marked_by_site: " << form.username_marked_by_site
             << " username_value: " << base::UTF16ToUTF8(form.username_value)
             << " password_elem: " << base::UTF16ToUTF8(form.password_element)
             << " password_value: " << base::UTF16ToUTF8(form.password_value)
@@ -75,6 +79,8 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
             << base::UTF16ToUTF8(form.new_password_element)
             << " new_password_value: "
             << base::UTF16ToUTF8(form.new_password_value)
+            << " other_possible_usernames: "
+            << JoinString(form.other_possible_usernames, '|')
             << " autocomplete_set:" << form.password_autocomplete_set
             << " blacklisted: " << form.blacklisted_by_user
             << " preferred: " << form.preferred
@@ -83,13 +89,12 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
             << " date_synced: " << form.date_synced.ToDoubleT()
             << " type: " << form.type
             << " times_used: " << form.times_used
-            << " use additional authentication: "
-            << form.use_additional_authentication
             << " form_data: " << form.form_data
+            << " generation_upload_status: " << form.generation_upload_status
             << " display_name: " << base::UTF16ToUTF8(form.display_name)
             << " avatar_url: " << form.avatar_url
             << " federation_url: " << form.federation_url
-            << " is_zero_click: " << form.is_zero_click;
+            << " skip_next_zero_click: " << form.skip_zero_click;
 }
 
 }  // namespace autofill

@@ -10,6 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/form_field.h"
 
@@ -20,12 +21,12 @@ class AutofillScanner;
 
 class CreditCardField : public FormField {
  public:
-  virtual ~CreditCardField();
-  static FormField* Parse(AutofillScanner* scanner);
+  ~CreditCardField() override;
+  static scoped_ptr<FormField> Parse(AutofillScanner* scanner);
 
  protected:
   // FormField:
-  virtual bool ClassifyField(ServerFieldTypeMap* map) const OVERRIDE;
+  bool ClassifyField(ServerFieldTypeMap* map) const override;
 
  private:
   friend class CreditCardFieldTest;
@@ -48,7 +49,6 @@ class CreditCardField : public FormField {
   // middle names or suffixes.)
   AutofillField* cardholder_last_;
 
-  // TODO(jhawkins): Parse the select control.
   AutofillField* type_;                  // Optional.
   std::vector<AutofillField*> numbers_;  // Required.
 

@@ -17,16 +17,17 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
+#include "components/app_modal/javascript_app_modal_dialog.h"
+#include "components/app_modal/native_app_modal_dialog.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -45,6 +46,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
+using app_modal::AppModalDialog;
+using app_modal::JavaScriptAppModalDialog;
 using net::test_server::BasicHttpResponse;
 using net::test_server::HttpRequest;
 using net::test_server::HttpResponse;
@@ -102,9 +105,9 @@ class OAuth2LoginManagerStateWaiter : public OAuth2LoginManager::Observer {
 
  private:
   // OAuth2LoginManager::Observer overrides.
-  virtual void OnSessionRestoreStateChanged(
+  void OnSessionRestoreStateChanged(
       Profile* user_profile,
-      OAuth2LoginManager::SessionRestoreState state) OVERRIDE {
+      OAuth2LoginManager::SessionRestoreState state) override {
     if (!waiting_for_state_)
       return;
 
@@ -130,6 +133,14 @@ class OAuth2LoginManagerStateWaiter : public OAuth2LoginManager::Observer {
 class OAuth2Test : public OobeBaseTest {
  protected:
   OAuth2Test() {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    OobeBaseTest::SetUpCommandLine(command_line);
+
+    // Disable sync sinc we don't really need this for these tests and it also
+    // makes OAuth2Test.MergeSession test flaky http://crbug.com/408867.
+    command_line->AppendSwitch(switches::kDisableSync);
+  }
 
   void SetupGaiaServerForNewAccount() {
     FakeGaia::MergeSessionParams params;
@@ -218,7 +229,7 @@ class OAuth2Test : public OobeBaseTest {
 
  protected:
   // OobeBaseTest overrides.
-  virtual Profile* profile() OVERRIDE {
+  Profile* profile() override {
     if (user_manager::UserManager::Get()->GetActiveUser())
       return ProfileManager::GetPrimaryUserProfile();
 
@@ -454,8 +465,7 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_MergeSession) {
 // MergeSession test is attempting to merge session for an existing profile
 // that was generated in PRE_PRE_MergeSession test. This attempt should fail
 // since FakeGaia instance isn't configured to return relevant tokens/cookies.
-// This test is flaky, see: crbug.com/408867.
-IN_PROC_BROWSER_TEST_F(OAuth2Test, DISABLED_MergeSession) {
+IN_PROC_BROWSER_TEST_F(OAuth2Test, MergeSession) {
   SimulateNetworkOnline();
 
   content::WindowedNotificationObserver(
@@ -521,7 +531,7 @@ class FakeGoogle {
       return scoped_ptr<HttpResponse>();      // Request not understood.
     }
 
-    return http_response.PassAs<HttpResponse>();
+    return http_response.Pass();
   }
 
   // True if we have already served the test page.
@@ -577,8 +587,8 @@ class DelayedFakeGaia : public FakeGaia {
 
  private:
   // FakeGaia overrides.
-  virtual void HandleMergeSession(const HttpRequest& request,
-                                  BasicHttpResponse* http_response) OVERRIDE {
+  void HandleMergeSession(const HttpRequest& request,
+                          BasicHttpResponse* http_response) override {
     start_event_.Signal();
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
@@ -606,25 +616,23 @@ class MergeSessionTest : public OAuth2Test {
     fake_gaia_.reset(delayed_fake_gaia_);
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     OAuth2Test::SetUpCommandLine(command_line);
 
     // Get fake URL for fake google.com.
     const GURL& server_url = embedded_test_server()->base_url();
-    std::string google_host("www.google.com");
     GURL::Replacements replace_google_host;
-    replace_google_host.SetHostStr(google_host);
+    replace_google_host.SetHostStr("www.google.com");
     GURL google_url = server_url.ReplaceComponents(replace_google_host);
     fake_google_page_url_ = google_url.Resolve(kHelloPagePath);
 
-    std::string non_google_host("www.somethingelse.org");
     GURL::Replacements replace_non_google_host;
-    replace_non_google_host.SetHostStr(non_google_host);
+    replace_non_google_host.SetHostStr("www.somethingelse.org");
     GURL non_google_url = server_url.ReplaceComponents(replace_non_google_host);
     non_google_page_url_ = non_google_url.Resolve(kRandomPagePath);
 }
 
-  virtual void SetUp() OVERRIDE {
+void SetUp() override {
     embedded_test_server()->RegisterRequestHandler(
         base::Bind(&FakeGoogle::HandleRequest,
                    base::Unretained(&fake_google_)));
@@ -652,7 +660,7 @@ class MergeSessionTest : public OAuth2Test {
 
   const GURL& GetBackGroundPageUrl(const std::string& extension_id) {
     extensions::ProcessManager* manager =
-        extensions::ExtensionSystem::Get(profile())->process_manager();
+        extensions::ProcessManager::Get(profile());
     extensions::ExtensionHost* host =
         manager->GetBackgroundHostForExtension(extension_id);
     return host->host_contents()->GetURL();
@@ -661,7 +669,7 @@ class MergeSessionTest : public OAuth2Test {
   void JsExpectOnBackgroundPage(const std::string& extension_id,
                                 const std::string& expression) {
     extensions::ProcessManager* manager =
-        extensions::ExtensionSystem::Get(profile())->process_manager();
+        extensions::ProcessManager::Get(profile());
     extensions::ExtensionHost* host =
         manager->GetBackgroundHostForExtension(extension_id);
     if (host == NULL) {

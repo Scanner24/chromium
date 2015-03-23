@@ -41,7 +41,7 @@ class NameServerClassifierTest : public testing::Test {
     for (std::vector<std::string>::const_iterator it = server_strings.begin();
          it != server_strings.end();
          ++it) {
-      if (*it == "")
+      if (it->empty())
         continue;
 
       IPAddressNumber address;
@@ -121,8 +121,8 @@ class DnsConfigServiceTest : public testing::Test {
  protected:
   class TestDnsConfigService : public DnsConfigService {
    public:
-    virtual void ReadNow() OVERRIDE {}
-    virtual bool StartWatching() OVERRIDE { return true; }
+    void ReadNow() override {}
+    bool StartWatching() override { return true; }
 
     // Expose the protected methods to this test suite.
     void InvalidateConfig() {
@@ -176,7 +176,7 @@ class DnsConfigServiceTest : public testing::Test {
     return hosts;
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     quit_on_config_ = false;
 
     service_.reset(new TestDnsConfigService());

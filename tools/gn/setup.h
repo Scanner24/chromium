@@ -8,11 +8,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "tools/gn/build_settings.h"
 #include "tools/gn/builder.h"
+#include "tools/gn/label_pattern.h"
 #include "tools/gn/loader.h"
 #include "tools/gn/scheduler.h"
 #include "tools/gn/scope.h"
@@ -54,6 +54,13 @@ class CommonSetup {
     check_public_headers_ = s;
   }
 
+  // Read from the .gn file, these are the targets to check. If the .gn file
+  // does not specify anything, this will be null. If the .gn file specifies
+  // the empty list, this will be non-null but empty.
+  const std::vector<LabelPattern>* check_patterns() const {
+    return check_patterns_.get();
+  }
+
   BuildSettings& build_settings() { return build_settings_; }
   Builder* builder() { return builder_.get(); }
   LoaderImpl* loader() { return loader_.get(); }
@@ -81,6 +88,9 @@ class CommonSetup {
   bool check_for_unused_overrides_;
   bool check_public_headers_;
 
+  // See getter for info.
+  scoped_ptr<std::vector<LabelPattern> > check_patterns_;
+
  private:
   CommonSetup& operator=(const CommonSetup& other);  // Disallow.
 };
@@ -90,7 +100,7 @@ class CommonSetup {
 class Setup : public CommonSetup {
  public:
   Setup();
-  virtual ~Setup();
+  ~Setup() override;
 
   // Configures the build for the current command line. On success returns
   // true. On failure, prints the error and returns false.
@@ -114,7 +124,7 @@ class Setup : public CommonSetup {
 
   Scheduler& scheduler() { return scheduler_; }
 
-  virtual Scheduler* GetScheduler() OVERRIDE;
+  Scheduler* GetScheduler() override;
 
   // Returns the file used to store the build arguments. Note that the path
   // might not exist.
@@ -202,14 +212,14 @@ class DependentSetup : public CommonSetup {
   // default copy constructor.
   DependentSetup(Setup* derive_from);
   DependentSetup(DependentSetup* derive_from);
-  virtual ~DependentSetup();
+  ~DependentSetup() override;
 
   // These are the two parts of Run() in the regular setup, not including the
   // call to actually run the message loop.
   void RunPreMessageLoop();
   bool RunPostMessageLoop();
 
-  virtual Scheduler* GetScheduler() OVERRIDE;
+  Scheduler* GetScheduler() override;
 
  private:
   Scheduler* scheduler_;

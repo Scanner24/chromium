@@ -16,12 +16,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
+#include "chrome/browser/autocomplete/scored_history_match_builder_impl.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/in_memory_url_index_types.h"
-#include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
@@ -29,7 +27,9 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/in_memory_url_index_types.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_provider_listener.h"
@@ -278,21 +278,18 @@ GURL ConvertToHostOnly(const history::HistoryMatch& match,
 class SearchTermsDataSnapshot : public SearchTermsData {
  public:
   explicit SearchTermsDataSnapshot(const SearchTermsData& search_terms_data);
-  virtual ~SearchTermsDataSnapshot();
+  ~SearchTermsDataSnapshot() override;
 
-  virtual std::string GoogleBaseURLValue() const OVERRIDE;
-  virtual std::string GetApplicationLocale() const OVERRIDE;
-  virtual base::string16 GetRlzParameterValue(
-      bool from_app_list) const OVERRIDE;
-  virtual std::string GetSearchClient() const OVERRIDE;
-  virtual bool EnableAnswersInSuggest() const OVERRIDE;
-  virtual bool IsShowingSearchTermsOnSearchResultsPages() const OVERRIDE;
-  virtual std::string InstantExtendedEnabledParam(
-      bool for_search) const OVERRIDE;
-  virtual std::string ForceInstantResultsParam(
-      bool for_prerender) const OVERRIDE;
-  virtual std::string NTPIsThemedParam() const OVERRIDE;
-  virtual std::string GoogleImageSearchSource() const OVERRIDE;
+  std::string GoogleBaseURLValue() const override;
+  std::string GetApplicationLocale() const override;
+  base::string16 GetRlzParameterValue(bool from_app_list) const override;
+  std::string GetSearchClient() const override;
+  bool EnableAnswersInSuggest() const override;
+  bool IsShowingSearchTermsOnSearchResultsPages() const override;
+  std::string InstantExtendedEnabledParam(bool for_search) const override;
+  std::string ForceInstantResultsParam(bool for_prerender) const override;
+  std::string NTPIsThemedParam() const override;
+  std::string GoogleImageSearchSource() const override;
 
  private:
   std::string google_base_url_value_;
@@ -484,7 +481,8 @@ HistoryURLProvider::HistoryURLProvider(AutocompleteProviderListener* listener,
 }
 
 void HistoryURLProvider::Start(const AutocompleteInput& input,
-                               bool minimal_changes) {
+                               bool minimal_changes,
+                               bool called_due_to_focus) {
   // NOTE: We could try hard to do less work in the |minimal_changes| case
   // here; some clever caching would let us reuse the raw matches from the
   // history DB without re-querying.  However, we'd still have to go back to
@@ -499,7 +497,8 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
 
   matches_.clear();
 
-  if ((input.type() == metrics::OmniboxInputType::INVALID) ||
+  if (called_due_to_focus ||
+      (input.type() == metrics::OmniboxInputType::INVALID) ||
       (input.type() == metrics::OmniboxInputType::FORCED_QUERY))
     return;
 
@@ -529,8 +528,8 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
   // We'll need the history service to run both passes, so try to obtain it.
   if (!profile_)
     return;
-  HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  HistoryService* const history_service = HistoryServiceFactory::GetForProfile(
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!history_service)
     return;
 
@@ -568,7 +567,7 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
   if (url_db) {
     DoAutocomplete(NULL, url_db, params.get());
     matches_.clear();
-    PromoteMatchesIfNecessary(*params);
+    PromoteMatchIfNecessary(*params);
     // NOTE: We don't reset |params| here since at least the |promote_type|
     // field on it will be read by the second pass -- see comments in
     // DoAutocomplete().
@@ -715,7 +714,7 @@ ACMatchClassifications HistoryURLProvider::ClassifyDescription(
   // are guaranteed that the beginning of input_text must be a word break.
   history::WordStarts offsets(1, 0u);
   description_matches =
-      history::ScoredHistoryMatch::FilterTermMatchesByWordStarts(
+      ScoredHistoryMatchBuilderImpl::FilterTermMatchesByWordStarts(
           description_matches, offsets, description_word_starts, 0,
           std::string::npos);
   return SpansFromTermMatch(
@@ -759,23 +758,22 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   SortAndDedupMatches(&params->matches);
 
   // Try to create a shorter suggestion from the best match.
-  // We consider the what you typed match eligible for display when there's a
-  // reasonable chance the user actually cares:
-  // * Their input can be opened as a URL, and
-  // * We parsed the input as a URL, or it starts with an explicit "http:" or
-  // "https:".
-  // Otherwise, this is just low-quality noise.  In the cases where we've parsed
-  // as UNKNOWN, we'll still show an accidental search infobar if need be.
+  // We consider the what you typed match eligible for display when it's
+  // navigable and there's a reasonable chance the user intended to do
+  // something other than search.  We use a variety of heuristics to determine
+  // this, e.g. whether the user explicitly typed a scheme, or if omnibox
+  // searching has been disabled by policy. In the cases where we've parsed as
+  // UNKNOWN, we'll still show an accidental search infobar if need be.
   VisitClassifier classifier(this, params->input, db);
-  params->have_what_you_typed_match =
+  bool have_what_you_typed_match =
       (params->input.type() != metrics::OmniboxInputType::QUERY) &&
       ((params->input.type() != metrics::OmniboxInputType::UNKNOWN) ||
        (classifier.type() == VisitClassifier::UNVISITED_INTRANET) ||
        !params->trim_http ||
-       (AutocompleteInput::NumNonHostComponents(params->input.parts()) > 0));
+       (AutocompleteInput::NumNonHostComponents(params->input.parts()) > 0) ||
+       !params->default_search_provider);
   const bool have_shorter_suggestion_suitable_for_inline_autocomplete =
-      PromoteOrCreateShorterSuggestion(
-          db, params->have_what_you_typed_match, params);
+      PromoteOrCreateShorterSuggestion(db, have_what_you_typed_match, params);
 
   // Check whether what the user typed appears in history.
   const bool can_check_history_for_exact_match =
@@ -809,7 +807,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
     params->promote_type = HistoryURLProviderParams::FRONT_HISTORY_MATCH;
   } else {
     // Failed to promote any URLs.  Use the What You Typed match, if we have it.
-    params->promote_type = params->have_what_you_typed_match ?
+    params->promote_type = have_what_you_typed_match ?
         HistoryURLProviderParams::WHAT_YOU_TYPED_MATCH :
         HistoryURLProviderParams::NEITHER;
   }
@@ -827,19 +825,15 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   }
 }
 
-void HistoryURLProvider::PromoteMatchesIfNecessary(
+void HistoryURLProvider::PromoteMatchIfNecessary(
     const HistoryURLProviderParams& params) {
-  if (params.promote_type == HistoryURLProviderParams::FRONT_HISTORY_MATCH) {
-    matches_.push_back(HistoryMatchToACMatch(params, 0, INLINE_AUTOCOMPLETE,
-        CalculateRelevance(INLINE_AUTOCOMPLETE, 0)));
-    if (OmniboxFieldTrial::AddUWYTMatchEvenIfPromotedURLs() &&
-        params.have_what_you_typed_match) {
-      matches_.push_back(params.what_you_typed_match);
-    }
-  } else if (params.promote_type ==
-      HistoryURLProviderParams::WHAT_YOU_TYPED_MATCH) {
-    matches_.push_back(params.what_you_typed_match);
-  }
+  if (params.promote_type == HistoryURLProviderParams::NEITHER)
+    return;
+  matches_.push_back(
+      (params.promote_type == HistoryURLProviderParams::WHAT_YOU_TYPED_MATCH) ?
+      params.what_you_typed_match :
+      HistoryMatchToACMatch(params, 0, INLINE_AUTOCOMPLETE,
+                            CalculateRelevance(INLINE_AUTOCOMPLETE, 0)));
 }
 
 void HistoryURLProvider::QueryComplete(
@@ -860,7 +854,7 @@ void HistoryURLProvider::QueryComplete(
   // match in it, whereas |params->matches| will be empty.
   if (!params->failed) {
     matches_.clear();
-    PromoteMatchesIfNecessary(*params);
+    PromoteMatchIfNecessary(*params);
 
     // Determine relevance of highest scoring match, if any.
     int relevance = matches_.empty() ?
@@ -920,33 +914,6 @@ bool HistoryURLProvider::FixupExactSuggestion(
             UNVISITED_INTRANET : WHAT_YOU_TYPED;
       }
       break;
-  }
-
-  const GURL& url = params->what_you_typed_match.destination_url;
-  const url::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
-  // If the what-you-typed result looks like a single word (which can be
-  // interpreted as an intranet address) followed by a pound sign ("#"),
-  // leave the score for the url-what-you-typed result as is.  It will be
-  // outscored by a search query from the SearchProvider. This test fixes
-  // cases such as "c#" and "c# foo" where the user has visited an intranet
-  // site "c".  We want the search-what-you-typed score to beat the
-  // URL-what-you-typed score in this case.  Most of the below test tries to
-  // make sure that this code does not trigger if the user did anything to
-  // indicate the desired match is a URL.  For instance, "c/# foo" will not
-  // pass the test because that will be classified as input type URL.  The
-  // parsed.CountCharactersBefore() in the test looks for the presence of a
-  // reference fragment in the URL by checking whether the position differs
-  // included the delimiter (pound sign) versus not including the delimiter.
-  // (One cannot simply check url.ref() because it will not distinguish
-  // between the input "c" and the input "c#", both of which will have empty
-  // reference fragments.)
-  if ((type == UNVISITED_INTRANET) &&
-      (params->input.type() != metrics::OmniboxInputType::URL) &&
-      url.username().empty() && url.password().empty() && url.port().empty() &&
-      (url.path() == "/") && url.query().empty() &&
-      (parsed.CountCharactersBefore(url::Parsed::REF, true) !=
-       parsed.CountCharactersBefore(url::Parsed::REF, false))) {
-    return false;
   }
 
   params->what_you_typed_match.relevance = CalculateRelevance(type, 0);

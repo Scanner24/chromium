@@ -13,20 +13,18 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/notifications.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/browser/notification_service.h"
@@ -102,17 +100,19 @@ class NotifierComparator {
   explicit NotifierComparator(icu::Collator* collator) : collator_(collator) {}
 
   bool operator() (Notifier* n1, Notifier* n2) {
-    return base::i18n::CompareString16WithCollator(
-        collator_, n1->name, n2->name) == UCOL_LESS;
+    if (n1->notifier_id.type != n2->notifier_id.type)
+      return n1->notifier_id.type < n2->notifier_id.type;
+
+    if (collator_) {
+      return base::i18n::CompareString16WithCollator(collator_, n1->name,
+                                                     n2->name) == UCOL_LESS;
+    }
+    return n1->name < n2->name;
   }
 
  private:
   icu::Collator* collator_;
 };
-
-bool SimpleCompareNotifiers(Notifier* n1, Notifier* n2) {
-  return n1->name < n2->name;
-}
 
 }  // namespace
 
@@ -208,12 +208,6 @@ void MessageCenterSettingsController::GetNotifierList(
   DesktopNotificationService* notification_service =
       DesktopNotificationServiceFactory::GetForProfile(profile);
 
-  UErrorCode error = U_ZERO_ERROR;
-  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
-  scoped_ptr<NotifierComparator> comparator;
-  if (!U_FAILURE(error))
-    comparator.reset(new NotifierComparator(collator.get()));
-
   const extensions::ExtensionSet& extension_set =
       extensions::ExtensionRegistry::Get(profile)->enabled_extensions();
   // The extension icon size has to be 32x32 at least to load bigger icons if
@@ -240,13 +234,11 @@ void MessageCenterSettingsController::GetNotifierList(
     app_icon_loader_->FetchImage(extension->id());
   }
 
-  int app_count = notifiers->size();
-
   ContentSettingsForOneType settings;
   DesktopNotificationProfileUtil::GetNotificationsSettings(profile, &settings);
 
-  FaviconService* favicon_service =
-      FaviconServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
   favicon_tracker_.reset(new base::CancelableTaskTracker());
   patterns_.clear();
   for (ContentSettingsForOneType::const_iterator iter = settings.begin();
@@ -293,12 +285,12 @@ void MessageCenterSettingsController::GetNotifierList(
   notifiers->push_back(screenshot_notifier);
 #endif
 
-  if (comparator) {
-    std::sort(notifiers->begin() + app_count, notifiers->end(), *comparator);
-  } else {
-    std::sort(notifiers->begin() + app_count, notifiers->end(),
-              SimpleCompareNotifiers);
-  }
+  UErrorCode error = U_ZERO_ERROR;
+  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
+  scoped_ptr<NotifierComparator> comparator(
+      new NotifierComparator(U_SUCCESS(error) ? collator.get() : NULL));
+
+  std::sort(notifiers->begin(), notifiers->end(), *comparator);
 }
 
 void MessageCenterSettingsController::SetNotifierEnabled(

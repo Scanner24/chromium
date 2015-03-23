@@ -9,37 +9,32 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
-class SkCanvas;
 class SkSurface;
 
 namespace ui {
 
 class DriBuffer;
 class DriWindowDelegate;
-class DriWrapper;
 class HardwareDisplayController;
 
-class DriSurface : public SurfaceOzoneCanvas {
+class OZONE_EXPORT DriSurface : public SurfaceOzoneCanvas {
  public:
-  DriSurface(DriWindowDelegate* window_delegate, DriWrapper* dri);
-  virtual ~DriSurface();
+  DriSurface(DriWindowDelegate* window_delegate);
+  ~DriSurface() override;
 
   // SurfaceOzoneCanvas:
-  virtual skia::RefPtr<SkCanvas> GetCanvas() OVERRIDE;
-  virtual void ResizeCanvas(const gfx::Size& viewport_size) OVERRIDE;
-  virtual void PresentCanvas(const gfx::Rect& damage) OVERRIDE;
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() OVERRIDE;
+  skia::RefPtr<SkSurface> GetSurface() override;
+  void ResizeCanvas(const gfx::Size& viewport_size) override;
+  void PresentCanvas(const gfx::Rect& damage) override;
+  scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
 
  private:
   void UpdateNativeSurface(const gfx::Rect& damage);
 
   DriWindowDelegate* window_delegate_;
-
-  // Stores the connection to the graphics card. Pointer not owned by this
-  // class.
-  DriWrapper* dri_;
 
   // The actual buffers used for painting.
   scoped_refptr<DriBuffer> buffers_[2];

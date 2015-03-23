@@ -21,7 +21,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer_tree_owner.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_util.h"
@@ -36,9 +36,9 @@ const int kRootHeight = 600;
 class DragWindowResizerTest : public test::AshTestBase {
  public:
   DragWindowResizerTest() {}
-  virtual ~DragWindowResizerTest() {}
+  ~DragWindowResizerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AshTestBase::SetUp();
     UpdateDisplay(base::StringPrintf("800x%d", kRootHeight));
 
@@ -87,7 +87,7 @@ class DragWindowResizerTest : public test::AshTestBase {
     ParentWindowInPrimaryRootWindow(panel_window_.get());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     window_.reset();
     always_on_top_window_.reset();
     system_modal_window_.reset();
@@ -127,7 +127,6 @@ class DragWindowResizerTest : public test::AshTestBase {
         Shell::GetInstance()->mouse_cursor_filter();
     bool is_warped = event_filter->WarpMouseCursorIfNecessaryForTest(
         target_root, point_in_screen);
-    event_filter->reset_was_mouse_warped_for_test();
     return is_warped;
   }
 
@@ -357,17 +356,18 @@ TEST_F(DragWindowResizerTest, DragWindowController) {
     ASSERT_TRUE(resizer.get());
     DragWindowResizer* drag_resizer = DragWindowResizer::instance_;
     ASSERT_TRUE(drag_resizer);
-    EXPECT_FALSE(drag_resizer->drag_window_controller_.get());
+    EXPECT_EQ(0u, drag_resizer->drag_window_controllers_.size());
 
     // The pointer is inside the primary root. The drag window controller
     // should be NULL.
     resizer->Drag(CalculateDragPoint(*resizer, 10, 10), 0);
-    EXPECT_FALSE(drag_resizer->drag_window_controller_.get());
+    EXPECT_EQ(0u, drag_resizer->drag_window_controllers_.size());
 
     // The window spans both root windows.
     resizer->Drag(CalculateDragPoint(*resizer, 798, 10), 0);
+    EXPECT_EQ(1u, drag_resizer->drag_window_controllers_.size());
     DragWindowController* controller =
-        drag_resizer->drag_window_controller_.get();
+        drag_resizer->drag_window_controllers_[0];
     ASSERT_TRUE(controller);
 
     ASSERT_TRUE(controller->drag_widget_);
@@ -387,7 +387,8 @@ TEST_F(DragWindowResizerTest, DragWindowController) {
 
     // Enter the pointer to the secondary display.
     resizer->Drag(CalculateDragPoint(*resizer, 800, 10), 0);
-    controller = drag_resizer->drag_window_controller_.get();
+    EXPECT_EQ(1u, drag_resizer->drag_window_controllers_.size());
+    controller = drag_resizer->drag_window_controllers_[0];
     ASSERT_TRUE(controller);
     // |window_| should be transparent, and the drag window should be opaque.
     EXPECT_GT(1.0f, window_->layer()->opacity());
@@ -409,7 +410,7 @@ TEST_F(DragWindowResizerTest, DragWindowController) {
     ASSERT_TRUE(resizer.get());
     DragWindowResizer* drag_resizer = DragWindowResizer::instance_;
     ASSERT_TRUE(drag_resizer);
-    EXPECT_FALSE(drag_resizer->drag_window_controller_.get());
+    EXPECT_EQ(0u, drag_resizer->drag_window_controllers_.size());
 
     resizer->Drag(CalculateDragPoint(*resizer, 0, 610), 0);
     resizer->RevertDrag();

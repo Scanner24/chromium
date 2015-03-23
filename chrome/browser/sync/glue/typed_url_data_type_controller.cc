@@ -9,7 +9,6 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/pref_names.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 
@@ -38,8 +38,8 @@ class RunTaskOnHistoryThread : public history::HistoryDBTask {
         dtc_(dtc) {
   }
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     // Set the backend, then release our reference before executing the task.
     dtc_->SetBackend(backend);
     dtc_ = NULL;
@@ -53,10 +53,10 @@ class RunTaskOnHistoryThread : public history::HistoryDBTask {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {}
+  void DoneRunOnMainThread() override {}
 
  protected:
-  virtual ~RunTaskOnHistoryThread() {}
+  ~RunTaskOnHistoryThread() override {}
 
   scoped_ptr<base::Closure> task_;
   scoped_refptr<TypedUrlDataTypeController> dtc_;
@@ -126,7 +126,7 @@ bool TypedUrlDataTypeController::PostTaskOnBackendThread(
     const base::Closure& task) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile(), Profile::IMPLICIT_ACCESS);
+      profile(), ServiceAccessType::IMPLICIT_ACCESS);
   if (history) {
     history->ScheduleDBTask(
         scoped_ptr<history::HistoryDBTask>(

@@ -21,6 +21,9 @@
         'SNAPSHOT_IMPLEMENTATION',
       ],
       'sources': [
+        'screenshot_grabber.cc',
+        'screenshot_grabber.h',
+        'screenshot_grabber_observer.h',
         'snapshot.h',
         'snapshot_android.cc',
         'snapshot_async.cc',
@@ -29,8 +32,6 @@
         'snapshot_export.h',
         'snapshot_ios.mm',
         'snapshot_mac.mm',
-        'snapshot_win.cc',
-        'snapshot_win.h',
       ],
       'include_dirs': [
         '..',
@@ -92,25 +93,5 @@
         }],
       ],
     },
-  ],
-  'conditions': [
-    ['OS=="win"', {
-      'targets': [
-        {
-          'target_name': 'snapshot_test_support',
-          'type': 'static_library',
-          'sources': [
-            'test/snapshot_desktop.h',
-            'test/snapshot_desktop_win.cc',
-          ],
-          'dependencies': [
-            'snapshot',
-          ],
-          'include_dirs': [
-            '../..',
-          ],
-        },
-      ],
-    }],
   ],
 }

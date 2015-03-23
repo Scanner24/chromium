@@ -45,21 +45,12 @@ const char kCroshBuiltinAppId[] = "nkoccljplnhpfnfiajclkommnmllphnl";
 const char kHotwordAudioVerificationAppId[] =
     "abjokfonkihficiokmkfboogholifghn";
 const char kHotwordExtensionId[] = "bepbmhgboaologfdajaanbcjmnhjmhfn";
+const char kHotwordNewExtensionId[] = "nbpagnldghgfoolbancepceaanlmhfmd";
 const char kHotwordSharedModuleId[] = "lccekmodgklaepjeofjdjpbminllajkg";
-const char kPdfExtensionId[] = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
-const char kQuickOfficeComponentExtensionId[] =
-    "bpmcpldpdmajfigpchkicefoigmkfalc";
-const char kQuickOfficeInternalExtensionId[] =
-    "ehibbfinohgbchlgdbfpikodjaojhccn";
-const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
 const char kSettingsAppId[] = "ennkphjdgehloodpbhlhldgbnhmacadg";
-const char kStreamsPrivateTestExtensionId[] =
-    "oickdpebdnfbgkcaoklfcdhjniefkcji";
 const char kYoutubeAppId[] = "blpcfgokakmgnkcojhhkbfbldkacnbeo";
 const char kInAppPaymentsSupportAppId[] = "nmmhkkegccagdldgiimedpiccmgmieda";
 
-const char kAppLaunchHistogram[] = "Extensions.AppLaunch";
-const char kPlatformAppLaunchHistogram[] = "Apps.AppLaunch";
 #if defined(OS_CHROMEOS)
 // The extension id for the built-in component extension.
 const char kChromeVoxExtensionId[] =
@@ -67,8 +58,6 @@ const char kChromeVoxExtensionId[] =
 const char kChromeVoxExtensionPath[] = "chromeos/chromevox";
 const char kChromeVoxManifestFilename[] = "manifest.json";
 const char kChromeVoxGuestManifestFilename[] = "manifest_guest.json";
-const char kChromeVoxNextManifestFilename[] = "manifest_next.json";
-const char kChromeVoxNextGuestManifestFilename[] = "manifest_next_guest.json";
 const char kBrailleImeExtensionId[] =
     "jddehjeebkoimngcbdkaahpobgicbffp";
 const char kBrailleImeExtensionPath[] =
@@ -87,6 +76,7 @@ const char kSpeechSynthesisExtensionId[] =
     "gjjabgpgjpampikjhjpfhneeoapjbjaf";
 const char kWallpaperManagerId[] = "obklkkbkpaoaejdabbfldmcfplpdgolj";
 const char kFirstRunDialogId[] = "jdgcneonijmofocbhmijhacgchbihela";
+const char kZIPUnpackerExtensionId[] = "oedeeodfidgoollimchfdnbmhcpnklnd";
 #else
 // The extension id for the web store extension.
 const char kChromeVoxExtensionId[] =

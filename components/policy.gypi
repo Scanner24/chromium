@@ -12,6 +12,7 @@
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'policy_out_dir': '<(SHARED_INTERMEDIATE_DIR)/policy',
     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
+    'android_resources_out_dir': '<(policy_out_dir)/android_resources',
     'generate_policy_source_script_path':
         'policy/tools/generate_policy_source.py',
     'policy_constant_header_path':
@@ -20,6 +21,10 @@
         '<(policy_out_dir)/policy/policy_constants.cc',
     'protobuf_decoder_path':
         '<(policy_out_dir)/policy/cloud_policy_generated.cc',
+    'app_restrictions_path':
+        '<(android_resources_out_dir)/xml-v21/app_restrictions.xml',
+    'app_resources_path':
+        '<(android_resources_out_dir)/values-v21/restriction_values.xml',
     # This is the "full" protobuf, which defines one protobuf message per
     # policy. It is also the format currently used by the server.
     'chrome_settings_proto_path':
@@ -62,7 +67,7 @@
           ],
         },
       ],
-    }, {  # component=="static_library"
+    }, {  # component=="shared_library"
       'targets': [
         {
           # GN version: //components/policy:policy_component
@@ -109,6 +114,8 @@
                 '<(protobuf_decoder_path)',
                 '<(chrome_settings_proto_path)',
                 '<(cloud_policy_proto_path)',
+                '<(app_restrictions_path)',
+                '<(app_resources_path)',
               ],
               'action_name': 'generate_policy_source',
               'action': [
@@ -119,11 +126,21 @@
                 '--chrome-settings-protobuf=<(chrome_settings_proto_path)',
                 '--cloud-policy-protobuf=<(cloud_policy_proto_path)',
                 '--cloud-policy-decoder=<(protobuf_decoder_path)',
+                '--app-restrictions-definition=<(app_restrictions_path)',
+                '--app-restrictions-resources=<(app_resources_path)',
                 '<(OS)',
                 '<(chromeos)',
                 'policy/resources/policy_templates.json',
               ],
               'message': 'Generating policy source',
+              'conditions': [
+                ['OS!="android"', {
+                  'outputs!': [
+                    '<(app_restrictions_path)',
+                    '<(app_resources_path)',
+                  ],
+                }],
+              ],
             },
           ],
           'direct_dependent_settings': {
@@ -294,6 +311,8 @@
             'policy/core/common/cloud/policy_builder.h',
             'policy/core/common/configuration_policy_provider_test.cc',
             'policy/core/common/configuration_policy_provider_test.h',
+            'policy/core/common/fake_async_policy_loader.cc',
+            'policy/core/common/fake_async_policy_loader.h',
             'policy/core/common/mock_configuration_policy_provider.cc',
             'policy/core/common/mock_configuration_policy_provider.h',
             'policy/core/common/mock_policy_service.cc',
@@ -302,8 +321,16 @@
             'policy/core/common/policy_test_utils.h',
             'policy/core/common/preferences_mock_mac.cc',
             'policy/core/common/preferences_mock_mac.h',
+            'policy/core/common/remote_commands/test_remote_command_job.cc',
+            'policy/core/common/remote_commands/test_remote_command_job.h',
           ],
           'conditions': [
+            ['OS=="android"', {
+              'sources!': [
+                'policy/core/common/fake_async_policy_loader.cc',
+                'policy/core/common/fake_async_policy_loader.h',
+              ],
+            }],
             ['chromeos==1', {
               'sources!': [
                 'policy/core/common/cloud/mock_user_cloud_policy_store.cc',

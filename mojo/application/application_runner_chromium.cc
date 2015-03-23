@@ -6,6 +6,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/debug/stack_trace.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "mojo/common/message_pump_mojo.h"
@@ -36,13 +37,16 @@ void ApplicationRunnerChromium::set_message_loop_type(
   message_loop_type_ = type;
 }
 
-MojoResult ApplicationRunnerChromium::Run(MojoHandle shell_handle) {
+MojoResult ApplicationRunnerChromium::Run(
+    MojoHandle application_request_handle) {
   DCHECK(!has_run_);
   has_run_ = true;
 
   base::CommandLine::Init(0, NULL);
-#if !defined(COMPONENT_BUILD)
   base::AtExitManager at_exit;
+
+#ifndef NDEBUG
+  base::debug::EnableInProcessStackDumping();
 #endif
 
   {
@@ -53,7 +57,8 @@ MojoResult ApplicationRunnerChromium::Run(MojoHandle shell_handle) {
       loop.reset(new base::MessageLoop(message_loop_type_));
 
     ApplicationImpl impl(delegate_.get(),
-                         MakeScopedHandle(MessagePipeHandle(shell_handle)));
+                         MakeRequest<Application>(MakeScopedHandle(
+                             MessagePipeHandle(application_request_handle))));
     loop->Run();
   }
   delegate_.reset();

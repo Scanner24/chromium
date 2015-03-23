@@ -34,25 +34,6 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   virtual bool Initialize(
       GLSurface* compatible_surface, GpuPreference gpu_preference) = 0;
 
-  class FlushEvent : public base::RefCountedThreadSafe<FlushEvent> {
-    public:
-      bool IsSignaled();
-
-    private:
-      friend class base::RefCountedThreadSafe<FlushEvent>;
-      friend class GLContext;
-      FlushEvent();
-      virtual ~FlushEvent();
-      void Signal();
-
-      base::CancellationFlag flag_;
-  };
-
-  // Needs to be called with this context current. It will return a FlushEvent
-  // that is initially unsignaled, but will transition to signaled after the
-  // next glFlush() or glFinish() occurs in this context.
-  scoped_refptr<FlushEvent> SignalFlush();
-
   // Destroys the GL context.
   virtual void Destroy() = 0;
 
@@ -76,7 +57,11 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   void SetGLStateRestorer(GLStateRestorer* state_restorer);
 
   // Set swap interval. This context must be current.
-  virtual void SetSwapInterval(int interval) = 0;
+  void SetSwapInterval(int interval);
+
+  // Forces the swap interval to zero (no vsync) regardless of any future values
+  // passed to SetSwapInterval.
+  void ForceSwapIntervalZero(bool force);
 
   // Returns space separated list of extensions. The context must be current.
   virtual std::string GetExtensions();
@@ -89,6 +74,10 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Indicate that it is safe to force this context to switch GPUs, since
   // transitioning can cause corruption and hangs (OS X only).
   virtual void SetSafeToForceGpuSwitch();
+
+  // Attempt to force the context to move to the GPU of its sharegroup. Return
+  // false only in the event of an unexpected error on the context.
+  virtual bool ForceGpuSwitchIfNeeded();
 
   // Indicate that the real context switches should unbind the FBO first
   // (For an Android work-around only).
@@ -135,9 +124,6 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Returns the GL renderer string. The context must be current.
   virtual std::string GetGLRenderer();
 
-  // Called when glFlush()/glFinish() is called with this context current.
-  void OnFlush();
-
  protected:
   virtual ~GLContext();
 
@@ -165,6 +151,8 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Returns the last real (non-virtual) GLContext made current.
   static GLContext* GetRealCurrent();
 
+  virtual void OnSetSwapInterval(int interval) = 0;
+
  private:
   friend class base::RefCounted<GLContext>;
 
@@ -176,7 +164,8 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   scoped_ptr<GLStateRestorer> state_restorer_;
   scoped_ptr<GLVersionInfo> version_info_;
 
-  std::vector<scoped_refptr<FlushEvent> > flush_events_;
+  int swap_interval_;
+  bool force_swap_interval_zero_;
 
   DISALLOW_COPY_AND_ASSIGN(GLContext);
 };
@@ -186,9 +175,9 @@ class GL_EXPORT GLContextReal : public GLContext {
   explicit GLContextReal(GLShareGroup* share_group);
 
  protected:
-  virtual ~GLContextReal();
+  ~GLContextReal() override;
 
-  virtual void SetCurrent(GLSurface* surface) OVERRIDE;
+  void SetCurrent(GLSurface* surface) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GLContextReal);

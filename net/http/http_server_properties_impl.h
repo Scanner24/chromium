@@ -5,7 +5,9 @@
 #ifndef NET_HTTP_HTTP_SERVER_PROPERTIES_IMPL_H_
 #define NET_HTTP_HTTP_SERVER_PROPERTIES_IMPL_H_
 
+#include <deque>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -30,7 +32,7 @@ class NET_EXPORT HttpServerPropertiesImpl
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   HttpServerPropertiesImpl();
-  virtual ~HttpServerPropertiesImpl();
+  ~HttpServerPropertiesImpl() override;
 
   // Initializes |spdy_servers_map_| with the servers (host/port) from
   // |spdy_servers| that either support SPDY or not.
@@ -42,7 +44,10 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   void InitializeSpdySettingsServers(SpdySettingsMap* spdy_settings_map);
 
-  void InitializeSupportsQuic(SupportsQuicMap* supports_quic_map);
+  void InitializeSupportsQuic(IPAddressNumber* last_address);
+
+  void InitializeServerNetworkStats(
+      ServerNetworkStatsMap* server_network_stats_map);
 
   // Get the list of servers (host/port) that support SPDY. The max_size is the
   // number of MRU servers that support SPDY that are to be returned.
@@ -51,8 +56,7 @@ class NET_EXPORT HttpServerPropertiesImpl
 
   // Returns flattened string representation of the |host_port_pair|. Used by
   // unittests.
-  static std::string GetFlattenedSpdyServer(
-      const net::HostPortPair& host_port_pair);
+  static std::string GetFlattenedSpdyServer(const HostPortPair& host_port_pair);
 
   // Debugging to simulate presence of an AlternateProtocol.
   // If we don't have an alternate protocol in the map for any given host/port
@@ -60,122 +64,104 @@ class NET_EXPORT HttpServerPropertiesImpl
   static void ForceAlternateProtocol(const AlternateProtocolInfo& pair);
   static void DisableForcedAlternateProtocol();
 
-  // Returns the canonical host suffix for |server|, or std::string() if none
+  // Returns the canonical host suffix for |host|, or std::string() if none
   // exists.
-  std::string GetCanonicalSuffix(const net::HostPortPair& server);
+  std::string GetCanonicalSuffix(const std::string& host);
 
   // -----------------------------
   // HttpServerProperties methods:
   // -----------------------------
 
-  // Gets a weak pointer for this object.
-  virtual base::WeakPtr<HttpServerProperties> GetWeakPtr() OVERRIDE;
-
-  // Deletes all data.
-  virtual void Clear() OVERRIDE;
-
-  // Returns true if |server| supports SPDY.
-  virtual bool SupportsSpdy(const HostPortPair& server) OVERRIDE;
-
-  // Add |server| into the persistent store.
-  virtual void SetSupportsSpdy(const HostPortPair& server,
-                               bool support_spdy) OVERRIDE;
-
-  // Returns true if |server| has an Alternate-Protocol header.
-  virtual bool HasAlternateProtocol(const HostPortPair& server) OVERRIDE;
-
-  // Returns the Alternate-Protocol and port for |server|.
-  // HasAlternateProtocol(server) must be true.
-  virtual AlternateProtocolInfo GetAlternateProtocol(
-      const HostPortPair& server) OVERRIDE;
-
-  // Sets the Alternate-Protocol for |server|.
-  virtual void SetAlternateProtocol(
-      const HostPortPair& server,
-      uint16 alternate_port,
-      AlternateProtocol alternate_protocol,
-      double probability) OVERRIDE;
-
-  // Sets the Alternate-Protocol for |server| to be BROKEN.
-  virtual void SetBrokenAlternateProtocol(const HostPortPair& server) OVERRIDE;
-
-  // Returns true if Alternate-Protocol for |server| was recently BROKEN.
-  virtual bool WasAlternateProtocolRecentlyBroken(
-      const HostPortPair& server) OVERRIDE;
-
-  // Confirms that Alternate-Protocol for |server| is working.
-  virtual void ConfirmAlternateProtocol(const HostPortPair& server) OVERRIDE;
-
-  // Clears the Alternate-Protocol for |server|.
-  virtual void ClearAlternateProtocol(const HostPortPair& server) OVERRIDE;
-
-  // Returns all Alternate-Protocol mappings.
-  virtual const AlternateProtocolMap& alternate_protocol_map() const OVERRIDE;
-
-  virtual void SetAlternateProtocolExperiment(
-      AlternateProtocolExperiment experiment) OVERRIDE;
-
-  virtual void SetAlternateProtocolProbabilityThreshold(
-      double threshold) OVERRIDE;
-
-  virtual AlternateProtocolExperiment GetAlternateProtocolExperiment()
-      const OVERRIDE;
-
-  // Gets a reference to the SettingsMap stored for a host.
-  // If no settings are stored, returns an empty SettingsMap.
-  virtual const SettingsMap& GetSpdySettings(
-      const HostPortPair& host_port_pair) OVERRIDE;
-
-  // Saves an individual SPDY setting for a host. Returns true if SPDY setting
-  // is to be persisted.
-  virtual bool SetSpdySetting(const HostPortPair& host_port_pair,
-                              SpdySettingsIds id,
-                              SpdySettingsFlags flags,
-                              uint32 value) OVERRIDE;
-
-  // Clears all entries in |spdy_settings_map_| for a host.
-  virtual void ClearSpdySettings(const HostPortPair& host_port_pair) OVERRIDE;
-
-  // Clears all entries in |spdy_settings_map_|.
-  virtual void ClearAllSpdySettings() OVERRIDE;
-
-  // Returns all persistent SPDY settings.
-  virtual const SpdySettingsMap& spdy_settings_map() const OVERRIDE;
-
-  // Methods for SupportsQuic.
-  virtual SupportsQuic GetSupportsQuic(
-      const HostPortPair& host_port_pair) const OVERRIDE;
-
-  virtual void SetSupportsQuic(const HostPortPair& host_port_pair,
-                               bool used_quic,
-                               const std::string& address) OVERRIDE;
-
-  virtual const SupportsQuicMap& supports_quic_map() const OVERRIDE;
-
-  // Methods for NetworkStats.
-  virtual void SetServerNetworkStats(const HostPortPair& host_port_pair,
-                                     NetworkStats stats) OVERRIDE;
-
-  virtual const NetworkStats* GetServerNetworkStats(
-      const HostPortPair& host_port_pair) const OVERRIDE;
+  base::WeakPtr<HttpServerProperties> GetWeakPtr() override;
+  void Clear() override;
+  bool SupportsRequestPriority(const HostPortPair& server) override;
+  void SetSupportsSpdy(const HostPortPair& server, bool support_spdy) override;
+  bool RequiresHTTP11(const HostPortPair& server) override;
+  void SetHTTP11Required(const HostPortPair& server) override;
+  void MaybeForceHTTP11(const HostPortPair& server,
+                        SSLConfig* ssl_config) override;
+  AlternateProtocolInfo GetAlternateProtocol(
+      const HostPortPair& server) override;
+  void SetAlternateProtocol(const HostPortPair& server,
+                            uint16 alternate_port,
+                            AlternateProtocol alternate_protocol,
+                            double probability) override;
+  void SetBrokenAlternateProtocol(const HostPortPair& server) override;
+  bool WasAlternateProtocolRecentlyBroken(const HostPortPair& server) override;
+  void ConfirmAlternateProtocol(const HostPortPair& server) override;
+  void ClearAlternateProtocol(const HostPortPair& server) override;
+  const AlternateProtocolMap& alternate_protocol_map() const override;
+  void SetAlternateProtocolProbabilityThreshold(double threshold) override;
+  const SettingsMap& GetSpdySettings(
+      const HostPortPair& host_port_pair) override;
+  bool SetSpdySetting(const HostPortPair& host_port_pair,
+                      SpdySettingsIds id,
+                      SpdySettingsFlags flags,
+                      uint32 value) override;
+  void ClearSpdySettings(const HostPortPair& host_port_pair) override;
+  void ClearAllSpdySettings() override;
+  const SpdySettingsMap& spdy_settings_map() const override;
+  bool GetSupportsQuic(IPAddressNumber* last_address) const override;
+  void SetSupportsQuic(bool used_quic, const IPAddressNumber& address) override;
+  void SetServerNetworkStats(const HostPortPair& host_port_pair,
+                             ServerNetworkStats stats) override;
+  const ServerNetworkStats* GetServerNetworkStats(
+      const HostPortPair& host_port_pair) override;
+  const ServerNetworkStatsMap& server_network_stats_map() const override;
 
  private:
   // |spdy_servers_map_| has flattened representation of servers (host, port)
   // that either support or not support SPDY protocol.
   typedef base::MRUCache<std::string, bool> SpdyServerHostPortMap;
-  typedef std::map<HostPortPair, NetworkStats> ServerNetworkStatsMap;
   typedef std::map<HostPortPair, HostPortPair> CanonicalHostMap;
   typedef std::vector<std::string> CanonicalSufficList;
-  // List of broken host:ports and the times when they can be expired.
+  typedef std::set<HostPortPair> Http11ServerHostPortSet;
+
+  // Server, port, and AlternateProtocol: an entity that can be broken.  (Once
+  // we use AlternativeService, the same AltSvc can be broken for one server but
+  // not for another depending on what certificate it can offer.)
   struct BrokenAlternateProtocolEntry {
+    BrokenAlternateProtocolEntry(const BrokenAlternateProtocolEntry&) = default;
+    BrokenAlternateProtocolEntry(const HostPortPair& server,
+                                 uint16 port,
+                                 AlternateProtocol protocol)
+        : server(server), port(port), protocol(protocol) {}
+
+    bool operator<(const BrokenAlternateProtocolEntry& other) const {
+      if (!server.Equals(other.server))
+        return server < other.server;
+      if (port != other.port)
+        return port < other.port;
+      return protocol < other.protocol;
+    }
+
     HostPortPair server;
+    uint16 port;
+    AlternateProtocol protocol;
+  };
+  // BrokenAlternateProtocolEntry with expiration time.
+  struct BrokenAlternateProtocolEntryWithTime {
+    BrokenAlternateProtocolEntryWithTime(
+        const BrokenAlternateProtocolEntry& broken_alternate_protocol_entry,
+        base::TimeTicks when)
+        : broken_alternate_protocol_entry(broken_alternate_protocol_entry),
+          when(when) {}
+
+    BrokenAlternateProtocolEntry broken_alternate_protocol_entry;
     base::TimeTicks when;
   };
-  typedef std::list<BrokenAlternateProtocolEntry>
+  // Deque of BrokenAlternateProtocolEntryWithTime items, ordered by expiration
+  // time.
+  typedef std::deque<BrokenAlternateProtocolEntryWithTime>
       BrokenAlternateProtocolList;
-  // Map from host:port to the number of times alternate protocol has
-  // been marked broken.
-  typedef std::map<HostPortPair, int> BrokenAlternateProtocolMap;
+  // Map from (server, alternate protocol and port) to the number of
+  // times that alternate protocol has been marked broken for that server.
+  typedef std::map<BrokenAlternateProtocolEntry, int>
+      BrokenAlternateProtocolMap;
+
+  // Return the iterator for |server|, or for its canonical host, or end.
+  AlternateProtocolMap::const_iterator GetAlternateProtocolIterator(
+      const HostPortPair& server);
 
   // Return the canonical host for |server|, or end if none exists.
   CanonicalHostMap::const_iterator GetCanonicalHost(HostPortPair server) const;
@@ -185,22 +171,22 @@ class NET_EXPORT HttpServerPropertiesImpl
   void ScheduleBrokenAlternateProtocolMappingsExpiration();
 
   SpdyServerHostPortMap spdy_servers_map_;
+  Http11ServerHostPortSet http11_servers_;
 
   AlternateProtocolMap alternate_protocol_map_;
   BrokenAlternateProtocolList broken_alternate_protocol_list_;
   BrokenAlternateProtocolMap broken_alternate_protocol_map_;
-  AlternateProtocolExperiment alternate_protocol_experiment_;
 
+  IPAddressNumber last_quic_address_;
   SpdySettingsMap spdy_settings_map_;
-  SupportsQuicMap supports_quic_map_;
   ServerNetworkStatsMap server_network_stats_map_;
   // Contains a map of servers which could share the same alternate protocol.
   // Map from a Canonical host/port (host is some postfix of host names) to an
   // actual origin, which has a plausible alternate protocol mapping.
   CanonicalHostMap canonical_host_to_origin_map_;
   // Contains list of suffixes (for exmaple ".c.youtube.com",
-  // ".googlevideo.com", ".googleusercontent.com") of canoncial hostnames.
-  CanonicalSufficList canoncial_suffixes_;
+  // ".googlevideo.com", ".googleusercontent.com") of canonical hostnames.
+  CanonicalSufficList canonical_suffixes_;
 
   double alternate_protocol_probability_threshold_;
 

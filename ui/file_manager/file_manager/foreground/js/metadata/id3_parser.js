@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Protocol + host parts of extension URL.
  * @type {string}
@@ -16,11 +14,19 @@ importScripts(
 importScripts(
     FILE_MANAGER_HOST + '/foreground/js/metadata/function_parallel.js');
 
+/**
+ * ID3 parser.
+ *
+ * @param {MetadataDispatcher} parent A metadata dispatcher.
+ * @constructor
+ * @struct
+ * @extends {MetadataParser}
+ */
 function Id3Parser(parent) {
   MetadataParser.call(this, parent, 'id3', /\.(mp3)$/i);
 }
 
-Id3Parser.prototype = {__proto__: MetadataParser.prototype};
+Id3Parser.prototype.__proto__ = MetadataParser.prototype;
 
 /**
  * Reads synchsafe integer.
@@ -252,7 +258,7 @@ Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
  * @param {File} file File object to parse.
  * @param {Object} metadata Metadata object of the file.
  * @param {function(Object)} callback Success callback.
- * @param {function(etring)} onError Error callback.
+ * @param {function(string)} onError Error callback.
  */
 Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
   var self = this;
@@ -269,8 +275,8 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
          * @param {File} file File which bytes to read.
          */
         function readTail(file) {
-          util.readFileBytes(file, file.size - 128, file.size,
-              this.nextStep, this.onError, this);
+          MetadataParser.readFileBytes(file, file.size - 128, file.size,
+              this.nextStep, this.onError);
         },
 
         /**
@@ -307,14 +313,16 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
           this.nextStep();
         }
       ],
-      this);
+      this,
+      function() {},
+      function(error) {});
 
   var id3v2Parser = new FunctionSequence(
       'id3v2parser',
       [
         function readHead(file) {
-          util.readFileBytes(file, 0, 10, this.nextStep, this.onError,
-              this);
+          MetadataParser.readFileBytes(file, 0, 10, this.nextStep,
+              this.onError);
         },
 
         /**
@@ -332,8 +340,8 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
             id3v2.flags = reader.readScalar(1, false);
             id3v2.size = Id3Parser.readSynchSafe_(reader, 4);
 
-            util.readFileBytes(file, 10, 10 + id3v2.size, this.nextStep,
-                this.onError, this);
+            MetadataParser.readFileBytes(file, 10, 10 + id3v2.size,
+                this.nextStep, this.onError);
           } else {
             this.finish();
           }
@@ -393,6 +401,10 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
             }
           }
 
+          /**
+           * @param {string} propName
+           * @param {...string} tags
+           */
           function extract(propName, tags) {
             for (var i = 1; i != arguments.length; i++) {
               var tag = id3v2[arguments[i]];
@@ -414,7 +426,9 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
           this.nextStep();
         }
       ],
-      this);
+      this,
+      function() {},
+      function(error) {});
 
   var metadataParser = new FunctionParallel(
       'mp3metadataParser',

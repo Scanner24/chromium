@@ -12,12 +12,13 @@
 #include "base/lazy_instance.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/stats_counters.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "net/base/auth.h"
+#include "net/base/chunked_upload_data_stream.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
@@ -140,31 +141,6 @@ void ConvertRealLoadTimesToBlockingTimes(
 
 }  // namespace
 
-void URLRequest::Deprecated::RegisterRequestInterceptor(
-    Interceptor* interceptor) {
-  URLRequest::RegisterRequestInterceptor(interceptor);
-}
-
-void URLRequest::Deprecated::UnregisterRequestInterceptor(
-    Interceptor* interceptor) {
-  URLRequest::UnregisterRequestInterceptor(interceptor);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// URLRequest::Interceptor
-
-URLRequestJob* URLRequest::Interceptor::MaybeInterceptRedirect(
-    URLRequest* request,
-    NetworkDelegate* network_delegate,
-    const GURL& location) {
-  return NULL;
-}
-
-URLRequestJob* URLRequest::Interceptor::MaybeInterceptResponse(
-    URLRequest* request, NetworkDelegate* network_delegate) {
-  return NULL;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // URLRequest::Delegate
 
@@ -223,8 +199,8 @@ URLRequest::~URLRequest() {
 void URLRequest::EnableChunkedUpload() {
   DCHECK(!upload_data_stream_ || upload_data_stream_->is_chunked());
   if (!upload_data_stream_) {
-    upload_data_stream_.reset(
-        new UploadDataStream(UploadDataStream::CHUNKED, 0));
+    upload_chunked_data_stream_ = new ChunkedUploadDataStream(0);
+    upload_data_stream_.reset(upload_chunked_data_stream_);
   }
 }
 
@@ -233,8 +209,7 @@ void URLRequest::AppendChunkToUpload(const char* bytes,
                                      bool is_last_chunk) {
   DCHECK(upload_data_stream_);
   DCHECK(upload_data_stream_->is_chunked());
-  DCHECK_GT(bytes_len, 0);
-  upload_data_stream_->AppendChunk(bytes, bytes_len, is_last_chunk);
+  upload_chunked_data_stream_->AppendData(bytes, bytes_len, is_last_chunk);
 }
 
 void URLRequest::set_upload(scoped_ptr<UploadDataStream> upload) {
@@ -248,12 +223,6 @@ const UploadDataStream* URLRequest::get_upload() const {
 
 bool URLRequest::has_upload() const {
   return upload_data_stream_.get() != NULL;
-}
-
-void URLRequest::SetExtraRequestHeaderById(int id, const string& value,
-                                           bool overwrite) {
-  DCHECK(!is_pending_ || is_redirecting_);
-  NOTREACHED() << "implement me!";
 }
 
 void URLRequest::SetExtraRequestHeaderByName(const string& name,
@@ -296,6 +265,10 @@ int64 URLRequest::GetTotalReceivedBytes() const {
 }
 
 LoadStateWithParam URLRequest::GetLoadState() const {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455952 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("455952 URLRequest::GetLoadState"));
   // The !blocked_by_.empty() check allows |this| to report it's blocked on a
   // delegate before it has been started.
   if (calling_delegate_ || !blocked_by_.empty()) {
@@ -401,26 +374,12 @@ UploadProgress URLRequest::GetUploadProgress() const {
   return job_->GetUploadProgress();
 }
 
-void URLRequest::GetResponseHeaderById(int id, string* value) {
-  DCHECK(job_.get());
-  NOTREACHED() << "implement me!";
-}
-
 void URLRequest::GetResponseHeaderByName(const string& name, string* value) {
   DCHECK(value);
   if (response_info_.headers.get()) {
     response_info_.headers->GetNormalizedHeader(name, value);
   } else {
     value->clear();
-  }
-}
-
-void URLRequest::GetAllResponseHeaders(string* headers) {
-  DCHECK(headers);
-  if (response_info_.headers.get()) {
-    response_info_.headers->GetNormalizedHeaders(headers);
-  } else {
-    headers->clear();
   }
 }
 
@@ -509,26 +468,6 @@ void URLRequest::set_method(const std::string& method) {
   method_ = method;
 }
 
-// static
-std::string URLRequest::ComputeMethodForRedirect(
-    const std::string& method,
-    int http_status_code) {
-  // For 303 redirects, all request methods except HEAD are converted to GET,
-  // as per the latest httpbis draft.  The draft also allows POST requests to
-  // be converted to GETs when following 301/302 redirects, for historical
-  // reasons. Most major browsers do this and so shall we.  Both RFC 2616 and
-  // the httpbis draft say to prompt the user to confirm the generation of new
-  // requests, other than GET and HEAD requests, but IE omits these prompts and
-  // so shall we.
-  // See:  https://tools.ietf.org/html/draft-ietf-httpbis-p2-semantics-17#section-7.3
-  if ((http_status_code == 303 && method != "HEAD") ||
-      ((http_status_code == 301 || http_status_code == 302) &&
-       method == "POST")) {
-    return "GET";
-  }
-  return method;
-}
-
 void URLRequest::SetReferrer(const std::string& referrer) {
   DCHECK(!is_pending_);
   GURL referrer_url(referrer);
@@ -612,25 +551,12 @@ URLRequest::URLRequest(const GURL& url,
       creation_time_(base::TimeTicks::Now()),
       notified_before_network_start_(false),
       cookie_store_(cookie_store ? cookie_store : context->cookie_store()) {
-  SIMPLE_STATS_COUNTER("URLRequestCount");
-
   // Sanity check out environment.
   DCHECK(base::MessageLoop::current())
       << "The current base::MessageLoop must exist";
 
   context->url_requests()->insert(this);
   net_log_.BeginEvent(NetLog::TYPE_REQUEST_ALIVE);
-}
-
-// static
-void URLRequest::RegisterRequestInterceptor(Interceptor* interceptor) {
-  URLRequestJobManager::GetInstance()->RegisterRequestInterceptor(interceptor);
-}
-
-// static
-void URLRequest::UnregisterRequestInterceptor(Interceptor* interceptor) {
-  URLRequestJobManager::GetInstance()->UnregisterRequestInterceptor(
-      interceptor);
 }
 
 void URLRequest::BeforeRequestComplete(int error) {
@@ -684,12 +610,8 @@ void URLRequest::StartJob(URLRequestJob* job) {
 
   response_info_.was_cached = false;
 
-  // If the referrer is secure, but the requested URL is not, the referrer
-  // policy should be something non-default. If you hit this, please file a
-  // bug.
-  if (referrer_policy_ ==
-          CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE &&
-      GURL(referrer_).SchemeIsSecure() && !url().SchemeIsSecure()) {
+  if (GURL(referrer_) != URLRequestJob::ComputeReferrerForRedirect(
+                             referrer_policy_, referrer_, url())) {
     if (!network_delegate_ ||
         !network_delegate_->CancelURLRequestWithPolicyViolatingReferrerHeader(
             *this, url(), GURL(referrer_))) {
@@ -806,9 +728,18 @@ bool URLRequest::Read(IOBuffer* dest, int dest_size, int* bytes_read) {
     return true;
   }
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequest::Read1"));
+
   bool rv = job_->Read(dest, dest_size, bytes_read);
   // If rv is false, the status cannot be success.
   DCHECK(rv || status_.status() != URLRequestStatus::SUCCESS);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequest::Read2"));
+
   if (rv && *bytes_read <= 0 && status_.is_success())
     NotifyRequestCompleted();
   return rv;
@@ -831,6 +762,11 @@ void URLRequest::NotifyReceivedRedirect(const RedirectInfo& redirect_info,
     RestartWithJob(job);
   } else if (delegate_) {
     OnCallToDelegate();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLRequest::Delegate::OnReceivedRedirect"));
     delegate_->OnReceivedRedirect(this, redirect_info, defer_redirect);
     // |this| may be have been destroyed here.
   }
@@ -839,7 +775,14 @@ void URLRequest::NotifyReceivedRedirect(const RedirectInfo& redirect_info,
 void URLRequest::NotifyBeforeNetworkStart(bool* defer) {
   if (delegate_ && !notified_before_network_start_) {
     OnCallToDelegate();
-    delegate_->OnBeforeNetworkStart(this, defer);
+    {
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "423948 URLRequest::Delegate::OnBeforeNetworkStart"));
+      delegate_->OnBeforeNetworkStart(this, defer);
+    }
     if (!*defer)
       OnCallToDelegateComplete();
     notified_before_network_start_ = true;
@@ -880,6 +823,11 @@ void URLRequest::NotifyResponseStarted() {
         NotifyRequestCompleted();
 
       OnCallToDelegate();
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "423948 URLRequest::Delegate::OnResponseStarted"));
       delegate_->OnResponseStarted(this);
       // Nothing may appear below this line as OnResponseStarted may delete
       // |this|.
@@ -1045,13 +993,14 @@ void URLRequest::SetPriority(RequestPriority priority) {
 
 bool URLRequest::GetHSTSRedirect(GURL* redirect_url) const {
   const GURL& url = this->url();
-  if (!url.SchemeIs("http"))
+  bool scheme_is_http = url.SchemeIs("http");
+  if (!scheme_is_http && !url.SchemeIs("ws"))
     return false;
   TransportSecurityState* state = context()->transport_security_state();
   if (state && state->ShouldUpgradeToSSL(url.host())) {
-    url::Replacements<char> replacements;
-    const char kNewScheme[] = "https";
-    replacements.SetScheme(kNewScheme, url::Component(0, strlen(kNewScheme)));
+    GURL::Replacements replacements;
+    const char* new_scheme = scheme_is_http ? "https" : "wss";
+    replacements.SetSchemeStr(new_scheme);
     *redirect_url = url.ReplaceComponents(replacements);
     return true;
   }
@@ -1096,8 +1045,14 @@ void URLRequest::NotifyAuthRequiredComplete(
     case NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION:
       // Defer to the URLRequest::Delegate, since the NetworkDelegate
       // didn't take an action.
-      if (delegate_)
+      if (delegate_) {
+        // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
+        // fixed.
+        tracked_objects::ScopedTracker tracking_profile(
+            FROM_HERE_WITH_EXPLICIT_FUNCTION(
+                "423948 URLRequest::Delegate::OnAuthRequired"));
         delegate_->OnAuthRequired(this, auth_info.get());
+      }
       break;
 
     case NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH:
@@ -1116,14 +1071,24 @@ void URLRequest::NotifyAuthRequiredComplete(
 
 void URLRequest::NotifyCertificateRequested(
     SSLCertRequestInfo* cert_request_info) {
-  if (delegate_)
+  if (delegate_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLRequest::Delegate::OnCertificateRequested"));
     delegate_->OnCertificateRequested(this, cert_request_info);
+  }
 }
 
 void URLRequest::NotifySSLCertificateError(const SSLInfo& ssl_info,
                                            bool fatal) {
-  if (delegate_)
+  if (delegate_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLRequest::Delegate::OnSSLCertificateError"));
     delegate_->OnSSLCertificateError(this, ssl_info, fatal);
+  }
 }
 
 bool URLRequest::CanGetCookies(const CookieList& cookie_list) const {
@@ -1164,8 +1129,13 @@ void URLRequest::NotifyReadCompleted(int bytes_read) {
   if (bytes_read > 0 && !was_cached())
     NetworkChangeNotifier::NotifyDataReceived(*this, bytes_read);
 
-  if (delegate_)
+  if (delegate_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLRequest::Delegate::OnReadCompleted"));
     delegate_->OnReadCompleted(this, bytes_read);
+  }
 
   // Nothing below this line as OnReadCompleted may delete |this|.
 }

@@ -28,6 +28,8 @@
          disable_depth_texture)                              \
   GPU_OP(DISABLE_EGL_KHR_FENCE_SYNC,                         \
          disable_egl_khr_fence_sync)                         \
+  GPU_OP(DISABLE_EGL_KHR_WAIT_SYNC,                          \
+         disable_egl_khr_wait_sync)                          \
   GPU_OP(DISABLE_EXT_DISCARD_FRAMEBUFFER,                    \
          disable_ext_discard_framebuffer)                    \
   GPU_OP(DISABLE_EXT_DRAW_BUFFERS,                           \
@@ -52,6 +54,12 @@
          force_gl_finish_after_compositing)                  \
   GPU_OP(FORCE_INTEGRATED_GPU,                               \
          force_integrated_gpu)                               \
+  GPU_OP(GL_BEGIN_GL_END_ON_FBO_CHANGE_TO_BACKBUFFER,        \
+         gl_begin_gl_end_on_fbo_change_to_backbuffer)        \
+  GPU_OP(GL_CLEAR_BROKEN,                                    \
+         gl_clear_broken)                                    \
+  GPU_OP(IGNORE_EGL_SYNC_FAILURES,                           \
+         ignore_egl_sync_failures)                           \
   GPU_OP(INIT_GL_POSITION_IN_VERTEX_SHADER,                  \
          init_gl_position_in_vertex_shader)                  \
   GPU_OP(INIT_TEXTURE_MAX_ANISOTROPY,                        \
@@ -80,8 +88,6 @@
          needs_offscreen_buffer_workaround)                  \
   GPU_OP(REGENERATE_STRUCT_NAMES,                            \
          regenerate_struct_names)                            \
-  GPU_OP(RELEASE_IMAGE_AFTER_USE,                            \
-         release_image_after_use)                            \
   GPU_OP(RESTORE_SCISSOR_ON_FBO_CHANGE,                      \
          restore_scissor_on_fbo_change)                      \
   GPU_OP(REVERSE_POINT_SPRITE_COORD_ORIGIN,                  \
@@ -94,6 +100,8 @@
          swizzle_rgba_for_async_readpixels)                  \
   GPU_OP(TEXSUBIMAGE2D_FASTER_THAN_TEXIMAGE2D,               \
          texsubimage2d_faster_than_teximage2d)               \
+  GPU_OP(UNBIND_ATTACHMENTS_ON_BOUND_RENDER_FBO_DELETE,      \
+         unbind_attachments_on_bound_render_fbo_delete)      \
   GPU_OP(UNBIND_FBO_ON_CONTEXT_SWITCH,                       \
          unbind_fbo_on_context_switch)                       \
   GPU_OP(UNFOLD_SHORT_CIRCUIT_AS_TERNARY_OPERATION,          \

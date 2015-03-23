@@ -13,8 +13,10 @@
           'dependencies': [
             '../base/base.gyp:base',
             '../content/content.gyp:content_browser',
+            '../net/net.gyp:net',
             '../skia/skia.gyp:skia',
             '../sync/sync.gyp:sync',
+            '../url/url.gyp:url_lib',
             'components_resources.gyp:components_resources',
             'components_strings.gyp:components_strings',
             'distilled_page_proto',
@@ -36,6 +38,7 @@
           'type': 'static_library',
           'dependencies': [
             '../base/base.gyp:base',
+            '../base/base.gyp:base_prefs',
             '../skia/skia.gyp:skia',
             '../sync/sync.gyp:sync',
             '../third_party/dom_distiller_js/dom_distiller_js.gyp:dom_distiller_js_proto',
@@ -55,6 +58,8 @@
           'sources': [
             'dom_distiller/android/component_jni_registrar.cc',
             'dom_distiller/android/component_jni_registrar.h',
+            'dom_distiller/core/article_attachments_data.cc',
+            'dom_distiller/core/article_attachments_data.h',
             'dom_distiller/core/article_distillation_update.cc',
             'dom_distiller/core/article_distillation_update.h',
             'dom_distiller/core/article_entry.cc',
@@ -90,10 +95,10 @@
             'dom_distiller/core/theme_list.h',
             'dom_distiller/core/url_constants.cc',
             'dom_distiller/core/url_constants.h',
-            'dom_distiller/core/url_utils_android.cc',
-            'dom_distiller/core/url_utils_android.h',
             'dom_distiller/core/url_utils.cc',
             'dom_distiller/core/url_utils.h',
+            'dom_distiller/core/url_utils_android.cc',
+            'dom_distiller/core/url_utils_android.h',
             'dom_distiller/core/viewer.cc',
             'dom_distiller/core/viewer.h',
           ],
@@ -114,6 +119,7 @@
             'components.gyp:leveldb_proto_test_support',
             '../sync/sync.gyp:sync',
             '../testing/gmock.gyp:gmock',
+            '../url/url.gyp:url_lib',
           ],
           'include_dirs': [
             '..',
@@ -150,10 +156,13 @@
               'target_name': 'dom_distiller_content',
               'type': 'static_library',
               'dependencies': [
+                '../base/base.gyp:base',
                 '../content/content.gyp:content_browser',
                 '../net/net.gyp:net',
                 '../skia/skia.gyp:skia',
                 '../sync/sync.gyp:sync',
+                '../ui/gfx/gfx.gyp:gfx',
+                '../url/url.gyp:url_lib',
                 'components_resources.gyp:components_resources',
                 'components_strings.gyp:components_strings',
                 'dom_distiller_core',
@@ -175,6 +184,7 @@
         ['OS=="android"', {
           'targets': [
             {
+              # GN: //components/dom_distiller/android:dom_distiller_core_java
               'target_name': 'dom_distiller_core_java',
               'type': 'none',
               'dependencies': [
@@ -188,6 +198,7 @@
               'includes': [ '../build/java.gypi' ],
             },
             {
+              # GN: //components/dom_distiller/android:dom_distiller_core_font_family_javagen
               'target_name': 'dom_distiller_core_font_family_java',
               'type': 'none',
               'sources': [
@@ -200,6 +211,7 @@
               'includes': [ '../build/android/java_cpp_template.gypi' ],
             },
             {
+              # GN: //components/dom_distiller/core:jni_headers
               'target_name': 'dom_distiller_core_jni_headers',
               'type': 'none',
               'sources': [
@@ -213,6 +225,7 @@
               'includes': [ '../build/jni_generator.gypi' ],
             },
             {
+              # GN: //components/dom_distiller/android:dom_distiller_core_theme_javagen
               'target_name': 'dom_distiller_core_theme_java',
               'type': 'none',
               'sources': [

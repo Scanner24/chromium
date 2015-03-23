@@ -20,8 +20,6 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/alarms.h"
 #include "content/public/browser/power_save_blocker.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
@@ -36,13 +34,14 @@
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/uninstall_reason.h"
+#include "extensions/common/api/alarms.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/sync_change_processor_wrapper_for_test.h"
 #include "sync/api/sync_error_factory_mock.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notifier_settings.h"
 
@@ -59,7 +58,7 @@ using extensions::ResultCatcher;
 
 namespace {
 
-namespace alarms = extensions::api::alarms;
+namespace alarms = extensions::core_api::alarms;
 
 const char kPowerTestApp[] = "ephemeral_apps/power";
 
@@ -105,7 +104,7 @@ class InstallObserver : public ExtensionRegistryObserver {
     registry_observer_.Add(ExtensionRegistry::Get(profile));
   }
 
-  virtual ~InstallObserver() {}
+  ~InstallObserver() override {}
 
   const InstallParameters& Last() {
     CHECK(!install_params_.empty());
@@ -113,12 +112,11 @@ class InstallObserver : public ExtensionRegistryObserver {
   }
 
  private:
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE {
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override {
     install_params_.push_back(
         InstallParameters(extension->id(), is_update, from_ephemeral));
   }
@@ -158,7 +156,7 @@ class PowerSaveBlockerStub : public content::PowerSaveBlocker {
     power_settings_->request_keep_awake();
   }
 
-  virtual ~PowerSaveBlockerStub() { power_settings_->release_keep_awake(); }
+  ~PowerSaveBlockerStub() override { power_settings_->release_keep_awake(); }
 
   static scoped_ptr<PowerSaveBlocker> Create(PowerSettingsMock* power_settings,
                                              PowerSaveBlockerType type,
@@ -202,8 +200,9 @@ void EphemeralAppTestBase::SetUpCommandLine(base::CommandLine* command_line) {
   extensions::ProcessManager::SetEventPageIdleTimeForTesting(1);
   extensions::ProcessManager::SetEventPageSuspendingTimeForTesting(1);
 
-  // Enable ephemeral apps flag.
-  command_line->AppendSwitch(switches::kEnableEphemeralApps);
+  // Enable ephemeral apps, which are gated by the experimental app launcher
+  // flag.
+  command_line->AppendSwitch(app_list::switches::kEnableExperimentalAppList);
 }
 
 void EphemeralAppTestBase::SetUpOnMainThread() {
@@ -274,8 +273,8 @@ const Extension* EphemeralAppTestBase::UpdateEphemeralApp(
       content::Source<extensions::CrxInstaller>(crx_installer));
   ExtensionService* service =
       ExtensionSystem::Get(profile())->extension_service();
-  EXPECT_TRUE(service->UpdateExtension(app_id, app_v2_path, true,
-                                       &crx_installer));
+  EXPECT_TRUE(service->UpdateExtension(
+      extensions::CRXFileInfo(app_id, app_v2_path), true, &crx_installer));
   windowed_observer.Wait();
 
   return ExtensionRegistry::Get(profile())
@@ -372,8 +371,8 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
 
   // Verify that the event page of the app has not been loaded.
   void VerifyAppNotLoaded(const std::string& app_id) {
-    EXPECT_FALSE(ExtensionSystem::Get(profile())->
-        process_manager()->GetBackgroundHostForExtension(app_id));
+    EXPECT_FALSE(extensions::ProcessManager::Get(profile())
+                     ->GetBackgroundHostForExtension(app_id));
   }
 
   // Verify properties of ephemeral apps.
@@ -491,6 +490,7 @@ class EphemeralAppBrowserTest : public EphemeralAppTestBase {
                               enable_from_sync,
                               false /* incognito enabled */,
                               false /* remote install */,
+                              extensions::ExtensionSyncData::BOOLEAN_UNSET,
                               kAppLaunchOrdinal,
                               kPageOrdinal,
                               extensions::LAUNCH_TYPE_REGULAR);

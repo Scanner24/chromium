@@ -165,8 +165,8 @@ void WaitForChildToDie(pid_t child, int timeout) {
 
 }  // namespace
 
-void EnsureProcessTerminated(ProcessHandle process) {
-  WaitForChildToDie(process, kWaitBeforeKillSeconds);
+void EnsureProcessTerminated(Process process) {
+  WaitForChildToDie(process.Pid(), kWaitBeforeKillSeconds);
 }
 
 }  // namespace base

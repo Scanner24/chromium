@@ -13,7 +13,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/time/time.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface.h"
@@ -29,7 +29,8 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   GLSurfaceEGL();
 
   // Implement GLSurface.
-  virtual EGLDisplay GetDisplay() OVERRIDE;
+  void DestroyAndTerminateDisplay() override;
+  EGLDisplay GetDisplay() override;
 
   static bool InitializeOneOff();
   static EGLDisplay GetHardwareDisplay();
@@ -44,10 +45,11 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   static bool IsEGLSurfacelessContextSupported();
 
  protected:
-  virtual ~GLSurfaceEGL();
+  ~GLSurfaceEGL() override;
 
  private:
 #if defined(OS_WIN)
+  friend struct DriverEGL;
   static EGLDisplay GetPlatformDisplay(EGLNativeDisplayType native_display);
 #endif
 
@@ -60,27 +62,29 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   explicit NativeViewGLSurfaceEGL(EGLNativeWindowType window);
 
   // Implement GLSurface.
-  virtual EGLConfig GetConfig() OVERRIDE;
-  virtual bool Initialize() OVERRIDE;
-  virtual void Destroy() OVERRIDE;
-  virtual bool Resize(const gfx::Size& size) OVERRIDE;
-  virtual bool Recreate() OVERRIDE;
-  virtual bool IsOffscreen() OVERRIDE;
-  virtual bool SwapBuffers() OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual EGLSurface GetHandle() OVERRIDE;
-  virtual bool SupportsPostSubBuffer() OVERRIDE;
-  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
-  virtual VSyncProvider* GetVSyncProvider() OVERRIDE;
+  EGLConfig GetConfig() override;
+  bool Initialize() override;
+  void Destroy() override;
+  bool Resize(const gfx::Size& size) override;
+  bool Recreate() override;
+  bool IsOffscreen() override;
+  bool SwapBuffers() override;
+  gfx::Size GetSize() override;
+  EGLSurface GetHandle() override;
+  bool SupportsPostSubBuffer() override;
+  bool PostSubBuffer(int x, int y, int width, int height) override;
+  VSyncProvider* GetVSyncProvider() override;
 
   // Create a NativeViewGLSurfaceEGL with an externally provided VSyncProvider.
   // Takes ownership of the VSyncProvider.
   virtual bool Initialize(scoped_ptr<VSyncProvider> sync_provider);
 
  protected:
-  virtual ~NativeViewGLSurfaceEGL();
+  ~NativeViewGLSurfaceEGL() override;
 
   EGLNativeWindowType window_;
+
+  void OnSetSwapInterval(int interval) override;
 
  private:
   EGLSurface surface_;
@@ -89,6 +93,17 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   gfx::Size size_;
 
   scoped_ptr<VSyncProvider> vsync_provider_;
+
+  int swap_interval_;
+
+#if defined(OS_WIN)
+  bool vsync_override_;
+
+  unsigned int swap_generation_;
+  static unsigned int current_swap_generation_;
+  static unsigned int swaps_this_generation_;
+  static unsigned int last_multiswap_generation_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceEGL);
 };
@@ -99,18 +114,18 @@ class GL_EXPORT PbufferGLSurfaceEGL : public GLSurfaceEGL {
   explicit PbufferGLSurfaceEGL(const gfx::Size& size);
 
   // Implement GLSurface.
-  virtual EGLConfig GetConfig() OVERRIDE;
-  virtual bool Initialize() OVERRIDE;
-  virtual void Destroy() OVERRIDE;
-  virtual bool IsOffscreen() OVERRIDE;
-  virtual bool SwapBuffers() OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual bool Resize(const gfx::Size& size) OVERRIDE;
-  virtual EGLSurface GetHandle() OVERRIDE;
-  virtual void* GetShareHandle() OVERRIDE;
+  EGLConfig GetConfig() override;
+  bool Initialize() override;
+  void Destroy() override;
+  bool IsOffscreen() override;
+  bool SwapBuffers() override;
+  gfx::Size GetSize() override;
+  bool Resize(const gfx::Size& size) override;
+  EGLSurface GetHandle() override;
+  void* GetShareHandle() override;
 
  protected:
-  virtual ~PbufferGLSurfaceEGL();
+  ~PbufferGLSurfaceEGL() override;
 
  private:
   gfx::Size size_;
@@ -127,18 +142,19 @@ class GL_EXPORT SurfacelessEGL : public GLSurfaceEGL {
   explicit SurfacelessEGL(const gfx::Size& size);
 
   // Implement GLSurface.
-  virtual EGLConfig GetConfig() OVERRIDE;
-  virtual bool Initialize() OVERRIDE;
-  virtual void Destroy() OVERRIDE;
-  virtual bool IsOffscreen() OVERRIDE;
-  virtual bool SwapBuffers() OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual bool Resize(const gfx::Size& size) OVERRIDE;
-  virtual EGLSurface GetHandle() OVERRIDE;
-  virtual void* GetShareHandle() OVERRIDE;
+  EGLConfig GetConfig() override;
+  bool Initialize() override;
+  void Destroy() override;
+  bool IsOffscreen() override;
+  bool IsSurfaceless() const override;
+  bool SwapBuffers() override;
+  gfx::Size GetSize() override;
+  bool Resize(const gfx::Size& size) override;
+  EGLSurface GetHandle() override;
+  void* GetShareHandle() override;
 
  protected:
-  virtual ~SurfacelessEGL();
+  ~SurfacelessEGL() override;
 
  private:
   gfx::Size size_;

@@ -17,13 +17,16 @@
 #endif  // OS_WIN
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_patcher_operation_out_of_process.h"
-#include "chrome/browser/omaha_query_params/chrome_omaha_query_params_delegate.h"
+#include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/chrome_version_info.h"
-#include "components/component_updater/component_updater_configurator.h"
 #include "components/component_updater/component_updater_switches.h"
+#include "components/update_client/configurator.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
+
+using update_client::Configurator;
+using update_client::OutOfProcessPatcher;
 
 namespace component_updater {
 
@@ -109,34 +112,33 @@ std::string GetSwitchArgument(const std::vector<std::string>& vec,
 
 class ChromeConfigurator : public Configurator {
  public:
-  ChromeConfigurator(const CommandLine* cmdline,
+  ChromeConfigurator(const base::CommandLine* cmdline,
                      net::URLRequestContextGetter* url_request_getter);
 
-  virtual ~ChromeConfigurator() {}
+  ~ChromeConfigurator() override {}
 
-  virtual int InitialDelay() const OVERRIDE;
-  virtual int NextCheckDelay() OVERRIDE;
-  virtual int StepDelay() const OVERRIDE;
-  virtual int StepDelayMedium() OVERRIDE;
-  virtual int MinimumReCheckWait() const OVERRIDE;
-  virtual int OnDemandDelay() const OVERRIDE;
-  virtual std::vector<GURL> UpdateUrl() const OVERRIDE;
-  virtual std::vector<GURL> PingUrl() const OVERRIDE;
-  virtual base::Version GetBrowserVersion() const OVERRIDE;
-  virtual std::string GetChannel() const OVERRIDE;
-  virtual std::string GetLang() const OVERRIDE;
-  virtual std::string GetOSLongName() const OVERRIDE;
-  virtual std::string ExtraRequestParams() const OVERRIDE;
-  virtual size_t UrlSizeLimit() const OVERRIDE;
-  virtual net::URLRequestContextGetter* RequestContext() const OVERRIDE;
-  virtual scoped_refptr<OutOfProcessPatcher> CreateOutOfProcessPatcher()
-      const OVERRIDE;
-  virtual bool DeltasEnabled() const OVERRIDE;
-  virtual bool UseBackgroundDownloader() const OVERRIDE;
-  virtual scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
-      const OVERRIDE;
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetSingleThreadTaskRunner() const OVERRIDE;
+  int InitialDelay() const override;
+  int NextCheckDelay() override;
+  int StepDelay() const override;
+  int StepDelayMedium() override;
+  int MinimumReCheckWait() const override;
+  int OnDemandDelay() const override;
+  std::vector<GURL> UpdateUrl() const override;
+  std::vector<GURL> PingUrl() const override;
+  base::Version GetBrowserVersion() const override;
+  std::string GetChannel() const override;
+  std::string GetLang() const override;
+  std::string GetOSLongName() const override;
+  std::string ExtraRequestParams() const override;
+  size_t UrlSizeLimit() const override;
+  net::URLRequestContextGetter* RequestContext() const override;
+  scoped_refptr<OutOfProcessPatcher> CreateOutOfProcessPatcher() const override;
+  bool DeltasEnabled() const override;
+  bool UseBackgroundDownloader() const override;
+  scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
+      const override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetSingleThreadTaskRunner()
+      const override;
 
  private:
   net::URLRequestContextGetter* url_request_getter_;
@@ -150,7 +152,7 @@ class ChromeConfigurator : public Configurator {
 };
 
 ChromeConfigurator::ChromeConfigurator(
-    const CommandLine* cmdline,
+    const base::CommandLine* cmdline,
     net::URLRequestContextGetter* url_request_getter)
     : url_request_getter_(url_request_getter),
       fast_update_(false),
@@ -233,11 +235,11 @@ base::Version ChromeConfigurator::GetBrowserVersion() const {
 }
 
 std::string ChromeConfigurator::GetChannel() const {
-  return ChromeOmahaQueryParamsDelegate::GetChannelString();
+  return ChromeUpdateQueryParamsDelegate::GetChannelString();
 }
 
 std::string ChromeConfigurator::GetLang() const {
-  return ChromeOmahaQueryParamsDelegate::GetLang();
+  return ChromeUpdateQueryParamsDelegate::GetLang();
 }
 
 std::string ChromeConfigurator::GetOSLongName() const {

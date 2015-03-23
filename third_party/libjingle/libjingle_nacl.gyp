@@ -7,6 +7,7 @@
     'libjingle_source': "source",
     'webrtc_base': "../webrtc/base",
     'webrtc_xmllite': "../webrtc/libjingle/xmllite",
+    'webrtc_p2p': "../webrtc/p2p",
   },
   'includes': [
     '../../native_client/build/untrusted.gypi',
@@ -82,7 +83,6 @@
         '<(webrtc_base)/checks.h',
         '<(webrtc_base)/common.cc',
         '<(webrtc_base)/common.h',
-        '<(webrtc_base)/compile_assert.h',
         '<(webrtc_base)/cpumonitor.cc',
         '<(webrtc_base)/cpumonitor.h',
         '<(webrtc_base)/crc32.cc',
@@ -248,8 +248,8 @@
       ],
       'sources!': [
         # Compiled as part of libjingle_p2p_constants_nacl.
-        '<(libjingle_source)/talk/p2p/base/constants.cc',
-        '<(libjingle_source)/talk/p2p/base/constants.h',
+        '<(webrtc_p2p)/base/constants.cc',
+        '<(webrtc_p2p)/base/constants.h',
       ],
       'sources/': [
         ['exclude', '/mac[a-z]+\\.(h|cc)$'],
@@ -312,8 +312,8 @@
         '../'
       ],
       'sources': [
-        '<(libjingle_source)/talk/p2p/base/constants.cc',
-        '<(libjingle_source)/talk/p2p/base/constants.h',
+        '<(webrtc_p2p)/base/constants.cc',
+        '<(webrtc_p2p)/base/constants.h',
       ],
     },  # end of target 'libjingle_p2p_constants_nacl'
   ],

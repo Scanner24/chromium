@@ -14,7 +14,7 @@
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/single_release_callback_impl.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "cc/trees/occlusion_tracker.h"
+#include "cc/trees/occlusion.h"
 #include "cc/trees/proxy.h"
 #include "media/base/video_frame.h"
 
@@ -41,7 +41,9 @@ scoped_ptr<VideoLayerImpl> VideoLayerImpl::Create(
 VideoLayerImpl::VideoLayerImpl(LayerTreeImpl* tree_impl,
                                int id,
                                media::VideoRotation video_rotation)
-    : LayerImpl(tree_impl, id), frame_(NULL), video_rotation_(video_rotation) {
+    : LayerImpl(tree_impl, id),
+      frame_(nullptr),
+      video_rotation_(video_rotation) {
 }
 
 VideoLayerImpl::~VideoLayerImpl() {
@@ -59,8 +61,7 @@ VideoLayerImpl::~VideoLayerImpl() {
 
 scoped_ptr<LayerImpl> VideoLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  VideoLayerImpl* impl = new VideoLayerImpl(tree_impl, id(), video_rotation_);
-  return scoped_ptr<LayerImpl>(impl);
+  return make_scoped_ptr(new VideoLayerImpl(tree_impl, id(), video_rotation_));
 }
 
 void VideoLayerImpl::PushPropertiesTo(LayerImpl* layer) {
@@ -71,7 +72,7 @@ void VideoLayerImpl::PushPropertiesTo(LayerImpl* layer) {
 }
 
 void VideoLayerImpl::DidBecomeActive() {
-  provider_client_impl_->set_active_video_layer(this);
+  provider_client_impl_->SetActiveVideoLayer(this);
 }
 
 bool VideoLayerImpl::WillDraw(DrawMode draw_mode,
@@ -90,7 +91,7 @@ bool VideoLayerImpl::WillDraw(DrawMode draw_mode,
 
   if (!frame_.get()) {
     // Drop any resources used by the updater if there is no frame to display.
-    updater_.reset();
+    updater_ = nullptr;
 
     provider_client_impl_->ReleaseLock();
     return false;
@@ -130,10 +131,8 @@ bool VideoLayerImpl::WillDraw(DrawMode draw_mode,
   return true;
 }
 
-void VideoLayerImpl::AppendQuads(
-    RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
-    AppendQuadsData* append_quads_data) {
+void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
+                                 AppendQuadsData* append_quads_data) {
   DCHECK(frame_.get());
 
   gfx::Transform transform = draw_transform();
@@ -159,14 +158,9 @@ void VideoLayerImpl::AppendQuads(
 
   SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
-  shared_quad_state->SetAll(transform,
-                            rotated_size,
-                            visible_content_rect(),
-                            clip_rect(),
-                            is_clipped(),
-                            draw_opacity(),
-                            blend_mode(),
-                            sorting_context_id());
+  shared_quad_state->SetAll(transform, rotated_size, visible_content_rect(),
+                            clip_rect(), is_clipped(), draw_opacity(),
+                            draw_blend_mode(), sorting_context_id());
 
   AppendDebugBorderQuad(
       render_pass, rotated_size, shared_quad_state, append_quads_data);
@@ -176,9 +170,12 @@ void VideoLayerImpl::AppendQuads(
   gfx::Rect visible_rect = frame_->visible_rect();
   gfx::Size coded_size = frame_->coded_size();
 
+  Occlusion occlusion_in_video_space =
+      draw_properties()
+          .occlusion_in_content_space.GetOcclusionWithGivenDrawTransform(
+              transform);
   gfx::Rect visible_quad_rect =
-      occlusion_tracker.GetCurrentOcclusionForLayer(transform)
-          .GetUnoccludedContentRect(quad_rect);
+      occlusion_in_video_space.GetUnoccludedContentRect(quad_rect);
   if (visible_quad_rect.IsEmpty())
     return;
 
@@ -204,6 +201,7 @@ void VideoLayerImpl::AppendQuads(
       gfx::PointF uv_bottom_right(tex_width_scale, tex_height_scale);
       float opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};
       bool flipped = false;
+      bool nearest_neighbor = false;
       TextureDrawQuad* texture_quad =
           render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
       texture_quad->SetNew(shared_quad_state,
@@ -216,32 +214,30 @@ void VideoLayerImpl::AppendQuads(
                            uv_bottom_right,
                            SK_ColorTRANSPARENT,
                            opacity,
-                           flipped);
+                           flipped,
+                           nearest_neighbor);
       break;
     }
     case VideoFrameExternalResources::YUV_RESOURCE: {
       DCHECK_GE(frame_resources_.size(), 3u);
       if (frame_resources_.size() < 3u)
         break;
-      YUVVideoDrawQuad::ColorSpace color_space =
-          frame_->format() == media::VideoFrame::YV12J
-              ? YUVVideoDrawQuad::REC_601_JPEG
-              : YUVVideoDrawQuad::REC_601;
+      YUVVideoDrawQuad::ColorSpace color_space = YUVVideoDrawQuad::REC_601;
+      if (frame_->format() == media::VideoFrame::YV12J) {
+        color_space = YUVVideoDrawQuad::JPEG;
+      } else if (frame_->format() == media::VideoFrame::YV12HD) {
+        color_space = YUVVideoDrawQuad::REC_709;
+      }
+
       gfx::RectF tex_coord_rect(
           tex_x_offset, tex_y_offset, tex_width_scale, tex_height_scale);
       YUVVideoDrawQuad* yuv_video_quad =
           render_pass->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
       yuv_video_quad->SetNew(
-          shared_quad_state,
-          quad_rect,
-          opaque_rect,
-          visible_quad_rect,
-          tex_coord_rect,
-          frame_resources_[0],
-          frame_resources_[1],
+          shared_quad_state, quad_rect, opaque_rect, visible_quad_rect,
+          tex_coord_rect, coded_size, frame_resources_[0], frame_resources_[1],
           frame_resources_[2],
-          frame_resources_.size() > 3 ? frame_resources_[3] : 0,
-          color_space);
+          frame_resources_.size() > 3 ? frame_resources_[3] : 0, color_space);
       break;
     }
     case VideoFrameExternalResources::RGB_RESOURCE: {
@@ -253,6 +249,7 @@ void VideoLayerImpl::AppendQuads(
       gfx::PointF uv_bottom_right(tex_width_scale, tex_height_scale);
       float opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};
       bool flipped = false;
+      bool nearest_neighbor = false;
       TextureDrawQuad* texture_quad =
           render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
       texture_quad->SetNew(shared_quad_state,
@@ -265,7 +262,8 @@ void VideoLayerImpl::AppendQuads(
                            uv_bottom_right,
                            SK_ColorTRANSPARENT,
                            opacity,
-                           flipped);
+                           flipped,
+                           nearest_neighbor);
       break;
     }
     case VideoFrameExternalResources::STREAM_TEXTURE_RESOURCE: {
@@ -301,12 +299,12 @@ void VideoLayerImpl::AppendQuads(
       break;
     }
 #if defined(VIDEO_HOLE)
-    // This block and other blocks wrapped around #if defined(GOOGLE_TV) is not
+    // This block and other blocks wrapped around #if defined(VIDEO_HOLE) is not
     // maintained by the general compositor team. Please contact the following
     // people instead:
     //
     // wonsik@chromium.org
-    // ycheo@chromium.org
+    // lcwu@chromium.org
     case VideoFrameExternalResources::HOLE: {
       DCHECK_EQ(frame_resources_.size(), 0u);
       SolidColorDrawQuad* solid_color_draw_quad =
@@ -352,17 +350,17 @@ void VideoLayerImpl::DidDraw(ResourceProvider* resource_provider) {
   }
 
   provider_client_impl_->PutCurrentFrame(frame_);
-  frame_ = NULL;
+  frame_ = nullptr;
 
   provider_client_impl_->ReleaseLock();
 }
 
 void VideoLayerImpl::ReleaseResources() {
-  updater_.reset();
+  updater_ = nullptr;
 }
 
 void VideoLayerImpl::SetNeedsRedraw() {
-  SetUpdateRect(gfx::UnionRects(update_rect(), gfx::RectF(bounds())));
+  SetUpdateRect(gfx::UnionRects(update_rect(), gfx::Rect(bounds())));
   layer_tree_impl()->SetNeedsRedraw();
 }
 

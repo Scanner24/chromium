@@ -11,13 +11,13 @@
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/scoped_select_object.h"
-#include "skia/ext/vector_platform_device_emf_win.h"
+#include "skia/ext/platform_device.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/gdi_util.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -447,17 +447,6 @@ bool Emf::Record::SafePlayback(Emf::EnumerationContext* context) const {
     }
   }
   return res;
-}
-
-SkBaseDevice* Emf::StartPageForVectorCanvas(
-    const gfx::Size& page_size, const gfx::Rect& content_area,
-    const float& scale_factor) {
-  if (!StartPage(page_size, content_area, scale_factor))
-    return NULL;
-
-  return skia::VectorPlatformDeviceEmf::CreateDevice(page_size.width(),
-                                                     page_size.height(),
-                                                     true, hdc_);
 }
 
 bool Emf::StartPage(const gfx::Size& /*page_size*/,

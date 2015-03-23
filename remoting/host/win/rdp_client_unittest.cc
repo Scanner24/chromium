@@ -71,7 +71,7 @@ RdpClientModule::RdpClientModule() {
 
 RdpClientModule::~RdpClientModule() {
   AtlAxWinTerm();
-  ATL::_pAtlModule = NULL;
+  ATL::_pAtlModule = nullptr;
 }
 
 }  // namespace
@@ -81,8 +81,8 @@ class RdpClientTest : public testing::Test {
   RdpClientTest();
   virtual ~RdpClientTest();
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  virtual void SetUp() override;
+  virtual void TearDown() override;
 
   // Caaled when an RDP connection is established.
   void OnRdpConnected();
@@ -165,7 +165,7 @@ TEST_F(RdpClientTest, Basic) {
       task_runner_, task_runner_,
       webrtc::DesktopSize(kDefaultWidth, kDefaultHeight),
       terminal_id_, &event_handler_));
-  task_runner_ = NULL;
+  task_runner_ = nullptr;
 
   run_loop_.Run();
 }

@@ -7,7 +7,9 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
-#include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "ui/ozone/ozone_export.h"
+#include "ui/ozone/platform/dri/display_change_observer.h"
 #include "ui/ozone/platform/dri/hardware_display_controller.h"
 
 typedef struct _drmModeModeInfo drmModeModeInfo;
@@ -24,50 +26,51 @@ class DriWrapper;
 class ScanoutBufferGenerator;
 
 // Responsible for keeping track of active displays and configuring them.
-class ScreenManager {
+class OZONE_EXPORT ScreenManager {
  public:
-  ScreenManager(DriWrapper* dri, ScanoutBufferGenerator* surface_generator);
+  ScreenManager(ScanoutBufferGenerator* surface_generator);
   virtual ~ScreenManager();
 
   // Register a display controller. This must be called before trying to
   // configure it.
-  void AddDisplayController(uint32_t crtc, uint32_t connector);
+  void AddDisplayController(const scoped_refptr<DriWrapper>& dri,
+                            uint32_t crtc,
+                            uint32_t connector);
 
   // Remove a display controller from the list of active controllers. The
   // controller is removed since it was disconnected.
-  void RemoveDisplayController(uint32_t crtc);
+  void RemoveDisplayController(const scoped_refptr<DriWrapper>& dri,
+                               uint32_t crtc);
 
   // Configure a display controller. The display controller is identified by
   // (|crtc|, |connector|) and the controller is modeset using |mode|.
-  bool ConfigureDisplayController(uint32_t crtc,
+  bool ConfigureDisplayController(const scoped_refptr<DriWrapper>& dri,
+                                  uint32_t crtc,
                                   uint32_t connector,
                                   const gfx::Point& origin,
                                   const drmModeModeInfo& mode);
 
   // Disable the display controller identified by |crtc|. Note, the controller
   // may still be connected, so this does not remove the controller.
-  bool DisableDisplayController(uint32_t crtc);
+  bool DisableDisplayController(const scoped_refptr<DriWrapper>& dri,
+                                uint32_t crtc);
 
   // Returns a reference to the display controller configured to display within
-  // |bounds|.
-  // This returns a weak reference since the display controller may be destroyed
-  // at any point in time, but the changes are propagated to the compositor much
-  // later (Compositor owns SurfaceOzone*, which is responsible for updating the
-  // display surface).
-  base::WeakPtr<HardwareDisplayController> GetDisplayController(
-      const gfx::Rect& bounds);
+  // |bounds|. If the caller caches the controller it must also register as an
+  // observer to be notified when the controller goes out of scope.
+  HardwareDisplayController* GetDisplayController(const gfx::Rect& bounds);
 
-  // On non CrOS builds there is no display configurator to look-up available
-  // displays and initialize the HDCs. In such cases this is called internally
-  // to initialize a display.
-  virtual void ForceInitializationOfPrimaryDisplay();
+  void AddObserver(DisplayChangeObserver* observer);
+  void RemoveObserver(DisplayChangeObserver* observer);
 
  private:
   typedef ScopedVector<HardwareDisplayController> HardwareDisplayControllers;
 
   // Returns an iterator into |controllers_| for the controller identified by
   // (|crtc|, |connector|).
-  HardwareDisplayControllers::iterator FindDisplayController(uint32_t crtc);
+  HardwareDisplayControllers::iterator FindDisplayController(
+      const scoped_refptr<DriWrapper>& drm,
+      uint32_t crtc);
 
   // Returns an iterator into |controllers_| for the controller located at
   // |origin|.
@@ -84,13 +87,15 @@ class ScreenManager {
   // controller is currently present.
   bool HandleMirrorMode(HardwareDisplayControllers::iterator original,
                         HardwareDisplayControllers::iterator mirror,
+                        const scoped_refptr<DriWrapper>& drm,
                         uint32_t crtc,
                         uint32_t connector);
 
-  DriWrapper* dri_;  // Not owned.
   ScanoutBufferGenerator* buffer_generator_;  // Not owned.
   // List of display controllers (active and disabled).
   HardwareDisplayControllers controllers_;
+
+  ObserverList<DisplayChangeObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenManager);
 };

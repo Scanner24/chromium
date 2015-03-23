@@ -35,6 +35,19 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+#if !defined(USE_OPENSSL)
+#include <pk11pub.h>
+#include "crypto/nss_util.h"
+
+#if !defined(CKM_AES_GCM)
+#define CKM_AES_GCM 0x00001087
+#endif
+
+#if !defined(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)
+#define CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256 (CKM_NSS + 24)
+#endif
+#endif
+
 //-----------------------------------------------------------------------------
 
 using testing::_;
@@ -44,8 +57,6 @@ using testing::Truly;
 namespace net {
 
 namespace {
-
-const SSLConfig kDefaultSSLConfig;
 
 // WrappedStreamSocket is a base class that wraps an existing StreamSocket,
 // forwarding the Socket and StreamSocket interfaces to the underlying
@@ -57,65 +68,57 @@ class WrappedStreamSocket : public StreamSocket {
  public:
   explicit WrappedStreamSocket(scoped_ptr<StreamSocket> transport)
       : transport_(transport.Pass()) {}
-  virtual ~WrappedStreamSocket() {}
+  ~WrappedStreamSocket() override {}
 
   // StreamSocket implementation:
-  virtual int Connect(const CompletionCallback& callback) OVERRIDE {
+  int Connect(const CompletionCallback& callback) override {
     return transport_->Connect(callback);
   }
-  virtual void Disconnect() OVERRIDE { transport_->Disconnect(); }
-  virtual bool IsConnected() const OVERRIDE {
-    return transport_->IsConnected();
-  }
-  virtual bool IsConnectedAndIdle() const OVERRIDE {
+  void Disconnect() override { transport_->Disconnect(); }
+  bool IsConnected() const override { return transport_->IsConnected(); }
+  bool IsConnectedAndIdle() const override {
     return transport_->IsConnectedAndIdle();
   }
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE {
+  int GetPeerAddress(IPEndPoint* address) const override {
     return transport_->GetPeerAddress(address);
   }
-  virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE {
+  int GetLocalAddress(IPEndPoint* address) const override {
     return transport_->GetLocalAddress(address);
   }
-  virtual const BoundNetLog& NetLog() const OVERRIDE {
-    return transport_->NetLog();
-  }
-  virtual void SetSubresourceSpeculation() OVERRIDE {
+  const BoundNetLog& NetLog() const override { return transport_->NetLog(); }
+  void SetSubresourceSpeculation() override {
     transport_->SetSubresourceSpeculation();
   }
-  virtual void SetOmniboxSpeculation() OVERRIDE {
-    transport_->SetOmniboxSpeculation();
-  }
-  virtual bool WasEverUsed() const OVERRIDE {
-    return transport_->WasEverUsed();
-  }
-  virtual bool UsingTCPFastOpen() const OVERRIDE {
+  void SetOmniboxSpeculation() override { transport_->SetOmniboxSpeculation(); }
+  bool WasEverUsed() const override { return transport_->WasEverUsed(); }
+  bool UsingTCPFastOpen() const override {
     return transport_->UsingTCPFastOpen();
   }
-  virtual bool WasNpnNegotiated() const OVERRIDE {
+  bool WasNpnNegotiated() const override {
     return transport_->WasNpnNegotiated();
   }
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE {
+  NextProto GetNegotiatedProtocol() const override {
     return transport_->GetNegotiatedProtocol();
   }
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE {
+  bool GetSSLInfo(SSLInfo* ssl_info) override {
     return transport_->GetSSLInfo(ssl_info);
   }
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE {
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override {
     return transport_->Read(buf, buf_len, callback);
   }
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override {
     return transport_->Write(buf, buf_len, callback);
   }
-  virtual int SetReceiveBufferSize(int32 size) OVERRIDE {
+  int SetReceiveBufferSize(int32 size) override {
     return transport_->SetReceiveBufferSize(size);
   }
-  virtual int SetSendBufferSize(int32 size) OVERRIDE {
+  int SetSendBufferSize(int32 size) override {
     return transport_->SetSendBufferSize(size);
   }
 
@@ -132,12 +135,12 @@ class WrappedStreamSocket : public StreamSocket {
 class ReadBufferingStreamSocket : public WrappedStreamSocket {
  public:
   explicit ReadBufferingStreamSocket(scoped_ptr<StreamSocket> transport);
-  virtual ~ReadBufferingStreamSocket() {}
+  ~ReadBufferingStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
 
   // Sets the internal buffer to |size|. This must not be greater than
   // the largest value supplied to Read() - that is, it does not handle
@@ -262,15 +265,15 @@ void ReadBufferingStreamSocket::OnReadCompleted(int result) {
 class SynchronousErrorStreamSocket : public WrappedStreamSocket {
  public:
   explicit SynchronousErrorStreamSocket(scoped_ptr<StreamSocket> transport);
-  virtual ~SynchronousErrorStreamSocket() {}
+  ~SynchronousErrorStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override;
 
   // Sets the next Read() call and all future calls to return |error|.
   // If there is already a pending asynchronous read, the configured error
@@ -333,15 +336,15 @@ int SynchronousErrorStreamSocket::Write(IOBuffer* buf,
 class FakeBlockingStreamSocket : public WrappedStreamSocket {
  public:
   explicit FakeBlockingStreamSocket(scoped_ptr<StreamSocket> transport);
-  virtual ~FakeBlockingStreamSocket() {}
+  ~FakeBlockingStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override;
 
   // Blocks read results on the socket. Reads will not complete until
   // UnblockReadResult() has been called and a result is ready from the
@@ -549,18 +552,18 @@ class CountingStreamSocket : public WrappedStreamSocket {
       : WrappedStreamSocket(transport.Pass()),
         read_count_(0),
         write_count_(0) {}
-  virtual ~CountingStreamSocket() {}
+  ~CountingStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE {
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override {
     read_count_++;
     return transport_->Read(buf, buf_len, callback);
   }
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override {
     write_count_++;
     return transport_->Write(buf, buf_len, callback);
   }
@@ -581,7 +584,7 @@ class DeleteSocketCallback : public TestCompletionCallbackBase {
       : socket_(socket),
         callback_(base::Bind(&DeleteSocketCallback::OnComplete,
                              base::Unretained(this))) {}
-  virtual ~DeleteSocketCallback() {}
+  ~DeleteSocketCallback() override {}
 
   const CompletionCallback& callback() const { return callback_; }
 
@@ -605,62 +608,58 @@ class DeleteSocketCallback : public TestCompletionCallbackBase {
 // A ChannelIDStore that always returns an error when asked for a
 // channel id.
 class FailingChannelIDStore : public ChannelIDStore {
-  virtual int GetChannelID(const std::string& server_identifier,
-                           base::Time* expiration_time,
-                           std::string* private_key_result,
-                           std::string* cert_result,
-                           const GetChannelIDCallback& callback) OVERRIDE {
+  int GetChannelID(const std::string& server_identifier,
+                   base::Time* expiration_time,
+                   std::string* private_key_result,
+                   std::string* cert_result,
+                   const GetChannelIDCallback& callback) override {
     return ERR_UNEXPECTED;
   }
-  virtual void SetChannelID(const std::string& server_identifier,
-                            base::Time creation_time,
-                            base::Time expiration_time,
-                            const std::string& private_key,
-                            const std::string& cert) OVERRIDE {}
-  virtual void DeleteChannelID(const std::string& server_identifier,
-                               const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAllCreatedBetween(base::Time delete_begin,
-                                       base::Time delete_end,
-                                       const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAll(const base::Closure& completion_callback) OVERRIDE {}
-  virtual void GetAllChannelIDs(const GetChannelIDListCallback& callback)
-      OVERRIDE {}
-  virtual int GetChannelIDCount() OVERRIDE { return 0; }
-  virtual void SetForceKeepSessionState() OVERRIDE {}
+  void SetChannelID(const std::string& server_identifier,
+                    base::Time creation_time,
+                    base::Time expiration_time,
+                    const std::string& private_key,
+                    const std::string& cert) override {}
+  void DeleteChannelID(const std::string& server_identifier,
+                       const base::Closure& completion_callback) override {}
+  void DeleteAllCreatedBetween(
+      base::Time delete_begin,
+      base::Time delete_end,
+      const base::Closure& completion_callback) override {}
+  void DeleteAll(const base::Closure& completion_callback) override {}
+  void GetAllChannelIDs(const GetChannelIDListCallback& callback) override {}
+  int GetChannelIDCount() override { return 0; }
+  void SetForceKeepSessionState() override {}
 };
 
 // A ChannelIDStore that asynchronously returns an error when asked for a
 // channel id.
 class AsyncFailingChannelIDStore : public ChannelIDStore {
-  virtual int GetChannelID(const std::string& server_identifier,
-                           base::Time* expiration_time,
-                           std::string* private_key_result,
-                           std::string* cert_result,
-                           const GetChannelIDCallback& callback) OVERRIDE {
+  int GetChannelID(const std::string& server_identifier,
+                   base::Time* expiration_time,
+                   std::string* private_key_result,
+                   std::string* cert_result,
+                   const GetChannelIDCallback& callback) override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(callback, ERR_UNEXPECTED,
                               server_identifier, base::Time(), "", ""));
     return ERR_IO_PENDING;
   }
-  virtual void SetChannelID(const std::string& server_identifier,
-                            base::Time creation_time,
-                            base::Time expiration_time,
-                            const std::string& private_key,
-                            const std::string& cert) OVERRIDE {}
-  virtual void DeleteChannelID(const std::string& server_identifier,
-                               const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAllCreatedBetween(base::Time delete_begin,
-                                       base::Time delete_end,
-                                       const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAll(const base::Closure& completion_callback) OVERRIDE {}
-  virtual void GetAllChannelIDs(const GetChannelIDListCallback& callback)
-      OVERRIDE {}
-  virtual int GetChannelIDCount() OVERRIDE { return 0; }
-  virtual void SetForceKeepSessionState() OVERRIDE {}
+  void SetChannelID(const std::string& server_identifier,
+                    base::Time creation_time,
+                    base::Time expiration_time,
+                    const std::string& private_key,
+                    const std::string& cert) override {}
+  void DeleteChannelID(const std::string& server_identifier,
+                       const base::Closure& completion_callback) override {}
+  void DeleteAllCreatedBetween(
+      base::Time delete_begin,
+      base::Time delete_end,
+      const base::Closure& completion_callback) override {}
+  void DeleteAll(const base::Closure& completion_callback) override {}
+  void GetAllChannelIDs(const GetChannelIDListCallback& callback) override {}
+  int GetChannelIDCount() override { return 0; }
+  void SetForceKeepSessionState() override {}
 };
 
 // A mock CTVerifier that records every call to Verify but doesn't verify
@@ -803,7 +802,7 @@ class SSLClientSocketCertRequestInfoTest : public SSLClientSocketTest {
     EXPECT_EQ(OK, rv);
 
     scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-        transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+        transport.Pass(), test_server.host_port_pair(), SSLConfig()));
     EXPECT_FALSE(sock->IsConnected());
 
     rv = sock->Connect(callback.callback());
@@ -858,10 +857,8 @@ class SSLClientSocketFalseStartTest : public SSLClientSocketTest {
     EXPECT_EQ(OK, rv);
 
     FakeBlockingStreamSocket* raw_transport = transport.get();
-    scoped_ptr<SSLClientSocket> sock =
-        CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                              test_server()->host_port_pair(),
-                              client_config);
+    scoped_ptr<SSLClientSocket> sock = CreateSSLClientSocket(
+        transport.Pass(), test_server()->host_port_pair(), client_config);
 
     if (monitor_handshake_callback_) {
       sock->SetHandshakeCompletionCallback(
@@ -1005,6 +1002,16 @@ static bool LogContainsSSLConnectEndEvent(
              log, i, NetLog::TYPE_SOCKET_BYTES_SENT, NetLog::PHASE_NONE);
 }
 
+bool SupportsAESGCM() {
+#if defined(USE_OPENSSL)
+  return true;
+#else
+  crypto::EnsureNSSInit();
+  return PK11_TokenExists(CKM_AES_GCM) &&
+         PK11_TokenExists(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256);
+#endif
+}
+
 }  // namespace
 
 TEST_F(SSLClientSocketTest, Connect) {
@@ -1026,7 +1033,7 @@ TEST_F(SSLClientSocketTest, Connect) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1068,7 +1075,7 @@ TEST_F(SSLClientSocketTest, ConnectExpired) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1112,7 +1119,7 @@ TEST_F(SSLClientSocketTest, ConnectMismatched) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1156,7 +1163,7 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthCertRequested) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -1214,7 +1221,7 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthSendNullCert) {
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.send_client_cert = true;
   ssl_config.client_cert = NULL;
 
@@ -1272,7 +1279,7 @@ TEST_F(SSLClientSocketTest, Read) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -1332,10 +1339,8 @@ TEST_F(SSLClientSocketTest, Connect_WithSynchronousError) {
   ssl_config.false_start_enabled = false;
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   raw_transport->SetNextWriteError(ERR_CONNECTION_RESET);
 
@@ -1370,10 +1375,8 @@ TEST_F(SSLClientSocketTest, Read_WithSynchronousError) {
   ssl_config.false_start_enabled = false;
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1423,7 +1426,7 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousError) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
   int rv = callback.GetResult(transport->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1432,10 +1435,8 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousError) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1497,7 +1498,7 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousErrorNoRead) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<CountingStreamSocket> counting_socket(
-      new CountingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new CountingStreamSocket(error_socket.Pass()));
   CountingStreamSocket* raw_counting_socket = counting_socket.get();
   int rv = callback.GetResult(counting_socket->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -1506,10 +1507,8 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousErrorNoRead) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(counting_socket.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      counting_socket.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -1565,7 +1564,7 @@ TEST_F(SSLClientSocketTest, Read_FullDuplex) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -1627,7 +1626,7 @@ TEST_F(SSLClientSocketTest, Read_DeleteWhilePendingFullDuplex) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
 
   int rv = callback.GetResult(transport->Connect(callback.callback()));
@@ -1637,10 +1636,8 @@ TEST_F(SSLClientSocketTest, Read_DeleteWhilePendingFullDuplex) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock =
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config);
+  scoped_ptr<SSLClientSocket> sock = CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config);
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1743,7 +1740,7 @@ TEST_F(SSLClientSocketTest, Read_WithWriteError) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
 
   int rv = callback.GetResult(transport->Connect(callback.callback()));
@@ -1753,10 +1750,8 @@ TEST_F(SSLClientSocketTest, Read_WithWriteError) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1847,10 +1842,8 @@ TEST_F(SSLClientSocketTest, Connect_WithZeroReturn) {
   EXPECT_EQ(OK, rv);
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            kDefaultSSLConfig));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   raw_transport->SetNextReadError(0);
 
@@ -1885,7 +1878,7 @@ TEST_F(SSLClientSocketTest, Read_WithZeroReturn) {
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
   scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
+      CreateSSLClientSocket(transport.Pass(),
                             test_server.host_port_pair(),
                             ssl_config));
 
@@ -1918,7 +1911,7 @@ TEST_F(SSLClientSocketTest, Read_WithAsyncZeroReturn) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
   int rv = callback.GetResult(transport->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1928,7 +1921,7 @@ TEST_F(SSLClientSocketTest, Read_WithAsyncZeroReturn) {
   ssl_config.false_start_enabled = false;
 
   scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
+      CreateSSLClientSocket(transport.Pass(),
                             test_server.host_port_pair(),
                             ssl_config));
 
@@ -1965,7 +1958,7 @@ TEST_F(SSLClientSocketTest, Read_SmallChunks) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2018,10 +2011,8 @@ TEST_F(SSLClientSocketTest, Read_ManySmallRecords) {
   int rv = callback.GetResult(transport->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            kDefaultSSLConfig));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -2071,7 +2062,7 @@ TEST_F(SSLClientSocketTest, Read_Interrupted) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2122,7 +2113,7 @@ TEST_F(SSLClientSocketTest, Read_FullLogging) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2208,7 +2199,7 @@ TEST_F(SSLClientSocketTest, PrematureApplicationData) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2313,11 +2304,9 @@ TEST_F(SSLClientSocketTest, ClientSocketHandleNotFromPool) {
   scoped_ptr<ClientSocketHandle> socket_handle(new ClientSocketHandle());
   socket_handle->SetSocket(transport.Pass());
 
-  scoped_ptr<SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(socket_handle.Pass(),
-                                             test_server.host_port_pair(),
-                                             kDefaultSSLConfig,
-                                             context_));
+  scoped_ptr<SSLClientSocket> sock(socket_factory_->CreateSSLClientSocket(
+      socket_handle.Pass(), test_server.host_port_pair(), SSLConfig(),
+      context_));
 
   EXPECT_FALSE(sock->IsConnected());
   rv = sock->Connect(callback.callback());
@@ -2347,7 +2336,7 @@ TEST_F(SSLClientSocketTest, ExportKeyingMaterial) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2356,15 +2345,15 @@ TEST_F(SSLClientSocketTest, ExportKeyingMaterial) {
   EXPECT_TRUE(sock->IsConnected());
 
   const int kKeyingMaterialSize = 32;
-  const char* kKeyingLabel1 = "client-socket-test-1";
-  const char* kKeyingContext = "";
+  const char kKeyingLabel1[] = "client-socket-test-1";
+  const char kKeyingContext[] = "";
   unsigned char client_out1[kKeyingMaterialSize];
   memset(client_out1, 0, sizeof(client_out1));
   rv = sock->ExportKeyingMaterial(
       kKeyingLabel1, false, kKeyingContext, client_out1, sizeof(client_out1));
   EXPECT_EQ(rv, OK);
 
-  const char* kKeyingLabel2 = "client-socket-test-2";
+  const char kKeyingLabel2[] = "client-socket-test-2";
   unsigned char client_out2[kKeyingMaterialSize];
   memset(client_out2, 0, sizeof(client_out2));
   rv = sock->ExportKeyingMaterial(
@@ -2377,6 +2366,33 @@ TEST_F(SSLClientSocketTest, ExportKeyingMaterial) {
 // explicit NSS initialization.
 TEST(SSLClientSocket, ClearSessionCache) {
   SSLClientSocket::ClearSessionCache();
+}
+
+TEST(SSLClientSocket, SerializeNextProtos) {
+  NextProtoVector next_protos;
+  next_protos.push_back(kProtoHTTP11);
+  next_protos.push_back(kProtoSPDY31);
+  static std::vector<uint8_t> serialized =
+      SSLClientSocket::SerializeNextProtos(next_protos, true);
+  ASSERT_EQ(18u, serialized.size());
+  EXPECT_EQ(8, serialized[0]);  // length("http/1.1")
+  EXPECT_EQ('h', serialized[1]);
+  EXPECT_EQ('t', serialized[2]);
+  EXPECT_EQ('t', serialized[3]);
+  EXPECT_EQ('p', serialized[4]);
+  EXPECT_EQ('/', serialized[5]);
+  EXPECT_EQ('1', serialized[6]);
+  EXPECT_EQ('.', serialized[7]);
+  EXPECT_EQ('1', serialized[8]);
+  EXPECT_EQ(8, serialized[9]);  // length("spdy/3.1")
+  EXPECT_EQ('s', serialized[10]);
+  EXPECT_EQ('p', serialized[11]);
+  EXPECT_EQ('d', serialized[12]);
+  EXPECT_EQ('y', serialized[13]);
+  EXPECT_EQ('/', serialized[14]);
+  EXPECT_EQ('3', serialized[15]);
+  EXPECT_EQ('.', serialized[16]);
+  EXPECT_EQ('1', serialized[17]);
 }
 
 // Test that the server certificates are properly retrieved from the underlying
@@ -2405,7 +2421,7 @@ TEST_F(SSLClientSocketTest, VerifyServerChainProperlyOrdered) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
   EXPECT_FALSE(sock->IsConnected());
   rv = sock->Connect(callback.callback());
   rv = callback.GetResult(rv);
@@ -2512,7 +2528,7 @@ TEST_F(SSLClientSocketTest, VerifyReturnChainProperlyOrdered) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
   EXPECT_FALSE(sock->IsConnected());
   rv = sock->Connect(callback.callback());
 
@@ -2760,7 +2776,7 @@ TEST_F(SSLClientSocketTest, ReuseStates) {
   EXPECT_EQ(OK, rv);
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
+      transport.Pass(), test_server.host_port_pair(), SSLConfig()));
 
   rv = sock->Connect(callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -2821,10 +2837,8 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithFailure) {
   ssl_config.false_start_enabled = false;
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   sock->SetHandshakeCompletionCallback(base::Bind(
       &SSLClientSocketTest::RecordCompletedHandshake, base::Unretained(this)));
@@ -2858,7 +2872,7 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithSuccess) {
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
@@ -2895,7 +2909,7 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithDisabledSessionCache) {
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
   scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
@@ -2913,13 +2927,20 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithDisabledSessionCache) {
 
 TEST_F(SSLClientSocketFalseStartTest,
        HandshakeCallbackIsRun_WithFalseStartFailure) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // False Start requires NPN and a forward-secret cipher suite.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   monitor_handshake_callback_ = true;
   fail_handshake_after_false_start_ = true;
   ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, true));
@@ -2928,13 +2949,20 @@ TEST_F(SSLClientSocketFalseStartTest,
 
 TEST_F(SSLClientSocketFalseStartTest,
        HandshakeCallbackIsRun_WithFalseStartSuccess) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // False Start requires NPN and a forward-secret cipher suite.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   monitor_handshake_callback_ = true;
   ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, true));
   ASSERT_TRUE(ran_handshake_completion_callback_);
@@ -2942,49 +2970,90 @@ TEST_F(SSLClientSocketFalseStartTest,
 #endif  // defined(USE_OPENSSL)
 
 TEST_F(SSLClientSocketFalseStartTest, FalseStartEnabled) {
-  // False Start requires NPN and a forward-secret cipher suite.
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
+  // False Start requires NPN/ALPN, perfect forward secrecy, and an AEAD.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   ASSERT_NO_FATAL_FAILURE(
       TestFalseStart(server_options, client_config, true));
 }
 
 // Test that False Start is disabled without NPN.
 TEST_F(SSLClientSocketFalseStartTest, NoNPN) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   SSLConfig client_config;
   client_config.next_protos.clear();
   ASSERT_NO_FATAL_FAILURE(
       TestFalseStart(server_options, client_config, false));
 }
 
-// Test that False Start is disabled without a forward-secret cipher suite.
+// Test that False Start is disabled without perfect forward secrecy.
 TEST_F(SSLClientSocketFalseStartTest, NoForwardSecrecy) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
   ASSERT_NO_FATAL_FAILURE(
       TestFalseStart(server_options, client_config, false));
 }
 
+// Test that False Start is disabled without an AEAD.
+TEST_F(SSLClientSocketFalseStartTest, NoAEAD) {
+  SpawnedTestServer::SSLOptions server_options;
+  server_options.key_exchanges =
+      SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128;
+  server_options.enable_npn = true;
+  SSLConfig client_config;
+  client_config.next_protos.push_back(kProtoHTTP11);
+  ASSERT_NO_FATAL_FAILURE(TestFalseStart(server_options, client_config, false));
+}
+
 // Test that sessions are resumable after receiving the server Finished message.
 TEST_F(SSLClientSocketFalseStartTest, SessionResumption) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // Start a server.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
 
   // Let a full handshake complete with False Start.
   ASSERT_NO_FATAL_FAILURE(
@@ -3009,15 +3078,22 @@ TEST_F(SSLClientSocketFalseStartTest, SessionResumption) {
 // Test that sessions are not resumable before receiving the server Finished
 // message.
 TEST_F(SSLClientSocketFalseStartTest, NoSessionResumptionBeforeFinish) {
+  if (!SupportsAESGCM()) {
+    LOG(WARNING) << "Skipping test because AES-GCM is not supported.";
+    return;
+  }
+
   // Start a server.
   SpawnedTestServer::SSLOptions server_options;
   server_options.key_exchanges =
       SpawnedTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA;
+  server_options.bulk_ciphers =
+      SpawnedTestServer::SSLOptions::BULK_CIPHER_AES128GCM;
   server_options.enable_npn = true;
   ASSERT_TRUE(StartTestServer(server_options));
 
   SSLConfig client_config;
-  client_config.next_protos.push_back("http/1.1");
+  client_config.next_protos.push_back(kProtoHTTP11);
 
   // Start a handshake up to the server Finished message.
   TestCompletionCallback callback;
@@ -3055,7 +3131,7 @@ TEST_F(SSLClientSocketChannelIDTest, SendChannelID) {
   ASSERT_TRUE(ConnectToTestServer(ssl_options));
 
   EnableChannelID();
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.channel_id_enabled = true;
 
   int rv;
@@ -3077,7 +3153,7 @@ TEST_F(SSLClientSocketChannelIDTest, FailingChannelID) {
   ASSERT_TRUE(ConnectToTestServer(ssl_options));
 
   EnableFailingChannelID();
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.channel_id_enabled = true;
 
   int rv;
@@ -3099,7 +3175,7 @@ TEST_F(SSLClientSocketChannelIDTest, FailingChannelIDAsync) {
   ASSERT_TRUE(ConnectToTestServer(ssl_options));
 
   EnableAsyncFailingChannelID();
-  SSLConfig ssl_config = kDefaultSSLConfig;
+  SSLConfig ssl_config;
   ssl_config.channel_id_enabled = true;
 
   int rv;

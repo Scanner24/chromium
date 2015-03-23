@@ -122,29 +122,31 @@ class RequestContentScript : public ContentAction {
                              ScriptData* script_data);
 
   // Implementation of ContentAction:
-  virtual Type GetType() const OVERRIDE;
+  Type GetType() const override;
 
-  virtual void Apply(const std::string& extension_id,
-                     const base::Time& extension_install_time,
-                     ApplyInfo* apply_info) const OVERRIDE;
+  void Apply(const std::string& extension_id,
+             const base::Time& extension_install_time,
+             ApplyInfo* apply_info) const override;
 
-  virtual void Reapply(const std::string& extension_id,
-                       const base::Time& extension_install_time,
-                       ApplyInfo* apply_info) const OVERRIDE;
+  void Reapply(const std::string& extension_id,
+               const base::Time& extension_install_time,
+               ApplyInfo* apply_info) const override;
 
-  virtual void Revert(const std::string& extension_id,
-                      const base::Time& extension_install_time,
-                      ApplyInfo* apply_info) const OVERRIDE;
+  void Revert(const std::string& extension_id,
+              const base::Time& extension_install_time,
+              ApplyInfo* apply_info) const override;
 
  private:
-  void InitScript(const Extension* extension, const ScriptData& script_data);
+  void InitScript(const HostID& host_id,
+                  const Extension* extension,
+                  const ScriptData& script_data);
 
   void AddScript() {
     DCHECK(master_);
     master_->AddScript(script_);
   }
 
-  virtual ~RequestContentScript();
+  ~RequestContentScript() override;
 
   void InstructRenderProcessToInject(content::WebContents* contents,
                                      const std::string& extension_id) const;

@@ -9,6 +9,16 @@
 # file to your new one or GN won't know about it.
 
 import("//build/config/ui.gni")
+if (is_android) {
+  import("//build/config/android/config.gni")
+}
+
+declare_args() {
+  # A list of extra dependencies to add to the root target. This allows a
+  # checkout to add additional targets without explicitly changing any checked-
+  # in files.
+  root_extra_deps = []
+}
 
 # In GN, a "group" is a dummy target that just lists other targets.
 group("root") {
@@ -28,14 +38,18 @@ group("root") {
     "//chrome/common",
     "//chrome/plugin",
     "//chrome/renderer",
+    "//chrome/test",
+    "//chrome/tools",
     "//chrome/utility",
     "//components:all_components",
     "//content",
     "//content/shell:content_shell",
     "//content/test:test_support",
     "//crypto",
+    "//device/battery",
     "//device/bluetooth",
     "//device/nfc",
+    "//device/vibration",
     "//extensions/browser",
     "//extensions/common",
     "//extensions/common/api",
@@ -54,7 +68,7 @@ group("root") {
     "//mojo",
     "//net",
     "//pdf",
-    "//ppapi:ppapi_c",
+    "//ppapi/examples",
     "//printing",
     "//remoting/client/plugin",
     "//sandbox",
@@ -81,7 +95,6 @@ group("root") {
     "//third_party/libpng",
     "//third_party/libsrtp",
     "//third_party/libusb",
-    "//third_party/libwebm",
     "//third_party/libwebp",
     "//third_party/libxslt",
     "//third_party/libvpx",
@@ -119,12 +132,14 @@ group("root") {
     "//ui/snapshot",
     "//ui/strings",
     "//ui/surface",
+    "//ui/touch_selection",
     "//ui/views",
     "//ui/views/controls/webview",
     "//ui/web_dialogs",
     "//url",
     "//v8:v8",
   ]
+  deps += root_extra_deps
 
   if (!is_win) {
     deps += [ "//breakpad:symupload" ]
@@ -147,35 +162,47 @@ group("root") {
   }
 
   if (is_win) {
-    deps += [
-      "//ui/metro_viewer",
-    ]
+    deps += [ "//ui/metro_viewer" ]
   }
 
   if (is_win || is_mac || is_chromeos) {
     # RLZ works on these platforms.
-    deps += [
-      "//rlz:rlz_lib",
-    ]
+    deps += [ "//rlz:rlz_lib" ]
   }
 
-  if (cpu_arch == "x86" || cpu_arch == "x64") {
+  if (current_cpu == "x86" || current_cpu == "x64") {
     # YASM is x86/x64 only.
     deps += [ "//third_party/yasm($host_toolchain)" ]
   }
 
   if (is_android) {
     deps += [
+      "//base/android/linker:chromium_android_linker",
+      "//build/android/gyp/test:hello_world",
+      "//build/android/rezip",
       "//third_party/openmax_dl/dl",
       "//content/shell/android:content_shell_apk",
+      "//chrome/android:chrome_shell_apk",
+      "//chrome/test:test_support_unit",
+      "//chrome/test/chromedriver/test/webview_shell:chromedriver_webview_shell_apk",
       "//ui/android:ui_java",
       "//third_party/android_tools:android_gcm_java",
       "//third_party/android_tools:uiautomator_java",
       "//third_party/android_tools:android_support_v13_java",
       "//third_party/android_tools:android_support_v7_appcompat_java",
       "//third_party/android_tools:android_support_v7_mediarouter_java",
-      "//third_party/eyesfree:eyesfree_java",
+      "//third_party/mockito:mockito_java",
     ]
+
+    if (has_chrome_android_internal) {
+      deps += [ "//clank" ]
+    }
+
+    # TODO(GYP): Move the targets in the rest of this block that still
+    # need to be made to work in the GN build to the bottom of the file
+    # so that all the remaining work is located in one place in the file.
+    # This block should contain only the targets that aren't actually
+    # needed on Android.
 
     deps -= [
       "//apps",  # Needs testing.
@@ -184,6 +211,8 @@ group("root") {
       "//chrome/common",
       "//chrome/plugin",
       "//chrome/renderer",
+      "//chrome/test",
+      "//chrome/tools",
       "//chrome/utility",
       "//content/shell:content_shell",
       "//extensions/browser",
@@ -191,7 +220,7 @@ group("root") {
       "//extensions/common/api",
       "//extensions/renderer",
       "//pdf",  # Not compiled on Android in GYP yet, either.
-      "//ppapi:ppapi_c",
+      "//ppapi/examples",
       "//third_party/libusb",
       "//ui/keyboard",  # Blocked on content.
 
@@ -232,6 +261,44 @@ group("root") {
   if (!is_android && !is_ios) {
     deps += [
       "//device/usb",
+      "//third_party/pdfium/samples",
     ]
+  }
+
+  #
+  # TODO(GYP): Make everything below this work in the GN build.
+  #
+
+  if (is_mac) {
+    # TODO(dpranke): These are as-yet untriaged but need at least the above.
+    deps -= [
+      "//apps",
+      "//ash",
+      "//chrome/browser",
+      "//chrome/browser/devtools",
+      "//chrome/common",
+      "//chrome/plugin",
+      "//chrome/renderer",
+      "//chrome/test",
+      "//chrome/utility",
+      "//components:all_components",
+      "//content/shell:content_shell",
+      "//extensions/browser",
+      "//extensions/common",
+      "//extensions/common/api",
+      "//extensions/renderer",
+      "//remoting/client/plugin",
+      "//third_party/usrsctp",
+      "//ui/app_list",
+      "//ui/aura",
+      "//ui/keyboard",
+      "//ui/views",
+      "//ui/views/controls/webview",
+      "//ui/web_dialogs",
+    ]
+  }
+
+  if (is_mac || is_ios) {
+    deps -= [ "//ui/touch_selection" ]
   }
 }

@@ -13,6 +13,7 @@ class DumpsysPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
   """PowerMonitor that relies on the dumpsys batterystats to monitor the power
   consumption of a single android application. This measure uses a heuristic
   and is the same information end-users see with the battery application.
+  Available on Android L and higher releases.
   """
   def __init__(self, device, platform_backend):
     """Constructor.
@@ -22,6 +23,7 @@ class DumpsysPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
         platform_backend: A LinuxBasedPlatformBackend instance.
     """
     super(DumpsysPowerMonitor, self).__init__(platform_backend)
+    self._browser = None
     self._device = device
 
   def CanMonitorPower(self):
@@ -29,6 +31,7 @@ class DumpsysPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
 
   def StartMonitoringPower(self, browser):
     super(DumpsysPowerMonitor, self).StartMonitoringPower(browser)
+    self._browser = browser
     # Disable the charging of the device over USB. This is necessary because the
     # device only collects information about power usage when the device is not
     # charging.
@@ -36,8 +39,8 @@ class DumpsysPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
 
   def StopMonitoringPower(self):
     if self._browser:
-      # pylint: disable=W0212
       package = self._browser._browser_backend.package
+      self._browser = None
     cpu_stats = super(DumpsysPowerMonitor, self).StopMonitoringPower()
     self._device.old_interface.EnableUsbCharging()
     # By default, 'dumpsys batterystats' measures power consumption during the
@@ -45,7 +48,8 @@ class DumpsysPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
     result = self._platform.RunCommand('dumpsys batterystats -c %s' % package)
     assert result, 'Dumpsys produced no output'
     return super(DumpsysPowerMonitor, self).CombineResults(
-        cpu_stats, DumpsysPowerMonitor.ParseSamplingOutput(package, result))
+        cpu_stats, DumpsysPowerMonitor.ParseSamplingOutput(package,
+                                                           result.split('\n')))
 
   @staticmethod
   def ParseSamplingOutput(package, dumpsys_output):
@@ -103,8 +107,9 @@ class DumpsysPowerMonitor(sysfs_power_monitor.SysfsPowerMonitor):
 
     # Find the uid of for the given package.
     if not package in uid_entries:
-      logging.warning('Unable to parse dumpsys output. ' +
-                      'Please upgrade the OS version of the device.')
+      logging.warning('Unable to parse dumpsys output. '
+                      'Please upgrade the OS version of the device.'
+                      'package=%s, uid_entries=%s' % (package, uid_entries))
       out_dict['energy_consumption_mwh'] = 0
       return out_dict
     uid = uid_entries[package]

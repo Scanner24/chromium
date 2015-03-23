@@ -22,7 +22,7 @@ class AuthSyncObserver : public KeyedService,
                          public ProfileSyncServiceObserver {
  public:
   explicit AuthSyncObserver(Profile* user_profile);
-  virtual ~AuthSyncObserver();
+  ~AuthSyncObserver() override;
 
   void StartObserving();
 
@@ -30,10 +30,10 @@ class AuthSyncObserver : public KeyedService,
   friend class AuthSyncObserverFactory;
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
   // Called on attempt to restore supervised user token.
   void OnSupervisedTokenLoaded(const std::string& token);

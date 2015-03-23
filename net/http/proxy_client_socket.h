@@ -25,7 +25,7 @@ class HttpAuthController;
 class NET_EXPORT_PRIVATE ProxyClientSocket : public StreamSocket {
  public:
   ProxyClientSocket() {}
-  virtual ~ProxyClientSocket() {}
+  ~ProxyClientSocket() override {}
 
   // Returns the HttpResponseInfo (including HTTP Headers) from
   // the response to the CONNECT request.
@@ -74,13 +74,19 @@ class NET_EXPORT_PRIVATE ProxyClientSocket : public StreamSocket {
                                        const GURL& url,
                                        bool is_https_proxy);
 
+  // When a proxy authentication response is received during tunnel
+  // construction, this method should be called to strip everything
+  // but the auth header from the redirect response.  If it returns
+  // false, the response should be discarded and tunnel construction should
+  // fail.
+  static bool SanitizeProxyAuth(HttpResponseInfo* response);
+
   // When a redirect (e.g. 302 response) is received during tunnel
   // construction, this method should be called to strip everything
   // but the Location header from the redirect response.  If it returns
   // false, the response should be discarded and tunnel construction should
-  // fail.  |url| is for logging purposes.
-  static bool SanitizeProxyRedirect(HttpResponseInfo* response,
-                                    const GURL& url);
+  // fail.
+  static bool SanitizeProxyRedirect(HttpResponseInfo* response);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ProxyClientSocket);

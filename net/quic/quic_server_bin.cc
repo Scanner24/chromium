@@ -48,22 +48,19 @@ int main(int argc, char *argv[]) {
   }
 
   if (line->HasSwitch("port")) {
-    int port;
-    if (base::StringToInt(line->GetSwitchValueASCII("port"), &port)) {
-      FLAGS_port = port;
+    if (!base::StringToInt(line->GetSwitchValueASCII("port"), &FLAGS_port)) {
+      LOG(ERROR) << "--port must be an integer\n";
+      return 1;
     }
   }
 
   base::AtExitManager exit_manager;
-
   base::MessageLoopForIO message_loop;
 
   net::IPAddressNumber ip;
   CHECK(net::ParseIPLiteralToNumber("::", &ip));
 
   net::QuicConfig config;
-  config.SetDefaults();
-
   net::QuicServer server(config, net::QuicSupportedVersions());
 
   int rc = server.Listen(net::IPEndPoint(ip, FLAGS_port));

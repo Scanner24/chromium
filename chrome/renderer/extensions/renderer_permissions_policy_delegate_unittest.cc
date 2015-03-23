@@ -26,7 +26,7 @@ class RendererPermissionsPolicyDelegateTest : public testing::Test {
   RendererPermissionsPolicyDelegateTest() {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
     render_thread_.reset(new content::MockRenderThread());
     renderer_client_.reset(new TestExtensionsRendererClient);
@@ -73,7 +73,8 @@ TEST_F(RendererPermissionsPolicyDelegateTest, CannotScriptSigninProcess) {
       << error;
   // Pretend we are in the signin process. We should not be able to execute
   // script.
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kSigninProcess);
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kSigninProcess);
   EXPECT_FALSE(extension->permissions_data()->CanAccessPage(
       extension.get(), kSigninUrl, kSigninUrl, -1, -1, &error))
       << error;

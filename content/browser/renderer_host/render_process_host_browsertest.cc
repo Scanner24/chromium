@@ -42,13 +42,12 @@ class RenderProcessHostTest : public ContentBrowserTest,
 
  protected:
   // RenderProcessHostObserver:
-  virtual void RenderProcessExited(RenderProcessHost* host,
-                                   base::ProcessHandle handle,
-                                   base::TerminationStatus status,
-                                   int exit_code) OVERRIDE {
+  void RenderProcessExited(RenderProcessHost* host,
+                           base::TerminationStatus status,
+                           int exit_code) override {
     ++process_exits_;
   }
-  virtual void RenderProcessHostDestroyed(RenderProcessHost* host) OVERRIDE {
+  void RenderProcessHostDestroyed(RenderProcessHost* host) override {
     ++host_destructions_;
   }
 
@@ -104,8 +103,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
 
   // Navigate to a different page.
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // Must stay in scope with replace_host.
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
   GURL another_url = embedded_test_server()->GetURL("/simple_page.html");
   another_url = another_url.ReplaceComponents(replace_host);
   NavigateToURL(CreateBrowser(), another_url);
@@ -121,15 +119,14 @@ class ShellCloser : public RenderProcessHostObserver {
 
  protected:
   // RenderProcessHostObserver:
-  virtual void RenderProcessExited(RenderProcessHost* host,
-                                   base::ProcessHandle handle,
-                                   base::TerminationStatus status,
-                                   int exit_code) OVERRIDE {
+  void RenderProcessExited(RenderProcessHost* host,
+                           base::TerminationStatus status,
+                           int exit_code) override {
     logging_string_->append("ShellCloser::RenderProcessExited ");
     shell_->Close();
   }
 
-  virtual void RenderProcessHostDestroyed(RenderProcessHost* host) OVERRIDE {
+  void RenderProcessHostDestroyed(RenderProcessHost* host) override {
     logging_string_->append("ShellCloser::RenderProcessHostDestroyed ");
   }
 
@@ -146,14 +143,13 @@ class ObserverLogger : public RenderProcessHostObserver {
 
  protected:
   // RenderProcessHostObserver:
-  virtual void RenderProcessExited(RenderProcessHost* host,
-                                   base::ProcessHandle handle,
-                                   base::TerminationStatus status,
-                                   int exit_code) OVERRIDE {
+  void RenderProcessExited(RenderProcessHost* host,
+                           base::TerminationStatus status,
+                           int exit_code) override {
     logging_string_->append("ObserverLogger::RenderProcessExited ");
   }
 
-  virtual void RenderProcessHostDestroyed(RenderProcessHost* host) OVERRIDE {
+  void RenderProcessHostDestroyed(RenderProcessHost* host) override {
     logging_string_->append("ObserverLogger::RenderProcessHostDestroyed ");
     host_destroyed_ = true;
   }
@@ -181,7 +177,10 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
   rph->AddObserver(&observer_logger);
 
   // This will crash the render process, and start all the callbacks.
-  NavigateToURL(shell(), GURL(kChromeUICrashURL));
+  // We can't use NavigateToURL here since it accesses the shell() after
+  // navigating, which the shell_closer deletes.
+  NavigateToURLBlockUntilNavigationsComplete(
+      shell(), GURL(kChromeUICrashURL), 1);
 
   // The key here is that all the RenderProcessExited callbacks precede all the
   // RenderProcessHostDestroyed callbacks.
@@ -208,7 +207,7 @@ class Win32KLockdownRendererProcessHostTest : public RenderProcessHostTest {
   virtual ~Win32KLockdownRendererProcessHostTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitch(switches::kEnableWin32kRendererLockDown);
     RenderProcessHostTest::SetUp();

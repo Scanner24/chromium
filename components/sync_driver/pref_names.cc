@@ -36,6 +36,7 @@ const char kSyncAppSettings[] = "sync.app_settings";
 const char kSyncApps[] = "sync.apps";
 const char kSyncArticles[] = "sync.articles";
 const char kSyncAutofillProfile[] = "sync.autofill_profile";
+const char kSyncAutofillWallet[] = "sync.autofill_wallet";
 const char kSyncAutofill[] = "sync.autofill";
 const char kSyncBookmarks[] = "sync.bookmarks";
 const char kSyncDeviceInfo[] = "sync.device_info";
@@ -53,6 +54,8 @@ const char kSyncSessions[] = "sync.sessions";
 const char kSyncSupervisedUserSettings[] = "sync.managed_user_settings";
 const char kSyncSupervisedUserSharedSettings[] =
     "sync.managed_user_shared_settings";
+const char kSyncSupervisedUserWhitelists[] =
+    "sync.managed_user_whitelists";
 const char kSyncSupervisedUsers[] = "sync.managed_users";
 const char kSyncSyncedNotificationAppInfo[] =
     "sync.synced_notification_app_info";
@@ -60,6 +63,7 @@ const char kSyncSyncedNotifications[] = "sync.synced_notifications";
 const char kSyncTabs[] = "sync.tabs";
 const char kSyncThemes[] = "sync.themes";
 const char kSyncTypedUrls[] = "sync.typed_urls";
+const char kSyncWifiCredentials[] = "sync.wifi_credentials";
 
 // Boolean used by enterprise configuration management in order to lock down
 // sync.

@@ -10,10 +10,12 @@
 #include "base/mac/sdk_forward_declarations.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/app_window/app_window_registry.h"
+#include "extensions/common/constants.h"
 
 using extensions::PlatformAppBrowserTest;
 
@@ -33,10 +35,8 @@ class NativeAppWindowCocoaBrowserTest : public PlatformAppBrowserTest {
           content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
           content::NotificationService::AllSources());
       OpenApplication(
-          AppLaunchParams(profile(),
-                          app_,
-                          extensions::LAUNCH_CONTAINER_NONE,
-                          NEW_WINDOW));
+          AppLaunchParams(profile(), app_, extensions::LAUNCH_CONTAINER_NONE,
+                          NEW_WINDOW, extensions::SOURCE_TEST));
       app_loaded_observer.Wait();
     }
   }
@@ -114,18 +114,6 @@ IN_PROC_BROWSER_TEST_F(NativeAppWindowCocoaBrowserTest, HideShowWithApp) {
   EXPECT_TRUE([ns_window isVisible]);
   EXPECT_FALSE([other_ns_window isVisible]);
 }
-
-// Only test fullscreen for 10.7 and above.
-// Replicate specific 10.7 SDK declarations for building with prior SDKs.
-#if !defined(MAC_OS_X_VERSION_10_7) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
-NSString* const NSWindowDidEnterFullScreenNotification =
-    @"NSWindowDidEnterFullScreenNotification";
-NSString* const NSWindowDidExitFullScreenNotification =
-    @"NSWindowDidExitFullScreenNotification";
-
-#endif  // MAC_OS_X_VERSION_10_7
 
 @interface ScopedNotificationWatcher : NSObject {
  @private

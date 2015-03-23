@@ -29,7 +29,6 @@
 #include "build/build_config.h"
 #include "net/base/net_util.h"
 #include "remoting/host/host_config.h"
-#include "remoting/host/json_host_config.h"
 #include "remoting/host/usage_stats_consent.h"
 
 namespace remoting {
@@ -93,7 +92,6 @@ bool RunHostScriptWithTimeout(
   for (unsigned int i = 0; i < args.size(); ++i) {
     command_line.AppendArg(args[i]);
   }
-  base::ProcessHandle process_handle;
 
   // Redirect the child's stdout to the parent's stderr. In the case where this
   // parent process is a Native Messaging host, its stdout is used to send
@@ -107,14 +105,15 @@ bool RunHostScriptWithTimeout(
   options.allow_new_privs = true;
 #endif
 
-  if (!base::LaunchProcess(command_line, options, &process_handle)) {
+  base::Process process = base::LaunchProcess(command_line, options);
+  if (!process.IsValid()) {
     LOG(ERROR) << "Failed to run command: "
                << command_line.GetCommandLineString();
     return false;
   }
 
-  if (!base::WaitForExitCodeWithTimeout(process_handle, exit_code, timeout)) {
-    base::KillProcess(process_handle, 0, false);
+  if (!process.WaitForExitWithTimeout(timeout, exit_code)) {
+    base::KillProcess(process.Handle(), 0, false);
     LOG(ERROR) << "Timeout exceeded for command: "
                << command_line.GetCommandLineString();
     return false;
@@ -139,23 +138,16 @@ DaemonControllerDelegateLinux::~DaemonControllerDelegateLinux() {
 DaemonController::State DaemonControllerDelegateLinux::GetState() {
   base::FilePath script_path;
   if (!GetScriptPath(&script_path)) {
-    return DaemonController::STATE_NOT_IMPLEMENTED;
+    LOG(ERROR) << "GetScriptPath() failed.";
+    return DaemonController::STATE_UNKNOWN;
   }
   base::CommandLine command_line(script_path);
   command_line.AppendArg("--get-status");
 
   std::string status;
   int exit_code = 0;
-  bool result =
-      base::GetAppOutputWithExitCode(command_line, &status, &exit_code);
-  if (!result) {
-    // TODO(jamiewalch): When we have a good story for installing, return
-    // NOT_INSTALLED rather than NOT_IMPLEMENTED (the former suppresses
-    // the relevant UI in the web-app).
-    return DaemonController::STATE_NOT_IMPLEMENTED;
-  }
-
-  if (exit_code != 0) {
+  if (!base::GetAppOutputWithExitCode(command_line, &status, &exit_code) ||
+      exit_code != 0) {
     LOG(ERROR) << "Failed to run \"" << command_line.GetCommandLineString()
                << "\". Exit code: " << exit_code;
     return DaemonController::STATE_UNKNOWN;
@@ -168,6 +160,8 @@ DaemonController::State DaemonControllerDelegateLinux::GetState() {
   } else if (status == "STOPPED") {
     return DaemonController::STATE_STOPPED;
   } else if (status == "NOT_IMPLEMENTED") {
+    // Chrome Remote Desktop is not currently supported on the underlying Linux
+    // Distro.
     return DaemonController::STATE_NOT_IMPLEMENTED;
   } else {
     LOG(ERROR) << "Unknown status string returned from  \""
@@ -178,29 +172,20 @@ DaemonController::State DaemonControllerDelegateLinux::GetState() {
 }
 
 scoped_ptr<base::DictionaryValue> DaemonControllerDelegateLinux::GetConfig() {
+  scoped_ptr<base::DictionaryValue> config(
+      HostConfigFromJsonFile(GetConfigPath()));
+  if (!config)
+    return nullptr;
+
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-
-  if (GetState() != DaemonController::STATE_NOT_IMPLEMENTED) {
-    JsonHostConfig config(GetConfigPath());
-    if (config.Read()) {
-      std::string value;
-      if (config.GetString(kHostIdConfigPath, &value)) {
-        result->SetString(kHostIdConfigPath, value);
-      }
-      if (config.GetString(kXmppLoginConfigPath, &value)) {
-        result->SetString(kXmppLoginConfigPath, value);
-      }
-    } else {
-      result.reset();  // Return NULL in case of error.
-    }
+  std::string value;
+  if (config->GetString(kHostIdConfigPath, &value)) {
+    result->SetString(kHostIdConfigPath, value);
   }
-
+  if (config->GetString(kXmppLoginConfigPath, &value)) {
+    result->SetString(kXmppLoginConfigPath, value);
+  }
   return result.Pass();
-}
-
-void DaemonControllerDelegateLinux::InstallHost(
-    const DaemonController::CompletionCallback& done) {
-  NOTREACHED();
 }
 
 void DaemonControllerDelegateLinux::SetConfigAndStart(
@@ -230,9 +215,7 @@ void DaemonControllerDelegateLinux::SetConfigAndStart(
   }
 
   // Write config.
-  JsonHostConfig config_file(GetConfigPath());
-  if (!config_file.CopyFrom(config.get()) ||
-      !config_file.Save()) {
+  if (!HostConfigToJsonFile(*config, GetConfigPath())) {
     LOG(ERROR) << "Failed to update config file.";
     done.Run(DaemonController::RESULT_FAILED);
     return;
@@ -251,10 +234,11 @@ void DaemonControllerDelegateLinux::SetConfigAndStart(
 void DaemonControllerDelegateLinux::UpdateConfig(
     scoped_ptr<base::DictionaryValue> config,
     const DaemonController::CompletionCallback& done) {
-  JsonHostConfig config_file(GetConfigPath());
-  if (!config_file.Read() ||
-      !config_file.CopyFrom(config.get()) ||
-      !config_file.Save()) {
+  scoped_ptr<base::DictionaryValue> new_config(
+      HostConfigFromJsonFile(GetConfigPath()));
+  if (new_config)
+    new_config->MergeDictionary(config.get());
+  if (!new_config || !HostConfigToJsonFile(*new_config, GetConfigPath())) {
     LOG(ERROR) << "Failed to update config file.";
     done.Run(DaemonController::RESULT_FAILED);
     return;
@@ -280,37 +264,6 @@ void DaemonControllerDelegateLinux::Stop(
     result = DaemonController::RESULT_OK;
 
   done.Run(result);
-}
-
-void DaemonControllerDelegateLinux::SetWindow(void* window_handle) {
-  // noop
-}
-
-std::string DaemonControllerDelegateLinux::GetVersion() {
-  base::FilePath script_path;
-  if (!GetScriptPath(&script_path)) {
-    return std::string();
-  }
-  base::CommandLine command_line(script_path);
-  command_line.AppendArg("--host-version");
-
-  std::string version;
-  int exit_code = 0;
-  int result =
-      base::GetAppOutputWithExitCode(command_line, &version, &exit_code);
-  if (!result || exit_code != 0) {
-    LOG(ERROR) << "Failed to run \"" << command_line.GetCommandLineString()
-               << "\". Exit code: " << exit_code;
-    return std::string();
-  }
-
-  base::TrimWhitespaceASCII(version, base::TRIM_ALL, &version);
-  if (!base::ContainsOnlyChars(version, "0123456789.")) {
-    LOG(ERROR) << "Received invalid host version number: " << version;
-    return std::string();
-  }
-
-  return version;
 }
 
 DaemonController::UsageStatsConsent

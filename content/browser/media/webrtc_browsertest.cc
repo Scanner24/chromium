@@ -33,9 +33,6 @@ namespace content {
 #if defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
 // Renderer crashes under Android ASAN: https://crbug.com/408496.
 #define MAYBE_WebRtcBrowserTest DISABLED_WebRtcBrowserTest
-#elif defined(OS_ANDROID) && defined(__aarch64__)
-// Failures on ARM64 Android: http://crbug.com/408179.
-#define MAYBE_WebRtcBrowserTest DISABLED_WebRtcBrowserTest
 #else
 #define MAYBE_WebRtcBrowserTest WebRtcBrowserTest
 #endif
@@ -43,7 +40,7 @@ namespace content {
 class MAYBE_WebRtcBrowserTest : public WebRtcContentBrowserTest {
  public:
   MAYBE_WebRtcBrowserTest() {}
-  virtual ~MAYBE_WebRtcBrowserTest() {}
+  ~MAYBE_WebRtcBrowserTest() override {}
 
   // Convenience function since most peerconnection-call.html tests just load
   // the page, kick off some javascript and wait for the title to change to OK.
@@ -113,12 +110,8 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
   MakeTypicalPeerConnectionCall(javascript);
 }
 
-#if defined(OS_ANDROID) && defined(ARCH_CPU_ARM64)
-// Failing on ARM64 Android bot: http://crbug.com/408179
-#define MAYBE_CanSetupVideoCallWith16To9AspectRatio \
-  DISABLED_CanSetupVideoCallWith16To9AspectRatio
 // Flaky on TSAN v2. http://crbug.com/408006
-#elif defined(THREAD_SANITIZER)
+#if defined(THREAD_SANITIZER)
 #define MAYBE_CanSetupVideoCallWith16To9AspectRatio \
   DISABLED_CanSetupVideoCallWith16To9AspectRatio
 #else
@@ -144,8 +137,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
                        MAYBE_CanSetupVideoCallWith4To3AspectRatio) {
   const std::string javascript =
-      "callAndExpectResolution({video: {mandatory: {minWidth: 960,"
-      "maxAspectRatio: 1.333}}}, 960, 720);";
+      "callAndExpectResolution({video: {mandatory: { minWidth: 960,"
+      "maxWidth: 960, minAspectRatio: 1.333, maxAspectRatio: 1.333}}}, 960,"
+      " 720);";
   MakeTypicalPeerConnectionCall(javascript);
 }
 
@@ -181,14 +175,26 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
   MakeTypicalPeerConnectionCall("callAndSendDtmf(\'123,abc\');");
 }
 
-// TODO(phoglund): this test fails because the peer connection state will be
-// stable in the second negotiation round rather than have-local-offer.
-// http://crbug.com/293125.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       DISABLED_CanMakeEmptyCallThenAddStreamsAndRenegotiate) {
+                       CanMakeEmptyCallThenAddStreamsAndRenegotiate) {
   const char* kJavascript =
       "callEmptyThenAddOneStreamAndRenegotiate({video: true, audio: true});";
   MakeTypicalPeerConnectionCall(kJavascript);
+}
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       CanMakeAudioCallAndThenRenegotiateToVideo) {
+  const char* kJavascript =
+      "callAndRenegotiateToVideo({audio: true}, {audio: true, video:true});";
+  MakeTypicalPeerConnectionCall(kJavascript);
+}
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
+                       CanMakeVideoCallAndThenRenegotiateToAudio) {
+  MakeAudioDetectingPeerConnectionCall(base::StringPrintf(
+      "callAndRenegotiateToAudio("
+      "    %s, {audio: true, video:true}, {audio: true});",
+      kUseLenientAudioChecking));
 }
 
 // Below 2 test will make a complete PeerConnection-based call between pc1 and
@@ -197,18 +203,13 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 // The stream sent from pc3 to pc4 is the stream received on pc1.
 // The stream sent from pc4 to pc3 is cloned from stream the stream received
 // on pc2.
-// Flaky on win xp. http://crbug.com/304775
-#if defined(OS_WIN)
+#if defined(THREAD_SANITIZER)
+// Flaky on TSAN v2. http://crbug.com/373637
 #define MAYBE_CanForwardRemoteStream DISABLED_CanForwardRemoteStream
 #define MAYBE_CanForwardRemoteStream720p DISABLED_CanForwardRemoteStream720p
 #else
 #define MAYBE_CanForwardRemoteStream CanForwardRemoteStream
-// Flaky on TSAN v2. http://crbug.com/373637
-#if defined(THREAD_SANITIZER)
-#define MAYBE_CanForwardRemoteStream720p DISABLED_CanForwardRemoteStream720p
-#else
 #define MAYBE_CanForwardRemoteStream720p CanForwardRemoteStream720p
-#endif
 #endif
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, MAYBE_CanForwardRemoteStream) {
 #if defined (OS_ANDROID)
@@ -317,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, MAYBE_CallWithSctpDataOnly) {
 // This test will make a PeerConnection-based call and test an unreliable text
 // dataChannel and audio and video tracks.
 // TODO(mallinath) - Remove this test after rtp based data channel is disabled.
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, DISABLED_CallWithDataAndMedia) {
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest, MAYBE_CallWithDataAndMedia) {
   MakeTypicalPeerConnectionCall("callWithDataAndMedia();");
 }
 

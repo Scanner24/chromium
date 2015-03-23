@@ -11,12 +11,17 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_element_reader.h"
+#include "net/base/upload_file_element_reader.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
@@ -67,12 +72,10 @@ class ThrottlingTestURLRequestContextGetter
   }
 
   // TestURLRequestContextGetter:
-  virtual TestURLRequestContext* GetURLRequestContext() OVERRIDE {
-    return context_;
-  }
+  TestURLRequestContext* GetURLRequestContext() override { return context_; }
 
  protected:
-  virtual ~ThrottlingTestURLRequestContextGetter() {}
+  ~ThrottlingTestURLRequestContextGetter() override {}
 
   TestURLRequestContext* const context_;
 };
@@ -82,7 +85,7 @@ class ThrottlingTestURLRequestContextGetter
 class URLFetcherTest : public testing::Test,
                        public URLFetcherDelegate {
  public:
-  URLFetcherTest() : fetcher_(NULL) {}
+  URLFetcherTest() : fetcher_(NULL), expected_status_code_(200) {}
 
   static int GetNumFetcherCores() {
     return URLFetcherImpl::GetNumFetcherCores();
@@ -95,7 +98,7 @@ class URLFetcherTest : public testing::Test,
   // Subclasses that override this should either call this function or
   // CleanupAfterFetchComplete() at the end of their processing, depending on
   // whether they want to check for a non-empty HTTP 200 response or not.
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
   // Deletes |fetcher| and terminates the message loop.
   void CleanupAfterFetchComplete();
@@ -110,7 +113,7 @@ class URLFetcherTest : public testing::Test,
 
  protected:
   // testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
 
     context_.reset(new ThrottlingTestURLRequestContext());
@@ -122,7 +125,7 @@ class URLFetcherTest : public testing::Test,
 #endif
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
 #if defined(USE_NSS) || defined(OS_IOS)
     ShutdownNSSHttpIO();
 #endif
@@ -136,6 +139,7 @@ class URLFetcherTest : public testing::Test,
 
   URLFetcherImpl* fetcher_;
   scoped_ptr<TestURLRequestContext> context_;
+  int expected_status_code_;
 };
 
 // A test fixture that uses a MockHostResolver, so that name resolutions can
@@ -143,13 +147,13 @@ class URLFetcherTest : public testing::Test,
 class URLFetcherMockDnsTest : public URLFetcherTest {
  public:
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
  protected:
   GURL test_url_;
@@ -167,7 +171,7 @@ void URLFetcherTest::CreateFetcher(const GURL& url) {
 
 void URLFetcherTest::OnURLFetchComplete(const URLFetcher* source) {
   EXPECT_TRUE(source->GetStatus().is_success());
-  EXPECT_EQ(200, source->GetResponseCode());  // HTTP OK
+  EXPECT_EQ(expected_status_code_, source->GetResponseCode());  // HTTP OK
 
   std::string data;
   EXPECT_TRUE(source->GetResponseAsString(&data));
@@ -231,10 +235,10 @@ namespace {
 class URLFetcherPostTest : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 };
 
 // Version of URLFetcherTest that does a POST of a file using
@@ -249,10 +253,10 @@ class URLFetcherPostFileTest : public URLFetcherTest {
   }
 
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
  private:
   base::FilePath path_;
@@ -260,14 +264,42 @@ class URLFetcherPostFileTest : public URLFetcherTest {
   uint64 range_length_;
 };
 
+class URLFetcherSetUploadFactoryTest : public URLFetcherTest {
+ public:
+  URLFetcherSetUploadFactoryTest() : create_stream_count_(0) {}
+
+  // URLFetcherTest:
+  void CreateFetcher(const GURL& url) override;
+
+  // URLFetcherDelegate:
+  void OnURLFetchComplete(const URLFetcher* source) override;
+
+  // Callback passed to URLFetcher to create upload stream.
+  scoped_ptr<UploadDataStream> CreateUploadStream() {
+    ++create_stream_count_;
+    const std::string str("bobsyeruncle\n");
+    std::vector<char> buffer(str.begin(), str.end());
+    return ElementsUploadDataStream::CreateWithReader(
+        scoped_ptr<UploadElementReader>(
+            new UploadOwnedBytesElementReader(&buffer)),
+        0);
+  }
+
+  size_t create_stream_count() const { return create_stream_count_; }
+
+ private:
+  // Count of calling CreateStream.
+  size_t create_stream_count_;
+};
+
 // Version of URLFetcherTest that does a POST instead with empty upload body
 class URLFetcherEmptyPostTest : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 };
 
 // Version of URLFetcherTest that tests download progress reports.
@@ -279,12 +311,12 @@ class URLFetcherDownloadProgressTest : public URLFetcherTest {
   }
 
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchDownloadProgress(const URLFetcher* source,
-                                          int64 current,
-                                          int64 total) OVERRIDE;
+  void OnURLFetchDownloadProgress(const URLFetcher* source,
+                                  int64 current,
+                                  int64 total) override;
 
  protected:
   // Download progress returned by the previous callback.
@@ -298,13 +330,14 @@ class URLFetcherDownloadProgressTest : public URLFetcherTest {
 class URLFetcherDownloadProgressCancelTest : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
-  virtual void OnURLFetchDownloadProgress(const URLFetcher* source,
-                                          int64 current,
-                                          int64 total) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
+  void OnURLFetchDownloadProgress(const URLFetcher* source,
+                                  int64 current,
+                                  int64 total) override;
+
  protected:
   bool cancelled_;
 };
@@ -313,12 +346,13 @@ class URLFetcherDownloadProgressCancelTest : public URLFetcherTest {
 class URLFetcherUploadProgressTest : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchUploadProgress(const URLFetcher* source,
-                                        int64 current,
-                                        int64 total) OVERRIDE;
+  void OnURLFetchUploadProgress(const URLFetcher* source,
+                                int64 current,
+                                int64 total) override;
+
  protected:
   int64 previous_progress_;
   std::string chunk_;
@@ -329,14 +363,15 @@ class URLFetcherUploadProgressTest : public URLFetcherTest {
 class URLFetcherHeadersTest : public URLFetcherTest {
  public:
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 };
 
 // Version of URLFetcherTest that tests SocketAddress.
 class URLFetcherSocketAddressTest : public URLFetcherTest {
  public:
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
+
  protected:
   std::string expected_host_;
   uint16 expected_port_;
@@ -346,13 +381,13 @@ class URLFetcherSocketAddressTest : public URLFetcherTest {
 class URLFetcherStopOnRedirectTest : public URLFetcherTest {
  public:
   URLFetcherStopOnRedirectTest();
-  virtual ~URLFetcherStopOnRedirectTest();
+  ~URLFetcherStopOnRedirectTest() override;
 
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
  protected:
   // The URL we should be redirected to.
@@ -365,10 +400,11 @@ class URLFetcherStopOnRedirectTest : public URLFetcherTest {
 class URLFetcherProtectTest : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
+
  private:
   Time start_time_;
 };
@@ -378,10 +414,11 @@ class URLFetcherProtectTest : public URLFetcherTest {
 class URLFetcherProtectTestPassedThrough : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
+
  private:
   Time start_time_;
 };
@@ -392,7 +429,7 @@ class URLFetcherBadHTTPSTest : public URLFetcherTest {
   URLFetcherBadHTTPSTest();
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
  private:
   base::FilePath cert_dir_;
@@ -402,10 +439,10 @@ class URLFetcherBadHTTPSTest : public URLFetcherTest {
 class URLFetcherCancelTest : public URLFetcherTest {
  public:
   // URLFetcherTest:
-  virtual void CreateFetcher(const GURL& url) OVERRIDE;
+  void CreateFetcher(const GURL& url) override;
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
   void CancelRequest();
 };
@@ -418,7 +455,7 @@ class CancelTestURLRequestContext : public ThrottlingTestURLRequestContext {
   }
 
  private:
-  virtual ~CancelTestURLRequestContext() {
+  ~CancelTestURLRequestContext() override {
     // The d'tor should execute in the IO thread. Post the quit task to the
     // current thread.
     base::MessageLoop::current()->PostTask(FROM_HERE,
@@ -439,7 +476,7 @@ class CancelTestURLRequestContextGetter
   }
 
   // TestURLRequestContextGetter:
-  virtual TestURLRequestContext* GetURLRequestContext() OVERRIDE {
+  TestURLRequestContext* GetURLRequestContext() override {
     if (!context_.get()) {
       context_.reset(new CancelTestURLRequestContext());
       DCHECK(context_->throttler_manager());
@@ -474,7 +511,7 @@ class CancelTestURLRequestContextGetter
   }
 
  protected:
-  virtual ~CancelTestURLRequestContextGetter() {}
+  ~CancelTestURLRequestContextGetter() override {}
 
  private:
   scoped_ptr<TestURLRequestContext> context_;
@@ -487,7 +524,8 @@ class CancelTestURLRequestContextGetter
 class URLFetcherMultipleAttemptTest : public URLFetcherTest {
  public:
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
+
  private:
   std::string data_;
 };
@@ -501,7 +539,7 @@ class URLFetcherFileTest : public URLFetcherTest {
   void CreateFetcherForTempFile(const GURL& url);
 
   // URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const URLFetcher* source) override;
 
  protected:
   base::FilePath expected_file_;
@@ -563,6 +601,27 @@ void URLFetcherPostFileTest::OnURLFetchComplete(const URLFetcher* source) {
   std::string data;
   EXPECT_TRUE(source->GetResponseAsString(&data));
   EXPECT_EQ(expected.substr(range_offset_, expected_size), data);
+  URLFetcherTest::OnURLFetchComplete(source);
+}
+
+void URLFetcherSetUploadFactoryTest::CreateFetcher(const GURL& url) {
+  fetcher_ = new URLFetcherImpl(url, URLFetcher::POST, this);
+  fetcher_->SetRequestContext(new ThrottlingTestURLRequestContextGetter(
+      io_message_loop_proxy().get(), request_context()));
+  fetcher_->SetUploadStreamFactory(
+      "text/plain",
+      base::Bind(&URLFetcherSetUploadFactoryTest::CreateUploadStream,
+                 base::Unretained(this)));
+  fetcher_->SetAutomaticallyRetryOn5xx(true);
+  fetcher_->SetMaxRetriesOn5xx(1);
+  fetcher_->Start();
+}
+
+void URLFetcherSetUploadFactoryTest::OnURLFetchComplete(
+    const URLFetcher* source) {
+  std::string data;
+  EXPECT_TRUE(source->GetResponseAsString(&data));
+  EXPECT_EQ("bobsyeruncle\n", data);
   URLFetcherTest::OnURLFetchComplete(source);
 }
 
@@ -1078,6 +1137,28 @@ TEST_F(URLFetcherPostFileTest, Range) {
 
   CreateFetcher(test_server.GetURL("echo"));
   base::MessageLoop::current()->Run();
+}
+
+TEST_F(URLFetcherSetUploadFactoryTest, Basic) {
+  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
+                                SpawnedTestServer::kLocalhost,
+                                base::FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+
+  CreateFetcher(test_server.GetURL("echo"));
+  base::MessageLoop::current()->Run();
+  ASSERT_EQ(1u, create_stream_count());
+}
+
+TEST_F(URLFetcherSetUploadFactoryTest, Retry) {
+  SpawnedTestServer test_server(SpawnedTestServer::TYPE_HTTP,
+                                SpawnedTestServer::kLocalhost,
+                                base::FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
+  expected_status_code_ = 500;
+  CreateFetcher(test_server.GetURL("echo?status=500"));
+  base::MessageLoop::current()->Run();
+  ASSERT_EQ(2u, create_stream_count());
 }
 
 TEST_F(URLFetcherEmptyPostTest, Basic) {

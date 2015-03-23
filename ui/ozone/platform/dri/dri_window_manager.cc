@@ -5,22 +5,12 @@
 #include "ui/ozone/platform/dri/dri_window_manager.h"
 
 #include "base/logging.h"
-#include "ui/ozone/platform/dri/dri_cursor.h"
 #include "ui/ozone/platform/dri/dri_window.h"
 
 namespace ui {
 
-namespace {
-
-gfx::PointF GetDefaultCursorLocation(DriWindow* window) {
-  return gfx::PointF(window->GetBounds().width() / 2,
-                     window->GetBounds().height() / 2);
-}
-
-}  // namespace
-
-DriWindowManager::DriWindowManager(HardwareCursorDelegate* cursor_delegate)
-    : last_allocated_widget_(0), cursor_(new DriCursor(cursor_delegate, this)) {
+DriWindowManager::DriWindowManager()
+    : last_allocated_widget_(0), event_grabber_(gfx::kNullAcceleratedWidget) {
 }
 
 DriWindowManager::~DriWindowManager() {
@@ -37,9 +27,6 @@ void DriWindowManager::AddWindow(gfx::AcceleratedWidget widget,
   std::pair<WidgetToWindowMap::iterator, bool> result = window_map_.insert(
       std::pair<gfx::AcceleratedWidget, DriWindow*>(widget, window));
   DCHECK(result.second) << "Window for " << widget << " already added.";
-
-  if (cursor_->GetCursorWindow() == gfx::kNullAcceleratedWidget)
-    ResetCursorLocation();
 }
 
 void DriWindowManager::RemoveWindow(gfx::AcceleratedWidget widget) {
@@ -49,8 +36,8 @@ void DriWindowManager::RemoveWindow(gfx::AcceleratedWidget widget) {
   else
     NOTREACHED() << "Attempting to remove non-existing window " << widget;
 
-  if (cursor_->GetCursorWindow() == widget)
-    ResetCursorLocation();
+  if (event_grabber_ == widget)
+    event_grabber_ = gfx::kNullAcceleratedWidget;
 }
 
 DriWindow* DriWindowManager::GetWindow(gfx::AcceleratedWidget widget) {
@@ -62,16 +49,29 @@ DriWindow* DriWindowManager::GetWindow(gfx::AcceleratedWidget widget) {
   return NULL;
 }
 
-void DriWindowManager::ResetCursorLocation() {
-  gfx::AcceleratedWidget cursor_widget = gfx::kNullAcceleratedWidget;
-  gfx::PointF location;
-  if (!window_map_.empty()) {
-    WidgetToWindowMap::iterator it = window_map_.begin();
-    cursor_widget = it->first;
-    location = GetDefaultCursorLocation(it->second);
-  }
+DriWindow* DriWindowManager::GetWindowAt(const gfx::Point& location) {
+  for (auto it = window_map_.begin(); it != window_map_.end(); ++it)
+    if (it->second->GetBounds().Contains(location))
+      return it->second;
 
-  cursor_->MoveCursorTo(cursor_widget, location);
+  return NULL;
+}
+
+DriWindow* DriWindowManager::GetPrimaryWindow() {
+  auto it = window_map_.begin();
+  return it != window_map_.end() ? it->second : nullptr;
+}
+
+void DriWindowManager::GrabEvents(gfx::AcceleratedWidget widget) {
+  if (event_grabber_ != gfx::kNullAcceleratedWidget)
+    return;
+  event_grabber_ = widget;
+}
+
+void DriWindowManager::UngrabEvents(gfx::AcceleratedWidget widget) {
+  if (event_grabber_ != widget)
+    return;
+  event_grabber_ = gfx::kNullAcceleratedWidget;
 }
 
 }  // namespace ui

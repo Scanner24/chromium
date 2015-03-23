@@ -21,7 +21,7 @@ namespace policy {
 namespace {
 
 // Grace interval for policy timestamp checks, in seconds.
-const int kTimestampGraceIntervalSeconds = 60;
+const int kTimestampGraceIntervalSeconds = 7200;
 
 // DER-encoded ASN.1 object identifier for the SHA1-RSA signature algorithm.
 const uint8 kSHA1SignatureAlgorithm[] = {
@@ -36,8 +36,10 @@ const uint8 kSHA256SignatureAlgorithm[] = {
     0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00
 };
 
-COMPILE_ASSERT(sizeof(kSHA256SignatureAlgorithm) ==
-               sizeof(kSHA1SignatureAlgorithm), invalid_algorithm_size);
+static_assert(sizeof(kSHA256SignatureAlgorithm) ==
+              sizeof(kSHA1SignatureAlgorithm),
+              "kSHA256SignatureAlgorithm must be the same size as "
+              "kSHA1SignatureAlgorithm");
 
 const int kSignatureAlgorithmSize = sizeof(kSHA1SignatureAlgorithm);
 
@@ -66,8 +68,8 @@ void CloudPolicyValidatorBase::ValidateTimestamp(
     base::Time not_before,
     base::Time now,
     ValidateTimestampOption timestamp_option) {
-  // Timestamp should be from the past. We allow for a 1-minute grace interval
-  // to cover clock drift.
+  // Timestamp should be from the past. We allow for a grace interval to cover
+  // clock drift.
   validation_flags_ |= VALIDATE_TIMESTAMP;
   timestamp_not_before_ =
       (not_before - base::Time::UnixEpoch()).InMilliseconds();
@@ -253,7 +255,7 @@ void CloudPolicyValidatorBase::RunChecks() {
     { VALIDATE_PAYLOAD,     &CloudPolicyValidatorBase::CheckPayload },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kCheckFunctions); ++i) {
+  for (size_t i = 0; i < arraysize(kCheckFunctions); ++i) {
     if (validation_flags_ & kCheckFunctions[i].flag) {
       status_ = (this->*(kCheckFunctions[i].checkFunction))();
       if (status_ != VALIDATION_OK)

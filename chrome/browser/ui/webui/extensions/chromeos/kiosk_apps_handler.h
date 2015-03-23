@@ -30,22 +30,20 @@ class KioskAppsHandler : public content::WebUIMessageHandler,
                          public KioskAppManagerObserver {
  public:
   KioskAppsHandler();
-  virtual ~KioskAppsHandler();
+  ~KioskAppsHandler() override;
 
   void GetLocalizedValues(content::WebUIDataSource* source);
 
   // content::WebUIMessageHandler overrides:
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // KioskAppManagerObserver overrides:
-  virtual void OnKioskAppDataChanged(const std::string& app_id) OVERRIDE;
-  virtual void OnKioskAppDataLoadFailure(const std::string& app_id) OVERRIDE;
-  virtual void OnKioskExtensionLoadedInCache(
-      const std::string& app_id) OVERRIDE;
-  virtual void OnKioskExtensionDownloadFailed(
-      const std::string& app_id) OVERRIDE;
+  void OnKioskAppDataChanged(const std::string& app_id) override;
+  void OnKioskAppDataLoadFailure(const std::string& app_id) override;
+  void OnKioskExtensionLoadedInCache(const std::string& app_id) override;
+  void OnKioskExtensionDownloadFailed(const std::string& app_id) override;
 
-  virtual void OnKioskAppsSettingsChanged() OVERRIDE;
+  void OnKioskAppsSettingsChanged() override;
 
  private:
   // Sends all kiosk apps and settings to webui.

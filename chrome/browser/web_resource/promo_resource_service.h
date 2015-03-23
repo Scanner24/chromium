@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/web_resource/web_resource_service.h"
+#include "chrome/browser/web_resource/chrome_web_resource_service.h"
 
 class NotificationPromo;
 class PrefRegistrySimple;
@@ -26,17 +26,16 @@ class PrefRegistrySyncable;
 // dynamically change the appearance of the New Tab Page. For example, it has
 // been used to fetch "tips" to be displayed on the NTP, or to display
 // promotional messages to certain groups of Chrome users.
-class PromoResourceService : public WebResourceService {
+class PromoResourceService : public ChromeWebResourceService {
  public:
   static void RegisterPrefs(PrefRegistrySimple* registry);
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
   static void MigrateUserPrefs(PrefService* user_prefs);
 
   PromoResourceService();
+  ~PromoResourceService() override;
 
  private:
-  virtual ~PromoResourceService();
-
   // Schedule a notification that a web resource is either going to become
   // available or be no longer valid.
   void ScheduleNotification(const NotificationPromo& notification_promo);
@@ -56,7 +55,7 @@ class PromoResourceService : public WebResourceService {
   void PromoResourceStateChange();
 
   // WebResourceService override to process the parsed information.
-  virtual void Unpack(const base::DictionaryValue& parsed_json) OVERRIDE;
+  void Unpack(const base::DictionaryValue& parsed_json) override;
 
   // Allows the creation of tasks to send a notification.
   // This allows the PromoResourceService to notify the New Tab Page immediately

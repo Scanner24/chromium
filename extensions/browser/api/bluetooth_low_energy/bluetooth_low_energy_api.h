@@ -25,10 +25,10 @@ class BluetoothLowEnergyAPI : public BrowserContextKeyedAPI {
   static BluetoothLowEnergyAPI* Get(content::BrowserContext* context);
 
   explicit BluetoothLowEnergyAPI(content::BrowserContext* context);
-  virtual ~BluetoothLowEnergyAPI();
+  ~BluetoothLowEnergyAPI() override;
 
   // KeyedService implementation..
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   BluetoothLowEnergyEventRouter* event_router() const {
     return event_router_.get();
@@ -44,8 +44,6 @@ class BluetoothLowEnergyAPI : public BrowserContextKeyedAPI {
 
   scoped_ptr<BluetoothLowEnergyEventRouter> event_router_;
 
-  content::BrowserContext* browser_context_;
-
   DISALLOW_COPY_AND_ASSIGN(BluetoothLowEnergyAPI);
 };
 
@@ -59,10 +57,10 @@ class BluetoothLowEnergyExtensionFunction : public AsyncExtensionFunction {
   BluetoothLowEnergyExtensionFunction();
 
  protected:
-  virtual ~BluetoothLowEnergyExtensionFunction();
+  ~BluetoothLowEnergyExtensionFunction() override;
 
   // ExtensionFunction override.
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
   // Implemented by individual bluetoothLowEnergy extension functions to perform
   // the body of the function. This invoked asynchonously after RunAsync after
@@ -81,10 +79,10 @@ class BluetoothLowEnergyConnectFunction
                              BLUETOOTHLOWENERGY_CONNECT);
 
  protected:
-  virtual ~BluetoothLowEnergyConnectFunction() {}
+  ~BluetoothLowEnergyConnectFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -100,10 +98,10 @@ class BluetoothLowEnergyDisconnectFunction
                              BLUETOOTHLOWENERGY_DISCONNECT);
 
  protected:
-  virtual ~BluetoothLowEnergyDisconnectFunction() {}
+  ~BluetoothLowEnergyDisconnectFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -119,10 +117,10 @@ class BluetoothLowEnergyGetServiceFunction
                              BLUETOOTHLOWENERGY_GETSERVICE);
 
  protected:
-  virtual ~BluetoothLowEnergyGetServiceFunction() {}
+  ~BluetoothLowEnergyGetServiceFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyGetServicesFunction
@@ -132,10 +130,10 @@ class BluetoothLowEnergyGetServicesFunction
                              BLUETOOTHLOWENERGY_GETSERVICES);
 
  protected:
-  virtual ~BluetoothLowEnergyGetServicesFunction() {}
+  ~BluetoothLowEnergyGetServicesFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyGetCharacteristicFunction
@@ -145,10 +143,10 @@ class BluetoothLowEnergyGetCharacteristicFunction
                              BLUETOOTHLOWENERGY_GETCHARACTERISTIC);
 
  protected:
-  virtual ~BluetoothLowEnergyGetCharacteristicFunction() {}
+  ~BluetoothLowEnergyGetCharacteristicFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyGetCharacteristicsFunction
@@ -158,10 +156,10 @@ class BluetoothLowEnergyGetCharacteristicsFunction
                              BLUETOOTHLOWENERGY_GETCHARACTERISTICS);
 
  protected:
-  virtual ~BluetoothLowEnergyGetCharacteristicsFunction() {}
+  ~BluetoothLowEnergyGetCharacteristicsFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyGetIncludedServicesFunction
@@ -171,10 +169,10 @@ class BluetoothLowEnergyGetIncludedServicesFunction
                              BLUETOOTHLOWENERGY_GETINCLUDEDSERVICES);
 
  protected:
-  virtual ~BluetoothLowEnergyGetIncludedServicesFunction() {}
+  ~BluetoothLowEnergyGetIncludedServicesFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyGetDescriptorFunction
@@ -184,10 +182,10 @@ class BluetoothLowEnergyGetDescriptorFunction
                              BLUETOOTHLOWENERGY_GETDESCRIPTOR);
 
  protected:
-  virtual ~BluetoothLowEnergyGetDescriptorFunction() {}
+  ~BluetoothLowEnergyGetDescriptorFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyGetDescriptorsFunction
@@ -197,10 +195,10 @@ class BluetoothLowEnergyGetDescriptorsFunction
                              BLUETOOTHLOWENERGY_GETDESCRIPTORS);
 
  protected:
-  virtual ~BluetoothLowEnergyGetDescriptorsFunction() {}
+  ~BluetoothLowEnergyGetDescriptorsFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 };
 
 class BluetoothLowEnergyReadCharacteristicValueFunction
@@ -210,10 +208,10 @@ class BluetoothLowEnergyReadCharacteristicValueFunction
                              BLUETOOTHLOWENERGY_READCHARACTERISTICVALUE);
 
  protected:
-  virtual ~BluetoothLowEnergyReadCharacteristicValueFunction() {}
+  ~BluetoothLowEnergyReadCharacteristicValueFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -232,10 +230,10 @@ class BluetoothLowEnergyWriteCharacteristicValueFunction
                              BLUETOOTHLOWENERGY_WRITECHARACTERISTICVALUE);
 
  protected:
-  virtual ~BluetoothLowEnergyWriteCharacteristicValueFunction() {}
+  ~BluetoothLowEnergyWriteCharacteristicValueFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -255,10 +253,10 @@ class BluetoothLowEnergyStartCharacteristicNotificationsFunction
       BLUETOOTHLOWENERGY_STARTCHARACTERISTICNOTIFICATIONS);
 
  protected:
-  virtual ~BluetoothLowEnergyStartCharacteristicNotificationsFunction() {}
+  ~BluetoothLowEnergyStartCharacteristicNotificationsFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -275,10 +273,10 @@ class BluetoothLowEnergyStopCharacteristicNotificationsFunction
       BLUETOOTHLOWENERGY_STOPCHARACTERISTICNOTIFICATIONS);
 
  protected:
-  virtual ~BluetoothLowEnergyStopCharacteristicNotificationsFunction() {}
+  ~BluetoothLowEnergyStopCharacteristicNotificationsFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -294,10 +292,10 @@ class BluetoothLowEnergyReadDescriptorValueFunction
                              BLUETOOTHLOWENERGY_READDESCRIPTORVALUE);
 
  protected:
-  virtual ~BluetoothLowEnergyReadDescriptorValueFunction() {}
+  ~BluetoothLowEnergyReadDescriptorValueFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by
@@ -316,10 +314,10 @@ class BluetoothLowEnergyWriteDescriptorValueFunction
                              BLUETOOTHLOWENERGY_WRITEDESCRIPTORVALUE);
 
  protected:
-  virtual ~BluetoothLowEnergyWriteDescriptorValueFunction() {}
+  ~BluetoothLowEnergyWriteDescriptorValueFunction() override {}
 
   // BluetoothLowEnergyExtensionFunction override.
-  virtual bool DoWork() OVERRIDE;
+  bool DoWork() override;
 
  private:
   // Success and error callbacks, called by

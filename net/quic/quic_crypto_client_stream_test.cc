@@ -18,6 +18,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using std::string;
+
 namespace net {
 namespace test {
 namespace {
@@ -28,18 +30,20 @@ const uint16 kServerPort = 80;
 class QuicCryptoClientStreamTest : public ::testing::Test {
  public:
   QuicCryptoClientStreamTest()
-      : connection_(new PacketSavingConnection(false)),
+      : connection_(new PacketSavingConnection(/*is_server=*/false)),
         session_(new TestClientSession(connection_, DefaultQuicConfig())),
         server_id_(kServerHostname, kServerPort, false, PRIVACY_MODE_DISABLED),
-        stream_(new QuicCryptoClientStream(
-            server_id_, session_.get(), NULL, &crypto_config_)) {
+        stream_(new QuicCryptoClientStream(server_id_,
+                                           session_.get(),
+                                           nullptr,
+                                           &crypto_config_)) {
     session_->SetCryptoStream(stream_.get());
-    session_->config()->SetDefaults();
-    crypto_config_.SetDefaults();
+    // Advance the time, because timers do not like uninitialized times.
+    connection_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
   }
 
   void CompleteCryptoHandshake() {
-    EXPECT_TRUE(stream_->CryptoConnect());
+    stream_->CryptoConnect();
     CryptoTestUtils::HandshakeWithFakeServer(connection_, stream_.get());
   }
 
@@ -79,7 +83,7 @@ TEST_F(QuicCryptoClientStreamTest, MessageAfterHandshake) {
 }
 
 TEST_F(QuicCryptoClientStreamTest, BadMessageType) {
-  EXPECT_TRUE(stream_->CryptoConnect());
+  stream_->CryptoConnect();
 
   message_.set_tag(kCHLO);
   ConstructHandshakeMessage();
@@ -93,12 +97,10 @@ TEST_F(QuicCryptoClientStreamTest, NegotiatedParameters) {
   CompleteCryptoHandshake();
 
   const QuicConfig* config = session_->config();
-  EXPECT_EQ(kQBIC, config->congestion_feedback());
   EXPECT_EQ(kMaximumIdleTimeoutSecs,
-            config->idle_connection_state_lifetime().ToSeconds());
+            config->IdleConnectionStateLifetime().ToSeconds());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection,
-            config->max_streams_per_connection());
-  EXPECT_EQ(0, config->keepalive_timeout().ToSeconds());
+            config->MaxStreamsPerConnection());
 
   const QuicCryptoNegotiatedParameters& crypto_params(
       stream_->crypto_negotiated_params());
@@ -108,7 +110,7 @@ TEST_F(QuicCryptoClientStreamTest, NegotiatedParameters) {
 
 TEST_F(QuicCryptoClientStreamTest, InvalidHostname) {
   QuicServerId server_id("invalid", 80, false, PRIVACY_MODE_DISABLED);
-  stream_.reset(new QuicCryptoClientStream(server_id, session_.get(), NULL,
+  stream_.reset(new QuicCryptoClientStream(server_id, session_.get(), nullptr,
                                            &crypto_config_));
   session_->SetCryptoStream(stream_.get());
 
@@ -121,23 +123,21 @@ TEST_F(QuicCryptoClientStreamTest, ExpiredServerConfig) {
   // Seed the config with a cached server config.
   CompleteCryptoHandshake();
 
-  connection_ = new PacketSavingConnection(true);
+  connection_ = new PacketSavingConnection(/*is_server=*/false);
   session_.reset(new TestClientSession(connection_, DefaultQuicConfig()));
-  stream_.reset(new QuicCryptoClientStream(server_id_, session_.get(), NULL,
+  stream_.reset(new QuicCryptoClientStream(server_id_, session_.get(), nullptr,
                                            &crypto_config_));
 
   session_->SetCryptoStream(stream_.get());
-  session_->config()->SetDefaults();
 
   // Advance time 5 years to ensure that we pass the expiry time of the cached
   // server config.
-  reinterpret_cast<MockClock*>(const_cast<QuicClock*>(connection_->clock()))
-      ->AdvanceTime(QuicTime::Delta::FromSeconds(60 * 60 * 24 * 365 * 5));
+  connection_->AdvanceTime(
+      QuicTime::Delta::FromSeconds(60 * 60 * 24 * 365 * 5));
 
-  // Check that a client hello was sent and that CryptoConnect doesn't fail
-  // with an error.
-  EXPECT_TRUE(stream_->CryptoConnect());
-  ASSERT_EQ(1u, connection_->packets_.size());
+  stream_->CryptoConnect();
+  // Check that a client hello was sent.
+  ASSERT_EQ(1u, connection_->encrypted_packets_.size());
 }
 
 TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdate) {

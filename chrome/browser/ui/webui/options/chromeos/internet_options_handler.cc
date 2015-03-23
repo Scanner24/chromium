@@ -10,11 +10,11 @@
 #include <string>
 #include <vector>
 
-#include "ash/system/chromeos/network/network_connect.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -34,7 +34,6 @@
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
-#include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_connection_handler.h"
 #include "chromeos/network/network_device_handler.h"
 #include "chromeos/network/network_event_log.h"
@@ -55,6 +54,7 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/web_ui_util.h"
+#include "ui/chromeos/network/network_connect.h"
 #include "ui/chromeos/network/network_icon.h"
 #include "ui/gfx/image/image_skia.h"
 
@@ -63,40 +63,31 @@ namespace options {
 
 namespace {
 
+// Keys for the initial "localized" dictionary values.
+const char kLoggedInAsOwnerKey[] = "loggedInAsOwner";
+const char kShowCarrierSelectKey[] = "showCarrierSelect";
+const char kNetworkDataKey[] = "networkData";
+
 // Keys for the network description dictionary passed to the web ui. Make sure
 // to keep the strings in sync with what the JavaScript side uses.
 const char kNetworkInfoKeyIconURL[] = "iconURL";
 const char kNetworkInfoKeyPolicyManaged[] = "policyManaged";
-
-// These are types of name server selections from the web ui.
-const char kNameServerTypeAutomatic[] = "automatic";
-const char kNameServerTypeGoogle[] = "google";
-
-// Google public name servers (DNS).
-const char kGoogleNameServers[] = "8.8.4.4,8.8.8.8";
 
 // Functions we call in JavaScript.
 const char kRefreshNetworkDataFunction[] =
     "options.network.NetworkList.refreshNetworkData";
 const char kSetDefaultNetworkIconsFunction[] =
     "options.network.NetworkList.setDefaultNetworkIcons";
-const char kSendNetworkDetailsFunction[] =
-    "options.internet.DetailsInternetPage.sendNetworkDetails";
-const char kShowDetailedInfoFunction[] =
-    "options.internet.DetailsInternetPage.showDetailedInfo";
+const char kGetManagedPropertiesResultFunction[] =
+    "options.internet.DetailsInternetPage.getManagedPropertiesResult";
 const char kUpdateConnectionDataFunction[] =
     "options.internet.DetailsInternetPage.updateConnectionData";
 const char kUpdateCarrierFunction[] =
     "options.internet.DetailsInternetPage.updateCarrier";
 
-// These are used to register message handlers with JavaScript.
-const char kNetworkCommandMessage[] = "networkCommand";
-const char kSetApnMessage[] = "setApn";
-const char kSetAutoConnectMessage[] = "setAutoConnect";
+// Setter methods called from JS that still need to be converted to match
+// networkingPrivate methods.
 const char kSetCarrierMessage[] = "setCarrier";
-const char kSetIPConfigMessage[] = "setIPConfig";
-const char kSetPreferNetworkMessage[] = "setPreferNetwork";
-const char kSetServerHostname[] = "setServerHostname";
 const char kShowMorePlanInfoMessage[] = "showMorePlanInfo";
 const char kSimOperationMessage[] = "simOperation";
 
@@ -108,27 +99,28 @@ const char kGetManagedPropertiesMessage[] = "getManagedProperties";
 const char kRequestNetworkScanMessage[] = "requestNetworkScan";
 const char kStartConnectMessage[] = "startConnect";
 const char kStartDisconnectMessage[] = "startDisconnect";
+const char kSetPropertiesMessage[] = "setProperties";
+
+// TODO(stevenjb): Add these to networkingPrivate.
+const char kRemoveNetworkMessage[] = "removeNetwork";
+
+// TODO(stevenjb): Deprecate these and integrate with settings Web UI.
+const char kAddConnectionMessage[] = "addConnection";
+const char kConfigureNetworkMessage[] = "configureNetwork";
+const char kActivateNetworkMessage[] = "activateNetwork";
 
 // These are strings used to communicate with JavaScript.
-const char kTagActivate[] = "activate";
-const char kTagAddConnection[] = "add";
-const char kTagCarrierSelectFlag[] = "showCarrierSelect";
 const char kTagCellularAvailable[] = "cellularAvailable";
 const char kTagCellularEnabled[] = "cellularEnabled";
 const char kTagCellularSimAbsent[] = "cellularSimAbsent";
 const char kTagCellularSimLockType[] = "cellularSimLockType";
 const char kTagCellularSupportsScan[] = "cellularSupportsScan";
-const char kTagConfigure[] = "configure";
-const char kTagForget[] = "forget";
 const char kTagRememberedList[] = "rememberedList";
-const char kTagShowDetails[] = "showDetails";
-const char kTagShowViewAccountButton[] = "showViewAccountButton";
 const char kTagSimOpChangePin[] = "changePin";
 const char kTagSimOpConfigure[] = "configure";
 const char kTagSimOpSetLocked[] = "setLocked";
 const char kTagSimOpSetUnlocked[] = "setUnlocked";
 const char kTagSimOpUnlock[] = "unlock";
-const char kTagTrue[] = "true";
 const char kTagVpnList[] = "vpnList";
 const char kTagWifiAvailable[] = "wifiAvailable";
 const char kTagWifiEnabled[] = "wifiEnabled";
@@ -138,11 +130,9 @@ const char kTagWiredList[] = "wiredList";
 const char kTagWirelessList[] = "wirelessList";
 
 // Pseudo-ONC chrome specific properties appended to the ONC dictionary.
-const char kTagErrorMessage[] = "errorMessage";
 const char kNetworkInfoKeyServicePath[] = "servicePath";
-const char kNetworkInfoKeyGUID[] = "GUID";
-
-const int kPreferredPriority = 1;
+const char kTagErrorMessage[] = "errorMessage";
+const char kTagShowViewAccountButton[] = "showViewAccountButton";
 
 void ShillError(const std::string& function,
                 const std::string& error_name,
@@ -159,18 +149,6 @@ void ShillError(const std::string& function,
 const NetworkState* GetNetworkState(const std::string& service_path) {
   return NetworkHandler::Get()->network_state_handler()->
       GetNetworkState(service_path);
-}
-
-void SetNetworkProperty(const std::string& service_path,
-                        const std::string& property,
-                        base::Value* value) {
-  NET_LOG_EVENT("SetNetworkProperty: " + property, service_path);
-  base::DictionaryValue properties;
-  properties.SetWithoutPathExpansion(property, value);
-  NetworkHandler::Get()->network_configuration_handler()->SetProperties(
-      service_path, properties,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "SetNetworkProperty"));
 }
 
 // Builds a dictionary with network information and an icon used for the
@@ -238,58 +216,6 @@ bool ShowViewAccountButton(const NetworkState* cellular) {
   return true;
 }
 
-scoped_ptr<base::DictionaryValue> PopulateConnectionDetails(
-    const NetworkState* network,
-    const base::DictionaryValue& onc_properties) {
-  scoped_ptr<base::DictionaryValue> dictionary(onc_properties.DeepCopy());
-
-  // Append Service Path for now.
-  dictionary->SetString(kNetworkInfoKeyServicePath, network->path());
-  // Append a Chrome specific translated error message.
-  dictionary->SetString(
-      kTagErrorMessage,
-      ash::network_connect::ErrorString(network->error(), network->path()));
-
-  return dictionary.Pass();
-}
-
-// Helper methods for SetIPConfigProperties
-bool AppendPropertyKeyIfPresent(const std::string& key,
-                                const base::DictionaryValue& old_properties,
-                                std::vector<std::string>* property_keys) {
-  if (old_properties.HasKey(key)) {
-    property_keys->push_back(key);
-    return true;
-  }
-  return false;
-}
-
-bool AddStringPropertyIfChanged(const std::string& key,
-                                const std::string& new_value,
-                                const base::DictionaryValue& old_properties,
-                                base::DictionaryValue* new_properties) {
-  std::string old_value;
-  if (!old_properties.GetStringWithoutPathExpansion(key, &old_value) ||
-      new_value != old_value) {
-    new_properties->SetStringWithoutPathExpansion(key, new_value);
-    return true;
-  }
-  return false;
-}
-
-bool AddIntegerPropertyIfChanged(const std::string& key,
-                                 int new_value,
-                                 const base::DictionaryValue& old_properties,
-                                 base::DictionaryValue* new_properties) {
-  int old_value;
-  if (!old_properties.GetIntegerWithoutPathExpansion(key, &old_value) ||
-      new_value != old_value) {
-    new_properties->SetIntegerWithoutPathExpansion(key, new_value);
-    return true;
-  }
-  return false;
-}
-
 }  // namespace
 
 InternetOptionsHandler::InternetOptionsHandler()
@@ -313,14 +239,16 @@ void InternetOptionsHandler::GetLocalizedValues(
   // InitializePage() gets called.
   std::string owner;
   chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner, &owner);
-  localized_strings->SetString("ownerUserId", base::UTF8ToUTF16(owner));
   bool logged_in_as_owner = LoginState::Get()->GetLoggedInUserType() ==
                             LoginState::LOGGED_IN_USER_OWNER;
-  localized_strings->SetBoolean("loggedInAsOwner", logged_in_as_owner);
+  localized_strings->SetBoolean(kLoggedInAsOwnerKey, logged_in_as_owner);
+  localized_strings->SetBoolean(
+      kShowCarrierSelectKey, base::CommandLine::ForCurrentProcess()->HasSwitch(
+                                 chromeos::switches::kEnableCarrierSwitching));
 
   base::DictionaryValue* network_dictionary = new base::DictionaryValue;
   FillNetworkInfo(network_dictionary);
-  localized_strings->Set("networkData", network_dictionary);
+  localized_strings->Set(kNetworkDataKey, network_dictionary);
 }
 
 void InternetOptionsHandler::InitializePage() {
@@ -338,33 +266,26 @@ void InternetOptionsHandler::InitializePage() {
 }
 
 void InternetOptionsHandler::RegisterMessages() {
-  // Setup handlers specific to this panel.
-  web_ui()->RegisterMessageCallback(kNetworkCommandMessage,
-      base::Bind(&InternetOptionsHandler::NetworkCommandCallback,
+  web_ui()->RegisterMessageCallback(kAddConnectionMessage,
+      base::Bind(&InternetOptionsHandler::AddConnection,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetPreferNetworkMessage,
-      base::Bind(&InternetOptionsHandler::SetPreferNetworkCallback,
+  web_ui()->RegisterMessageCallback(kRemoveNetworkMessage,
+      base::Bind(&InternetOptionsHandler::RemoveNetwork,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetAutoConnectMessage,
-      base::Bind(&InternetOptionsHandler::SetAutoConnectCallback,
+  web_ui()->RegisterMessageCallback(kConfigureNetworkMessage,
+      base::Bind(&InternetOptionsHandler::ConfigureNetwork,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetIPConfigMessage,
-      base::Bind(&InternetOptionsHandler::SetIPConfigCallback,
+  web_ui()->RegisterMessageCallback(kActivateNetworkMessage,
+      base::Bind(&InternetOptionsHandler::ActivateNetwork,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kShowMorePlanInfoMessage,
       base::Bind(&InternetOptionsHandler::ShowMorePlanInfoCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetApnMessage,
-      base::Bind(&InternetOptionsHandler::SetApnCallback,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kSetCarrierMessage,
       base::Bind(&InternetOptionsHandler::SetCarrierCallback,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kSimOperationMessage,
       base::Bind(&InternetOptionsHandler::SimOperationCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetServerHostname,
-      base::Bind(&InternetOptionsHandler::SetServerHostnameCallback,
                  base::Unretained(this)));
 
   // networkingPrivate methods
@@ -386,6 +307,9 @@ void InternetOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kStartDisconnectMessage,
       base::Bind(&InternetOptionsHandler::StartDisconnectCallback,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kSetPropertiesMessage,
+      base::Bind(&InternetOptionsHandler::SetPropertiesCallback,
+                 base::Unretained(this)));
 }
 
 void InternetOptionsHandler::ShowMorePlanInfoCallback(
@@ -397,66 +321,7 @@ void InternetOptionsHandler::ShowMorePlanInfoCallback(
     NOTREACHED();
     return;
   }
-  ash::network_connect::ShowMobileSetup(service_path);
-}
-
-void InternetOptionsHandler::SetApnCallback(const base::ListValue* args) {
-  std::string service_path;
-  if (!args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->network_configuration_handler()->GetProperties(
-      service_path,
-      base::Bind(&InternetOptionsHandler::SetApnProperties,
-                 weak_factory_.GetWeakPtr(), base::Owned(args->DeepCopy())),
-      base::Bind(&ShillError, "SetApnCallback"));
-}
-
-void InternetOptionsHandler::SetApnProperties(
-    const base::ListValue* args,
-    const std::string& service_path,
-    const base::DictionaryValue& shill_properties) {
-  std::string apn, username, password;
-  if (!args->GetString(1, &apn) ||
-      !args->GetString(2, &username) ||
-      !args->GetString(3, &password)) {
-    NOTREACHED();
-    return;
-  }
-  NET_LOG_EVENT("SetApnCallback", service_path);
-
-  if (apn.empty()) {
-    std::vector<std::string> properties_to_clear;
-    properties_to_clear.push_back(shill::kCellularApnProperty);
-    NetworkHandler::Get()->network_configuration_handler()->ClearProperties(
-      service_path, properties_to_clear,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "ClearCellularApnProperties"));
-    return;
-  }
-
-  const base::DictionaryValue* shill_apn_dict = NULL;
-  std::string network_id;
-  if (shill_properties.GetDictionaryWithoutPathExpansion(
-          shill::kCellularApnProperty, &shill_apn_dict)) {
-    shill_apn_dict->GetStringWithoutPathExpansion(
-        shill::kApnNetworkIdProperty, &network_id);
-  }
-  base::DictionaryValue properties;
-  base::DictionaryValue* apn_dict = new base::DictionaryValue;
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnProperty, apn);
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnNetworkIdProperty,
-                                          network_id);
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnUsernameProperty,
-                                          username);
-  apn_dict->SetStringWithoutPathExpansion(shill::kApnPasswordProperty,
-                                          password);
-  properties.SetWithoutPathExpansion(shill::kCellularApnProperty, apn_dict);
-  NetworkHandler::Get()->network_configuration_handler()->SetProperties(
-      service_path, properties,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "SetApnProperties"));
+  ui::NetworkConnect::Get()->ShowMobileSetup(service_path);
 }
 
 void InternetOptionsHandler::CarrierStatusCallback() {
@@ -467,7 +332,7 @@ void InternetOptionsHandler::CarrierStatusCallback() {
     const NetworkState* network =
         handler->FirstNetworkByType(NetworkTypePattern::Cellular());
     if (network && network->path() == details_path_) {
-      ash::network_connect::ActivateCellular(network->path());
+      ui::NetworkConnect::Get()->ActivateCellular(network->path());
       UpdateConnectionData(network->path());
     }
   }
@@ -565,13 +430,16 @@ void InternetOptionsHandler::GetManagedPropertiesCallback(
     NOTREACHED();
     return;
   }
-  NetworkHandler::Get()->managed_network_configuration_handler()
+  // This is only ever called to provide properties for the details page, so
+  // set |details_path_| (used by the NetworkState observers) here.
+  details_path_ = service_path;
+  NetworkHandler::Get()
+      ->managed_network_configuration_handler()
       ->GetManagedProperties(
-          LoginState::Get()->primary_user_hash(),
-          service_path,
-          base::Bind(
-              &InternetOptionsHandler::PopulateDictionaryDetailsCallback,
-              weak_factory_.GetWeakPtr()),
+          LoginState::Get()->primary_user_hash(), service_path,
+          base::Bind(&InternetOptionsHandler::GetManagedPropertiesResult,
+                     weak_factory_.GetWeakPtr(),
+                     kGetManagedPropertiesResultFunction),
           base::Bind(&ShillError, "GetManagedProperties"));
 }
 
@@ -586,7 +454,7 @@ void InternetOptionsHandler::StartConnectCallback(const base::ListValue* args) {
     NOTREACHED();
     return;
   }
-  ash::network_connect::ConnectToNetwork(service_path);
+  ui::NetworkConnect::Get()->ConnectToNetwork(service_path);
 }
 
 void InternetOptionsHandler::StartDisconnectCallback(
@@ -623,22 +491,35 @@ void InternetOptionsHandler::UpdateConnectionData(
   NetworkHandler::Get()
       ->managed_network_configuration_handler()
       ->GetManagedProperties(
-          LoginState::Get()->primary_user_hash(),
-          service_path,
-          base::Bind(&InternetOptionsHandler::UpdateConnectionDataCallback,
-                     weak_factory_.GetWeakPtr()),
+          LoginState::Get()->primary_user_hash(), service_path,
+          base::Bind(&InternetOptionsHandler::GetManagedPropertiesResult,
+                     weak_factory_.GetWeakPtr(), kUpdateConnectionDataFunction),
           base::Bind(&ShillError, "UpdateConnectionData"));
 }
 
-void InternetOptionsHandler::UpdateConnectionDataCallback(
+void InternetOptionsHandler::GetManagedPropertiesResult(
+    const std::string& js_callback_function,
     const std::string& service_path,
     const base::DictionaryValue& onc_properties) {
+  scoped_ptr<base::DictionaryValue> dictionary(onc_properties.DeepCopy());
+  // Add service path for now.
+  dictionary->SetString(kNetworkInfoKeyServicePath, service_path);
+
   const NetworkState* network = GetNetworkState(service_path);
-  if (!network)
-    return;
-  scoped_ptr<base::DictionaryValue> dictionary =
-      PopulateConnectionDetails(network, onc_properties);
-  web_ui()->CallJavascriptFunction(kUpdateConnectionDataFunction, *dictionary);
+  if (network) {
+    // Add a Chrome specific translated error message. TODO(stevenjb): Figure
+    // out a more robust way to track errors. Service.Error is transient so we
+    // use NetworkState.error() which accurately tracks the "last" error.
+    dictionary->SetString(kTagErrorMessage,
+                          ui::NetworkConnect::Get()->GetShillErrorString(
+                              network->error(), service_path));
+    // Add additional non-ONC cellular properties to inform the UI.
+    if (network->type() == shill::kTypeCellular) {
+      dictionary->SetBoolean(kTagShowViewAccountButton,
+                             ShowViewAccountButton(network));
+    }
+  }
+  web_ui()->CallJavascriptFunction(js_callback_function, *dictionary);
 }
 
 void InternetOptionsHandler::UpdateCarrier() {
@@ -687,165 +568,20 @@ void InternetOptionsHandler::DevicePropertiesUpdated(
     UpdateConnectionData(network->path());
 }
 
-void InternetOptionsHandler::SetServerHostnameCallback(
+void InternetOptionsHandler::SetPropertiesCallback(
     const base::ListValue* args) {
-  std::string service_path, server_hostname;
-  if (args->GetSize() < 2 ||
-      !args->GetString(0, &service_path) ||
-      !args->GetString(1, &server_hostname)) {
-    NOTREACHED();
-    return;
-  }
-  SetNetworkProperty(service_path,
-                     shill::kProviderHostProperty,
-                     new base::StringValue(server_hostname));
-}
-
-void InternetOptionsHandler::SetPreferNetworkCallback(
-    const base::ListValue* args) {
-  std::string service_path, prefer_network_str;
-  if (args->GetSize() < 2 ||
-      !args->GetString(0, &service_path) ||
-      !args->GetString(1, &prefer_network_str)) {
-    NOTREACHED();
-    return;
-  }
-  int priority = (prefer_network_str == kTagTrue) ? kPreferredPriority : 0;
-  SetNetworkProperty(service_path,
-                     shill::kPriorityProperty,
-                     new base::FundamentalValue(priority));
-}
-
-void InternetOptionsHandler::SetAutoConnectCallback(
-    const base::ListValue* args) {
-  std::string service_path, auto_connect_str;
-  if (args->GetSize() < 2 ||
-      !args->GetString(0, &service_path) ||
-      !args->GetString(1, &auto_connect_str)) {
-    NOTREACHED();
-    return;
-  }
-  bool auto_connect = auto_connect_str == kTagTrue;
-  SetNetworkProperty(service_path,
-                     shill::kAutoConnectProperty,
-                     new base::FundamentalValue(auto_connect));
-}
-
-void InternetOptionsHandler::SetIPConfigCallback(const base::ListValue* args) {
   std::string service_path;
-  if (!args->GetString(0, &service_path)) {
+  const base::DictionaryValue* properties;
+  if (args->GetSize() < 2 ||
+      !args->GetString(0, &service_path) ||
+      !args->GetDictionary(1, &properties)) {
     NOTREACHED();
     return;
   }
-  NetworkHandler::Get()->network_configuration_handler()->GetProperties(
-      service_path,
-      base::Bind(&InternetOptionsHandler::SetIPConfigProperties,
-                 weak_factory_.GetWeakPtr(), base::Owned(args->DeepCopy())),
-      base::Bind(&ShillError, "SetIPConfigCallback"));
-}
-
-void InternetOptionsHandler::SetIPConfigProperties(
-    const base::ListValue* args,
-    const std::string& service_path,
-    const base::DictionaryValue& shill_properties) {
-  std::string address, netmask, gateway, name_server_type, name_servers;
-  bool dhcp_for_ip;
-  if (!args->GetBoolean(1, &dhcp_for_ip) ||
-      !args->GetString(2, &address) ||
-      !args->GetString(3, &netmask) ||
-      !args->GetString(4, &gateway) ||
-      !args->GetString(5, &name_server_type) ||
-      !args->GetString(6, &name_servers)) {
-    NOTREACHED();
-    return;
-  }
-  NET_LOG_USER("SetIPConfigProperties: " + name_server_type, service_path);
-
-  std::vector<std::string> properties_to_clear;
-  base::DictionaryValue properties_to_set;
-
-  if (dhcp_for_ip) {
-    AppendPropertyKeyIfPresent(shill::kStaticIPAddressProperty,
-                               shill_properties,
-                               &properties_to_clear);
-    AppendPropertyKeyIfPresent(shill::kStaticIPPrefixlenProperty,
-                               shill_properties,
-                               &properties_to_clear);
-    AppendPropertyKeyIfPresent(shill::kStaticIPGatewayProperty,
-                               shill_properties,
-                               &properties_to_clear);
-  } else {
-    AddStringPropertyIfChanged(shill::kStaticIPAddressProperty,
-                               address,
-                               shill_properties,
-                               &properties_to_set);
-    int prefixlen = network_util::NetmaskToPrefixLength(netmask);
-    if (prefixlen < 0) {
-      LOG(ERROR) << "Invalid prefix length for: " << service_path
-                 << " with netmask " << netmask;
-      prefixlen = 0;
-    }
-    AddIntegerPropertyIfChanged(shill::kStaticIPPrefixlenProperty,
-                                prefixlen,
-                                shill_properties,
-                                &properties_to_set);
-    AddStringPropertyIfChanged(shill::kStaticIPGatewayProperty,
-                               gateway,
-                               shill_properties,
-                               &properties_to_set);
-  }
-
-  if (name_server_type == kNameServerTypeAutomatic) {
-    AppendPropertyKeyIfPresent(shill::kStaticIPNameServersProperty,
-                               shill_properties,
-                               &properties_to_clear);
-  } else {
-    if (name_server_type == kNameServerTypeGoogle)
-      name_servers = kGoogleNameServers;
-    AddStringPropertyIfChanged(shill::kStaticIPNameServersProperty,
-                               name_servers,
-                               shill_properties,
-                               &properties_to_set);
-  }
-
-  if (!properties_to_clear.empty()) {
-    NetworkHandler::Get()->network_configuration_handler()->ClearProperties(
-        service_path,
-        properties_to_clear,
-        base::Bind(&base::DoNothing),
-        base::Bind(&ShillError, "ClearIPConfigProperties"));
-  }
-  if (!properties_to_set.empty()) {
-    NetworkHandler::Get()->network_configuration_handler()->SetProperties(
-        service_path,
-        properties_to_set,
-        base::Bind(&base::DoNothing),
-        base::Bind(&ShillError, "SetIPConfigProperties"));
-  }
-  std::string device_path;
-  shill_properties.GetStringWithoutPathExpansion(shill::kDeviceProperty,
-                                                 &device_path);
-  if (!device_path.empty()) {
-    NetworkHandler::Get()->network_device_handler()->RequestRefreshIPConfigs(
-        device_path,
-        base::Bind(&base::DoNothing),
-        base::Bind(&ShillError, "RequestRefreshIPConfigs"));
-  }
-}
-
-void InternetOptionsHandler::PopulateDictionaryDetailsCallback(
-    const std::string& service_path,
-    const base::DictionaryValue& onc_properties) {
-  const NetworkState* network = GetNetworkState(service_path);
-  if (!network) {
-    LOG(ERROR) << "Network properties not found: " << service_path;
-    return;
-  }
-  scoped_ptr<base::DictionaryValue> dictionary =
-      PopulateConnectionDetails(network, onc_properties);
-
-  // Show details dialog
-  web_ui()->CallJavascriptFunction(kSendNetworkDetailsFunction, *dictionary);
+  NetworkHandler::Get()->managed_network_configuration_handler()->SetProperties(
+      service_path, *properties,
+      base::Bind(&base::DoNothing),
+      base::Bind(&ShillError, "SetProperties"));
 }
 
 gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
@@ -860,79 +596,51 @@ const PrefService* InternetOptionsHandler::GetPrefs() const {
   return Profile::FromWebUI(web_ui())->GetPrefs();
 }
 
-void InternetOptionsHandler::NetworkCommandCallback(
-    const base::ListValue* args) {
+void InternetOptionsHandler::AddConnection(const base::ListValue* args) {
   std::string onc_type;
-  std::string service_path;
-  std::string command;
-  if (args->GetSize() != 3 ||
-      !args->GetString(0, &onc_type) ||
-      !args->GetString(1, &service_path) ||
-      !args->GetString(2, &command)) {
+  if (args->GetSize() != 1 || !args->GetString(0, &onc_type)) {
     NOTREACHED();
     return;
   }
-  std::string type;  // Shill type
-  if (!onc_type.empty()) {
-    type = network_util::TranslateONCTypeToShill(onc_type);
-    if (type.empty())
-      LOG(ERROR) << "Unable to translate ONC type: " << onc_type;
-  }
-  // Process commands that do not require an existing network.
-  if (command == kTagAddConnection) {
-    AddConnection(type);
-  } else if (command == kTagForget) {
-    NetworkHandler::Get()->network_configuration_handler()->
-        RemoveConfiguration(
-            service_path,
-            base::Bind(&base::DoNothing),
-            base::Bind(&ShillError, "NetworkCommand: " + command));
-  } else if (command == kTagShowDetails) {
-    SendShowDetailedInfo(service_path);
-  } else if (command == kTagConfigure) {
-    NetworkConfigView::Show(service_path, GetNativeWindow());
-  } else if (command == kTagActivate && type == shill::kTypeCellular) {
-    ash::network_connect::ActivateCellular(service_path);
-    // Activation may update network properties (e.g. ActivationState), so
-    // request them here in case they change.
-    UpdateConnectionData(service_path);
-  } else {
-    LOG(ERROR) << "Unknown internet options command: " << command;
-    NOTREACHED();
-  }
-}
-
-void InternetOptionsHandler::AddConnection(const std::string& type) {
-  if (type == shill::kTypeWifi) {
+  if (onc_type == ::onc::network_type::kWiFi) {
     NetworkConfigView::ShowForType(shill::kTypeWifi, GetNativeWindow());
-  } else if (type == shill::kTypeVPN) {
+  } else if (onc_type == ::onc::network_type::kVPN) {
     NetworkConfigView::ShowForType(shill::kTypeVPN, GetNativeWindow());
-  } else if (type == shill::kTypeCellular) {
+  } else if (onc_type == ::onc::network_type::kCellular) {
     ChooseMobileNetworkDialog::ShowDialog(GetNativeWindow());
   } else {
     LOG(ERROR) << "Unsupported type for AddConnection";
   }
 }
 
-void InternetOptionsHandler::SendShowDetailedInfo(
-    const std::string& service_path) {
-  details_path_ = service_path;
-
-  scoped_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue);
-  const NetworkState* network = GetNetworkState(service_path);
-  if (network) {
-    dictionary->SetString(kNetworkInfoKeyServicePath, service_path);
-    dictionary->SetString(kNetworkInfoKeyGUID, network->guid());
-    if (network->type() == shill::kTypeCellular) {
-      dictionary->SetBoolean(
-          kTagCarrierSelectFlag,
-          CommandLine::ForCurrentProcess()
-          ->HasSwitch(chromeos::switches::kEnableCarrierSwitching));
-      dictionary->SetBoolean(kTagShowViewAccountButton,
-                             ShowViewAccountButton(network));
-    }
+void InternetOptionsHandler::ConfigureNetwork(const base::ListValue* args) {
+  std::string service_path;
+  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+    NOTREACHED();
+    return;
   }
-  web_ui()->CallJavascriptFunction(kShowDetailedInfoFunction, *dictionary);
+  NetworkConfigView::Show(service_path, GetNativeWindow());
+}
+
+void InternetOptionsHandler::ActivateNetwork(const base::ListValue* args) {
+  std::string service_path;
+  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+    NOTREACHED();
+    return;
+  }
+  ui::NetworkConnect::Get()->ActivateCellular(service_path);
+}
+
+void InternetOptionsHandler::RemoveNetwork(const base::ListValue* args) {
+  std::string service_path;
+  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+    NOTREACHED();
+    return;
+  }
+  NetworkHandler::Get()
+      ->managed_network_configuration_handler()
+      ->RemoveConfiguration(service_path, base::Bind(&base::DoNothing),
+                            base::Bind(&ShillError, "RemoveNetwork"));
 }
 
 base::ListValue* InternetOptionsHandler::GetWiredList() {

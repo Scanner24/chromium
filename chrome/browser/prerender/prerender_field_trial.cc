@@ -19,7 +19,6 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/variations/variations_associated_data.h"
 
@@ -32,9 +31,6 @@ using std::vector;
 namespace prerender {
 
 namespace {
-
-const char kOmniboxTrialName[] = "PrerenderFromOmnibox";
-int g_omnibox_trial_default_group_number = kint32min;
 
 const char kDisabledGroup[] = "Disabled";
 const char kEnabledGroup[] = "Enabled";
@@ -84,8 +80,6 @@ const int kDefaultPrefetchListTimeoutSeconds = 300;
 const char kSkipPrerenderLocalCanadidates[] = "SkipPrerenderLocalCandidates";
 const char kSkipPrerenderServiceCanadidates[] =
     "SkipPrerenderServiceCandidates";
-const char kDisableSessionStorageNamespaceMerging[] =
-    "DisableSessionStorageNamespaceMerging";
 const char kPrerenderCookieStore[] = "PrerenderCookieStore";
 
 void SetupPrerenderFieldTrial() {
@@ -109,14 +103,14 @@ void SetupPrerenderFieldTrial() {
     const FieldTrial::Probability release_experiment_no_use_probability = 0;
     const FieldTrial::Probability
         release_experiment_match_complete_probability = 10;
-    COMPILE_ASSERT(
+    static_assert(
         release_prerender_enabled_probability +
         release_control_probability +
         release_experiment_multi_prerender_probability +
         release_experiment_15min_ttl_probability +
         release_experiment_no_use_probability +
         release_experiment_match_complete_probability == divisor,
-        release_experiment_probabilities_must_equal_divisor);
+        "release experiment probabilities must equal divisor");
 
     control_probability = release_control_probability;
     experiment_multi_prerender_probability =
@@ -136,13 +130,13 @@ void SetupPrerenderFieldTrial() {
     const FieldTrial::Probability dev_experiment_no_use_probability = 100;
     const FieldTrial::Probability
         dev_experiment_match_complete_probability = 200;
-    COMPILE_ASSERT(dev_prerender_enabled_probability +
-                   dev_control_probability +
-                   dev_experiment_multi_prerender_probability +
-                   dev_experiment_15min_ttl_probability +
-                   dev_experiment_no_use_probability +
-                   dev_experiment_match_complete_probability == divisor,
-                   dev_experiment_probabilities_must_equal_divisor);
+    static_assert(dev_prerender_enabled_probability +
+                  dev_control_probability +
+                  dev_experiment_multi_prerender_probability +
+                  dev_experiment_15min_ttl_probability +
+                  dev_experiment_no_use_probability +
+                  dev_experiment_match_complete_probability == divisor,
+                  "dev experiment probabilities must equal divisor");
 
     control_probability = dev_control_probability;
     experiment_multi_prerender_probability =
@@ -201,9 +195,7 @@ void SetupPrerenderFieldTrial() {
 
 }  // end namespace
 
-void ConfigureOmniboxPrerender();
-
-void ConfigurePrerender(const CommandLine& command_line) {
+void ConfigurePrerender(const base::CommandLine& command_line) {
   enum PrerenderOption {
     PRERENDER_OPTION_AUTO,
     PRERENDER_OPTION_DISABLED,
@@ -245,27 +237,6 @@ void ConfigurePrerender(const CommandLine& command_line) {
     default:
       NOTREACHED();
   }
-
-  ConfigureOmniboxPrerender();
-}
-
-void ConfigureOmniboxPrerender() {
-  // Field trial to see if we're enabled.
-  const FieldTrial::Probability kDivisor = 100;
-
-  FieldTrial::Probability kDisabledProbability = 10;
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
-      channel == chrome::VersionInfo::CHANNEL_BETA) {
-    kDisabledProbability = 1;
-  }
-  scoped_refptr<FieldTrial> omnibox_prerender_trial(
-      FieldTrialList::FactoryGetFieldTrial(
-          kOmniboxTrialName, kDivisor, "OmniboxPrerenderEnabled",
-          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED,
-          &g_omnibox_trial_default_group_number));
-  omnibox_prerender_trial->AppendGroup("OmniboxPrerenderDisabled",
-                                       kDisabledProbability);
 }
 
 bool IsOmniboxEnabled(Profile* profile) {
@@ -276,10 +247,10 @@ bool IsOmniboxEnabled(Profile* profile) {
     return false;
 
   // Override any field trial groups if the user has set a command line flag.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kPrerenderFromOmnibox)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kPrerenderFromOmnibox)) {
     const string switch_value =
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kPrerenderFromOmnibox);
 
     if (switch_value == switches::kPrerenderFromOmniboxSwitchValueEnabled)
@@ -291,9 +262,8 @@ bool IsOmniboxEnabled(Profile* profile) {
     DCHECK_EQ(switches::kPrerenderFromOmniboxSwitchValueAuto, switch_value);
   }
 
-  const int group = FieldTrialList::FindValue(kOmniboxTrialName);
-  return group == FieldTrial::kNotFinalized ||
-         group == g_omnibox_trial_default_group_number;
+  return (FieldTrialList::FindFullName("PrerenderFromOmnibox") !=
+          "OmniboxPrerenderDisabled");
 }
 
 /*
@@ -330,10 +300,9 @@ bool IsLocalPredictorEnabled() {
 #if defined(OS_ANDROID) || defined(OS_IOS)
   return false;
 #endif
-  return
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisablePrerenderLocalPredictor) &&
-      GetLocalPredictorSpecValue(kLocalPredictorKeyName) == kEnabledGroup;
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kDisablePrerenderLocalPredictor) &&
+         GetLocalPredictorSpecValue(kLocalPredictorKeyName) == kEnabledGroup;
 }
 
 bool ShouldDisableLocalPredictorBasedOnSyncAndConfiguration(Profile* profile) {
@@ -507,11 +476,6 @@ bool SkipLocalPredictorLocalCandidates() {
 bool SkipLocalPredictorServiceCandidates() {
   return GetLocalPredictorSpecValue(kSkipPrerenderServiceCanadidates) ==
       kEnabledGroup;
-}
-
-bool ShouldMergeSessionStorageNamespaces() {
-  return GetLocalPredictorSpecValue(kDisableSessionStorageNamespaceMerging) !=
-      kDisabledGroup;
 }
 
 bool IsPrerenderCookieStoreEnabled() {

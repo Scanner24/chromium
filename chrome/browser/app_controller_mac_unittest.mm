@@ -16,7 +16,6 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/platform_test.h"
 
@@ -24,7 +23,7 @@ class AppControllerTest : public PlatformTest {
  protected:
   AppControllerTest() {}
 
-  virtual void TearDown() {
+  void TearDown() override {
     TestingBrowserProcess::GetGlobal()->SetProfileManager(NULL);
     base::RunLoop().RunUntilIdle();
   }

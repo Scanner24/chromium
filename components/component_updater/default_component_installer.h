@@ -16,7 +16,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "components/component_updater/component_updater_service.h"
+#include "components/update_client/update_client.h"
 
 namespace base {
 class FilePath;
@@ -25,6 +25,8 @@ class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace component_updater {
+
+class ComponentUpdateService;
 
 // Components should use a DefaultComponentInstaller by defining a class that
 // implements the members of ComponentInstallerTraits, and then registering a
@@ -35,11 +37,13 @@ class ComponentInstallerTraits {
   virtual ~ComponentInstallerTraits();
 
   // Verifies that a working installation resides within the directory specified
-  // by |dir|. |dir| is of the form <base directory>/<version>.
+  // by |install_dir|. |install_dir| is of the form <base directory>/<version>.
+  // |manifest| should have been read from the manifest file in |install_dir|.
   // Called only from a thread belonging to a blocking thread pool.
   // The implementation of this function must be efficient since the function
   // can be called when Chrome starts.
-  virtual bool VerifyInstallation(const base::FilePath& dir) const = 0;
+  virtual bool VerifyInstallation(const base::DictionaryValue& manifest,
+                                  const base::FilePath& install_dir) const = 0;
 
   // Returns true if the component can be automatically updated. Called once
   // during component registration from the UI thread.
@@ -80,7 +84,7 @@ class ComponentInstallerTraits {
 // A DefaultComponentInstaller is intended to be final, and not derived from.
 // Customization must be provided by passing a ComponentInstallerTraits object
 // to the constructor.
-class DefaultComponentInstaller : public ComponentInstaller {
+class DefaultComponentInstaller : public update_client::ComponentInstaller {
  public:
   DefaultComponentInstaller(
       scoped_ptr<ComponentInstallerTraits> installer_traits);
@@ -89,21 +93,24 @@ class DefaultComponentInstaller : public ComponentInstaller {
   void Register(ComponentUpdateService* cus);
 
   // Overridden from ComponentInstaller:
-  virtual void OnUpdateError(int error) OVERRIDE;
-  virtual bool Install(const base::DictionaryValue& manifest,
-                       const base::FilePath& unpack_path) OVERRIDE;
-  virtual bool GetInstalledFile(const std::string& file,
-                                base::FilePath* installed_file) OVERRIDE;
-
-  virtual ~DefaultComponentInstaller();
+  void OnUpdateError(int error) override;
+  bool Install(const base::DictionaryValue& manifest,
+               const base::FilePath& unpack_path) override;
+  bool GetInstalledFile(const std::string& file,
+                        base::FilePath* installed_file) override;
+  bool Uninstall() override;
 
  private:
+  ~DefaultComponentInstaller() override;
+
   base::FilePath GetInstallDirectory();
   bool InstallHelper(const base::DictionaryValue& manifest,
                      const base::FilePath& unpack_path,
                      const base::FilePath& install_path);
   void StartRegistration(ComponentUpdateService* cus);
   void FinishRegistration(ComponentUpdateService* cus);
+  void ComponentReady(scoped_ptr<base::DictionaryValue> manifest);
+  void UninstallOnTaskRunner();
 
   base::Version current_version_;
   std::string current_fingerprint_;

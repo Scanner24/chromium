@@ -4,9 +4,6 @@
 
 Node.prototype.role;
 
-/** @type {Function} */
-Element.prototype.detachEvent;
-
 /**
  * @type {boolean}
  */
@@ -24,7 +21,7 @@ function MathJax() {}
 MathJax.Callback;
 
 /**
- * @param {Array.<*>} args
+ * @param {Array<*>} args
  * @param {string} err
  */
 MathJax.Callback.After = function(args, err) { };
@@ -40,7 +37,7 @@ MathJax.Jax;
 /**
  * @typedef {{inputID: string,
  *  spanID: number,
- *  data: Array.<Object>,
+ *  data: Array<Object>,
  *  id: string,
  *  texClass: string}}
  */
@@ -73,12 +70,12 @@ MathJax.Hub.getAllJax = function() { };
 
 /**
  * @type {{PreProcessor: Function,
- *  MessageHook: function(string, function(Array.<string>)):
- *                        function(Array.<string>),
- *  StartupHook: function(string, function(Array.<string>)):
- *                        function(Array.<string>),
- *  LoadHook: function(string, function(Array.<string>)):
- *                        function(Array.<string>)}}
+ *  MessageHook: function(string, function(Array<string>)):
+ *                        function(Array<string>),
+ *  StartupHook: function(string, function(Array<string>)):
+ *                        function(Array<string>),
+ *  LoadHook: function(string, function(Array<string>)):
+ *                        function(Array<string>)}}
  */
 MathJax.Hub.Register;
 
@@ -150,8 +147,8 @@ MathJax.HTML;
  * Creates an HTML element from a node tag, an object with attributes and an
  * array of text content.
  * @param {string} tag
- * @param {Object.<string, string>} attribs
- * @param {Array.<string>} text
+ * @param {Object<string, string>} attribs
+ * @param {Array<string>} text
  */
 MathJax.HTML.Element = function(tag, attribs, text) { };
 

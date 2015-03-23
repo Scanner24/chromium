@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+assert(!is_android && !is_ios)
+
 source_ids = "//third_party/usb_ids/usb.ids"
 generated_ids = "$target_gen_dir/usb_ids_gen.cc"
 
@@ -23,8 +25,10 @@ source_set("usb") {
     "usb_error.h",
     "usb_ids.cc",
     "usb_ids.h",
+    "usb_service.cc",
     "usb_service.h",
     "usb_service_impl.cc",
+    "usb_service_impl.h",
     generated_ids,
   ]
 
@@ -32,22 +36,32 @@ source_set("usb") {
     ":usb_device_ids",
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//device/core",
     "//net",
     "//third_party/libusb",
   ]
 
   if (is_linux) {
-    configs += [ "//build/config/linux:udev" ]
+    deps += [ "//device/udev_linux" ]
+  }
+  if (is_chromeos) {
+    deps += [ "//chromeos" ]
   }
 }
 
 action("usb_device_ids") {
   script = "//device/usb/tools/usb_ids.py"
-  inputs = [ source_ids ]
-  outputs = [ generated_ids ]
+  inputs = [
+    source_ids,
+  ]
+  outputs = [
+    generated_ids,
+  ]
   args = [
-    "-i", rebase_path(source_ids,  root_build_dir),
-    "-o", rebase_path(generated_ids, root_build_dir),
+    "-i",
+    rebase_path(source_ids, root_build_dir),
+    "-o",
+    rebase_path(generated_ids, root_build_dir),
   ]
 
   # Only the device_usb target can depend on us.

@@ -5,12 +5,11 @@
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller_test.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller_test.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 
 typedef InProcessBrowserTest ZoomBubbleBrowserTest;
 
@@ -39,8 +38,10 @@ IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, MAYBE_NonImmersiveFullscreen) {
     // notification before testing the zoom bubble visibility.
     scoped_ptr<FullscreenNotificationObserver> waiter(
         new FullscreenNotificationObserver());
-    browser()->fullscreen_controller()->ToggleFullscreenModeForTab(
-        web_contents, true);
+    browser()
+        ->exclusive_access_manager()
+        ->fullscreen_controller()
+        ->EnterFullscreenModeForTab(web_contents, GURL());
     waiter->Wait();
   }
   ASSERT_FALSE(browser_view->immersive_mode_controller()->IsEnabled());
@@ -96,7 +97,7 @@ IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, ImmersiveFullscreen) {
       immersive_controller->GetRevealedLock(
           ImmersiveModeController::ANIMATE_REVEAL_NO));
   ASSERT_TRUE(immersive_controller->IsRevealed());
-  EXPECT_FALSE(ZoomBubbleView::IsShowing());
+  EXPECT_EQ(NULL, ZoomBubbleView::zoom_bubble_);
 
   // The zoom bubble should be anchored when it is shown in immersive fullscreen
   // and the top-of-window views are revealed.

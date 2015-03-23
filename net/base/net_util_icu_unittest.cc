@@ -22,9 +22,9 @@ namespace net {
 
 namespace {
 
-static const size_t kNpos = base::string16::npos;
+const size_t kNpos = base::string16::npos;
 
-const char* kLanguages[] = {
+const char* const kLanguages[] = {
   "",      "en",    "zh-CN",    "ja",    "ko",
   "he",    "ar",    "ru",       "el",    "fr",
   "de",    "pt",    "sv",       "th",    "hi",
@@ -33,7 +33,7 @@ const char* kLanguages[] = {
 };
 
 struct IDNTestCase {
-  const char* input;
+  const char* const input;
   const wchar_t* unicode_output;
   const bool unicode_allowed[arraysize(kLanguages)];
 };
@@ -354,9 +354,9 @@ struct AdjustOffsetCase {
 };
 
 struct UrlTestData {
-  const char* description;
-  const char* input;
-  const char* languages;
+  const char* const description;
+  const char* const input;
+  const char* const languages;
   FormatUrlTypes format_types;
   UnescapeRule::Type escape_rules;
   const wchar_t* output;  // Use |wchar_t| to handle Unicode constants easily.
@@ -411,7 +411,7 @@ void CheckAdjustedOffsets(const std::string& url_string,
 }  // anonymous namespace
 
 TEST(NetUtilTest, IDNToUnicodeFast) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(idn_cases); i++) {
+  for (size_t i = 0; i < arraysize(idn_cases); i++) {
     for (size_t j = 0; j < arraysize(kLanguages); j++) {
       // ja || zh-TW,en || ko,ja -> IDNToUnicodeSlow
       if (j == 3 || j == 17 || j == 18)
@@ -427,7 +427,7 @@ TEST(NetUtilTest, IDNToUnicodeFast) {
 }
 
 TEST(NetUtilTest, IDNToUnicodeSlow) {
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(idn_cases); i++) {
+  for (size_t i = 0; i < arraysize(idn_cases); i++) {
     for (size_t j = 0; j < arraysize(kLanguages); j++) {
       // !(ja || zh-TW,en || ko,ja) -> IDNToUnicodeFast
       if (!(j == 3 || j == 17 || j == 18))
@@ -455,11 +455,11 @@ namespace {
 
 struct GetDirectoryListingEntryCase {
   const wchar_t* name;
-  const char* raw_bytes;
+  const char* const raw_bytes;
   bool is_dir;
   int64 filesize;
   base::Time time;
-  const char* expected;
+  const char* const expected;
 };
 
 }  // namespace
@@ -506,7 +506,7 @@ TEST(NetUtilTest, GetDirectoryListingEntry) {
          ",0,\"9.8 kB\",\"\");</script>\n"},
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
+  for (size_t i = 0; i < arraysize(test_cases); ++i) {
     const std::string results = GetDirectoryListingEntry(
         WideToUTF16(test_cases[i].name),
         test_cases[i].raw_bytes,
@@ -930,7 +930,7 @@ TEST(NetUtilTest, FormatUrlRoundTripQueryASCII) {
 TEST(NetUtilTest, FormatUrlRoundTripQueryEscaped) {
   // A full list of characters which FormatURL should unescape and GURL should
   // not escape again, when they appear in a query string.
-  const char* kUnescapedCharacters =
+  const char kUnescapedCharacters[] =
       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_~";
   for (unsigned char test_char = 0; test_char < 128; ++test_char) {
     std::string original_url("http://www.google.com/?");

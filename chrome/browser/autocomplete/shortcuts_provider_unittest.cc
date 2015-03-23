@@ -22,7 +22,6 @@
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/in_memory_url_index.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/url_database.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
@@ -261,8 +260,8 @@ class ShortcutsProviderTest : public testing::Test {
     std::set<ExpectedURLAndAllowedToBeDefault> matches_;
   };
 
-  virtual void SetUp();
-  virtual void TearDown();
+  void SetUp() override;
+  void TearDown() override;
 
   // Fills test data into the provider.
   void FillData(TestShortcutInfo* db, size_t db_size);
@@ -315,6 +314,7 @@ void ShortcutsProviderTest::TearDown() {
   // Run all pending tasks or else some threads hold on to the message loop
   // and prevent it from being deleted.
   message_loop_.RunUntilIdle();
+  profile_.DestroyHistoryService();
   provider_ = NULL;
 }
 
@@ -357,11 +357,11 @@ void ShortcutsProviderTest::RunTest(
     std::string expected_top_result,
     base::string16 top_result_inline_autocompletion) {
   base::MessageLoop::current()->RunUntilIdle();
-  AutocompleteInput input(text, base::string16::npos, base::string16(), GURL(),
+  AutocompleteInput input(text, base::string16::npos, std::string(), GURL(),
                           metrics::OmniboxEventProto::INVALID_SPEC,
                           prevent_inline_autocomplete, false, true, true,
                           ChromeAutocompleteSchemeClassifier(&profile_));
-  provider_->Start(input, false);
+  provider_->Start(input, false, false);
   EXPECT_TRUE(provider_->done());
 
   ac_matches_ = provider_->matches();
@@ -820,6 +820,16 @@ TEST_F(ShortcutsProviderTest, DeleteMatch) {
   EXPECT_EQ(original_shortcuts_count + 1, backend_->shortcuts_map().size());
   EXPECT_TRUE(backend_->shortcuts_map().end() ==
               backend_->shortcuts_map().find(ASCIIToUTF16("delete")));
+}
+
+TEST_F(ShortcutsProviderTest, DoesNotProvideOnFocus) {
+  AutocompleteInput input(ASCIIToUTF16("about:o"), base::string16::npos,
+                          std::string(), GURL(),
+                          metrics::OmniboxEventProto::INVALID_SPEC,
+                          false, false, true, true,
+                          ChromeAutocompleteSchemeClassifier(&profile_));
+  provider_->Start(input, false, true);
+  EXPECT_TRUE(provider_->matches().empty());
 }
 
 #if defined(ENABLE_EXTENSIONS)

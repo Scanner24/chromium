@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/strings/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -30,6 +31,8 @@ void TestProcess(const std::string& name,
 
   std::string output;
   EXPECT_TRUE(base::GetAppOutput(cmd, &output));
+  // Account for Windows line endings.
+  ReplaceSubstringsAfterOffset(&output, 0, "\r\n", "\n");
 
   const bool ok = output.size() >= 5 &&
                   memcmp("PASS\n", &output[output.size() - 5], 5) == 0 &&
@@ -53,88 +56,85 @@ bool BoringSSLPath(base::FilePath* result) {
   return true;
 }
 
-bool CryptoCipherPath(base::FilePath *result) {
+bool CryptoCipherTestPath(base::FilePath *result) {
   if (!BoringSSLPath(result))
     return false;
 
   *result = result->Append(FILE_PATH_LITERAL("crypto"));
   *result = result->Append(FILE_PATH_LITERAL("cipher"));
+  *result = result->Append(FILE_PATH_LITERAL("test"));
   return true;
 }
 
 }  // anonymous namespace
 
-TEST(BoringSSL, AES128GCM) {
-  base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("aes_128_gcm_tests.txt"));
+struct AEADTest {
+  const base::CommandLine::CharType *name;
+  const base::FilePath::CharType *test_vector_filename;
+};
 
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(FILE_PATH_LITERAL("aes-128-gcm"));
-  args.push_back(data_file.value());
+static const AEADTest kAEADTests[] = {
+    {FILE_PATH_LITERAL("aes-128-gcm"),
+     FILE_PATH_LITERAL("aes_128_gcm_tests.txt")},
+    {FILE_PATH_LITERAL("aes-128-key-wrap"),
+     FILE_PATH_LITERAL("aes_128_key_wrap_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-gcm"),
+     FILE_PATH_LITERAL("aes_256_gcm_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-key-wrap"),
+     FILE_PATH_LITERAL("aes_256_key_wrap_tests.txt")},
+    {FILE_PATH_LITERAL("chacha20-poly1305"),
+     FILE_PATH_LITERAL("chacha20_poly1305_tests.txt")},
+    {FILE_PATH_LITERAL("rc4-md5-tls"),
+     FILE_PATH_LITERAL("rc4_md5_tls_tests.txt")},
+    {FILE_PATH_LITERAL("rc4-sha1-tls"),
+     FILE_PATH_LITERAL("rc4_sha1_tls_tests.txt")},
+    {FILE_PATH_LITERAL("aes-128-cbc-sha1-tls"),
+     FILE_PATH_LITERAL("aes_128_cbc_sha1_tls_tests.txt")},
+    {FILE_PATH_LITERAL("aes-128-cbc-sha1-tls-implicit-iv"),
+     FILE_PATH_LITERAL("aes_128_cbc_sha1_tls_implicit_iv_tests.txt")},
+    {FILE_PATH_LITERAL("aes-128-cbc-sha256-tls"),
+     FILE_PATH_LITERAL("aes_128_cbc_sha256_tls_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-cbc-sha1-tls"),
+     FILE_PATH_LITERAL("aes_256_cbc_sha1_tls_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-cbc-sha1-tls-implicit-iv"),
+     FILE_PATH_LITERAL("aes_256_cbc_sha1_tls_implicit_iv_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-cbc-sha256-tls"),
+     FILE_PATH_LITERAL("aes_256_cbc_sha256_tls_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-cbc-sha384-tls"),
+     FILE_PATH_LITERAL("aes_256_cbc_sha384_tls_tests.txt")},
+    {FILE_PATH_LITERAL("des-ede3-cbc-sha1-tls"),
+     FILE_PATH_LITERAL("des_ede3_cbc_sha1_tls_tests.txt")},
+    {FILE_PATH_LITERAL("des-ede3-cbc-sha1-tls-implicit-iv"),
+     FILE_PATH_LITERAL("des_ede3_cbc_sha1_tls_implicit_iv_tests.txt")},
+    {FILE_PATH_LITERAL("rc4-md5-ssl3"),
+     FILE_PATH_LITERAL("rc4_md5_ssl3_tests.txt")},
+    {FILE_PATH_LITERAL("rc4-sha1-ssl3"),
+     FILE_PATH_LITERAL("rc4_sha1_ssl3_tests.txt")},
+    {FILE_PATH_LITERAL("aes-128-cbc-sha1-ssl3"),
+     FILE_PATH_LITERAL("aes_128_cbc_sha1_ssl3_tests.txt")},
+    {FILE_PATH_LITERAL("aes-256-cbc-sha1-ssl3"),
+     FILE_PATH_LITERAL("aes_256_cbc_sha1_ssl3_tests.txt")},
+    {FILE_PATH_LITERAL("des-ede3-cbc-sha1-ssl3"),
+     FILE_PATH_LITERAL("des_ede3_cbc_sha1_ssl3_tests.txt")},
+};
 
-  TestProcess("aead_test", args);
-}
+TEST(BoringSSL, AEADs) {
+  base::FilePath test_vector_dir;
+  ASSERT_TRUE(CryptoCipherTestPath(&test_vector_dir));
 
-TEST(BoringSSL, AES256GCM) {
-  base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("aes_256_gcm_tests.txt"));
+  for (size_t i = 0; i < arraysize(kAEADTests); i++) {
+    const AEADTest& test = kAEADTests[i];
+    SCOPED_TRACE(test.name);
 
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(FILE_PATH_LITERAL("aes-256-gcm"));
-  args.push_back(data_file.value());
+    base::FilePath test_vector_file =
+        test_vector_dir.Append(test.test_vector_filename);
 
-  TestProcess("aead_test", args);
-}
+    std::vector<base::CommandLine::StringType> args;
+    args.push_back(test.name);
+    args.push_back(test_vector_file.value());
 
-TEST(BoringSSL, ChaCha20Poly1305) {
-  base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
-  data_file =
-      data_file.Append(FILE_PATH_LITERAL("chacha20_poly1305_tests.txt"));
-
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(FILE_PATH_LITERAL("chacha20-poly1305"));
-  args.push_back(data_file.value());
-
-  TestProcess("aead_test", args);
-}
-
-TEST(BoringSSL, RC4MD5) {
-  base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("rc4_md5_tests.txt"));
-
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(FILE_PATH_LITERAL("rc4-md5"));
-  args.push_back(data_file.value());
-
-  TestProcess("aead_test", args);
-}
-
-TEST(BoringSSL, AESKW128) {
-  base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("aes_128_key_wrap_tests.txt"));
-
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(FILE_PATH_LITERAL("aes-128-key-wrap"));
-  args.push_back(data_file.value());
-
-  TestProcess("aead_test", args);
-}
-
-TEST(BoringSSL, AESKW256) {
-  base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
-  data_file = data_file.Append(FILE_PATH_LITERAL("aes_256_key_wrap_tests.txt"));
-
-  std::vector<base::CommandLine::StringType> args;
-  args.push_back(FILE_PATH_LITERAL("aes-256-key-wrap"));
-  args.push_back(data_file.value());
-
-  TestProcess("aead_test", args);
+    TestProcess("aead_test", args);
+  }
 }
 
 TEST(BoringSSL, Base64) {
@@ -153,9 +153,13 @@ TEST(BoringSSL, ByteString) {
   TestSimple("bytestring_test");
 }
 
+TEST(BoringSSL, ConstantTime) {
+  TestSimple("constant_time_test");
+}
+
 TEST(BoringSSL, Cipher) {
   base::FilePath data_file;
-  ASSERT_TRUE(CryptoCipherPath(&data_file));
+  ASSERT_TRUE(CryptoCipherTestPath(&data_file));
   data_file = data_file.Append(FILE_PATH_LITERAL("cipher_test.txt"));
 
   std::vector<base::CommandLine::StringType> args;
@@ -168,8 +172,16 @@ TEST(BoringSSL, DH) {
   TestSimple("dh_test");
 }
 
+TEST(BoringSSL, Digest) {
+  TestSimple("digest_test");
+}
+
 TEST(BoringSSL, DSA) {
   TestSimple("dsa_test");
+}
+
+TEST(BoringSSL, EC) {
+  TestSimple("ec_test");
 }
 
 TEST(BoringSSL, ECDSA) {
@@ -192,16 +204,8 @@ TEST(BoringSSL, LH) {
   TestSimple("lhash_test");
 }
 
-TEST(BoringSSL, MD5) {
-  TestSimple("md5_test");
-}
-
 TEST(BoringSSL, RSA) {
   TestSimple("rsa_test");
-}
-
-TEST(BoringSSL, SHA1) {
-  TestSimple("sha1_test");
 }
 
 TEST(BoringSSL, PKCS7) {
@@ -216,8 +220,8 @@ TEST(BoringSSL, ExampleMul) {
   TestSimple("example_mul");
 }
 
-TEST(BoringSSL, ExampleSign) {
-  TestSimple("example_sign");
+TEST(BoringSSL, EVP) {
+  TestSimple("evp_test");
 }
 
 TEST(BoringSSL, SSL) {
@@ -226,4 +230,12 @@ TEST(BoringSSL, SSL) {
 
 TEST(BoringSSL, PQueue) {
   TestSimple("pqueue_test");
+}
+
+TEST(BoringSSL, HKDF) {
+  TestSimple("hkdf_test");                                                     
+}
+
+TEST(BoringSSL, PBKDF) {
+  TestSimple("pbkdf_test");                                                     
 }

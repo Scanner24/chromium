@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/files/file.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
 #include "content/public/renderer/render_process_observer.h"
@@ -55,12 +56,12 @@ struct StreamDeviceInfo;
 
 // Object factory for RTC PeerConnections.
 class CONTENT_EXPORT PeerConnectionDependencyFactory
-    : NON_EXPORTED_BASE(public base::NonThreadSafe),
-      NON_EXPORTED_BASE(public AecDumpMessageFilter::AecDumpDelegate) {
+    : NON_EXPORTED_BASE(base::MessageLoop::DestructionObserver),
+      NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   PeerConnectionDependencyFactory(
       P2PSocketDispatcher* p2p_socket_dispatcher);
-  virtual ~PeerConnectionDependencyFactory();
+  ~PeerConnectionDependencyFactory() override;
 
   // Create a RTCPeerConnectionHandler object that implements the
   // WebKit WebRTCPeerConnectionHandler interface.
@@ -123,20 +124,8 @@ class CONTENT_EXPORT PeerConnectionDependencyFactory
 
   WebRtcAudioDeviceImpl* GetWebRtcAudioDevice();
 
-  static void AddNativeAudioTrackToBlinkTrack(
-      webrtc::MediaStreamTrackInterface* native_track,
-      const blink::WebMediaStreamTrack& webkit_track,
-      bool is_local_track);
-
   scoped_refptr<base::MessageLoopProxy> GetWebRtcWorkerThread() const;
-
-  // AecDumpMessageFilter::AecDumpDelegate implementation.
-  // TODO(xians): Remove when option to disable audio track processing is
-  // removed.
-  virtual void OnAecDumpFile(
-      const IPC::PlatformFileForTransit& file_handle) OVERRIDE;
-  virtual void OnDisableAecDump() OVERRIDE;
-  virtual void OnIpcClosing() OVERRIDE;
+  scoped_refptr<base::MessageLoopProxy> GetWebRtcSignalingThread() const;
 
  protected:
   // Asks the PeerConnection factory to create a Local Audio Source.
@@ -175,9 +164,18 @@ class CONTENT_EXPORT PeerConnectionDependencyFactory
   virtual void StartLocalAudioTrack(WebRtcLocalAudioTrack* audio_track);
 
  private:
+  // Implement base::MessageLoop::DestructionObserver.
+  // This makes sure the libjingle PeerConnectionFactory is released before
+  // the renderer message loop is destroyed.
+  void WillDestroyCurrentMessageLoop() override;
+
   // Creates |pc_factory_|, which in turn is used for
   // creating PeerConnection objects.
   void CreatePeerConnectionFactory();
+
+  void InitializeSignalingThread(
+      const scoped_refptr<media::GpuVideoAcceleratorFactories>& gpu_factories,
+      base::WaitableEvent* event);
 
   void InitializeWorkerThread(rtc::Thread** thread,
                               base::WaitableEvent* event);
@@ -199,15 +197,11 @@ class CONTENT_EXPORT PeerConnectionDependencyFactory
   scoped_refptr<P2PSocketDispatcher> p2p_socket_dispatcher_;
   scoped_refptr<WebRtcAudioDeviceImpl> audio_device_;
 
-  // This is only used if audio track processing is disabled.
-  // TODO(xians): Remove when option to disable audio track processing is
-  // removed.
-  scoped_refptr<AecDumpMessageFilter> aec_dump_message_filter_;
-
   // PeerConnection threads. signaling_thread_ is created from the
   // "current" chrome thread.
   rtc::Thread* signaling_thread_;
   rtc::Thread* worker_thread_;
+  base::Thread chrome_signaling_thread_;
   base::Thread chrome_worker_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(PeerConnectionDependencyFactory);

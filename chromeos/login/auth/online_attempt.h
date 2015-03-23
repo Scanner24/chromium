@@ -31,7 +31,7 @@ class CHROMEOS_EXPORT OnlineAttempt : public GaiaAuthConsumer {
  public:
   OnlineAttempt(AuthAttemptState* current_attempt,
                 AuthAttemptStateResolver* callback);
-  virtual ~OnlineAttempt();
+  ~OnlineAttempt() override;
 
   // Initiate the online login attempt either through client or auth login.
   // Status will be recorded in |current_attempt|, and resolver_->Resolve() will
@@ -40,10 +40,9 @@ class CHROMEOS_EXPORT OnlineAttempt : public GaiaAuthConsumer {
   void Initiate(net::URLRequestContextGetter* request_context);
 
   // GaiaAuthConsumer overrides. Callbacks from GaiaAuthFetcher
-  virtual void OnClientLoginFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnClientLoginSuccess(
-      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
+  void OnClientLoginFailure(const GoogleServiceAuthError& error) override;
+  void OnClientLoginSuccess(
+      const GaiaAuthConsumer::ClientLoginResult& credentials) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(OnlineAttemptTest, LoginSuccess);

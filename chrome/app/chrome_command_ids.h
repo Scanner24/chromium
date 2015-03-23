@@ -94,7 +94,6 @@
 #define IDC_ENCODING_AUTO_DETECT        35500
 #define IDC_ENCODING_UTF8               35501
 #define IDC_ENCODING_UTF16LE            35502
-#define IDC_ENCODING_ISO88591           35503
 #define IDC_ENCODING_WINDOWS1252        35504
 #define IDC_ENCODING_GBK                35505
 #define IDC_ENCODING_GB18030            35506
@@ -208,12 +207,13 @@
 #define IDC_RECENT_TABS_MENU            40239
 #define IDC_RECENT_TABS_NO_DEVICE_TABS  40240
 #define IDC_SHOW_SETTINGS_RESET_BUBBLE  40241
-#define IDC_TAKE_SCREENSHOT             40242
-#define IDC_SHOW_SYNC_ERROR             40243
-#define IDC_DISTILL_PAGE                40244
-#define IDC_HELP_MENU                   40245
-#define IDC_EXTENSIONS_OVERFLOW_MENU    40246
-#define IDC_SHOW_SRT_BUBBLE             40247
+#define IDC_SHOW_SYNC_ERROR             40242
+#define IDC_DISTILL_PAGE                40243
+#define IDC_HELP_MENU                   40244
+#define IDC_EXTENSIONS_OVERFLOW_MENU    40245
+#define IDC_SHOW_SRT_BUBBLE             40246
+#define IDC_ELEVATED_RECOVERY_DIALOG    40247
+#define IDC_TAKE_SCREENSHOT             40248
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -254,6 +254,7 @@
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
+#define IDC_TOUCH_HUD_PROJECTION_TOGGLE 46400     // ChromeOS only
 
 // The range of command ids reserved for context menus added by web content.
 #define IDC_CONTENT_CONTEXT_CUSTOM_FIRST 47000
@@ -278,6 +279,7 @@
 #define IDC_CONTENT_CONTEXT_COPYIMAGE 50112
 #define IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB 50113
 #define IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE 50114
+#define IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB 50115
 // Audio/video items.
 #define IDC_CONTENT_CONTEXT_SAVEAVAS 50120
 #define IDC_CONTENT_CONTEXT_COPYAVLOCATION 50121

@@ -10,6 +10,7 @@
 /** @const */ var SCREEN_OOBE_NETWORK = 'connect';
 /** @const */ var SCREEN_OOBE_HID_DETECTION = 'hid-detection';
 /** @const */ var SCREEN_OOBE_EULA = 'eula';
+/** @const */ var SCREEN_OOBE_ENABLE_DEBUGGING = 'debugging';
 /** @const */ var SCREEN_OOBE_UPDATE = 'update';
 /** @const */ var SCREEN_OOBE_RESET = 'reset';
 /** @const */ var SCREEN_OOBE_ENROLLMENT = 'oauth-enrollment';
@@ -29,9 +30,11 @@
 /** @const */ var SCREEN_KIOSK_ENABLE = 'kiosk-enable';
 /** @const */ var SCREEN_TERMS_OF_SERVICE = 'terms-of-service';
 /** @const */ var SCREEN_WRONG_HWID = 'wrong-hwid';
+/** @const */ var SCREEN_DEVICE_DISABLED = 'device-disabled';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
+/** @const */ var ACCELERATOR_ENABLE_DEBBUGING = 'debugging';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
 /** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
@@ -46,10 +49,9 @@
 /** @const */ var ACCELERATOR_APP_LAUNCH_BAILOUT = 'app_launch_bailout';
 /** @const */ var ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG =
     'app_launch_network_config';
-/** @const */ var ACCELERATOR_SHOW_ROLLBACK_ON_RESET =
-    'show_rollback_on_reset_screen';
-/** @const */ var ACCELERATOR_HIDE_ROLLBACK_ON_RESET =
-    'hide_rollback_on_reset_screen';
+/** @const */ var ACCELERATOR_EMBEDDED_SIGNIN = 'embedded_signin';
+/** @const */ var ACCELERATOR_NEW_OOBE = 'new_oobe';
+/** @const */ var ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN = 'toggle_webview_signin';
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -84,6 +86,8 @@
   APP_LAUNCH_SPLASH: 'app-launch-splash',
   DESKTOP_USER_MANAGER: 'login-add-user'
 };
+
+/** @const */ var USER_ACTION_ROLLBACK_TOGGLED = 'rollback-toggled';
 
 cr.define('cr.ui.login', function() {
   var Bubble = cr.ui.Bubble;
@@ -134,13 +138,28 @@ cr.define('cr.ui.login', function() {
   ];
 
   /**
+   * Group of screens (screen IDs) where enable debuggingscreen invocation is
+   * available.
+   * @type Array.<string>
+   * @const
+   */
+  var ENABLE_DEBUGGING_AVAILABLE_SCREEN_GROUP = [
+    SCREEN_OOBE_HID_DETECTION,
+    SCREEN_OOBE_NETWORK,
+    SCREEN_OOBE_EULA,
+    SCREEN_OOBE_UPDATE,
+    SCREEN_TERMS_OF_SERVICE
+  ];
+
+  /**
    * Group of screens (screen IDs) that are not participating in
    * left-current-right animation.
    * @type Array.<string>
    * @const
    */
   var NOT_ANIMATED_SCREEN_GROUP = [
-    SCREEN_OOBE_RESET
+    SCREEN_OOBE_ENABLE_DEBUGGING,
+    SCREEN_OOBE_RESET,
   ];
 
 
@@ -329,10 +348,18 @@ cr.define('cr.ui.login', function() {
      * @param {string} name Accelerator name.
      */
     handleAccelerator: function(name) {
+      if (this.currentScreen.ignoreAccelerators) {
+        return;
+      }
       var currentStepId = this.screens_[this.currentStep_];
       if (name == ACCELERATOR_CANCEL) {
         if (this.currentScreen.cancel) {
           this.currentScreen.cancel();
+        }
+      } else if (name == ACCELERATOR_ENABLE_DEBBUGING) {
+        if (ENABLE_DEBUGGING_AVAILABLE_SCREEN_GROUP.indexOf(
+                currentStepId) != -1) {
+          chrome.send('toggleEnableDebuggingScreen');
         }
       } else if (name == ACCELERATOR_ENROLLMENT) {
         if (currentStepId == SCREEN_GAIA_SIGNIN ||
@@ -343,10 +370,6 @@ cr.define('cr.ui.login', function() {
           // In this case update check will be skipped and OOBE will
           // proceed straight to enrollment screen when EULA is accepted.
           chrome.send('skipUpdateEnrollAfterEula');
-        } else if (currentStepId == SCREEN_OOBE_ENROLLMENT) {
-          // This accelerator is also used to manually cancel auto-enrollment.
-          if (this.currentScreen.cancelAutoEnrollment)
-            this.currentScreen.cancelAutoEnrollment();
         }
       } else if (name == ACCELERATOR_KIOSK_ENABLE) {
         if (currentStepId == SCREEN_GAIA_SIGNIN ||
@@ -357,7 +380,10 @@ cr.define('cr.ui.login', function() {
         if (this.allowToggleVersion_)
           $('version-labels').hidden = !$('version-labels').hidden;
       } else if (name == ACCELERATOR_RESET) {
-        if (RESET_AVAILABLE_SCREEN_GROUP.indexOf(currentStepId) != -1)
+        if (currentStepId == SCREEN_OOBE_RESET)
+          $('reset').send(login.Screen.CALLBACK_USER_ACTED,
+                          USER_ACTION_ROLLBACK_TOGGLED);
+        else if (RESET_AVAILABLE_SCREEN_GROUP.indexOf(currentStepId) != -1)
           chrome.send('toggleResetScreen');
       } else if (name == ACCELERATOR_DEVICE_REQUISITION) {
         if (this.isOobeUI())
@@ -376,12 +402,14 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG) {
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
           chrome.send('networkConfigRequest');
-      } else if (name == ACCELERATOR_SHOW_ROLLBACK_ON_RESET) {
-        if (currentStepId == SCREEN_OOBE_RESET)
-          chrome.send('showRollbackOnResetScreen');
-      } else if (name == ACCELERATOR_HIDE_ROLLBACK_ON_RESET) {
-        if (currentStepId == SCREEN_OOBE_RESET)
-          chrome.send('hideRollbackOnResetScreen');
+      } else if (name == ACCELERATOR_EMBEDDED_SIGNIN) {
+        if (currentStepId == SCREEN_GAIA_SIGNIN)
+          chrome.send('switchToEmbeddedSignin');
+      } else if (name == ACCELERATOR_NEW_OOBE) {
+        chrome.send('switchToNewOobe');
+      } else if (name == ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN) {
+        if (currentStepId == SCREEN_GAIA_SIGNIN)
+          chrome.send('toggleWebviewSignin');
       }
 
       if (!this.forceKeyboardFlow_)
@@ -588,9 +616,9 @@ cr.define('cr.ui.login', function() {
      */
     preloadScreen: function(screen) {
       var screenEl = $(screen.id);
-      if (screenEl.deferredDecorate !== undefined) {
-        screenEl.deferredDecorate();
-        delete screenEl.deferredDecorate;
+      if (screenEl.deferredInitialization !== undefined) {
+        screenEl.deferredInitialization();
+        delete screenEl.deferredInitialization;
       }
     },
 
@@ -599,6 +627,10 @@ cr.define('cr.ui.login', function() {
      * @param {Object} screen Screen params dict, e.g. {id: screenId, data: {}}.
      */
     showScreen: function(screen) {
+      // Do not allow any other screen to clobber the device disabled screen.
+      if (this.currentScreen.id == SCREEN_DEVICE_DISABLED)
+        return;
+
       var screenId = screen.id;
 
       // Make sure the screen is decorated.

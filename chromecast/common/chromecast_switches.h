@@ -9,6 +9,13 @@
 
 namespace switches {
 
+extern const char kEnableCmaMediaPipeline[];
+
+#if defined(OS_ANDROID)
+// Content-implementation switches
+extern const char kEnableLocalFileAccesses[];
+#endif  // defined(OS_ANDROID)
+
 // Metrics switches
 extern const char kOverrideMetricsUploadUrl[];
 

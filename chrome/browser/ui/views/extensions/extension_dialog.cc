@@ -8,9 +8,9 @@
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/extensions/extension_view_host_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
 #include "chrome/browser/ui/views/extensions/extension_view_views.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
@@ -97,7 +97,8 @@ ExtensionDialog* ExtensionDialog::Show(
 void ExtensionDialog::InitWindow(aura::Window* parent,
                                  int width,
                                  int height) {
-  views::Widget* window = CreateBrowserModalDialogViews(this, parent);
+  views::Widget* window =
+      constrained_window::CreateBrowserModalDialogViews(this, parent);
 
   // Center the window over the browser.
   gfx::Point center = parent->GetBoundsInScreen().CenterPoint();

@@ -34,6 +34,7 @@
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info.h"
 #include "third_party/angle/src/common/version.h"
+#include "ui/gl/gpu_switching_manager.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
@@ -239,17 +240,20 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
 class GpuMessageHandler
     : public WebUIMessageHandler,
       public base::SupportsWeakPtr<GpuMessageHandler>,
-      public GpuDataManagerObserver {
+      public GpuDataManagerObserver,
+      public ui::GpuSwitchingObserver {
  public:
   GpuMessageHandler();
-  virtual ~GpuMessageHandler();
+  ~GpuMessageHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // GpuDataManagerObserver implementation.
-  virtual void OnGpuInfoUpdate() OVERRIDE;
-  virtual void OnGpuSwitching() OVERRIDE;
+  void OnGpuInfoUpdate() override;
+
+  // ui::GpuSwitchingObserver implementation.
+  void OnGpuSwitched() override;
 
   // Messages
   void OnBrowserBridgeInitialized(const base::ListValue* list);
@@ -278,6 +282,7 @@ GpuMessageHandler::GpuMessageHandler()
 }
 
 GpuMessageHandler::~GpuMessageHandler() {
+  ui::GpuSwitchingManager::GetInstance()->RemoveObserver(this);
   GpuDataManagerImpl::GetInstance()->RemoveObserver(this);
 }
 
@@ -345,8 +350,10 @@ void GpuMessageHandler::OnBrowserBridgeInitialized(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Watch for changes in GPUInfo
-  if (!observing_)
+  if (!observing_) {
     GpuDataManagerImpl::GetInstance()->AddObserver(this);
+    ui::GpuSwitchingManager::GetInstance()->AddObserver(this);
+  }
   observing_ = true;
 
   // Tell GpuDataManager it should have full GpuInfo. If the
@@ -390,20 +397,23 @@ void GpuMessageHandler::OnGpuInfoUpdate() {
   // Get GPU Info.
   scoped_ptr<base::DictionaryValue> gpu_info_val(GpuInfoAsDictionaryValue());
 
+
   // Add in blacklisting features
   base::DictionaryValue* feature_status = new base::DictionaryValue;
   feature_status->Set("featureStatus", GetFeatureStatus());
   feature_status->Set("problems", GetProblems());
-  feature_status->Set("workarounds", GetDriverBugWorkarounds());
-  if (feature_status)
-    gpu_info_val->Set("featureStatus", feature_status);
+  base::ListValue* workarounds = new base::ListValue();
+  for (const std::string& workaround : GetDriverBugWorkarounds())
+    workarounds->AppendString(workaround);
+  feature_status->Set("workarounds", workarounds);
+  gpu_info_val->Set("featureStatus", feature_status);
 
   // Send GPU Info to javascript.
   web_ui()->CallJavascriptFunction("browserBridge.onGpuInfoUpdate",
       *(gpu_info_val.get()));
 }
 
-void GpuMessageHandler::OnGpuSwitching() {
+void GpuMessageHandler::OnGpuSwitched() {
   GpuDataManagerImpl::GetInstance()->RequestCompleteGpuInfoIfNeeded();
 }
 

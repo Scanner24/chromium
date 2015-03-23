@@ -4,19 +4,24 @@
 
 package org.chromium.android_webview;
 
-import org.chromium.content.browser.WebContentsObserverAndroid;
+import org.chromium.content.browser.WebContentsObserver;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.NetError;
 
 /**
  * Routes notifications from WebContents to AwContentsClient and other listeners.
  */
-public class AwWebContentsObserver extends WebContentsObserverAndroid {
+public class AwWebContentsObserver extends WebContentsObserver {
     private final AwContentsClient mAwContentsClient;
+    private boolean mHasStartedAnyProvisionalLoad = false;
 
     public AwWebContentsObserver(WebContents webContents, AwContentsClient awContentsClient) {
         super(webContents);
         mAwContentsClient = awContentsClient;
+    }
+
+    boolean hasStartedAnyProvisionalLoad() {
+        return mHasStartedAnyProvisionalLoad;
     }
 
     @Override
@@ -66,5 +71,16 @@ public class AwWebContentsObserver extends WebContentsObserverAndroid {
     @Override
     public void didNavigateAnyFrame(String url, String baseUrl, boolean isReload) {
         mAwContentsClient.doUpdateVisitedHistory(url, isReload);
+    }
+
+    @Override
+    public void didStartProvisionalLoadForFrame(
+            long frameId,
+            long parentFrameId,
+            boolean isMainFrame,
+            String validatedUrl,
+            boolean isErrorPage,
+            boolean isIframeSrcdoc) {
+        mHasStartedAnyProvisionalLoad = true;
     }
 }

@@ -17,8 +17,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/install_signer.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/common/content_switches.h"
@@ -28,6 +26,7 @@
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/one_shot_event.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -56,8 +55,9 @@ VerifyStatus GetExperimentStatus() {
   const std::string group = base::FieldTrialList::FindFullName(
       kExperimentName);
 
-  std::string forced_trials = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kForceFieldTrials);
+  std::string forced_trials =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kForceFieldTrials);
   if (forced_trials.find(kExperimentName) != std::string::npos) {
     // We don't want to allow turning off enforcement by forcing the field
     // trial group to something other than enforcement.
@@ -82,7 +82,7 @@ VerifyStatus GetExperimentStatus() {
 }
 
 VerifyStatus GetCommandLineStatus() {
-  const CommandLine* cmdline = CommandLine::ForCurrentProcess();
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
   if (!InstallSigner::GetForcedNotFromWebstore().empty())
     return ENFORCE;
 

@@ -11,20 +11,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
-import android.util.Log;
 import android.view.View;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
-
-import com.googlecode.eyesfree.braille.selfbraille.SelfBrailleClient;
-import com.googlecode.eyesfree.braille.selfbraille.WriteData;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.JavascriptInterface;
-import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.content.common.ContentSwitches;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -38,9 +33,7 @@ import java.util.List;
 /**
  * Responsible for accessibility injection and management of a {@link ContentViewCore}.
  */
-public class AccessibilityInjector extends WebContentsObserverAndroid {
-    private static final String TAG = "AccessibilityInjector";
-
+public class AccessibilityInjector {
     // The ContentView this injector is responsible for managing.
     protected ContentViewCore mContentViewCore;
 
@@ -74,20 +67,20 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
             "https://ssl.gstatic.com/accessibility/javascript/android/chromeandroidvox.js";
 
     private static final String ACCESSIBILITY_SCREEN_READER_JAVASCRIPT_TEMPLATE =
-            "(function() {" +
-            "    var chooser = document.createElement('script');" +
-            "    chooser.type = 'text/javascript';" +
-            "    chooser.src = '%1s';" +
-            "    document.getElementsByTagName('head')[0].appendChild(chooser);" +
-            "  })();";
+            "(function() {"
+            + "    var chooser = document.createElement('script');"
+            + "    chooser.type = 'text/javascript';"
+            + "    chooser.src = '%1s';"
+            + "    document.getElementsByTagName('head')[0].appendChild(chooser);"
+            + "  })();";
 
     // JavaScript call to turn ChromeVox on or off.
     private static final String TOGGLE_CHROME_VOX_JAVASCRIPT =
-            "(function() {" +
-            "    if (typeof cvox !== 'undefined') {" +
-            "        cvox.ChromeVox.host.activateOrDeactivateChromeVox(%1s);" +
-            "    }" +
-            "  })();";
+            "(function() {"
+            + "    if (typeof cvox !== 'undefined') {"
+            + "        cvox.ChromeVox.host.activateOrDeactivateChromeVox(%1s);"
+            + "    }"
+            + "  })();";
 
     /**
      * Returns an instance of the {@link AccessibilityInjector} based on the SDK version.
@@ -95,10 +88,12 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
      * @return An instance of a {@link AccessibilityInjector}.
      */
     public static AccessibilityInjector newInstance(ContentViewCore view) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
-            return new AccessibilityInjector(view);
-        } else {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return new LollipopAccessibilityInjector(view);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
             return new JellyBeanAccessibilityInjector(view);
+        } else {
+            return new AccessibilityInjector(view);
         }
     }
 
@@ -107,7 +102,6 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
      * @param view The ContentViewCore that this AccessibilityInjector manages.
      */
     protected AccessibilityInjector(ContentViewCore view) {
-        super(view.getWebContents());
         mContentViewCore = view;
 
         mAccessibilityScreenReaderUrl = CommandLine.getInstance().getSwitchValue(
@@ -135,10 +129,10 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         }
 
         String js = getScreenReaderInjectingJs();
-        if (mContentViewCore.isDeviceAccessibilityScriptInjectionEnabled() &&
-                js != null && mContentViewCore.isAlive()) {
+        if (mContentViewCore.isDeviceAccessibilityScriptInjectionEnabled()
+                && js != null && mContentViewCore.isAlive()) {
             addOrRemoveAccessibilityApisIfNecessary();
-            mContentViewCore.evaluateJavaScript(js, null);
+            mContentViewCore.getWebContents().evaluateJavaScript(js, null);
             mInjectedScriptEnabled = true;
             mScriptInjected = true;
         }
@@ -167,9 +161,8 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
      * Checks whether or not touch to explore is enabled on the system.
      */
     public boolean accessibilityIsAvailable() {
-        if (!getAccessibilityManager().isEnabled() ||
-                mContentViewCore.getContentSettings() == null ||
-                !mContentViewCore.getContentSettings().getJavaScriptEnabled()) {
+        if (!getAccessibilityManager().isEnabled()
+                || !mContentViewCore.getContentViewClient().isJavascriptEnabled()) {
             return false;
         }
 
@@ -199,7 +192,7 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         if (mContentViewCore.isAlive()) {
             String js = String.format(TOGGLE_CHROME_VOX_JAVASCRIPT, Boolean.toString(
                     mInjectedScriptEnabled));
-            mContentViewCore.evaluateJavaScript(js, null);
+            mContentViewCore.getWebContents().evaluateJavaScript(js, null);
 
             if (!mInjectedScriptEnabled) {
                 // Stop any TTS/Vibration right now.
@@ -213,13 +206,15 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
      * accessibility script as not being injected.  This way we can properly ignore incoming
      * accessibility gesture events.
      */
-    @Override
-    public void didStartLoading(String url) {
+    public void onPageLoadStarted() {
         mScriptInjected = false;
     }
 
-    @Override
-    public void didStopLoading(String url) {
+    /**
+     * Notifies this handler that a page load has stopped, which means we can now inject the
+     * accessibility script.
+     */
+    public void onPageLoadStopped() {
         injectAccessibilityScriptIntoPage();
     }
 
@@ -275,7 +270,7 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         if (context != null) {
             // Enabled, we should try to add if we have to.
             if (mTextToSpeech == null) {
-                mTextToSpeech = new TextToSpeechWrapper(mContentViewCore.getContainerView(),
+                mTextToSpeech = createTextToSpeechWrapper(mContentViewCore.getContainerView(),
                         context);
                 mContentViewCore.addJavascriptInterface(mTextToSpeech,
                         ALIAS_ACCESSIBILITY_JS_INTERFACE);
@@ -336,8 +331,8 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
 
     private AccessibilityManager getAccessibilityManager() {
         if (mAccessibilityManager == null) {
-            mAccessibilityManager = (AccessibilityManager) mContentViewCore.getContext().
-                    getSystemService(Context.ACCESSIBILITY_SERVICE);
+            mAccessibilityManager = (AccessibilityManager) mContentViewCore.getContext()
+                    .getSystemService(Context.ACCESSIBILITY_SERVICE);
         }
 
         return mAccessibilityManager;
@@ -390,19 +385,20 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         }
     }
 
+    protected TextToSpeechWrapper createTextToSpeechWrapper(View view, Context context) {
+        return new TextToSpeechWrapper(view, context);
+    }
+
     /**
      * Used to protect the TextToSpeech class, only exposing the methods we want to expose.
      */
-    private static class TextToSpeechWrapper {
-        private final TextToSpeech mTextToSpeech;
-        private final SelfBrailleClient mSelfBrailleClient;
+    protected static class TextToSpeechWrapper {
+        protected final TextToSpeech mTextToSpeech;
         private final View mView;
 
-        public TextToSpeechWrapper(View view, Context context) {
+        protected TextToSpeechWrapper(View view, Context context) {
             mView = view;
             mTextToSpeech = new TextToSpeech(context, null, null);
-            mSelfBrailleClient = new SelfBrailleClient(context, CommandLine.getInstance().hasSwitch(
-                    ContentSwitches.ACCESSIBILITY_DEBUG_BRAILLE_SERVICE));
         }
 
         @JavascriptInterface
@@ -412,7 +408,7 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         }
 
         @JavascriptInterface
-        @SuppressWarnings("unused")
+        @SuppressWarnings({"unused", "deprecation"})
         public int speak(String text, int queueMode, String jsonParams) {
             // Try to pull the params from the JSON string.
             HashMap<String, String> params = null;
@@ -449,23 +445,13 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         @JavascriptInterface
         @SuppressWarnings("unused")
         public void braille(String jsonString) {
-            try {
-                JSONObject jsonObj = new JSONObject(jsonString);
-
-                WriteData data = WriteData.forView(mView);
-                data.setText(jsonObj.getString("text"));
-                data.setSelectionStart(jsonObj.getInt("startIndex"));
-                data.setSelectionEnd(jsonObj.getInt("endIndex"));
-                mSelfBrailleClient.write(data);
-            } catch (JSONException ex) {
-                Log.w(TAG, "Error parsing JS JSON object", ex);
-            }
+            // This is here because AndroidVox depends on the existence
+            // of this method.
         }
 
         @SuppressWarnings("unused")
         protected void shutdownInternal() {
             mTextToSpeech.shutdown();
-            mSelfBrailleClient.shutdown();
         }
     }
 }

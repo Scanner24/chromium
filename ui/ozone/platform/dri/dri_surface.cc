@@ -4,6 +4,7 @@
 
 #include "ui/ozone/platform/dri/dri_surface.h"
 
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -20,7 +21,7 @@ namespace ui {
 
 namespace {
 
-scoped_refptr<DriBuffer> AllocateBuffer(DriWrapper* dri,
+scoped_refptr<DriBuffer> AllocateBuffer(const scoped_refptr<DriWrapper>& dri,
                                         const gfx::Size& size) {
   scoped_refptr<DriBuffer> buffer(new DriBuffer(dri));
   SkImageInfo info = SkImageInfo::MakeN32Premul(size.width(), size.height());
@@ -33,18 +34,15 @@ scoped_refptr<DriBuffer> AllocateBuffer(DriWrapper* dri,
 
 }  // namespace
 
-DriSurface::DriSurface(DriWindowDelegate* window_delegate, DriWrapper* dri)
-    : window_delegate_(window_delegate),
-      dri_(dri),
-      buffers_(),
-      front_buffer_(0) {
+DriSurface::DriSurface(DriWindowDelegate* window_delegate)
+    : window_delegate_(window_delegate), buffers_(), front_buffer_(0) {
 }
 
 DriSurface::~DriSurface() {
 }
 
-skia::RefPtr<SkCanvas> DriSurface::GetCanvas() {
-  return skia::SharePtr(surface_->getCanvas());
+skia::RefPtr<SkSurface> DriSurface::GetSurface() {
+  return surface_;
 }
 
 void DriSurface::ResizeCanvas(const gfx::Size& viewport_size) {
@@ -59,29 +57,29 @@ void DriSurface::ResizeCanvas(const gfx::Size& viewport_size) {
   // For the display buffers use the mode size since a |viewport_size| smaller
   // than the display size will not scanout.
   for (size_t i = 0; i < arraysize(buffers_); ++i)
-    buffers_[i] = AllocateBuffer(dri_, controller->GetModeSize());
+    buffers_[i] = AllocateBuffer(controller->GetAllocationDriWrapper(),
+                                 controller->GetModeSize());
 }
 
 void DriSurface::PresentCanvas(const gfx::Rect& damage) {
   DCHECK(base::MessageLoopForUI::IsCurrent());
-  DCHECK(buffers_[front_buffer_ ^ 1].get());
 
   HardwareDisplayController* controller = window_delegate_->GetController();
   if (!controller)
     return;
 
+  DCHECK(buffers_[front_buffer_ ^ 1].get());
   controller->QueueOverlayPlane(OverlayPlane(buffers_[front_buffer_ ^ 1]));
 
   UpdateNativeSurface(damage);
-  controller->SchedulePageFlip();
-  controller->WaitForPageFlipEvent();
+  controller->SchedulePageFlip(base::Bind(&base::DoNothing));
 
   // Update our front buffer pointer.
   front_buffer_ ^= 1;
 }
 
 scoped_ptr<gfx::VSyncProvider> DriSurface::CreateVSyncProvider() {
-  return scoped_ptr<gfx::VSyncProvider>(new DriVSyncProvider(window_delegate_));
+  return make_scoped_ptr(new DriVSyncProvider(window_delegate_));
 }
 
 void DriSurface::UpdateNativeSurface(const gfx::Rect& damage) {

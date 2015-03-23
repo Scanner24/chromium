@@ -14,6 +14,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 
 namespace {
@@ -53,7 +54,7 @@ PartnerBookmarksShim* PartnerBookmarksShim::BuildForBrowserContext(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   PartnerBookmarksShim* data =
-      reinterpret_cast<PartnerBookmarksShim*>(
+      static_cast<PartnerBookmarksShim*>(
           browser_context->GetUserData(kPartnerBookmarksShimUserDataKey));
   if (data)
     return data;

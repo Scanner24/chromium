@@ -10,8 +10,13 @@
 #include "base/files/file_util.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/pdf/pdf_extension_util.h"
+#include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -23,6 +28,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/browser_resources.h"
@@ -30,6 +36,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "components/user_manager/user_manager.h"
 #include "grit/keyboard_resources.h"
 #include "ui/file_manager/grit/file_manager_resources.h"
 #include "ui/keyboard/keyboard_util.h"
@@ -50,6 +57,10 @@
 
 #if defined(ENABLE_APP_LIST)
 #include "chrome/grit/chromium_strings.h"
+#endif
+
+#if defined(ENABLE_APP_LIST) && defined(OS_CHROMEOS)
+#include "chrome/browser/ui/app_list/google_now_extension.h"
 #endif
 
 using content::BrowserThread;
@@ -79,7 +90,17 @@ LoadManifestOnFileThread(
   scoped_ptr<base::DictionaryValue> manifest(
       file_util::LoadManifest(chromevox_path, manifest_filename, &error));
   CHECK(manifest) << error;
+  bool localized = extension_l10n_util::LocalizeExtension(
+      chromevox_path, manifest.get(), &error);
+  CHECK(localized) << error;
   return manifest.Pass();
+}
+
+bool IsNormalSession() {
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+             chromeos::switches::kGuestSession) &&
+         user_manager::UserManager::IsInitialized() &&
+         user_manager::UserManager::Get()->IsUserLoggedIn();
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -111,11 +132,15 @@ ComponentLoader::~ComponentLoader() {
 }
 
 void ComponentLoader::LoadAll() {
+  TRACE_EVENT0("browser,startup", "ComponentLoader::LoadAll");
+  const base::TimeTicks start_time = base::TimeTicks::Now();
   for (RegisteredComponentExtensions::iterator it =
           component_extensions_.begin();
       it != component_extensions_.end(); ++it) {
     Load(*it);
   }
+  UMA_HISTOGRAM_TIMES("Extensions.LoadAllComponentTime",
+                      base::TimeTicks::Now() - start_time);
 }
 
 base::DictionaryValue* ComponentLoader::ParseManifest(
@@ -263,7 +288,8 @@ bool ComponentLoader::Exists(const std::string& id) const {
 void ComponentLoader::AddFileManagerExtension() {
 #if defined(OS_CHROMEOS)
 #ifndef NDEBUG
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kFileManagerExtensionPath)) {
     base::FilePath filemgr_extension_path(
         command_line->GetSwitchValuePath(switches::kFileManagerExtensionPath));
@@ -288,6 +314,13 @@ void ComponentLoader::AddVideoPlayerExtension() {
 #endif  // defined(OS_CHROMEOS)
 }
 
+void ComponentLoader::AddAudioPlayerExtension() {
+#if defined(OS_CHROMEOS)
+  Add(IDR_AUDIO_PLAYER_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("audio_player")));
+#endif  // defined(OS_CHROMEOS)
+}
+
 void ComponentLoader::AddGalleryExtension() {
 #if defined(OS_CHROMEOS)
   Add(IDR_GALLERY_MANIFEST, base::FilePath(FILE_PATH_LITERAL("gallery")));
@@ -302,8 +335,8 @@ void ComponentLoader::AddHangoutServicesExtension() {
 }
 
 void ComponentLoader::AddHotwordAudioVerificationApp() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableExperimentalHotwording)) {
+  if (HotwordService::IsExperimentalHotwordingEnabled() &&
+      HotwordServiceFactory::IsHotwordHardwareAvailable()) {
     Add(IDR_HOTWORD_AUDIO_VERIFICATION_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("hotword_audio_verification")));
   }
@@ -311,8 +344,7 @@ void ComponentLoader::AddHotwordAudioVerificationApp() {
 
 void ComponentLoader::AddHotwordHelperExtension() {
   if (HotwordServiceFactory::IsHotwordAllowed(browser_context_)) {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(switches::kEnableExperimentalHotwording)) {
+    if (HotwordService::IsExperimentalHotwordingEnabled()) {
       Add(IDR_HOTWORD_MANIFEST,
           base::FilePath(FILE_PATH_LITERAL("hotword")));
     } else {
@@ -344,20 +376,10 @@ void ComponentLoader::AddChromeVoxExtension(
   base::FilePath chromevox_path =
       resources_path.Append(extension_misc::kChromeVoxExtensionPath);
 
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  bool is_chromevox_next =
-      command_line->HasSwitch(chromeos::switches::kEnableChromeVoxNext);
-  bool is_guest = command_line->HasSwitch(chromeos::switches::kGuestSession);
-  const char* manifest_filename;
-  if (is_chromevox_next) {
-    manifest_filename =
-        is_guest ? extension_misc::kChromeVoxNextGuestManifestFilename
-                 : extension_misc::kChromeVoxNextManifestFilename;
-  } else {
-    manifest_filename =
-        is_guest ? extension_misc::kChromeVoxGuestManifestFilename
-                 : extension_misc::kChromeVoxManifestFilename;
-  }
+  const char* manifest_filename =
+      IsNormalSession() ? extension_misc::kChromeVoxManifestFilename
+                        : extension_misc::kChromeVoxGuestManifestFilename;
+
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE,
       FROM_HERE,
@@ -380,9 +402,8 @@ void ComponentLoader::AddChromeVoxExtensionWithManifest(
 }
 
 std::string ComponentLoader::AddChromeOsSpeechSynthesisExtension() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  int idr = command_line->HasSwitch(chromeos::switches::kGuestSession) ?
-      IDR_SPEECH_SYNTHESIS_GUEST_MANIFEST : IDR_SPEECH_SYNTHESIS_MANIFEST;
+  int idr = IsNormalSession() ? IDR_SPEECH_SYNTHESIS_MANIFEST
+                              : IDR_SPEECH_SYNTHESIS_GUEST_MANIFEST;
   std::string id = Add(idr,
       base::FilePath(extension_misc::kSpeechSynthesisExtensionPath));
   EnableFileSystemInGuestMode(id);
@@ -456,7 +477,8 @@ void ComponentLoader::AddDefaultComponentExtensions(
 
   // Skip all other extensions that require user session presence.
   if (!skip_session_components) {
-    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    const base::CommandLine* command_line =
+        base::CommandLine::ForCurrentProcess();
     if (!command_line->HasSwitch(chromeos::switches::kGuestSession))
       Add(IDR_BOOKMARKS_MANIFEST,
           base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
@@ -498,7 +520,8 @@ void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
 
 void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     bool skip_session_components) {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
 
   // Component extensions with background pages are not enabled during tests
   // because they generate a lot of background behavior that can interfere.
@@ -520,6 +543,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
   if (!skip_session_components) {
     AddVideoPlayerExtension();
+    AddAudioPlayerExtension();
     AddFileManagerExtension();
     AddGalleryExtension();
 
@@ -528,20 +552,18 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     AddHotwordHelperExtension();
     AddImageLoaderExtension();
 
+    bool install_feedback = enable_background_extensions_during_testing;
+#if defined(GOOGLE_CHROME_BUILD)
+    install_feedback = true;
+#endif  // defined(GOOGLE_CHROME_BUILD)
+    if (install_feedback)
+      Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
+
 #if defined(ENABLE_SETTINGS_APP)
     Add(IDR_SETTINGS_APP_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("settings_app")));
 #endif
   }
-
-  // If (!enable_background_extensions_during_testing || this isn't a test)
-  //   install_feedback = false;
-  bool install_feedback = enable_background_extensions_during_testing;
-#if defined(GOOGLE_CHROME_BUILD)
-  install_feedback = true;
-#endif  // defined(GOOGLE_CHROME_BUILD)
-  if (install_feedback)
-    Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
 
 #if defined(OS_CHROMEOS)
   if (!skip_session_components) {
@@ -597,6 +619,14 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
   bool enabled = enabled_via_field_trial || enabled_via_trunk_build;
 
+#if defined(ENABLE_APP_LIST) && defined(OS_CHROMEOS)
+  // Don't load if newer trial is running (== new extension id is available).
+  std::string ignored_extension_id;
+  if (GetGoogleNowExtensionId(&ignored_extension_id)) {
+    enabled = false;
+  }
+#endif
+
   if (!skip_session_components && enabled) {
     Add(IDR_GOOGLE_NOW_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("google_now")));
@@ -611,13 +641,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #endif  // defined(GOOGLE_CHROME_BUILD)
 
 #if defined(ENABLE_PLUGINS)
-  base::FilePath pdf_path;
-  content::PluginService* plugin_service =
-      content::PluginService::GetInstance();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kOutOfProcessPdf) &&
-      PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path) &&
-      plugin_service->GetRegisteredPpapiPluginInfo(pdf_path)) {
-    Add(IDR_PDF_MANIFEST, base::FilePath(FILE_PATH_LITERAL("pdf")));
+  if (switches::OutOfProcessPdfEnabled()) {
+    Add(pdf_extension_util::GetManifest(),
+        base::FilePath(FILE_PATH_LITERAL("pdf")));
   }
 #endif
 
@@ -635,8 +661,7 @@ void ComponentLoader::UnloadComponent(ComponentExtensionInfo* component) {
 
 void ComponentLoader::EnableFileSystemInGuestMode(const std::string& id) {
 #if defined(OS_CHROMEOS)
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(chromeos::switches::kGuestSession)) {
+  if (!IsNormalSession()) {
     // TODO(dpolukhin): Hack to enable HTML5 temporary file system for
     // the extension. Some component extensions don't work without temporary
     // file system access. Make sure temporary file system is enabled in the off

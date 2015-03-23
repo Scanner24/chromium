@@ -5,7 +5,6 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -119,9 +118,8 @@ IN_PROC_BROWSER_TEST_F(WorkerTest, WebSocketSharedWorker) {
   ASSERT_TRUE(ws_server.Start());
 
   // Generate test URL.
-  std::string scheme("http");
   GURL::Replacements replacements;
-  replacements.SetSchemeStr(scheme);
+  replacements.SetSchemeStr("http");
   GURL url = ws_server.GetURL(
       "websocket_shared_worker.html").ReplaceComponents(replacements);
 

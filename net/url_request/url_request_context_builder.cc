@@ -14,7 +14,7 @@
 #include "base/threading/thread.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_errors.h"
-#include "net/base/network_delegate.h"
+#include "net/base/network_delegate_impl.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/dns/host_resolver.h"
@@ -48,85 +48,78 @@ namespace net {
 
 namespace {
 
-class BasicNetworkDelegate : public NetworkDelegate {
+class BasicNetworkDelegate : public NetworkDelegateImpl {
  public:
   BasicNetworkDelegate() {}
-  virtual ~BasicNetworkDelegate() {}
+  ~BasicNetworkDelegate() override {}
 
  private:
-  virtual int OnBeforeURLRequest(URLRequest* request,
-                                 const CompletionCallback& callback,
-                                 GURL* new_url) OVERRIDE {
+  int OnBeforeURLRequest(URLRequest* request,
+                         const CompletionCallback& callback,
+                         GURL* new_url) override {
     return OK;
   }
 
-  virtual int OnBeforeSendHeaders(URLRequest* request,
-                                  const CompletionCallback& callback,
-                                  HttpRequestHeaders* headers) OVERRIDE {
+  int OnBeforeSendHeaders(URLRequest* request,
+                          const CompletionCallback& callback,
+                          HttpRequestHeaders* headers) override {
     return OK;
   }
 
-  virtual void OnSendHeaders(URLRequest* request,
-                             const HttpRequestHeaders& headers) OVERRIDE {}
+  void OnSendHeaders(URLRequest* request,
+                     const HttpRequestHeaders& headers) override {}
 
-  virtual int OnHeadersReceived(
+  int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
-      GURL* allowed_unsafe_redirect_url) OVERRIDE {
+      GURL* allowed_unsafe_redirect_url) override {
     return OK;
   }
 
-  virtual void OnBeforeRedirect(URLRequest* request,
-                                const GURL& new_location) OVERRIDE {}
+  void OnBeforeRedirect(URLRequest* request,
+                        const GURL& new_location) override {}
 
-  virtual void OnResponseStarted(URLRequest* request) OVERRIDE {}
+  void OnResponseStarted(URLRequest* request) override {}
 
-  virtual void OnRawBytesRead(const URLRequest& request,
-                              int bytes_read) OVERRIDE {}
+  void OnRawBytesRead(const URLRequest& request, int bytes_read) override {}
 
-  virtual void OnCompleted(URLRequest* request, bool started) OVERRIDE {}
+  void OnCompleted(URLRequest* request, bool started) override {}
 
-  virtual void OnURLRequestDestroyed(URLRequest* request) OVERRIDE {}
+  void OnURLRequestDestroyed(URLRequest* request) override {}
 
-  virtual void OnPACScriptError(int line_number,
-                                const base::string16& error) OVERRIDE {}
+  void OnPACScriptError(int line_number, const base::string16& error) override {
+  }
 
-  virtual NetworkDelegate::AuthRequiredResponse OnAuthRequired(
+  NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       URLRequest* request,
       const AuthChallengeInfo& auth_info,
       const AuthCallback& callback,
-      AuthCredentials* credentials) OVERRIDE {
+      AuthCredentials* credentials) override {
     return NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
   }
 
-  virtual bool OnCanGetCookies(const URLRequest& request,
-                               const CookieList& cookie_list) OVERRIDE {
+  bool OnCanGetCookies(const URLRequest& request,
+                       const CookieList& cookie_list) override {
     return true;
   }
 
-  virtual bool OnCanSetCookie(const URLRequest& request,
-                              const std::string& cookie_line,
-                              CookieOptions* options) OVERRIDE {
+  bool OnCanSetCookie(const URLRequest& request,
+                      const std::string& cookie_line,
+                      CookieOptions* options) override {
     return true;
   }
 
-  virtual bool OnCanAccessFile(const net::URLRequest& request,
-                               const base::FilePath& path) const OVERRIDE {
+  bool OnCanAccessFile(const net::URLRequest& request,
+                       const base::FilePath& path) const override {
     return true;
   }
 
-  virtual bool OnCanThrottleRequest(const URLRequest& request) const OVERRIDE {
+  bool OnCanThrottleRequest(const URLRequest& request) const override {
     // Returning true will only enable throttling if there's also a
     // URLRequestThrottlerManager, which there isn't, by default.
     return true;
-  }
-
-  virtual int OnBeforeSocketStreamConnect(
-      SocketStream* stream,
-      const CompletionCallback& callback) OVERRIDE {
-    return OK;
   }
 
   DISALLOW_COPY_AND_ASSIGN(BasicNetworkDelegate);
@@ -165,9 +158,7 @@ class BasicURLRequestContext : public URLRequestContext {
   }
 
  protected:
-  virtual ~BasicURLRequestContext() {
-    AssertNoURLRequests();
-  }
+  ~BasicURLRequestContext() override { AssertNoURLRequests(); }
 
  private:
   // Threads should be torn down last.
@@ -240,6 +231,14 @@ void URLRequestContextBuilder::SetSpdyAndQuicEnabled(bool spdy_enabled,
   http_network_session_params_.enable_quic = quic_enabled;
 }
 
+void URLRequestContextBuilder::SetCookieAndChannelIdStores(
+      const scoped_refptr<CookieStore>& cookie_store,
+      scoped_ptr<ChannelIDService> channel_id_service) {
+  DCHECK(cookie_store);
+  cookie_store_ = cookie_store;
+  channel_id_service_ = channel_id_service.Pass();
+}
+
 URLRequestContext* URLRequestContextBuilder::Build() {
   BasicURLRequestContext* context = new BasicURLRequestContext;
   URLRequestContextStorage* storage = context->storage();
@@ -298,14 +297,18 @@ URLRequestContext* URLRequestContextBuilder::Build() {
         extra_http_auth_handlers_[i].factory);
   }
   storage->set_http_auth_handler_factory(http_auth_handler_registry_factory);
-  storage->set_cookie_store(new CookieMonster(NULL, NULL));
 
-  // TODO(mmenke):  This always creates a file thread, even when it ends up
-  // not being used.  Consider lazily creating the thread.
-  storage->set_channel_id_service(
-      new ChannelIDService(
-          new DefaultChannelIDStore(NULL),
-          context->GetFileThread()->message_loop_proxy()));
+  if (cookie_store_) {
+    storage->set_cookie_store(cookie_store_.get());
+    storage->set_channel_id_service(channel_id_service_.Pass());
+  } else {
+    storage->set_cookie_store(new CookieMonster(NULL, NULL));
+    // TODO(mmenke):  This always creates a file thread, even when it ends up
+    // not being used.  Consider lazily creating the thread.
+    storage->set_channel_id_service(make_scoped_ptr(
+        new ChannelIDService(new DefaultChannelIDStore(NULL),
+                             context->GetFileThread()->message_loop_proxy())));
+  }
 
   storage->set_transport_security_state(new net::TransportSecurityState());
   if (!transport_security_persister_path_.empty()) {
@@ -355,6 +358,8 @@ URLRequestContext* URLRequestContextBuilder::Build() {
       http_network_session_params_.trusted_spdy_proxy;
   network_session_params.next_protos = http_network_session_params_.next_protos;
   network_session_params.enable_quic = http_network_session_params_.enable_quic;
+  network_session_params.quic_connection_options =
+      http_network_session_params_.quic_connection_options;
 
   HttpTransactionFactory* http_transaction_factory = NULL;
   if (http_cache_enabled_) {

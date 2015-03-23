@@ -15,9 +15,9 @@
 #include "ui/gfx/animation/multi_animation.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_switches.h"
@@ -54,17 +54,24 @@ const int kAnimateClearingNextNotificationDelayMS = 40;
 
 const int kDefaultAnimationDurationMs = 120;
 const int kDefaultFrameRateHz = 60;
+
+void SetViewHierarchyEnabled(views::View* view, bool enabled) {
+  for (int i = 0; i < view->child_count(); i++)
+    SetViewHierarchyEnabled(view->child_at(i), enabled);
+  view->SetEnabled(enabled);
+}
+
 }  // namespace
 
 class NoNotificationMessageView : public views::View {
  public:
   NoNotificationMessageView();
-  virtual ~NoNotificationMessageView();
+  ~NoNotificationMessageView() override;
 
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual int GetHeightForWidth(int width) const OVERRIDE;
-  virtual void Layout() OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  int GetHeightForWidth(int width) const override;
+  void Layout() override;
 
  private:
   views::Label* label_;
@@ -110,7 +117,7 @@ class MessageListView : public views::View,
  public:
   explicit MessageListView(MessageCenterView* message_center_view,
                            bool top_down);
-  virtual ~MessageListView();
+  ~MessageListView() override;
 
   void AddNotificationAt(MessageView* view, int i);
   void RemoveNotification(MessageView* view);
@@ -121,17 +128,16 @@ class MessageListView : public views::View,
 
  protected:
   // Overridden from views::View.
-  virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual int GetHeightForWidth(int width) const OVERRIDE;
-  virtual void PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) OVERRIDE;
-  virtual void ReorderChildLayers(ui::Layer* parent_layer) OVERRIDE;
+  void Layout() override;
+  gfx::Size GetPreferredSize() const override;
+  int GetHeightForWidth(int width) const override;
+  void PaintChildren(gfx::Canvas* canvas,
+                     const views::CullSet& cull_set) override;
+  void ReorderChildLayers(ui::Layer* parent_layer) override;
 
   // Overridden from views::BoundsAnimatorObserver.
-  virtual void OnBoundsAnimatorProgressed(
-      views::BoundsAnimator* animator) OVERRIDE;
-  virtual void OnBoundsAnimatorDone(views::BoundsAnimator* animator) OVERRIDE;
+  void OnBoundsAnimatorProgressed(views::BoundsAnimator* animator) override;
+  void OnBoundsAnimatorDone(views::BoundsAnimator* animator) override;
 
  private:
   bool IsValidChild(const views::View* child) const;
@@ -421,7 +427,7 @@ void MessageListView::DoUpdateIfPossible() {
   }
 
   if (top_down_ ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableMessageCenterAlwaysScrollUpUponNotificationRemoval))
     AnimateNotificationsBelowTarget();
   else
@@ -686,13 +692,13 @@ void MessageCenterView::ClearAllNotifications() {
   if (is_closing_)
     return;
 
-  scroller_->SetEnabled(false);
+  SetViewHierarchyEnabled(scroller_, false);
   button_bar_->SetAllButtonsEnabled(false);
   message_list_view_->ClearAllNotifications(scroller_->GetVisibleRect());
 }
 
 void MessageCenterView::OnAllNotificationsCleared() {
-  scroller_->SetEnabled(true);
+  SetViewHierarchyEnabled(scroller_, true);
   button_bar_->SetAllButtonsEnabled(true);
   button_bar_->SetCloseAllButtonEnabled(false);
   message_center_->RemoveAllVisibleNotifications(true);  // Action by user.
@@ -864,12 +870,13 @@ void MessageCenterView::OnNotificationRemoved(const std::string& id,
         next_focused_view = message_list_view_->child_at(index - 1);
 
       if (next_focused_view) {
-        if (view->IsCloseButtonFocused())
+        if (view->IsCloseButtonFocused()) {
           // Safe cast since all views in MessageListView are MessageViews.
           static_cast<MessageView*>(
               next_focused_view)->RequestFocusOnCloseButton();
-        else
+        } else {
           next_focused_view->RequestFocus();
+        }
       }
     }
   }

@@ -85,9 +85,15 @@ class Processor(object):
       match = re.search(self._INCLUDE_REG, current_line[2])
       if match:
         file_dir = os.path.dirname(current_line[0])
-        self._include_file(os.path.join(file_dir, match.group(1)))
-      else:
-        self._index += 1
+        file_name = os.path.abspath(os.path.join(file_dir, match.group(1)))
+        if file_name not in self._included_files:
+          self._include_file(file_name)
+          continue  # Stay on the same line.
+        else:
+          # Found a duplicate <include>. Ignore and insert a blank line to
+          # preserve line numbers.
+          self._lines[self._index] = self._lines[self._index][:2] + ("",)
+      self._index += 1
 
     for i, line in enumerate(self._lines):
       self._lines[i] = line[:2] + (re.sub(self._IF_TAGS_REG, "", line[2]),)

@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "media/base/audio_renderer.h"
+#include "media/base/bind_to_current_loop.h"
 #include "media/base/demuxer_stream_provider.h"
 #include "media/base/time_source.h"
 #include "media/base/video_renderer.h"
@@ -20,12 +21,10 @@ namespace media {
 
 RendererImpl::RendererImpl(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    DemuxerStreamProvider* demuxer_stream_provider,
     scoped_ptr<AudioRenderer> audio_renderer,
     scoped_ptr<VideoRenderer> video_renderer)
     : state_(STATE_UNINITIALIZED),
       task_runner_(task_runner),
-      demuxer_stream_provider_(demuxer_stream_provider),
       audio_renderer_(audio_renderer.Pass()),
       video_renderer_(video_renderer.Pass()),
       time_source_(NULL),
@@ -34,10 +33,11 @@ RendererImpl::RendererImpl(
       video_buffering_state_(BUFFERING_HAVE_NOTHING),
       audio_ended_(false),
       video_ended_(false),
+      cdm_context_(nullptr),
       underflow_disabled_for_testing_(false),
       clockless_video_playback_enabled_for_testing_(false),
-      weak_factory_(this),
-      weak_this_(weak_factory_.GetWeakPtr()) {
+      weak_factory_(this) {
+  weak_this_ = weak_factory_.GetWeakPtr();
   DVLOG(1) << __FUNCTION__;
 }
 
@@ -50,40 +50,75 @@ RendererImpl::~RendererImpl() {
   video_renderer_.reset();
   audio_renderer_.reset();
 
-  FireAllPendingCallbacks();
+  if (!init_cb_.is_null())
+    base::ResetAndReturn(&init_cb_).Run(PIPELINE_ERROR_ABORT);
+  else if (!flush_cb_.is_null())
+    base::ResetAndReturn(&flush_cb_).Run();
 }
 
-void RendererImpl::Initialize(const base::Closure& init_cb,
+void RendererImpl::Initialize(DemuxerStreamProvider* demuxer_stream_provider,
+                              const PipelineStatusCB& init_cb,
                               const StatisticsCB& statistics_cb,
+                              const BufferingStateCB& buffering_state_cb,
+                              const PaintCB& paint_cb,
                               const base::Closure& ended_cb,
-                              const PipelineStatusCB& error_cb,
-                              const BufferingStateCB& buffering_state_cb) {
+                              const PipelineStatusCB& error_cb) {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_UNINITIALIZED) << state_;
+  DCHECK_EQ(state_, STATE_UNINITIALIZED);
   DCHECK(!init_cb.is_null());
   DCHECK(!statistics_cb.is_null());
+  DCHECK(!buffering_state_cb.is_null());
+  DCHECK(!paint_cb.is_null());
   DCHECK(!ended_cb.is_null());
   DCHECK(!error_cb.is_null());
-  DCHECK(!buffering_state_cb.is_null());
-  DCHECK(demuxer_stream_provider_->GetStream(DemuxerStream::AUDIO) ||
-         demuxer_stream_provider_->GetStream(DemuxerStream::VIDEO));
+  DCHECK(demuxer_stream_provider->GetStream(DemuxerStream::AUDIO) ||
+         demuxer_stream_provider->GetStream(DemuxerStream::VIDEO));
 
+  demuxer_stream_provider_ = demuxer_stream_provider;
   statistics_cb_ = statistics_cb;
+  buffering_state_cb_ = buffering_state_cb;
+  paint_cb_ = paint_cb;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
-  buffering_state_cb_ = buffering_state_cb;
-
   init_cb_ = init_cb;
+
   state_ = STATE_INITIALIZING;
   InitializeAudioRenderer();
+}
+
+void RendererImpl::SetCdm(CdmContext* cdm_context,
+                          const CdmAttachedCB& cdm_attached_cb) {
+  DVLOG(1) << __FUNCTION__;
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(cdm_context);
+
+  if (cdm_context_) {
+    DVLOG(1) << "Switching CDM not supported.";
+    cdm_attached_cb.Run(false);
+    return;
+  }
+
+  cdm_context_ = cdm_context;
+
+  if (decryptor_ready_cb_.is_null()) {
+    cdm_attached_cb.Run(true);
+    return;
+  }
+
+  base::ResetAndReturn(&decryptor_ready_cb_)
+      .Run(cdm_context->GetDecryptor(), cdm_attached_cb);
 }
 
 void RendererImpl::Flush(const base::Closure& flush_cb) {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_PLAYING) << state_;
   DCHECK(flush_cb_.is_null());
+
+  if (state_ != STATE_PLAYING) {
+    DCHECK_EQ(state_, STATE_ERROR);
+    return;
+  }
 
   flush_cb_ = flush_cb;
   state_ = STATE_FLUSHING;
@@ -97,7 +132,11 @@ void RendererImpl::Flush(const base::Closure& flush_cb) {
 void RendererImpl::StartPlayingFrom(base::TimeDelta time) {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_PLAYING) << state_;
+
+  if (state_ != STATE_PLAYING) {
+    DCHECK_EQ(state_, STATE_ERROR);
+    return;
+  }
 
   time_source_->SetMediaTime(time);
 
@@ -142,14 +181,6 @@ bool RendererImpl::HasVideo() {
   return video_renderer_ != NULL;
 }
 
-void RendererImpl::SetCdm(MediaKeys* cdm) {
-  DVLOG(1) << __FUNCTION__;
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  // TODO(xhwang): Explore to possibility to move CDM setting from
-  // WebMediaPlayerImpl to this class. See http://crbug.com/401264
-  NOTREACHED();
-}
-
 void RendererImpl::DisableUnderflowForTesting() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
@@ -180,10 +211,33 @@ base::TimeDelta RendererImpl::GetMediaTimeForSyncingVideo() {
   return time_source_->CurrentMediaTimeForSyncingVideo();
 }
 
+void RendererImpl::SetDecryptorReadyCallback(
+    const DecryptorReadyCB& decryptor_ready_cb) {
+  // Cancels the previous decryptor request.
+  if (decryptor_ready_cb.is_null()) {
+    if (!decryptor_ready_cb_.is_null()) {
+      base::ResetAndReturn(&decryptor_ready_cb_)
+          .Run(nullptr, base::Bind(IgnoreCdmAttached));
+    }
+    return;
+  }
+
+  // We initialize audio and video decoders in sequence.
+  DCHECK(decryptor_ready_cb_.is_null());
+
+  if (cdm_context_) {
+    decryptor_ready_cb.Run(cdm_context_->GetDecryptor(),
+                           base::Bind(IgnoreCdmAttached));
+    return;
+  }
+
+  decryptor_ready_cb_ = decryptor_ready_cb;
+}
+
 void RendererImpl::InitializeAudioRenderer() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_INITIALIZING) << state_;
+  DCHECK_EQ(state_, STATE_INITIALIZING);
   DCHECK(!init_cb_.is_null());
 
   PipelineStatusCB done_cb =
@@ -195,9 +249,11 @@ void RendererImpl::InitializeAudioRenderer() {
     return;
   }
 
+  // Note: After the initialization of a renderer, error events from it may
+  // happen at any time and all future calls must guard against STATE_ERROR.
   audio_renderer_->Initialize(
-      demuxer_stream_provider_->GetStream(DemuxerStream::AUDIO),
-      done_cb,
+      demuxer_stream_provider_->GetStream(DemuxerStream::AUDIO), done_cb,
+      base::Bind(&RendererImpl::SetDecryptorReadyCallback, weak_this_),
       base::Bind(&RendererImpl::OnUpdateStatistics, weak_this_),
       base::Bind(&RendererImpl::OnBufferingStateChanged, weak_this_,
                  &audio_buffering_state_),
@@ -208,22 +264,28 @@ void RendererImpl::InitializeAudioRenderer() {
 void RendererImpl::OnAudioRendererInitializeDone(PipelineStatus status) {
   DVLOG(1) << __FUNCTION__ << ": " << status;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_INITIALIZING) << state_;
-  DCHECK(!init_cb_.is_null());
 
-  if (status != PIPELINE_OK) {
+  // OnError() may be fired at any time by the renderers, even if they thought
+  // they initialized successfully (due to delayed output device setup).
+  if (state_ != STATE_INITIALIZING) {
+    DCHECK(init_cb_.is_null());
     audio_renderer_.reset();
-    OnError(status);
     return;
   }
 
+  if (status != PIPELINE_OK) {
+    base::ResetAndReturn(&init_cb_).Run(status);
+    return;
+  }
+
+  DCHECK(!init_cb_.is_null());
   InitializeVideoRenderer();
 }
 
 void RendererImpl::InitializeVideoRenderer() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_INITIALIZING) << state_;
+  DCHECK_EQ(state_, STATE_INITIALIZING);
   DCHECK(!init_cb_.is_null());
 
   PipelineStatusCB done_cb =
@@ -236,14 +298,12 @@ void RendererImpl::InitializeVideoRenderer() {
   }
 
   video_renderer_->Initialize(
-      demuxer_stream_provider_->GetStream(DemuxerStream::VIDEO),
-      demuxer_stream_provider_->GetLiveness() ==
-          DemuxerStreamProvider::LIVENESS_LIVE,
-      done_cb,
+      demuxer_stream_provider_->GetStream(DemuxerStream::VIDEO), done_cb,
+      base::Bind(&RendererImpl::SetDecryptorReadyCallback, weak_this_),
       base::Bind(&RendererImpl::OnUpdateStatistics, weak_this_),
-      base::Bind(&RendererImpl::OnBufferingStateChanged,
-                 weak_this_,
+      base::Bind(&RendererImpl::OnBufferingStateChanged, weak_this_,
                  &video_buffering_state_),
+      base::ResetAndReturn(&paint_cb_),
       base::Bind(&RendererImpl::OnVideoRendererEnded, weak_this_),
       base::Bind(&RendererImpl::OnError, weak_this_),
       base::Bind(&RendererImpl::GetMediaTimeForSyncingVideo,
@@ -253,13 +313,20 @@ void RendererImpl::InitializeVideoRenderer() {
 void RendererImpl::OnVideoRendererInitializeDone(PipelineStatus status) {
   DVLOG(1) << __FUNCTION__ << ": " << status;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_INITIALIZING) << state_;
+
+  // OnError() may be fired at any time by the renderers, even if they thought
+  // they initialized successfully (due to delayed output device setup).
+  if (state_ != STATE_INITIALIZING) {
+    DCHECK(init_cb_.is_null());
+    audio_renderer_.reset();
+    video_renderer_.reset();
+    return;
+  }
+
   DCHECK(!init_cb_.is_null());
 
   if (status != PIPELINE_OK) {
-    audio_renderer_.reset();
-    video_renderer_.reset();
-    OnError(status);
+    base::ResetAndReturn(&init_cb_).Run(status);
     return;
   }
 
@@ -273,13 +340,13 @@ void RendererImpl::OnVideoRendererInitializeDone(PipelineStatus status) {
   state_ = STATE_PLAYING;
   DCHECK(time_source_);
   DCHECK(audio_renderer_ || video_renderer_);
-  base::ResetAndReturn(&init_cb_).Run();
+  base::ResetAndReturn(&init_cb_).Run(PIPELINE_OK);
 }
 
 void RendererImpl::FlushAudioRenderer() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_FLUSHING) << state_;
+  DCHECK_EQ(state_, STATE_FLUSHING);
   DCHECK(!flush_cb_.is_null());
 
   if (!audio_renderer_) {
@@ -300,7 +367,7 @@ void RendererImpl::OnAudioRendererFlushDone() {
     return;
   }
 
-  DCHECK_EQ(state_, STATE_FLUSHING) << state_;
+  DCHECK_EQ(state_, STATE_FLUSHING);
   DCHECK(!flush_cb_.is_null());
 
   DCHECK_EQ(audio_buffering_state_, BUFFERING_HAVE_NOTHING);
@@ -311,7 +378,7 @@ void RendererImpl::OnAudioRendererFlushDone() {
 void RendererImpl::FlushVideoRenderer() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_EQ(state_, STATE_FLUSHING) << state_;
+  DCHECK_EQ(state_, STATE_FLUSHING);
   DCHECK(!flush_cb_.is_null());
 
   if (!video_renderer_) {
@@ -332,7 +399,7 @@ void RendererImpl::OnVideoRendererFlushDone() {
     return;
   }
 
-  DCHECK_EQ(state_, STATE_FLUSHING) << state_;
+  DCHECK_EQ(state_, STATE_FLUSHING);
   DCHECK(!flush_cb_.is_null());
 
   DCHECK_EQ(video_buffering_state_, BUFFERING_HAVE_NOTHING);
@@ -407,8 +474,11 @@ void RendererImpl::PausePlayback() {
 
     case STATE_UNINITIALIZED:
     case STATE_INITIALIZING:
-    case STATE_ERROR:
       NOTREACHED() << "Invalid state: " << state_;
+      break;
+
+    case STATE_ERROR:
+      // An error state may occur at any time.
       break;
   }
 
@@ -484,19 +554,20 @@ void RendererImpl::OnError(PipelineStatus error) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_NE(PIPELINE_OK, error) << "PIPELINE_OK isn't an error!";
 
+  // An error has already been delivered.
+  if (state_ == STATE_ERROR)
+    return;
+
+  const State old_state = state_;
   state_ = STATE_ERROR;
 
-  // Pipeline will destroy |this| as the result of error.
+  if (old_state == STATE_INITIALIZING) {
+    base::ResetAndReturn(&init_cb_).Run(error);
+    return;
+  }
+
+  // After OnError() returns, the pipeline may destroy |this|.
   base::ResetAndReturn(&error_cb_).Run(error);
-
-  FireAllPendingCallbacks();
-}
-
-void RendererImpl::FireAllPendingCallbacks() {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (!init_cb_.is_null())
-    base::ResetAndReturn(&init_cb_).Run();
 
   if (!flush_cb_.is_null())
     base::ResetAndReturn(&flush_cb_).Run();

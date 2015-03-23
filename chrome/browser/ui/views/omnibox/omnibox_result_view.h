@@ -13,7 +13,7 @@
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font_list.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/view.h"
 
@@ -50,7 +50,7 @@ class OmniboxResultView : public views::View,
                     int model_index,
                     LocationBarView* location_bar_view,
                     const gfx::FontList& font_list);
-  virtual ~OmniboxResultView();
+  ~OmniboxResultView() override;
 
   SkColor GetColor(ResultViewState state, ColorKind kind) const;
 
@@ -64,7 +64,7 @@ class OmniboxResultView : public views::View,
   void Invalidate();
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
   ResultViewState GetState() const;
 
@@ -118,6 +118,9 @@ class OmniboxResultView : public views::View,
   }
 
  private:
+  // views::View:
+  const char* GetClassName() const override;
+
   gfx::ImageSkia GetIcon() const;
   const gfx::ImageSkia* GetKeywordIcon() const;
 
@@ -134,12 +137,12 @@ class OmniboxResultView : public views::View,
   void InitContentsRenderTextIfNecessary() const;
 
   // views::View:
-  virtual void Layout() OVERRIDE;
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  void Layout() override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // gfx::AnimationDelegate:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  void AnimationProgressed(const gfx::Animation* animation) override;
 
   // Returns the offset at which the contents of the |match| should be displayed
   // within the text bounds. The directionality of UI and match contents is used

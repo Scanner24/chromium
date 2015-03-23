@@ -6,16 +6,22 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/mac/foundation_util.h"
+#import "base/mac/mac_util.h"
+#import "base/mac/sdk_forward_declarations.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "testing/gtest_mac.h"
 #import "ui/gfx/test/ui_cocoa_test_helper.h"
 #import "ui/views/cocoa/bridged_content_view.h"
+#import "ui/views/cocoa/native_widget_mac_nswindow.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/ime/input_method.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/native_widget_mac.h"
+#include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -37,6 +43,27 @@ NSRange EmptyRange() {
 
 }  // namespace
 
+// Class to override -[NSWindow toggleFullScreen:] to a no-op. This simulates
+// NSWindow's behavior when attempting to toggle fullscreen state again, when
+// the last attempt failed but Cocoa has not yet sent
+// windowDidFailToEnterFullScreen:.
+@interface BridgedNativeWidgetTestFullScreenWindow : NativeWidgetMacNSWindow {
+ @private
+  int ignoredToggleFullScreenCount_;
+}
+@property(readonly, nonatomic) int ignoredToggleFullScreenCount;
+@end
+
+@implementation BridgedNativeWidgetTestFullScreenWindow
+
+@synthesize ignoredToggleFullScreenCount = ignoredToggleFullScreenCount_;
+
+- (void)toggleFullScreen:(id)sender {
+  ++ignoredToggleFullScreenCount_;
+}
+
+@end
+
 namespace views {
 namespace test {
 
@@ -51,7 +78,7 @@ class MockNativeWidgetMac : public NativeWidgetMac {
   }
 
   // internal::NativeWidgetPrivate:
-  virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE {
+  void InitNativeWidget(const Widget::InitParams& params) override {
     ownership_ = params.ownership;
 
     // Usually the bridge gets initialized here. It is skipped to run extra
@@ -59,7 +86,7 @@ class MockNativeWidgetMac : public NativeWidgetMac {
     delegate()->OnNativeWidgetCreated(true);
   }
 
-  virtual void ReorderNativeViews() OVERRIDE {
+  void ReorderNativeViews() override {
     // Called via Widget::Init to set the content view. No-op in these tests.
   }
 
@@ -80,26 +107,33 @@ class BridgedNativeWidgetTestBase : public ui::CocoaTest {
   }
 
   // Overridden from testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ui::CocoaTest::SetUp();
 
-    Widget::InitParams params;
-    params.native_widget = native_widget_mac_;
+    init_params_.native_widget = native_widget_mac_;
+
     // To control the lifetime without an actual window that must be closed,
     // tests in this file need to use WIDGET_OWNS_NATIVE_WIDGET.
-    params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    native_widget_mac_->GetWidget()->Init(params);
+    init_params_.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+
+    // Opacity defaults to "infer" which is usually updated by ViewsDelegate.
+    init_params_.opacity = Widget::InitParams::OPAQUE_WINDOW;
+
+    native_widget_mac_->GetWidget()->Init(init_params_);
   }
 
  protected:
   scoped_ptr<Widget> widget_;
   MockNativeWidgetMac* native_widget_mac_;  // Weak. Owned by |widget_|.
+
+  // Make the InitParams available to tests to cover initialization codepaths.
+  Widget::InitParams init_params_;
 };
 
 class BridgedNativeWidgetTest : public BridgedNativeWidgetTestBase {
  public:
   BridgedNativeWidgetTest();
-  virtual ~BridgedNativeWidgetTest();
+  ~BridgedNativeWidgetTest() override;
 
   // Install a textfield in the view hierarchy and make it the text input
   // client.
@@ -109,11 +143,10 @@ class BridgedNativeWidgetTest : public BridgedNativeWidgetTestBase {
   std::string GetText();
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
-  // TODO(tapted): Make this a EventCountView from widget_unittest.cc.
   scoped_ptr<views::View> view_;
   scoped_ptr<BridgedNativeWidget> bridge_;
   BridgedContentView* ns_view_;  // Weak. Owned by bridge_.
@@ -145,17 +178,22 @@ std::string BridgedNativeWidgetTest::GetText() {
 void BridgedNativeWidgetTest::SetUp() {
   BridgedNativeWidgetTestBase::SetUp();
 
-  view_.reset(new views::View);
+  view_.reset(new views::internal::RootView(widget_.get()));
   base::scoped_nsobject<NSWindow> window([test_window() retain]);
 
+  // BridgedNativeWidget expects to be initialized with a hidden (deferred)
+  // window.
+  [window orderOut:nil];
   EXPECT_FALSE([window delegate]);
-  bridge()->Init(window, Widget::InitParams());
+  bridge()->Init(window, init_params_);
 
   // The delegate should exist before setting the root view.
   EXPECT_TRUE([window delegate]);
   bridge()->SetRootView(view_.get());
   ns_view_ = bridge()->ns_view();
 
+  // Pretend it has been shown via NativeWidgetMac::Show().
+  [window orderFront:nil];
   [test_window() makePretendKeyWindowAndSetFirstResponder:bridge()->ns_view()];
 }
 
@@ -232,30 +270,6 @@ TEST_F(BridgedNativeWidgetInitTest, InitNotCalled) {
   EXPECT_FALSE(bridge()->ns_view());
   EXPECT_FALSE(bridge()->ns_window());
   bridge().reset();
-}
-
-// Test attaching to a parent window that is not a NativeWidgetMac. When the
-// parent is a NativeWidgetMac, that is covered in widget_unittest.cc by
-// WidgetOwnershipTest.Ownership_ViewsNativeWidgetOwnsWidget*.
-TEST_F(BridgedNativeWidgetInitTest, ParentWindowNotNativeWidgetMac) {
-  Widget::InitParams params;
-  params.parent = [test_window() contentView];
-  EXPECT_EQ(0u, [[test_window() childWindows] count]);
-
-  base::scoped_nsobject<NSWindow> child_window(
-      [[NSWindow alloc] initWithContentRect:NSMakeRect(50, 50, 400, 300)
-                                  styleMask:NSBorderlessWindowMask
-                                    backing:NSBackingStoreBuffered
-                                      defer:NO]);
-  [child_window setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
-
-  EXPECT_FALSE([child_window parentWindow]);
-  bridge()->Init(child_window, params);
-
-  EXPECT_EQ(1u, [[test_window() childWindows] count]);
-  EXPECT_EQ(test_window(), [bridge()->ns_window() parentWindow]);
-  bridge().reset();
-  EXPECT_EQ(0u, [[test_window() childWindows] count]);
 }
 
 // Test getting complete string using text input protocol.
@@ -413,6 +427,81 @@ TEST_F(BridgedNativeWidgetTest, TextInput_DeleteForward) {
   [ns_view_ doCommandBySelector:@selector(deleteForward:)];
   EXPECT_EQ("", GetText());
   EXPECT_EQ_RANGE(NSMakeRange(0, 0), [ns_view_ selectedRange]);
+}
+
+typedef BridgedNativeWidgetTestBase BridgedNativeWidgetSimulateFullscreenTest;
+
+// Simulate the notifications that AppKit would send out if a fullscreen
+// operation begins, and then fails and must abort. This notification sequence
+// was determined by posting delayed tasks to toggle fullscreen state and then
+// mashing Ctrl+Left/Right to keep OSX in a transition between Spaces to cause
+// the fullscreen transition to fail.
+TEST_F(BridgedNativeWidgetSimulateFullscreenTest, FailToEnterAndExit) {
+  if (base::mac::IsOSSnowLeopard())
+    return;
+
+  base::scoped_nsobject<NSWindow> owned_window(
+      [[BridgedNativeWidgetTestFullScreenWindow alloc]
+          initWithContentRect:NSMakeRect(50, 50, 400, 300)
+                    styleMask:NSBorderlessWindowMask
+                      backing:NSBackingStoreBuffered
+                        defer:YES]);
+  [owned_window setReleasedWhenClosed:NO];  // Owned by scoped_nsobject.
+  bridge()->Init(owned_window, init_params_);  // Transfers ownership.
+
+  BridgedNativeWidgetTestFullScreenWindow* window =
+      base::mac::ObjCCastStrict<BridgedNativeWidgetTestFullScreenWindow>(
+          widget_->GetNativeWindow());
+  widget_->Show();
+
+  NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+
+  EXPECT_FALSE(bridge()->target_fullscreen_state());
+
+  // Simulate an initial toggleFullScreen: (user- or Widget-initiated).
+  [center postNotificationName:NSWindowWillEnterFullScreenNotification
+                        object:window];
+
+  // On a failure, Cocoa starts by sending an unexpected *exit* fullscreen, and
+  // BridgedNativeWidget will think it's just a delayed transition and try to go
+  // back into fullscreen but get ignored by Cocoa.
+  EXPECT_EQ(0, [window ignoredToggleFullScreenCount]);
+  EXPECT_TRUE(bridge()->target_fullscreen_state());
+  [center postNotificationName:NSWindowDidExitFullScreenNotification
+                        object:window];
+  EXPECT_EQ(1, [window ignoredToggleFullScreenCount]);
+  EXPECT_FALSE(bridge()->target_fullscreen_state());
+
+  // Cocoa follows up with a failure message sent to the NSWindowDelegate (there
+  // is no equivalent notification for failure). Called via id so that this
+  // compiles on 10.6.
+  id window_delegate = [window delegate];
+  [window_delegate windowDidFailToEnterFullScreen:window];
+  EXPECT_FALSE(bridge()->target_fullscreen_state());
+
+  // Now perform a successful fullscreen operation.
+  [center postNotificationName:NSWindowWillEnterFullScreenNotification
+                        object:window];
+  EXPECT_TRUE(bridge()->target_fullscreen_state());
+  [center postNotificationName:NSWindowDidEnterFullScreenNotification
+                        object:window];
+  EXPECT_TRUE(bridge()->target_fullscreen_state());
+
+  // And try to get out.
+  [center postNotificationName:NSWindowWillExitFullScreenNotification
+                        object:window];
+  EXPECT_FALSE(bridge()->target_fullscreen_state());
+
+  // On a failure, Cocoa sends a failure message, but then just dumps the window
+  // out of fullscreen anyway (in that order).
+  [window_delegate windowDidFailToExitFullScreen:window];
+  EXPECT_FALSE(bridge()->target_fullscreen_state());
+  [center postNotificationName:NSWindowDidExitFullScreenNotification
+                        object:window];
+  EXPECT_EQ(1, [window ignoredToggleFullScreenCount]);  // No change.
+  EXPECT_FALSE(bridge()->target_fullscreen_state());
+
+  widget_->CloseNow();
 }
 
 }  // namespace test

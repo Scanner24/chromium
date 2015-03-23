@@ -19,26 +19,47 @@ namespace ui {
 
 class TouchEvent;
 
+class DeviceEventDispatcherEvdev;
+
 class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
     : public EventConverterEvdev {
  public:
-  enum {
-    MAX_FINGERS = 11
-  };
+  enum { MAX_FINGERS = 20 };
   TouchEventConverterEvdev(int fd,
                            base::FilePath path,
-                           const EventDeviceInfo& info,
-                           const EventDispatchCallback& dispatch);
-  virtual ~TouchEventConverterEvdev();
+                           int id,
+                           InputDeviceType type,
+                           DeviceEventDispatcherEvdev* dispatcher);
+  ~TouchEventConverterEvdev() override;
+
+  // EventConverterEvdev:
+  bool HasTouchscreen() const override;
+  gfx::Size GetTouchscreenSize() const override;
+  int GetTouchPoints() const override;
+
+  // Unsafe part of initialization.
+  virtual void Initialize(const EventDeviceInfo& info);
 
  private:
   friend class MockTouchEventConverterEvdev;
 
-  // Unsafe part of initialization.
-  void Init(const EventDeviceInfo& info);
+  struct InProgressEvents {
+    InProgressEvents();
+
+    bool altered_;
+    float x_;
+    float y_;
+    int id_;  // Device reported "unique" touch point id; -1 means not active
+    int finger_;  // "Finger" id starting from 0; -1 means not active
+
+    EventType type_;
+    float radius_x_;
+    float radius_y_;
+    float pressure_;
+  };
 
   // Overidden from base::MessagePumpLibevent::Watcher.
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
+  void OnFileCanReadWithoutBlocking(int fd) override;
 
   virtual bool Reinitialize();
 
@@ -46,10 +67,12 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
   void ProcessAbs(const input_event& input);
   void ProcessSyn(const input_event& input);
 
+  void ReportEvent(int touch_id,
+      const InProgressEvents& event, const base::TimeDelta& delta);
   void ReportEvents(base::TimeDelta delta);
 
-  // Callback for dispatching events.
-  EventDispatchCallback callback_;
+  // Dispatcher for events.
+  DeviceEventDispatcherEvdev* dispatcher_;
 
   // Set if we have seen a SYN_DROPPED and not yet re-synced with the device.
   bool syn_dropped_;
@@ -69,35 +92,17 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
   float y_min_tuxels_;
   float y_num_tuxels_;
 
-  // Output range for x-axis.
-  float x_min_pixels_;
-  float x_num_pixels_;
+  // Size of the touchscreen as reported by the driver.
+  gfx::Size native_size_;
 
-  // Output range for y-axis.
-  float y_min_pixels_;
-  float y_num_pixels_;
+  // Number of touch points reported by driver
+  int touch_points_;
 
   // Touch point currently being updated from the /dev/input/event* stream.
-  int current_slot_;
-
-  // Bit field tracking which in-progress touch points have been modified
-  // without a syn event.
-  std::bitset<MAX_FINGERS> altered_slots_;
-
-  struct InProgressEvents {
-    float x_;
-    float y_;
-    int id_;  // Device reported "unique" touch point id; -1 means not active
-    int finger_;  // "Finger" id starting from 0; -1 means not active
-
-    EventType type_;
-    float radius_x_;
-    float radius_y_;
-    float pressure_;
-  };
+  size_t current_slot_;
 
   // In-progress touch points.
-  InProgressEvents events_[MAX_FINGERS];
+  std::vector<InProgressEvents> events_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchEventConverterEvdev);
 };

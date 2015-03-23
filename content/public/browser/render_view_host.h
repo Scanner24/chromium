@@ -5,15 +5,13 @@
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 
-#include <list>
-
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/common/file_chooser_params.h"
 #include "content/public/common/page_zoom.h"
-#include "mojo/public/cpp/system/core.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/core.h"
 
 class GURL;
 
@@ -31,14 +29,6 @@ namespace gfx {
 class Point;
 }
 
-namespace media {
-class AudioOutputController;
-}
-
-namespace ui {
-struct SelectedFileInfo;
-}
-
 namespace content {
 
 class ChildProcessSecurityPolicy;
@@ -47,6 +37,7 @@ class RenderViewHostDelegate;
 class SessionStorageNamespace;
 class SiteInstance;
 struct DropData;
+struct FileChooserFileInfo;
 struct WebPreferences;
 
 // A RenderViewHost is responsible for creating and talking to a RenderView
@@ -63,14 +54,14 @@ struct WebPreferences;
 class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
  public:
   // Returns the RenderViewHost given its ID and the ID of its render process.
-  // Returns NULL if the IDs do not correspond to a live RenderViewHost.
+  // Returns nullptr if the IDs do not correspond to a live RenderViewHost.
   static RenderViewHost* FromID(int render_process_id, int render_view_id);
 
   // Downcasts from a RenderWidgetHost to a RenderViewHost.  Required
   // because RenderWidgetHost is a virtual base class.
   static RenderViewHost* From(RenderWidgetHost* rwh);
 
-  virtual ~RenderViewHost() {}
+  ~RenderViewHost() override {}
 
   // Returns the main frame for this render view.
   virtual RenderFrameHost* GetMainFrame() = 0;
@@ -156,14 +147,11 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   virtual void ExecutePluginActionAtLocation(
       const gfx::Point& location, const blink::WebPluginAction& action) = 0;
 
-  // Asks the renderer to exit fullscreen
-  virtual void ExitFullscreen() = 0;
-
   // Notifies the Listener that one or more files have been chosen by the user
   // from a file chooser dialog for the form. |permissions| is the file
   // selection mode in which the chooser dialog was created.
   virtual void FilesSelectedInChooser(
-      const std::vector<ui::SelectedFileInfo>& files,
+      const std::vector<content::FileChooserFileInfo>& files,
       FileChooserParams::Mode permissions) = 0;
 
   virtual RenderViewHostDelegate* GetDelegate() const = 0;
@@ -204,16 +192,6 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
 
   // Passes a list of Webkit preferences to the renderer.
   virtual void UpdateWebkitPreferences(const WebPreferences& prefs) = 0;
-
-  // Retrieves the list of AudioOutputController objects associated
-  // with this object and passes it to the callback you specify, on
-  // the same thread on which you called the method.
-  typedef std::list<scoped_refptr<media::AudioOutputController> >
-      AudioOutputControllerList;
-  typedef base::Callback<void(const AudioOutputControllerList&)>
-      GetAudioOutputControllersCallback;
-  virtual void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const = 0;
 
   // Notify the render view host to select the word around the caret.
   virtual void SelectWordAroundCaret() = 0;

@@ -50,8 +50,8 @@ ServiceWorkerProcessManager::ServiceWorkerProcessManager(
     BrowserContext* browser_context)
     : browser_context_(browser_context),
       process_id_for_test_(-1),
-      weak_this_factory_(this),
-      weak_this_(weak_this_factory_.GetWeakPtr()) {
+      weak_this_factory_(this) {
+  weak_this_ = weak_this_factory_.GetWeakPtr();
 }
 
 ServiceWorkerProcessManager::~ServiceWorkerProcessManager() {
@@ -62,6 +62,7 @@ ServiceWorkerProcessManager::~ServiceWorkerProcessManager() {
 }
 
 void ServiceWorkerProcessManager::Shutdown() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   browser_context_ = NULL;
   for (std::map<int, ProcessInfo>::const_iterator it = instance_info_.begin();
        it != instance_info_.end();

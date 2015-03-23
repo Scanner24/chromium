@@ -33,22 +33,19 @@ bool GuestViewInternalCreateGuestFunction::RunAsync() {
       base::Bind(&GuestViewInternalCreateGuestFunction::CreateGuestCallback,
                  this);
 
-  content::WebContents* embedder_web_contents =
+  content::WebContents* owner_web_contents =
       content::WebContents::FromRenderViewHost(render_view_host());
-  if (!embedder_web_contents) {
+  if (!owner_web_contents) {
     error_ = "Guest views can only be embedded in web content";
     return false;
   }
-  // If the guest is an <extensionoptions> to be embedded in a WebUI, then
-  // there is no extension, and extension() will be null. Use an empty string
-  // instead.
-  std::string embedder_extension_id;
-  if (extension())
-    embedder_extension_id = extension_id();
+
+  // Add flag to |create_params| to indicate that the element size is specified
+  // in logical units.
+  create_params->SetBoolean(guestview::kElementSizeIsLogical, true);
 
   guest_view_manager->CreateGuest(view_type,
-                                  embedder_extension_id,
-                                  embedder_web_contents,
+                                  owner_web_contents,
                                   *create_params,
                                   callback);
   return true;
@@ -65,27 +62,61 @@ void GuestViewInternalCreateGuestFunction::CreateGuestCallback(
   SendResponse(true);
 }
 
-GuestViewInternalSetAutoSizeFunction::
-    GuestViewInternalSetAutoSizeFunction() {
+GuestViewInternalDestroyGuestFunction::
+    GuestViewInternalDestroyGuestFunction() {
 }
 
-GuestViewInternalSetAutoSizeFunction::
-    ~GuestViewInternalSetAutoSizeFunction() {
+GuestViewInternalDestroyGuestFunction::
+    ~GuestViewInternalDestroyGuestFunction() {
 }
 
-bool GuestViewInternalSetAutoSizeFunction::RunAsync() {
-  scoped_ptr<guest_view_internal::SetAutoSize::Params> params(
-      guest_view_internal::SetAutoSize::Params::Create(*args_));
+bool GuestViewInternalDestroyGuestFunction::RunAsync() {
+  scoped_ptr<guest_view_internal::DestroyGuest::Params> params(
+      guest_view_internal::DestroyGuest::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   GuestViewBase* guest = GuestViewBase::From(
       render_view_host()->GetProcess()->GetID(), params->instance_id);
   if (!guest)
     return false;
-  guest->SetAutoSize(params->params.enable_auto_size,
-                     gfx::Size(params->params.min.width,
-                               params->params.min.height),
-                     gfx::Size(params->params.max.width,
-                               params->params.max.height));
+  guest->Destroy();
+  SendResponse(true);
+  return true;
+}
+
+GuestViewInternalSetSizeFunction::GuestViewInternalSetSizeFunction() {
+}
+
+GuestViewInternalSetSizeFunction::~GuestViewInternalSetSizeFunction() {
+}
+
+bool GuestViewInternalSetSizeFunction::RunAsync() {
+  scoped_ptr<guest_view_internal::SetSize::Params> params(
+      guest_view_internal::SetSize::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  GuestViewBase* guest = GuestViewBase::From(
+      render_view_host()->GetProcess()->GetID(), params->instance_id);
+  if (!guest)
+    return false;
+
+  SetSizeParams set_size_params;
+  if (params->params.enable_auto_size) {
+    set_size_params.enable_auto_size.reset(
+        params->params.enable_auto_size.release());
+  }
+  if (params->params.min) {
+    set_size_params.min_size.reset(
+        new gfx::Size(params->params.min->width, params->params.min->height));
+  }
+  if (params->params.max) {
+    set_size_params.max_size.reset(
+        new gfx::Size(params->params.max->width, params->params.max->height));
+  }
+  if (params->params.normal) {
+    set_size_params.normal_size.reset(new gfx::Size(
+        params->params.normal->width, params->params.normal->height));
+  }
+
+  guest->SetSize(set_size_params);
   SendResponse(true);
   return true;
 }

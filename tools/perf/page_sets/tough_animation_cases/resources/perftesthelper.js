@@ -23,4 +23,38 @@ window.PerfTestHelper.random = function() {
     return (randomSeed & 0xfffffff) / 0x10000000;
 };
 
+window.PerfTestHelper.getParameter = function(parameter) {
+    var match = new RegExp(parameter + '=([^&]*)').exec(window.location.search);
+    if (match) {
+        return match[1];
+    }
+    return null;
+}
+
+window.PerfTestHelper.getN = function(defaultN) {
+    var match = PerfTestHelper.getParameter('N');
+    if (match) {
+        var n = Number(match);
+        if (isNaN(n)) {
+            throw 'Invalid N value: ' + match;
+        }
+        return n;
+    }
+    if (typeof defaultN === 'undefined') {
+        throw 'Default N value required';
+    }
+    return defaultN;
+};
+
+window.PerfTestHelper.signalReady = function() {
+    requestAnimationFrame(function() {
+        // FIXME: We must wait at least two frames before
+        // measuring to allow the GC to clean up the
+        // previous test.
+        requestAnimationFrame(function() {
+            window.measurementReady = true;
+        });
+    });
+};
+
 })();

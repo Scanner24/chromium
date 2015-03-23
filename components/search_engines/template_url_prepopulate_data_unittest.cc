@@ -35,7 +35,7 @@ std::string GetHostFromTemplateURLData(const TemplateURLData& data) {
 
 class TemplateURLPrepopulateDataTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     TemplateURLPrepopulateData::RegisterProfilePrefs(prefs_.registry());
   }
 
@@ -343,7 +343,7 @@ TEST_F(TemplateURLPrepopulateDataTest, GetEngineTypeAdvanced) {
   // specified on the command line.
   const std::string foo_url("http://www.foo.com/search?q={searchTerms}");
   EXPECT_EQ(SEARCH_ENGINE_OTHER, GetEngineType(foo_url));
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(switches::kGoogleBaseURL,
-                                                      "http://www.foo.com/");
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kGoogleBaseURL, "http://www.foo.com/");
   EXPECT_EQ(SEARCH_ENGINE_GOOGLE, GetEngineType(foo_url));
 }

@@ -26,7 +26,6 @@ class QuicPacketGenerator;
 class QuicPacketWriter;
 class QuicReceivedPacketManager;
 class QuicSentPacketManager;
-class ReceiveAlgorithmInterface;
 class SendAlgorithmInterface;
 
 namespace test {
@@ -36,16 +35,13 @@ class QuicConnectionPeer {
  public:
   static void SendAck(QuicConnection* connection);
 
-  static void SetReceiveAlgorithm(QuicConnection* connection,
-                                  ReceiveAlgorithmInterface* receive_algorithm);
-
   static void SetSendAlgorithm(QuicConnection* connection,
                                SendAlgorithmInterface* send_algorithm);
 
-  static QuicAckFrame* CreateAckFrame(QuicConnection* connection);
+  static void PopulateAckFrame(QuicConnection* connection, QuicAckFrame* ack);
 
-  static QuicStopWaitingFrame* CreateStopWaitingFrame(
-      QuicConnection* connection);
+  static void PopulateStopWaitingFrame(QuicConnection* connection,
+                                       QuicStopWaitingFrame* stop_waiting);
 
   static QuicConnectionVisitorInterface* GetVisitor(
       QuicConnection* connection);
@@ -91,6 +87,8 @@ class QuicConnectionPeer {
   static void SetPeerAddress(QuicConnection* connection,
                              const IPEndPoint& peer_address);
 
+  static bool IsSilentCloseEnabled(QuicConnection* connection);
+
   static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
 
   static QuicConnectionHelperInterface* GetHelper(QuicConnection* connection);
@@ -102,6 +100,7 @@ class QuicConnectionPeer {
 
   static QuicAlarm* GetAckAlarm(QuicConnection* connection);
   static QuicAlarm* GetPingAlarm(QuicConnection* connection);
+  static QuicAlarm* GetFecAlarm(QuicConnection* connection);
   static QuicAlarm* GetResumeWritesAlarm(QuicConnection* connection);
   static QuicAlarm* GetRetransmissionAlarm(QuicConnection* connection);
   static QuicAlarm* GetSendAlarm(QuicConnection* connection);
@@ -118,6 +117,13 @@ class QuicConnectionPeer {
 
   static void SetSupportedVersions(QuicConnection* connection,
                                    QuicVersionVector versions);
+
+  static QuicPacketHeader* GetLastHeader(QuicConnection* connection);
+
+  static void SetSequenceNumberOfLastSentPacket(
+      QuicConnection* connection, QuicPacketSequenceNumber number);
+
+  static QuicConnectionStats* GetStats(QuicConnection* connection);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

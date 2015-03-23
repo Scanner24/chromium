@@ -5,7 +5,12 @@
 
 # This script does some preparations before build of instrumented libasound2.
 
-libtoolize --force --copy
+# Instructions from the INSTALL file.
+libtoolize --force --copy --automake
 aclocal
+autoheader
 autoconf
-automake
+automake --foreign --copy --add-missing
+
+# Do not warn about undefined sanitizer symbols in object files.
+sed -i "s/\(-Wl,--no-undefined\|-Wl,-z,defs\)//g" ./configure

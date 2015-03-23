@@ -16,8 +16,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "google_apis/drive/drive_api_parser.h"
-#include "google_apis/drive/gdata_wapi_parser.h"
-#include "google_apis/drive/gdata_wapi_requests.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "url/gurl.h"
@@ -119,8 +117,7 @@ scoped_ptr<net::test_server::HttpResponse> HandleDownloadFileRequest(
   std::string remaining_path;
   if (!RemovePrefix(absolute_url.path(), "/files/", &remaining_path))
     return scoped_ptr<net::test_server::HttpResponse>();
-  return CreateHttpResponseFromFile(
-      GetTestFilePath(remaining_path)).PassAs<net::test_server::HttpResponse>();
+  return CreateHttpResponseFromFile(GetTestFilePath(remaining_path));
 }
 
 bool ParseContentRangeHeader(const std::string& value,
@@ -175,7 +172,7 @@ std::string TestGetContentCallback::GetConcatenatedData() const {
   return result;
 }
 
-void TestGetContentCallback::OnGetContent(google_apis::GDataErrorCode error,
+void TestGetContentCallback::OnGetContent(google_apis::DriveApiErrorCode error,
                                           scoped_ptr<std::string> data) {
   data_.push_back(data.release());
 }

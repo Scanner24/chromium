@@ -57,7 +57,8 @@ Value RunWriteFile(Scope* scope,
   if (!args[0].VerifyTypeIs(Value::STRING, err))
     return Value();
   const SourceDir& cur_dir = scope->GetSourceDir();
-  SourceFile source_file = cur_dir.ResolveRelativeFile(args[0].string_value());
+  SourceFile source_file = cur_dir.ResolveRelativeFile(args[0].string_value(),
+      scope->settings()->build_settings()->root_path_utf8());
   if (!EnsureStringIsInOutputDir(
           scope->settings()->build_settings()->build_dir(),
           source_file.value(), args[0].origin(), err))
@@ -67,8 +68,8 @@ Value RunWriteFile(Scope* scope,
   std::ostringstream contents;
   if (args[1].type() == Value::LIST) {
     const std::vector<Value>& list = args[1].list_value();
-    for (size_t i = 0; i < list.size(); i++)
-      contents << list[i].ToString(false) << std::endl;
+    for (const auto& cur : list)
+      contents << cur.ToString(false) << std::endl;
   } else {
     contents << args[1].ToString(false);
   }

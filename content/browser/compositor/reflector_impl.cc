@@ -21,12 +21,16 @@ ReflectorImpl::ReflectorImpl(
     int surface_id)
     : impl_unsafe_(output_surface_map),
       main_unsafe_(mirrored_compositor, mirroring_layer),
-      impl_message_loop_(compositor_thread_loop),
       main_message_loop_(base::MessageLoopProxy::current()),
       surface_id_(surface_id) {
   GLHelper* helper = ImageTransportFactory::GetInstance()->GetGLHelper();
   MainThreadData& main = GetMain();
   main.mailbox = new OwnedMailbox(helper);
+  if (!compositor_thread_loop) {
+    impl_message_loop_ = main_message_loop_;
+  } else {
+    impl_message_loop_ = compositor_thread_loop;
+  }
   impl_message_loop_->PostTask(
       FROM_HERE,
       base::Bind(
@@ -38,7 +42,9 @@ ReflectorImpl::MainThreadData::MainThreadData(
     ui::Layer* mirroring_layer)
     : needs_set_mailbox(true),
       mirrored_compositor(mirrored_compositor),
-      mirroring_layer(mirroring_layer) {}
+      mirroring_layer(mirroring_layer),
+      flip_texture(false) {
+}
 
 ReflectorImpl::MainThreadData::~MainThreadData() {}
 
@@ -88,7 +94,7 @@ void ReflectorImpl::OnSourceSurfaceReady(
 void ReflectorImpl::Shutdown() {
   MainThreadData& main = GetMain();
   main.mailbox = NULL;
-  main.mirroring_layer->SetShowPaintedContent();
+  main.mirroring_layer->SetShowSolidColorContent();
   main.mirroring_layer = NULL;
   impl_message_loop_->PostTask(
       FROM_HERE, base::Bind(&ReflectorImpl::ShutdownOnImplThread, this));
@@ -122,7 +128,7 @@ void ReflectorImpl::ReattachToOutputSurfaceFromMainThread(
   GLHelper* helper = ImageTransportFactory::GetInstance()->GetGLHelper();
   main.mailbox = new OwnedMailbox(helper);
   main.needs_set_mailbox = true;
-  main.mirroring_layer->SetShowPaintedContent();
+  main.mirroring_layer->SetShowSolidColorContent();
   impl_message_loop_->PostTask(
       FROM_HERE,
       base::Bind(&ReflectorImpl::AttachToOutputSurfaceOnImplThread,
@@ -193,10 +199,10 @@ void ReflectorImpl::AttachToOutputSurfaceOnImplThread(
   impl.gl_helper->Flush();
   output_surface->SetReflector(this);
   // The texture doesn't have the data, so invokes full redraw now.
+  bool flip_texture = !output_surface->capabilities().flipped_output_surface;
   main_message_loop_->PostTask(
-      FROM_HERE,
-      base::Bind(&ReflectorImpl::FullRedrawContentOnMainThread,
-                 scoped_refptr<ReflectorImpl>(this)));
+      FROM_HERE, base::Bind(&ReflectorImpl::FullRedrawContentOnMainThread,
+                            scoped_refptr<ReflectorImpl>(this), flip_texture));
 }
 
 void ReflectorImpl::UpdateTextureSizeOnMainThread(gfx::Size size) {
@@ -215,6 +221,7 @@ void ReflectorImpl::UpdateTextureSizeOnMainThread(gfx::Size size) {
     main.mirroring_layer->SetTextureSize(size);
   }
   main.mirroring_layer->SetBounds(gfx::Rect(size));
+  main.mirroring_layer->SetTextureFlipped(main.flip_texture);
 }
 
 void ReflectorImpl::FullRedrawOnMainThread(gfx::Size size) {
@@ -225,20 +232,24 @@ void ReflectorImpl::FullRedrawOnMainThread(gfx::Size size) {
   main.mirroring_layer->SchedulePaint(main.mirroring_layer->bounds());
 }
 
-void ReflectorImpl::UpdateSubBufferOnMainThread(gfx::Size size,
-                                                gfx::Rect rect) {
+void ReflectorImpl::UpdateSubBufferOnMainThread(const gfx::Size& size,
+                                                const gfx::Rect& rect) {
   MainThreadData& main = GetMain();
   if (!main.mirroring_layer)
     return;
   UpdateTextureSizeOnMainThread(size);
+
+  int y = rect.y();
   // Flip the coordinates to compositor's one.
-  int y = size.height() - rect.y() - rect.height();
+  if (main.flip_texture)
+    y = size.height() - rect.y() - rect.height();
   gfx::Rect new_rect(rect.x(), y, rect.width(), rect.height());
   main.mirroring_layer->SchedulePaint(new_rect);
 }
 
-void ReflectorImpl::FullRedrawContentOnMainThread() {
+void ReflectorImpl::FullRedrawContentOnMainThread(bool flip_texture) {
   MainThreadData& main = GetMain();
+  main.flip_texture = flip_texture;
   main.mirrored_compositor->ScheduleFullRedraw();
 }
 

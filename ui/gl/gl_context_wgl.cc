@@ -6,8 +6,8 @@
 
 #include "ui/gl/gl_context_wgl.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_wgl.h"
@@ -131,7 +131,7 @@ void* GLContextWGL::GetHandle() {
   return context_;
 }
 
-void GLContextWGL::SetSwapInterval(int interval) {
+void GLContextWGL::OnSetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
   if (gfx::g_driver_wgl.ext.b_WGL_EXT_swap_control) {
     wglSwapIntervalEXT(interval);

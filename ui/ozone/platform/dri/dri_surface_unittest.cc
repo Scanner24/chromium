@@ -7,7 +7,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkDevice.h"
-#include "ui/ozone/platform/dri/crtc_state.h"
+#include "ui/ozone/platform/dri/crtc_controller.h"
 #include "ui/ozone/platform/dri/dri_buffer.h"
 #include "ui/ozone/platform/dri/dri_surface.h"
 #include "ui/ozone/platform/dri/dri_window_delegate.h"
@@ -22,30 +22,35 @@ const drmModeModeInfo kDefaultMode =
 
 const uint32_t kDefaultCrtc = 1;
 const uint32_t kDefaultConnector = 2;
+const size_t kPlanesPerCrtc = 1;
 
 class MockDriWindowDelegate : public ui::DriWindowDelegate {
  public:
   MockDriWindowDelegate(ui::DriWrapper* drm) {
-    controller_.reset(new ui::HardwareDisplayController(
-        drm,
-        make_scoped_ptr(
-            new ui::CrtcState(drm, kDefaultCrtc, kDefaultConnector))));
+    controller_.reset(new ui::HardwareDisplayController(make_scoped_ptr(
+        new ui::CrtcController(drm, kDefaultCrtc, kDefaultConnector))));
     scoped_refptr<ui::DriBuffer> buffer(new ui::DriBuffer(drm));
     SkImageInfo info = SkImageInfo::MakeN32Premul(kDefaultMode.hdisplay,
                                                   kDefaultMode.vdisplay);
     EXPECT_TRUE(buffer->Initialize(info));
     EXPECT_TRUE(controller_->Modeset(ui::OverlayPlane(buffer), kDefaultMode));
   }
-  virtual ~MockDriWindowDelegate() {}
+  ~MockDriWindowDelegate() override {}
 
   // DriWindowDelegate:
-  virtual void Initialize() OVERRIDE {}
-  virtual void Shutdown() OVERRIDE {}
-  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE { return 1; }
-  virtual ui::HardwareDisplayController* GetController() OVERRIDE {
+  void Initialize() override {}
+  void Shutdown() override {}
+  gfx::AcceleratedWidget GetAcceleratedWidget() override { return 1; }
+  ui::HardwareDisplayController* GetController() override {
     return controller_.get();
   }
-  virtual void OnBoundsChanged(const gfx::Rect& bounds) OVERRIDE {}
+  void OnBoundsChanged(const gfx::Rect& bounds) override {}
+  void SetCursor(const std::vector<SkBitmap>& bitmaps,
+                 const gfx::Point& location,
+                 int frame_delay_ms) override {}
+  void SetCursorWithoutAnimations(const std::vector<SkBitmap>& bitmaps,
+                                  const gfx::Point& location) override {}
+  void MoveCursor(const gfx::Point& location) override {}
 
  private:
   scoped_ptr<ui::HardwareDisplayController> controller_;
@@ -59,12 +64,12 @@ class DriSurfaceTest : public testing::Test {
  public:
   DriSurfaceTest() {}
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   scoped_ptr<base::MessageLoop> message_loop_;
-  scoped_ptr<ui::MockDriWrapper> drm_;
+  scoped_refptr<ui::MockDriWrapper> drm_;
   scoped_ptr<MockDriWindowDelegate> window_delegate_;
   scoped_ptr<ui::DriSurface> surface_;
 
@@ -74,9 +79,11 @@ class DriSurfaceTest : public testing::Test {
 
 void DriSurfaceTest::SetUp() {
   message_loop_.reset(new base::MessageLoopForUI);
-  drm_.reset(new ui::MockDriWrapper(3));
+  std::vector<uint32_t> crtcs;
+  crtcs.push_back(kDefaultCrtc);
+  drm_ = new ui::MockDriWrapper(true, crtcs, kPlanesPerCrtc);
   window_delegate_.reset(new MockDriWindowDelegate(drm_.get()));
-  surface_.reset(new ui::DriSurface(window_delegate_.get(), drm_.get()));
+  surface_.reset(new ui::DriSurface(window_delegate_.get()));
   surface_->ResizeCanvas(gfx::Size(kDefaultMode.hdisplay,
                                    kDefaultMode.vdisplay));
 }
@@ -84,7 +91,7 @@ void DriSurfaceTest::SetUp() {
 void DriSurfaceTest::TearDown() {
   surface_.reset();
   window_delegate_.reset();
-  drm_.reset();
+  drm_ = nullptr;
   message_loop_.reset();
 }
 
@@ -101,7 +108,7 @@ TEST_F(DriSurfaceTest, CheckSurfaceContents) {
   paint.setColor(SK_ColorWHITE);
   SkRect rect = SkRect::MakeWH(kDefaultMode.hdisplay / 2,
                                kDefaultMode.vdisplay / 2);
-  surface_->GetCanvas()->drawRect(rect, paint);
+  surface_->GetSurface()->getCanvas()->drawRect(rect, paint);
   surface_->PresentCanvas(
       gfx::Rect(0, 0, kDefaultMode.hdisplay / 2, kDefaultMode.vdisplay / 2));
 

@@ -23,13 +23,17 @@ EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(int mock_render_process_id)
       next_thread_id_(0),
       mock_render_process_id_(mock_render_process_id),
       weak_factory_(this) {
+  scoped_ptr<MockServiceWorkerDatabaseTaskManager> database_task_manager(
+      new MockServiceWorkerDatabaseTaskManager(
+          base::MessageLoopProxy::current()));
   wrapper_->InitInternal(base::FilePath(),
                          base::MessageLoopProxy::current(),
+                         database_task_manager.Pass(),
                          base::MessageLoopProxy::current(),
-                         base::MessageLoopProxy::current(),
+                         NULL,
                          NULL);
   wrapper_->process_manager()->SetProcessIdForTest(mock_render_process_id);
-  registry()->AddChildProcessSender(mock_render_process_id, this);
+  registry()->AddChildProcessSender(mock_render_process_id, this, nullptr);
 }
 
 EmbeddedWorkerTestHelper::~EmbeddedWorkerTestHelper() {
@@ -40,7 +44,7 @@ EmbeddedWorkerTestHelper::~EmbeddedWorkerTestHelper() {
 void EmbeddedWorkerTestHelper::SimulateAddProcessToPattern(
     const GURL& pattern,
     int process_id) {
-  registry()->AddChildProcessSender(process_id, this);
+  registry()->AddChildProcessSender(process_id, this, nullptr);
   wrapper_->process_manager()->AddProcessReferenceToPattern(
       pattern, process_id);
 }
@@ -91,12 +95,14 @@ void EmbeddedWorkerTestHelper::OnStartWorker(
   }
   SimulateWorkerReadyForInspection(embedded_worker_id);
   SimulateWorkerScriptLoaded(next_thread_id_++, embedded_worker_id);
+  SimulateWorkerScriptEvaluated(embedded_worker_id);
   SimulateWorkerStarted(embedded_worker_id);
 }
 
 void EmbeddedWorkerTestHelper::OnResumeAfterDownload(int embedded_worker_id) {
   SimulateWorkerReadyForInspection(embedded_worker_id);
   SimulateWorkerScriptLoaded(next_thread_id_++, embedded_worker_id);
+  SimulateWorkerScriptEvaluated(embedded_worker_id);
   SimulateWorkerStarted(embedded_worker_id);
 }
 
@@ -133,6 +139,9 @@ void EmbeddedWorkerTestHelper::OnActivateEvent(int embedded_worker_id,
 void EmbeddedWorkerTestHelper::OnInstallEvent(int embedded_worker_id,
                                               int request_id,
                                               int active_version_id) {
+  // The installing worker may have been doomed and terminated.
+  if (!registry()->GetWorker(embedded_worker_id))
+    return;
   SimulateSend(
       new ServiceWorkerHostMsg_InstallEventFinished(
           embedded_worker_id, request_id,
@@ -147,8 +156,14 @@ void EmbeddedWorkerTestHelper::OnFetchEvent(
       embedded_worker_id,
       request_id,
       SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
-      ServiceWorkerResponse(
-          GURL(""), 200, "OK", ServiceWorkerHeaderMap(), std::string())));
+      ServiceWorkerResponse(GURL(),
+                            200,
+                            "OK",
+                            blink::WebServiceWorkerResponseTypeDefault,
+                            ServiceWorkerHeaderMap(),
+                            std::string(),
+                            0,
+                            GURL())));
 }
 
 void EmbeddedWorkerTestHelper::SimulatePausedAfterDownload(
@@ -174,6 +189,14 @@ void EmbeddedWorkerTestHelper::SimulateWorkerScriptLoaded(
       worker->process_id(), thread_id, embedded_worker_id);
 }
 
+void EmbeddedWorkerTestHelper::SimulateWorkerScriptEvaluated(
+    int embedded_worker_id) {
+  EmbeddedWorkerInstance* worker = registry()->GetWorker(embedded_worker_id);
+  ASSERT_TRUE(worker != NULL);
+  registry()->OnWorkerScriptEvaluated(
+      worker->process_id(), embedded_worker_id, true /* success */);
+}
+
 void EmbeddedWorkerTestHelper::SimulateWorkerStarted(
     int embedded_worker_id) {
   EmbeddedWorkerInstance* worker = registry()->GetWorker(embedded_worker_id);
@@ -192,7 +215,7 @@ void EmbeddedWorkerTestHelper::SimulateWorkerStopped(
 
 void EmbeddedWorkerTestHelper::SimulateSend(
     IPC::Message* message) {
-  registry()->OnMessageReceived(*message);
+  registry()->OnMessageReceived(*message, mock_render_process_id_);
   delete message;
 }
 

@@ -9,8 +9,8 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/debug/trace_event.h"
 #include "base/memory/ref_counted.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/content_export.h"
 
 namespace content {
@@ -87,8 +87,8 @@ class TracingController {
   // |options| controls what kind of tracing is enabled.
   typedef base::Callback<void()> EnableRecordingDoneCallback;
   virtual bool EnableRecording(
-      const base::debug::CategoryFilter& category_filter,
-      const base::debug::TraceOptions& trace_options,
+      const base::trace_event::CategoryFilter& category_filter,
+      const base::trace_event::TraceOptions& trace_options,
       const EnableRecordingDoneCallback& callback) = 0;
 
   // Stop recording on all processes.
@@ -124,8 +124,8 @@ class TracingController {
   // |options| controls what kind of tracing is enabled.
   typedef base::Callback<void()> EnableMonitoringDoneCallback;
   virtual bool EnableMonitoring(
-      const base::debug::CategoryFilter& category_filter,
-      const base::debug::TraceOptions& trace_options,
+      const base::trace_event::CategoryFilter& category_filter,
+      const base::trace_event::TraceOptions& trace_options,
       const EnableMonitoringDoneCallback& callback) = 0;
 
   // Stop monitoring on all processes.
@@ -139,8 +139,8 @@ class TracingController {
   // Get the current monitoring configuration.
   virtual void GetMonitoringStatus(
       bool* out_enabled,
-      base::debug::CategoryFilter* out_category_filter,
-      base::debug::TraceOptions* out_trace_options) = 0;
+      base::trace_event::CategoryFilter* out_category_filter,
+      base::trace_event::TraceOptions* out_trace_options) = 0;
 
   // Get the current monitoring traced data.
   //
@@ -161,11 +161,11 @@ class TracingController {
       const scoped_refptr<TraceDataSink>& trace_data_sink) = 0;
 
   // Get the maximum across processes of trace buffer percent full state.
-  // When the TraceBufferPercentFull value is determined, the callback is
+  // When the TraceBufferUsage value is determined, the callback is
   // called.
-  typedef base::Callback<void(float)> GetTraceBufferPercentFullCallback;
-  virtual bool GetTraceBufferPercentFull(
-      const GetTraceBufferPercentFullCallback& callback) = 0;
+  typedef base::Callback<void(float, size_t)> GetTraceBufferUsageCallback;
+  virtual bool GetTraceBufferUsage(
+      const GetTraceBufferUsageCallback& callback) = 0;
 
   // |callback| will will be called every time the given event occurs on any
   // process.

@@ -6,7 +6,7 @@
 #include "cc/surfaces/surface_factory.h"
 #include "cc/surfaces/surface_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace cc {
 namespace {
@@ -17,7 +17,7 @@ TEST(SurfaceTest, SurfaceLifetime) {
 
   SurfaceId surface_id(6);
   {
-    factory.Create(surface_id, gfx::Size(5, 5));
+    factory.Create(surface_id);
     EXPECT_TRUE(!!manager.GetSurfaceForId(surface_id));
     factory.Destroy(surface_id);
   }

@@ -26,9 +26,9 @@ TEST(Functions, Defined) {
 
   // Define a value that's itself a scope value.
   const char kDef[] = "def";  // Defined variable name.
-  setup.scope()->SetValue(kDef,
-      Value(NULL, scoped_ptr<Scope>(new Scope(setup.scope()))),
-      NULL);
+  setup.scope()->SetValue(
+      kDef, Value(nullptr, scoped_ptr<Scope>(new Scope(setup.scope()))),
+      nullptr);
 
   // Test the defined identifier.
   Token defined_token(Location(), Token::IDENTIFIER, kDef);
@@ -47,7 +47,7 @@ TEST(Functions, Defined) {
   undef_accessor->set_member(scoped_ptr<IdentifierNode>(
       new IdentifierNode(undefined_token)));
   ListNode args_list_accessor_defined;
-  args_list_accessor_defined.append_item(undef_accessor.PassAs<ParseNode>());
+  args_list_accessor_defined.append_item(undef_accessor.Pass());
   result = functions::RunDefined(setup.scope(), &function_call,
                                  &args_list_accessor_defined, &err);
   ASSERT_EQ(Value::BOOLEAN, result.type());

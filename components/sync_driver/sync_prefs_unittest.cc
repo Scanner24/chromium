@@ -25,7 +25,7 @@ using ::testing::StrictMock;
 
 class SyncPrefsTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
   }
 
@@ -140,6 +140,7 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
     syncer::ModelTypeSet expected_preferred_types(preferred_types);
     if (it.Get() == syncer::AUTOFILL) {
       expected_preferred_types.Put(syncer::AUTOFILL_PROFILE);
+      expected_preferred_types.Put(syncer::AUTOFILL_WALLET_DATA);
     }
     if (it.Get() == syncer::PREFERENCES) {
       expected_preferred_types.Put(syncer::DICTIONARY);

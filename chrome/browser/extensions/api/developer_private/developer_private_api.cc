@@ -36,7 +36,6 @@
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
@@ -46,6 +45,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/api/device_permissions_manager.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/extension_error.h"
@@ -65,16 +65,17 @@
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
 #include "extensions/grit/extensions_browser_resources.h"
 #include "net/base/net_util.h"
+#include "storage/browser/blob/shareable_file_reference.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation.h"
 #include "storage/browser/fileapi/file_system_operation_runner.h"
 #include "storage/browser/fileapi/isolated_context.h"
-#include "storage/common/blob/shareable_file_reference.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -562,8 +563,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
         bool extension_is_enabled) {
   ItemInspectViewList result;
   // Get the extension process's active views.
-  ProcessManager* process_manager =
-      ExtensionSystem::Get(GetProfile())->process_manager();
+  ProcessManager* process_manager = ProcessManager::Get(GetProfile());
   GetInspectablePagesForExtensionProcess(
       extension,
       process_manager->GetRenderViewHostsForExtension(extension->id()),
@@ -589,8 +589,8 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
   // app windows for incognito process.
   if (service->profile()->HasOffTheRecordProfile() &&
       IncognitoInfo::IsSplitMode(extension)) {
-    process_manager = ExtensionSystem::Get(
-        service->profile()->GetOffTheRecordProfile())->process_manager();
+    process_manager =
+        ProcessManager::Get(service->profile()->GetOffTheRecordProfile());
     GetInspectablePagesForExtensionProcess(
         extension,
         process_manager->GetRenderViewHostsForExtension(extension->id()),
@@ -758,7 +758,14 @@ bool DeveloperPrivateShowPermissionsDialogFunction::RunSync() {
       retained_file_paths.push_back(retained_file_entries[i].path);
     }
   }
-  prompt_->ReviewPermissions(this, extension, retained_file_paths);
+  std::vector<base::string16> retained_device_messages;
+  if (extension->permissions_data()->HasAPIPermission(APIPermission::kUsb)) {
+    retained_device_messages =
+        extensions::DevicePermissionsManager::Get(GetProfile())
+            ->GetPermissionMessageStrings(extension_id_);
+  }
+  prompt_->ReviewPermissions(
+      this, extension, retained_file_paths, retained_device_messages);
   return true;
 }
 
@@ -767,6 +774,7 @@ DeveloperPrivateReloadFunction::~DeveloperPrivateReloadFunction() {}
 // This is called when the user clicks "Revoke File Access."
 void DeveloperPrivateShowPermissionsDialogFunction::InstallUIProceed() {
   Profile* profile = GetProfile();
+  extensions::DevicePermissionsManager::Get(profile)->Clear(extension_id_);
   const Extension* extension = ExtensionRegistry::Get(
       profile)->GetExtensionById(extension_id_, ExtensionRegistry::EVERYTHING);
   apps::SavedFilesService::Get(profile)->ClearQueue(extension);
@@ -1068,7 +1076,7 @@ bool DeveloperPrivateLoadDirectoryFunction::RunAsync() {
                  ->GetFileSystemContext();
 
   // Directory url is non empty only for syncfilesystem.
-  if (directory_url_str != "") {
+  if (!directory_url_str.empty()) {
     storage::FileSystemURL directory_url =
         context_->CrackURL(GURL(directory_url_str));
     if (!directory_url.is_valid() ||

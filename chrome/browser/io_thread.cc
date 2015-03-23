@@ -12,11 +12,12 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/leak_tracker.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/user_metrics.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -26,6 +27,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/async_dns_field_trial.h"
@@ -35,27 +37,23 @@
 #include "chrome/browser/net/dns_probe_service.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_delegate.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_protocol.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/net_util.h"
+#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_known_logs_static.h"
 #include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
@@ -74,6 +72,7 @@
 #include "net/proxy/proxy_service.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/quic_protocol.h"
+#include "net/quic/quic_utils.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/spdy/spdy_session.h"
 #include "net/ssl/channel_id_service.h"
@@ -101,6 +100,10 @@
 #include "net/ocsp/nss_ocsp.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/net/cert_verify_proc_chromeos.h"
 #include "chromeos/network/host_resolver_impl_chromeos.h"
@@ -121,10 +124,6 @@ const char kTCPFastOpenHttpsEnabledGroupName[] = "HttpsEnabled";
 const char kQuicFieldTrialName[] = "QUIC";
 const char kQuicFieldTrialEnabledGroupName[] = "Enabled";
 const char kQuicFieldTrialHttpsEnabledGroupName[] = "HttpsEnabled";
-const char kQuicFieldTrialPacketLengthSuffix[] = "BytePackets";
-const char kQuicFieldTrialPacingSuffix[] = "WithPacing";
-const char kQuicFieldTrialTimeBasedLossDetectionSuffix[] =
-    "WithTimeBasedLossDetection";
 
 // The SPDY trial composes two different trial plus control groups:
 //  * A "holdback" group with SPDY disabled, and corresponding control
@@ -139,6 +138,9 @@ const char kSpdyFieldTrialHoldbackControlGroupName[] = "Control";
 const char kSpdyFieldTrialSpdy31GroupNamePrefix[] = "Spdy31Enabled";
 const char kSpdyFieldTrialSpdy4GroupNamePrefix[] = "Spdy4Enabled";
 const char kSpdyFieldTrialSpdy4ControlGroupName[] = "Spdy4Control";
+
+// Field trial for Cache-Control: stale-while-revalidate directive.
+const char kStaleWhileRevalidateFieldTrialName[] = "StaleWhileRevalidate";
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 void ObserveKeychainEvents() {
@@ -157,7 +159,7 @@ class SystemURLRequestContext : public net::URLRequestContext {
   }
 
  private:
-  virtual ~SystemURLRequestContext() {
+  ~SystemURLRequestContext() override {
     AssertNoURLRequests();
 #if defined(USE_NSS) || defined(OS_IOS)
     net::SetURLRequestContextForNSSHttpIO(NULL);
@@ -167,23 +169,10 @@ class SystemURLRequestContext : public net::URLRequestContext {
 
 scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
   TRACE_EVENT0("startup", "IOThread::CreateGlobalHostResolver");
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 
   net::HostResolver::Options options;
-
-  // Use the concurrency override from the command-line, if any.
-  if (command_line.HasSwitch(switches::kHostResolverParallelism)) {
-    std::string s =
-        command_line.GetSwitchValueASCII(switches::kHostResolverParallelism);
-
-    // Parse the switch (it should be a positive integer formatted as decimal).
-    int n;
-    if (base::StringToInt(s, &n) && n > 0) {
-      options.max_concurrent_resolves = static_cast<size_t>(n);
-    } else {
-      LOG(ERROR) << "Invalid switch for host resolver parallelism: " << s;
-    }
-  }
 
   // Use the retry attempts override from the command-line, if any.
   if (command_line.HasSwitch(switches::kHostResolverRetryAttempts)) {
@@ -221,13 +210,13 @@ scoped_ptr<net::HostResolver> CreateGlobalHostResolver(net::NetLog* net_log) {
   // rules on top of the real host resolver. This allows forwarding all requests
   // through a designated test server.
   if (!command_line.HasSwitch(switches::kHostResolverRules))
-    return global_host_resolver.PassAs<net::HostResolver>();
+    return global_host_resolver.Pass();
 
   scoped_ptr<net::MappedHostResolver> remapped_resolver(
       new net::MappedHostResolver(global_host_resolver.Pass()));
   remapped_resolver->SetRulesFromString(
       command_line.GetSwitchValueASCII(switches::kHostResolverRules));
-  return remapped_resolver.PassAs<net::HostResolver>();
+  return remapped_resolver.Pass();
 }
 
 // TODO(willchan): Remove proxy script fetcher context since it's not necessary
@@ -266,6 +255,10 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
 net::URLRequestContext*
 ConstructSystemRequestContext(IOThread::Globals* globals,
                               net::NetLog* net_log) {
+  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "454983 ConstructSystemRequestContext"));
   net::URLRequestContext* context = new SystemURLRequestContext;
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
@@ -290,7 +283,7 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   return context;
 }
 
-int GetSwitchValueAsInt(const CommandLine& command_line,
+int GetSwitchValueAsInt(const base::CommandLine& command_line,
                         const std::string& switch_name) {
   int value;
   if (!base::StringToInt(command_line.GetSwitchValueASCII(switch_name),
@@ -312,6 +305,26 @@ const std::string& GetVariationParam(
   return it->second;
 }
 
+// Return true if stale-while-revalidate support should be enabled.
+bool IsStaleWhileRevalidateEnabled(const base::CommandLine& command_line) {
+  if (command_line.HasSwitch(switches::kEnableStaleWhileRevalidate))
+    return true;
+  const std::string group_name =
+      base::FieldTrialList::FindFullName(kStaleWhileRevalidateFieldTrialName);
+  return group_name == "Enabled";
+}
+
+bool IsCertificateTransparencyRequiredForEV(
+    const base::CommandLine& command_line) {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("CTRequiredForEVTrial");
+
+  if (command_line.HasSwitch(switches::kRequireCTForEV))
+    return true;
+
+  return group_name == "RequirementEnforced";
+}
+
 }  // namespace
 
 class IOThread::LoggingNetworkChangeObserver
@@ -327,22 +340,22 @@ class IOThread::LoggingNetworkChangeObserver
     net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
   }
 
-  virtual ~LoggingNetworkChangeObserver() {
+  ~LoggingNetworkChangeObserver() override {
     net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
     net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
     net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
   }
 
   // NetworkChangeNotifier::IPAddressObserver implementation.
-  virtual void OnIPAddressChanged() OVERRIDE {
+  void OnIPAddressChanged() override {
     VLOG(1) << "Observed a change to the network IP addresses";
 
     net_log_->AddGlobalEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED);
   }
 
   // NetworkChangeNotifier::ConnectionTypeObserver implementation.
-  virtual void OnConnectionTypeChanged(
-      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE {
+  void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override {
     std::string type_as_string =
         net::NetworkChangeNotifier::ConnectionTypeToString(type);
 
@@ -355,8 +368,8 @@ class IOThread::LoggingNetworkChangeObserver
   }
 
   // NetworkChangeNotifier::NetworkChangeObserver implementation.
-  virtual void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE {
+  void OnNetworkChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override {
     std::string type_as_string =
         net::NetworkChangeNotifier::ConnectionTypeToString(type);
 
@@ -377,12 +390,12 @@ class SystemURLRequestContextGetter : public net::URLRequestContextGetter {
   explicit SystemURLRequestContextGetter(IOThread* io_thread);
 
   // Implementation for net::UrlRequestContextGetter.
-  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetNetworkTaskRunner() const OVERRIDE;
+  net::URLRequestContext* GetURLRequestContext() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
+      const override;
 
  protected:
-  virtual ~SystemURLRequestContextGetter();
+  ~SystemURLRequestContextGetter() override;
 
  private:
   IOThread* const io_thread_;  // Weak pointer, owned by BrowserProcess.
@@ -429,6 +442,7 @@ IOThread::Globals::Globals()
     : system_request_context_leak_checker(this),
       enable_ssl_connect_job_waiting(false),
       ignore_certificate_errors(false),
+      use_stale_while_revalidate(false),
       testing_fixed_http_port(0),
       testing_fixed_https_port(0),
       enable_user_alternate_protocol_ports(false) {
@@ -467,6 +481,8 @@ IOThread::IOThread(
       &system_enable_referrers_,
       NULL,
       NULL,
+      NULL,
+      NULL,
       local_state);
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
@@ -475,6 +491,8 @@ IOThread::IOThread(
       chrome_browser_net::ConfigureAsyncDnsFieldTrial());
   local_state->SetDefaultPrefValue(prefs::kBuiltInDnsClientEnabled,
                                    dns_client_enabled_default);
+  chrome_browser_net::LogAsyncDnsPrefSource(
+      local_state->FindPreference(prefs::kBuiltInDnsClientEnabled));
 
   dns_client_enabled_.Init(prefs::kBuiltInDnsClientEnabled,
                            local_state,
@@ -551,7 +569,8 @@ void IOThread::InitAsync() {
   net::SetMessageLoopForNSSHttpIO();
 #endif
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 
   DCHECK(!globals_);
   globals_ = new Globals;
@@ -570,19 +589,19 @@ void IOThread::InitAsync() {
       extension_event_router_forwarder_;
 #endif
 
-  ChromeNetworkDelegate* network_delegate =
+  scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate(
       new ChromeNetworkDelegate(extension_event_router_forwarder(),
-                                &system_enable_referrers_);
+                                &system_enable_referrers_));
 
   if (command_line.HasSwitch(switches::kEnableClientHints))
-    network_delegate->SetEnableClientHints();
+    chrome_network_delegate->SetEnableClientHints();
 
 #if defined(ENABLE_EXTENSIONS)
   if (command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling))
-    network_delegate->NeverThrottleRequests();
+    chrome_network_delegate->NeverThrottleRequests();
 #endif
 
-  globals_->system_network_delegate.reset(network_delegate);
+  globals_->system_network_delegate = chrome_network_delegate.Pass();
   globals_->host_resolver = CreateGlobalHostResolver(net_log_);
   UpdateDnsClientEnabled();
 #if defined(OS_CHROMEOS)
@@ -628,9 +647,12 @@ void IOThread::InitAsync() {
     }
   }
 
-  globals_->ssl_config_service = GetSSLConfigService();
+  net::CertPolicyEnforcer* policy_enforcer = NULL;
+  policy_enforcer = new net::CertPolicyEnforcer(
+      IsCertificateTransparencyRequiredForEV(command_line));
+  globals_->cert_policy_enforcer.reset(policy_enforcer);
 
-  SetupDataReductionProxy(network_delegate);
+  globals_->ssl_config_service = GetSSLConfigService();
 
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
@@ -660,6 +682,8 @@ void IOThread::InitAsync() {
     globals_->enable_ssl_connect_job_waiting = true;
   if (command_line.HasSwitch(switches::kIgnoreCertificateErrors))
     globals_->ignore_certificate_errors = true;
+  globals_->use_stale_while_revalidate =
+      IsStaleWhileRevalidateEnabled(command_line);
   if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
     globals_->testing_fixed_http_port =
         GetSwitchValueAsInt(command_line, switches::kTestingFixedHttpPort);
@@ -705,8 +729,7 @@ void IOThread::InitAsync() {
       new net::FtpProtocolHandler(
           globals_->proxy_script_fetcher_ftp_transaction_factory.get()));
 #endif
-  globals_->proxy_script_fetcher_url_request_job_factory =
-      job_factory.PassAs<net::URLRequestJobFactory>();
+  globals_->proxy_script_fetcher_url_request_job_factory = job_factory.Pass();
 
   globals_->throttler_manager.reset(new net::URLRequestThrottlerManager());
   globals_->throttler_manager->set_net_log(net_log_);
@@ -766,7 +789,7 @@ void IOThread::CleanUp() {
   base::debug::LeakTracker<SystemURLRequestContextGetter>::CheckForLeaks();
 }
 
-void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
+void IOThread::InitializeNetworkOptions(const base::CommandLine& command_line) {
   // Only handle use-spdy command line flags if "spdy.disabled" preference is
   // not disabled via policy.
   if (is_spdy_disabled_by_policy_) {
@@ -788,24 +811,14 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
     } else if (command_line.HasSwitch(switches::kEnableSpdy4)) {
       globals_->next_protos = net::NextProtosSpdy4Http2();
       globals_->use_alternate_protocols.set(true);
-    } else if (command_line.HasSwitch(switches::kDisableSpdy31)) {
-      globals_->next_protos = net::NextProtosSpdy3();
-      globals_->use_alternate_protocols.set(true);
     } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
       globals_->next_protos = net::NextProtosHttpOnly();
       globals_->use_alternate_protocols.set(false);
-    } else if (command_line.HasSwitch(switches::kEnableWebSocketOverSpdy)) {
-      // Use the current SPDY default (SPDY/3.1).
-      globals_->next_protos = net::NextProtosSpdy31();
-      globals_->use_alternate_protocols.set(true);
     } else {
       // No SPDY command-line flags have been specified. Examine trial groups.
       ConfigureSpdyFromTrial(
           base::FieldTrialList::FindFullName(kSpdyFieldTrialName), globals_);
     }
-
-    if (command_line.HasSwitch(switches::kEnableWebSocketOverSpdy))
-      globals_->enable_websocket_over_spdy.set(true);
   }
 
   ConfigureTCPFastOpen(command_line);
@@ -816,7 +829,7 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
   // HttpNetworkSession::Params.
 }
 
-void IOThread::ConfigureTCPFastOpen(const CommandLine& command_line) {
+void IOThread::ConfigureTCPFastOpen(const base::CommandLine& command_line) {
   const std::string trial_group =
       base::FieldTrialList::FindFullName(kTCPFastOpenFieldTrialName);
   if (trial_group == kTCPFastOpenHttpsEnabledGroupName)
@@ -839,7 +852,7 @@ void IOThread::ConfigureSpdyFromTrial(base::StringPiece spdy_trial_group,
     globals->use_alternate_protocols.set(true);
   } else if (spdy_trial_group.starts_with(
                  kSpdyFieldTrialSpdy31GroupNamePrefix)) {
-    globals->next_protos = net::NextProtosSpdy4Http2();
+    globals->next_protos = net::NextProtosSpdy31();
     globals->use_alternate_protocols.set(true);
   } else if (spdy_trial_group.starts_with(
                  kSpdyFieldTrialSpdy4GroupNamePrefix)) {
@@ -850,8 +863,8 @@ void IOThread::ConfigureSpdyFromTrial(base::StringPiece spdy_trial_group,
     globals->next_protos = net::NextProtosSpdy31();
     globals->use_alternate_protocols.set(true);
   } else {
-    // Use the current SPDY default (SPDY/3.1).
-    globals->next_protos = net::NextProtosSpdy31();
+    // By default, enable HTTP/2.
+    globals->next_protos = net::NextProtosSpdy4Http2();
     globals->use_alternate_protocols.set(true);
   }
 }
@@ -885,11 +898,11 @@ void IOThread::EnableSpdy(const std::string& mode) {
     if (option == kOff) {
       net::HttpStreamFactory::set_spdy_enabled(false);
     } else if (option == kDisableSSL) {
-      globals_->spdy_default_protocol.set(net::kProtoSPDY3);
+      globals_->spdy_default_protocol.set(net::kProtoSPDY31);
       globals_->force_spdy_over_ssl.set(false);
       globals_->force_spdy_always.set(true);
     } else if (option == kSSL) {
-      globals_->spdy_default_protocol.set(net::kProtoSPDY3);
+      globals_->spdy_default_protocol.set(net::kProtoSPDY31);
       globals_->force_spdy_over_ssl.set(true);
       globals_->force_spdy_always.set(true);
     } else if (option == kDisablePing) {
@@ -903,6 +916,7 @@ void IOThread::EnableSpdy(const std::string& mode) {
       globals_->use_alternate_protocols.set(false);
     } else if (option == kForceAltProtocols) {
       net::AlternateProtocolInfo pair(443, net::NPN_SPDY_3, 1);
+      base::RecordAction(base::UserMetricsAction("Net.ForceAlternateProtocol"));
       net::HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
     } else if (option == kSingleDomain) {
       DVLOG(1) << "FORCING SINGLE DOMAIN";
@@ -974,6 +988,10 @@ void IOThread::ClearHostCache() {
 
 void IOThread::InitializeNetworkSessionParams(
     net::HttpNetworkSession::Params* params) {
+  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "454983 IOThread::InitializeNetworkSessionParams"));
   InitializeNetworkSessionParamsFromGlobals(*globals_, params);
 }
 
@@ -983,6 +1001,7 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
     net::HttpNetworkSession::Params* params) {
   params->host_resolver = globals.host_resolver.get();
   params->cert_verifier = globals.cert_verifier.get();
+  params->cert_policy_enforcer = globals.cert_policy_enforcer.get();
   params->channel_id_service = globals.system_channel_id_service.get();
   params->transport_security_state = globals.transport_security_state.get();
   params->ssl_config_service = globals.ssl_config_service.get();
@@ -994,6 +1013,7 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
   params->enable_ssl_connect_job_waiting =
       globals.enable_ssl_connect_job_waiting;
   params->ignore_certificate_errors = globals.ignore_certificate_errors;
+  params->use_stale_while_revalidate = globals.use_stale_while_revalidate;
   params->testing_fixed_http_port = globals.testing_fixed_http_port;
   params->testing_fixed_https_port = globals.testing_fixed_https_port;
   globals.enable_tcp_fast_open_for_ssl.CopyToIfSet(
@@ -1018,16 +1038,23 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->use_alternate_protocols);
   globals.alternate_protocol_probability_threshold.CopyToIfSet(
       &params->alternate_protocol_probability_threshold);
-  globals.enable_websocket_over_spdy.CopyToIfSet(
-      &params->enable_websocket_over_spdy);
 
   globals.enable_quic.CopyToIfSet(&params->enable_quic);
-  globals.enable_quic_time_based_loss_detection.CopyToIfSet(
-      &params->enable_quic_time_based_loss_detection);
+  globals.enable_quic_for_proxies.CopyToIfSet(&params->enable_quic_for_proxies);
   globals.quic_always_require_handshake_confirmation.CopyToIfSet(
       &params->quic_always_require_handshake_confirmation);
   globals.quic_disable_connection_pooling.CopyToIfSet(
       &params->quic_disable_connection_pooling);
+  globals.quic_load_server_info_timeout_ms.CopyToIfSet(
+      &params->quic_load_server_info_timeout_ms);
+  globals.quic_load_server_info_timeout_srtt_multiplier.CopyToIfSet(
+      &params->quic_load_server_info_timeout_srtt_multiplier);
+  globals.quic_enable_truncated_connection_ids.CopyToIfSet(
+      &params->quic_enable_truncated_connection_ids);
+  globals.quic_enable_connection_racing.CopyToIfSet(
+      &params->quic_enable_connection_racing);
+  globals.quic_disable_disk_cache.CopyToIfSet(
+      &params->quic_disable_disk_cache);
   globals.enable_quic_port_selection.CopyToIfSet(
       &params->enable_quic_port_selection);
   globals.quic_max_packet_length.CopyToIfSet(&params->quic_max_packet_length);
@@ -1040,7 +1067,6 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->origin_to_force_quic_on);
   params->enable_user_alternate_protocol_ports =
       globals.enable_user_alternate_protocol_ports;
-  params->proxy_delegate = globals.data_reduction_proxy_delegate.get();
 }
 
 base::TimeTicks IOThread::creation_time() const {
@@ -1084,7 +1110,8 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   DCHECK(!globals_->system_proxy_service.get());
   DCHECK(system_proxy_config_service_.get());
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   globals_->system_proxy_service.reset(
       ProxyServiceFactory::CreateProxyService(
           net_log_,
@@ -1093,16 +1120,22 @@ void IOThread::InitSystemRequestContextOnIOThread() {
           system_proxy_config_service_.release(),
           command_line,
           quick_check_enabled_.GetValue()));
-  DCHECK(globals_->data_reduction_proxy_params);
 
   net::HttpNetworkSession::Params system_params;
   InitializeNetworkSessionParams(&system_params);
   system_params.net_log = net_log_;
   system_params.proxy_service = globals_->system_proxy_service.get();
 
-  globals_->system_http_transaction_factory.reset(
-      new net::HttpNetworkLayer(
-          new net::HttpNetworkSession(system_params)));
+  {
+    // TODO(michaeln): Remove after crbug.com/454983 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "454983 IOThread::InitSystemRequestContextOnIOThread"
+            ".HttpNetworkSession"));
+    globals_->system_http_transaction_factory.reset(
+        new net::HttpNetworkLayer(
+            new net::HttpNetworkSession(system_params)));
+  }
   globals_->system_url_request_job_factory.reset(
       new net::URLRequestJobFactoryImpl());
   globals_->system_request_context.reset(
@@ -1117,7 +1150,7 @@ void IOThread::UpdateDnsClientEnabled() {
   globals()->host_resolver->SetDnsClientEnabled(*dns_client_enabled_);
 }
 
-void IOThread::ConfigureQuic(const CommandLine& command_line) {
+void IOThread::ConfigureQuic(const base::CommandLine& command_line) {
   // Always fetch the field trial group to ensure it is reported correctly.
   // The command line flags will be associated with a group that is reported
   // so long as trial is actually queried.
@@ -1131,42 +1164,6 @@ void IOThread::ConfigureQuic(const CommandLine& command_line) {
   ConfigureQuicGlobals(command_line, group, params, globals_);
 }
 
-void IOThread::SetupDataReductionProxy(
-    ChromeNetworkDelegate* network_delegate) {
-  // TODO(kundaji): Move flags initialization to DataReductionProxyParams and
-  // merge with flag initialization in
-  // data_reduction_proxy_chrome_settings_factory.cc.
-  int flags = data_reduction_proxy::DataReductionProxyParams::kAllowed |
-      data_reduction_proxy::DataReductionProxyParams::kFallbackAllowed |
-      data_reduction_proxy::DataReductionProxyParams::kAlternativeAllowed;
-  if (data_reduction_proxy::DataReductionProxyParams::
-      IsIncludedInPromoFieldTrial()) {
-    flags |= data_reduction_proxy::DataReductionProxyParams::kPromoAllowed;
-  }
-  if (data_reduction_proxy::DataReductionProxyParams::
-      IsIncludedInHoldbackFieldTrial()) {
-    flags |= data_reduction_proxy::DataReductionProxyParams::kHoldback;
-  }
-  globals_->data_reduction_proxy_params.reset(
-      new data_reduction_proxy::DataReductionProxyParams(flags));
-  globals_->data_reduction_proxy_auth_request_handler.reset(
-      new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-          DataReductionProxyChromeSettings::GetClient(),
-          globals_->data_reduction_proxy_params.get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
-  globals_->data_reduction_proxy_delegate.reset(
-      new data_reduction_proxy::DataReductionProxyDelegate(
-          globals_->data_reduction_proxy_auth_request_handler.get()));
-  // This is the same as in ProfileImplIOData except that we do not collect
-  // usage stats.
-  network_delegate->set_data_reduction_proxy_params(
-      globals_->data_reduction_proxy_params.get());
-  network_delegate->set_data_reduction_proxy_auth_request_handler(
-      globals_->data_reduction_proxy_auth_request_handler.get());
-  network_delegate->set_on_resolve_proxy_handler(
-      base::Bind(data_reduction_proxy::OnResolveProxyHandler));
-}
-
 // static
 void IOThread::ConfigureQuicGlobals(
     const base::CommandLine& command_line,
@@ -1175,26 +1172,42 @@ void IOThread::ConfigureQuicGlobals(
     IOThread::Globals* globals) {
   bool enable_quic = ShouldEnableQuic(command_line, quic_trial_group);
   globals->enable_quic.set(enable_quic);
+  bool enable_quic_for_proxies = ShouldEnableQuicForProxies(command_line,
+                                                            quic_trial_group);
+  globals->enable_quic_for_proxies.set(enable_quic_for_proxies);
   if (enable_quic) {
-    globals->enable_quic_time_based_loss_detection.set(
-        ShouldEnableQuicTimeBasedLossDetection(command_line, quic_trial_group,
-                                               quic_trial_params));
     globals->quic_always_require_handshake_confirmation.set(
         ShouldQuicAlwaysRequireHandshakeConfirmation(quic_trial_params));
     globals->quic_disable_connection_pooling.set(
         ShouldQuicDisableConnectionPooling(quic_trial_params));
+    int load_server_info_timeout_ms =
+        GetQuicLoadServerInfoTimeout(quic_trial_params);
+    if (load_server_info_timeout_ms != 0) {
+      globals->quic_load_server_info_timeout_ms.set(
+          load_server_info_timeout_ms);
+    }
+    float load_server_info_timeout_srtt_multiplier =
+        GetQuicLoadServerInfoTimeoutSrttMultiplier(quic_trial_params);
+    if (load_server_info_timeout_srtt_multiplier != 0) {
+      globals->quic_load_server_info_timeout_srtt_multiplier.set(
+          load_server_info_timeout_srtt_multiplier);
+    }
+    globals->quic_enable_truncated_connection_ids.set(
+        ShouldQuicEnableTruncatedConnectionIds(quic_trial_params));
+    globals->quic_enable_connection_racing.set(
+        ShouldQuicEnableConnectionRacing(quic_trial_params));
+    globals->quic_disable_disk_cache.set(
+        ShouldQuicDisableDiskCache(quic_trial_params));
     globals->enable_quic_port_selection.set(
         ShouldEnableQuicPortSelection(command_line));
     globals->quic_connection_options =
         GetQuicConnectionOptions(command_line, quic_trial_params);
-    if (ShouldEnableQuicPacing(command_line, quic_trial_group,
-                               quic_trial_params)) {
+    if (ShouldEnableQuicPacing(command_line, quic_trial_params)) {
       globals->quic_connection_options.push_back(net::kPACE);
     }
   }
 
   size_t max_packet_length = GetQuicMaxPacketLength(command_line,
-                                                    quic_trial_group,
                                                     quic_trial_params);
   if (max_packet_length != 0) {
     globals->quic_max_packet_length.set(max_packet_length);
@@ -1233,7 +1246,7 @@ void IOThread::ConfigureQuicGlobals(
   }
 }
 
-bool IOThread::ShouldEnableQuic(const CommandLine& command_line,
+bool IOThread::ShouldEnableQuic(const base::CommandLine& command_line,
                                 base::StringPiece quic_trial_group) {
   if (command_line.HasSwitch(switches::kDisableQuic))
     return false;
@@ -1245,8 +1258,27 @@ bool IOThread::ShouldEnableQuic(const CommandLine& command_line,
       quic_trial_group.starts_with(kQuicFieldTrialHttpsEnabledGroupName);
 }
 
+// static
+bool IOThread::ShouldEnableQuicForProxies(const base::CommandLine& command_line,
+                                          base::StringPiece quic_trial_group) {
+  return ShouldEnableQuic(command_line, quic_trial_group) ||
+      ShouldEnableQuicForDataReductionProxy();
+}
+
+// static
+bool IOThread::ShouldEnableQuicForDataReductionProxy() {
+  const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
+
+  if (command_line.HasSwitch(switches::kDisableQuic))
+    return false;
+
+  return data_reduction_proxy::DataReductionProxyParams::
+      IsIncludedInQuicFieldTrial();
+}
+
 bool IOThread::ShouldEnableQuicPortSelection(
-      const CommandLine& command_line) {
+    const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kDisableQuicPortSelection))
     return false;
 
@@ -1257,8 +1289,7 @@ bool IOThread::ShouldEnableQuicPortSelection(
 }
 
 bool IOThread::ShouldEnableQuicPacing(
-    const CommandLine& command_line,
-    base::StringPiece quic_trial_group,
+    const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kEnableQuicPacing))
     return true;
@@ -1266,52 +1297,26 @@ bool IOThread::ShouldEnableQuicPacing(
   if (command_line.HasSwitch(switches::kDisableQuicPacing))
     return false;
 
-  if (LowerCaseEqualsASCII(
+  return LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params, "enable_pacing"),
-      "true"))
-    return true;
-
-  return quic_trial_group.ends_with(kQuicFieldTrialPacingSuffix);
+      "true");
 }
 
 net::QuicTagVector IOThread::GetQuicConnectionOptions(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicConnectionOptions)) {
-    return ParseQuicConnectionOptions(
+    return net::QuicUtils::ParseQuicConnectionOptions(
         command_line.GetSwitchValueASCII(switches::kQuicConnectionOptions));
   }
 
   VariationParameters::const_iterator it =
       quic_trial_params.find("connection_options");
   if (it == quic_trial_params.end()) {
-    // TODO(rch): remove support for deprecated congestion_options.
-    it = quic_trial_params.find("congestion_options");
-    if (it == quic_trial_params.end())
-      return net::QuicTagVector();
+    return net::QuicTagVector();
   }
 
-  return ParseQuicConnectionOptions(it->second);
-}
-
-// static
-net::QuicTagVector IOThread::ParseQuicConnectionOptions(
-    const std::string& connection_options) {
-  net::QuicTagVector options;
-  std::vector<std::string> tokens;
-  base::SplitString(connection_options, ',', &tokens);
-  // Tokens are expected to be no more than 4 characters long, but we
-  // handle overflow gracefully.
-  for (std::vector<std::string>::iterator token = tokens.begin();
-       token != tokens.end(); ++token) {
-    uint32 option = 0;
-    for (size_t i = token->length() ; i > 0; --i) {
-      option <<= 8;
-      option |= static_cast<unsigned char>((*token)[i - 1]);
-    }
-    options.push_back(static_cast<net::QuicTag>(option));
-  }
-  return options;
+  return net::QuicUtils::ParseQuicConnectionOptions(it->second);
 }
 
 // static
@@ -1341,26 +1346,6 @@ double IOThread::GetAlternateProtocolProbabilityThreshold(
 }
 
 // static
-bool IOThread::ShouldEnableQuicTimeBasedLossDetection(
-    const CommandLine& command_line,
-    base::StringPiece quic_trial_group,
-    const VariationParameters& quic_trial_params) {
-  if (command_line.HasSwitch(switches::kEnableQuicTimeBasedLossDetection))
-    return true;
-
-  if (command_line.HasSwitch(switches::kDisableQuicTimeBasedLossDetection))
-    return false;
-
-  if (LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "enable_time_based_loss_detection"),
-      "true"))
-    return true;
-
-  return quic_trial_group.ends_with(
-      kQuicFieldTrialTimeBasedLossDetectionSuffix);
-}
-
-// static
 bool IOThread::ShouldQuicAlwaysRequireHandshakeConfirmation(
     const VariationParameters& quic_trial_params) {
   return LowerCaseEqualsASCII(
@@ -1378,9 +1363,55 @@ bool IOThread::ShouldQuicDisableConnectionPooling(
 }
 
 // static
+int IOThread::GetQuicLoadServerInfoTimeout(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(GetVariationParam(quic_trial_params,
+                                          "load_server_info_timeout"),
+                        &value)) {
+    return value;
+  }
+  return 0;
+}
+
+// static
+float IOThread::GetQuicLoadServerInfoTimeoutSrttMultiplier(
+    const VariationParameters& quic_trial_params) {
+  double value;
+  if (base::StringToDouble(GetVariationParam(quic_trial_params,
+                                             "load_server_info_time_to_srtt"),
+                           &value)) {
+    return (float)value;
+  }
+  return 0.0f;
+}
+
+// static
+bool IOThread::ShouldQuicEnableTruncatedConnectionIds(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "enable_truncated_connection_ids"),
+      "true");
+}
+
+// static
+bool IOThread::ShouldQuicEnableConnectionRacing(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "enable_connection_racing"),
+      "true");
+}
+
+// static
+bool IOThread::ShouldQuicDisableDiskCache(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "disable_disk_cache"), "true");
+}
+
+// static
 size_t IOThread::GetQuicMaxPacketLength(
-    const CommandLine& command_line,
-    base::StringPiece quic_trial_group,
+    const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicMaxPacketLength)) {
     unsigned value;
@@ -1398,30 +1429,12 @@ size_t IOThread::GetQuicMaxPacketLength(
                          &value)) {
     return value;
   }
-
-  // Format of the packet length group names is:
-  //   (Https)?Enabled<length>BytePackets.
-  base::StringPiece length_str(quic_trial_group);
-  if (length_str.starts_with(kQuicFieldTrialEnabledGroupName)) {
-    length_str.remove_prefix(strlen(kQuicFieldTrialEnabledGroupName));
-  } else if (length_str.starts_with(kQuicFieldTrialHttpsEnabledGroupName)) {
-    length_str.remove_prefix(strlen(kQuicFieldTrialHttpsEnabledGroupName));
-  } else {
-    return 0;
-  }
-  if (!length_str.ends_with(kQuicFieldTrialPacketLengthSuffix)) {
-    return 0;
-  }
-  length_str.remove_suffix(strlen(kQuicFieldTrialPacketLengthSuffix));
-  if (!base::StringToUint(length_str, &value)) {
-    return 0;
-  }
-  return value;
+  return 0;
 }
 
 // static
 net::QuicVersion IOThread::GetQuicVersion(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   if (command_line.HasSwitch(switches::kQuicVersion)) {
     return ParseQuicVersion(

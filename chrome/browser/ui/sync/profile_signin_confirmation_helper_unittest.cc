@@ -50,6 +50,8 @@
 #include "extensions/common/permissions/permission_set.h"
 #endif
 
+using bookmarks::BookmarkModel;
+
 namespace {
 
 template<typename T>
@@ -76,17 +78,13 @@ class TestingPrefStoreWithCustomReadError : public TestingPrefStore {
     // By default the profile is "new" (NO_FILE means that the profile
     // wasn't found on disk, so it was created).
   }
-  virtual PrefReadError GetReadError() const OVERRIDE {
-    return read_error_;
-  }
-  virtual bool IsInitializationComplete() const OVERRIDE {
-    return true;
-  }
+  PrefReadError GetReadError() const override { return read_error_; }
+  bool IsInitializationComplete() const override { return true; }
   void set_read_error(PrefReadError read_error) {
     read_error_ = read_error;
   }
  private:
-  virtual ~TestingPrefStoreWithCustomReadError() {}
+  ~TestingPrefStoreWithCustomReadError() override {}
   PrefReadError read_error_;
 };
 
@@ -127,7 +125,7 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
         model_(NULL) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Create the profile.
     TestingProfile::Builder builder;
     user_prefs_ = new TestingPrefStoreWithCustomReadError;
@@ -144,20 +142,20 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
     // Initialize the services we check.
     profile_->CreateBookmarkModel(true);
     model_ = BookmarkModelFactory::GetForProfile(profile_.get());
-    test::WaitForBookmarkModelToLoad(model_);
+    bookmarks::test::WaitForBookmarkModelToLoad(model_);
     ASSERT_TRUE(profile_->CreateHistoryService(true, false));
 #if defined(ENABLE_EXTENSIONS)
     extensions::TestExtensionSystem* system =
         static_cast<extensions::TestExtensionSystem*>(
             extensions::ExtensionSystem::Get(profile_.get()));
-    CommandLine command_line(CommandLine::NO_PROGRAM);
+    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
     system->CreateExtensionService(&command_line,
                                    base::FilePath(kExtensionFilePath),
                                    false);
 #endif
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // TestExtensionSystem uses DeleteSoon, so we need to delete the profile
     // and then run the message queue to clean up.
     profile_.reset();
@@ -232,8 +230,7 @@ TEST_F(ProfileSigninConfirmationHelperTest, PromptForNewProfile_Extensions) {
 TEST_F(ProfileSigninConfirmationHelperTest,
        DISABLED_PromptForNewProfile_History) {
   HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile_.get(),
-      Profile::EXPLICIT_ACCESS);
+      profile_.get(), ServiceAccessType::EXPLICIT_ACCESS);
   ASSERT_TRUE(history);
 
   // Profile is new but has more than $(kHistoryEntriesBeforeNewProfilePrompt)
@@ -257,8 +254,7 @@ TEST_F(ProfileSigninConfirmationHelperTest,
 TEST_F(ProfileSigninConfirmationHelperTest,
        DISABLED_PromptForNewProfile_TypedURLs) {
   HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile_.get(),
-      Profile::EXPLICIT_ACCESS);
+      profile_.get(), ServiceAccessType::EXPLICIT_ACCESS);
   ASSERT_TRUE(history);
 
   // Profile is new but has a typed URL.

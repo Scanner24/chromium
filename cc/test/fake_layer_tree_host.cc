@@ -7,7 +7,7 @@
 namespace cc {
 FakeLayerTreeHost::FakeLayerTreeHost(FakeLayerTreeHostClient* client,
                                      const LayerTreeSettings& settings)
-    : LayerTreeHost(client, NULL, settings),
+    : LayerTreeHost(client, NULL, NULL, settings),
       client_(client),
       host_impl_(settings, &proxy_, &manager_),
       needs_commit_(false) {
@@ -17,6 +17,7 @@ FakeLayerTreeHost::FakeLayerTreeHost(FakeLayerTreeHostClient* client,
 scoped_ptr<FakeLayerTreeHost> FakeLayerTreeHost::Create(
     FakeLayerTreeHostClient* client) {
   LayerTreeSettings settings;
+  settings.verify_property_trees = true;
   return make_scoped_ptr(new FakeLayerTreeHost(client, settings));
 }
 

@@ -65,14 +65,14 @@ function SingleGnubbySigner(gnubbyId, forEnroll, completeCb, timer,
   /** @private {string|undefined} */
   this.logMsgUrl_ = opt_logMsgUrl;
 
-  /** @private {!Array.<!SignHelperChallenge>} */
+  /** @private {!Array<!SignHelperChallenge>} */
   this.challenges_ = [];
   /** @private {number} */
   this.challengeIndex_ = 0;
   /** @private {boolean} */
   this.challengesSet_ = false;
 
-  /** @private {!Object.<string, number>} */
+  /** @private {!Object<string, number>} */
   this.cachedError_ = [];
 }
 
@@ -138,7 +138,7 @@ SingleGnubbySigner.prototype.closed_ = function() {
 
 /**
  * Begins signing the given challenges.
- * @param {Array.<SignHelperChallenge>} challenges The challenges to sign.
+ * @param {Array<SignHelperChallenge>} challenges The challenges to sign.
  * @return {boolean} Whether the challenges were accepted.
  */
 SingleGnubbySigner.prototype.doSign = function(challenges) {
@@ -253,6 +253,22 @@ SingleGnubbySigner.prototype.openCallback_ = function(rc, gnubby) {
  * @private
  */
 SingleGnubbySigner.prototype.versionCallback_ = function(rc, opt_data) {
+  if (rc == DeviceStatusCodes.BUSY_STATUS) {
+    if (this.timer_ && this.timer_.expired()) {
+      this.goToError_(DeviceStatusCodes.TIMEOUT_STATUS);
+      return;
+    }
+    // There's still time: resync and retry.
+    var self = this;
+    this.gnubby_.sync(function(code) {
+      if (code) {
+        self.goToError_(code, true);
+        return;
+      }
+      self.gnubby_.version(self.versionCallback_.bind(self));
+    });
+    return;
+  }
   if (rc) {
     this.goToError_(rc, true);
     return;
@@ -345,12 +361,20 @@ SingleGnubbySigner.prototype.signCallback_ =
       break;
 
     case DeviceStatusCodes.TIMEOUT_STATUS:
-      // TODO: On a TIMEOUT_STATUS, sync first, then retry.
+      this.gnubby_.sync(this.synced_.bind(this));
+      break;
+
     case DeviceStatusCodes.BUSY_STATUS:
       this.doSign_(this.challengeIndex_);
       break;
 
     case DeviceStatusCodes.OK_STATUS:
+      // Lower bound on the minimum length, signature length can vary.
+      var MIN_SIGNATURE_LENGTH = 7;
+      if (!opt_info || opt_info.byteLength < MIN_SIGNATURE_LENGTH) {
+        console.error(UTIL_fmt('Got short response to sign request (' +
+            (opt_info ? opt_info.byteLength : 0) + ' bytes), WTF?'));
+      }
       if (this.forEnroll_) {
         this.goToError_(code);
       } else {
@@ -387,6 +411,20 @@ SingleGnubbySigner.prototype.signCallback_ =
 };
 
 /**
+ * Called with the response of a sync command, called when a sign yields a
+ * timeout to reassert control over the gnubby.
+ * @param {number} code Error code
+ * @private
+ */
+SingleGnubbySigner.prototype.synced_ = function(code) {
+  if (code) {
+    this.goToError_(code, true);
+    return;
+  }
+  this.doSign_(this.challengeIndex_);
+};
+
+/**
  * Switches to the error state, and notifies caller.
  * @param {number} code Error code
  * @param {boolean=} opt_warn Whether to warn in the console about the error.
@@ -396,10 +434,19 @@ SingleGnubbySigner.prototype.goToError_ = function(code, opt_warn) {
   this.state_ = SingleGnubbySigner.State.COMPLETE;
   var logFn = opt_warn ? console.warn.bind(console) : console.log.bind(console);
   logFn(UTIL_fmt('failed (' + code.toString(16) + ')'));
-  // Since this gnubby can no longer produce a useful result, go ahead and
-  // close it.
-  this.close();
   var result = { code: code };
+  if (!this.forEnroll_ && code == DeviceStatusCodes.WRONG_DATA_STATUS) {
+    // When a device yields WRONG_DATA to all sign challenges, and this is a
+    // sign request, we don't want to yield to the web page that it's not
+    // enrolled just yet: we want the user to tap the device first. We'll
+    // report the gnubby to the caller and let it close it instead of closing
+    // it here.
+    result.gnubby = this.gnubby_;
+  } else {
+    // Since this gnubby can no longer produce a useful result, go ahead and
+    // close it.
+    this.close();
+  }
   this.completeCb_(result);
 };
 

@@ -9,11 +9,13 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/tracked_objects.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -33,7 +35,6 @@ namespace {
 
 const int kBufferSize = 4096;
 const int kUploadProgressTimerInterval = 100;
-bool g_interception_enabled = false;
 bool g_ignore_certificate_requests = false;
 
 void EmptyCompletionCallback(int result) {}
@@ -136,10 +137,8 @@ void URLFetcherCore::Stop() {
 
 void URLFetcherCore::SetUploadData(const std::string& upload_content_type,
                                    const std::string& upload_content) {
+  AssertHasNoUploadData();
   DCHECK(!is_chunked_upload_);
-  DCHECK(!upload_content_set_);
-  DCHECK(upload_content_.empty());
-  DCHECK(upload_file_path_.empty());
   DCHECK(upload_content_type_.empty());
 
   // Empty |upload_content_type| is allowed iff the |upload_content| is empty.
@@ -156,10 +155,8 @@ void URLFetcherCore::SetUploadFilePath(
     uint64 range_offset,
     uint64 range_length,
     scoped_refptr<base::TaskRunner> file_task_runner) {
+  AssertHasNoUploadData();
   DCHECK(!is_chunked_upload_);
-  DCHECK(!upload_content_set_);
-  DCHECK(upload_content_.empty());
-  DCHECK(upload_file_path_.empty());
   DCHECK_EQ(upload_range_offset_, 0ULL);
   DCHECK_EQ(upload_range_length_, 0ULL);
   DCHECK(upload_content_type_.empty());
@@ -173,10 +170,23 @@ void URLFetcherCore::SetUploadFilePath(
   upload_content_set_ = true;
 }
 
+void URLFetcherCore::SetUploadStreamFactory(
+    const std::string& upload_content_type,
+    const URLFetcher::CreateUploadStreamCallback& factory) {
+  AssertHasNoUploadData();
+  DCHECK(!is_chunked_upload_);
+  DCHECK(upload_content_type_.empty());
+
+  upload_content_type_ = upload_content_type;
+  upload_stream_factory_ = factory;
+  upload_content_set_ = true;
+}
+
 void URLFetcherCore::SetChunkedUpload(const std::string& content_type) {
-  DCHECK(is_chunked_upload_ ||
-         (upload_content_type_.empty() &&
-          upload_content_.empty()));
+  if (!is_chunked_upload_) {
+    AssertHasNoUploadData();
+    DCHECK(upload_content_type_.empty());
+  }
 
   // Empty |content_type| is not allowed here, because it is impossible
   // to ensure non-empty upload content as it is not yet supplied.
@@ -389,6 +399,11 @@ void URLFetcherCore::OnReceivedRedirect(URLRequest* request,
 }
 
 void URLFetcherCore::OnResponseStarted(URLRequest* request) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLFetcherCore::OnResponseStarted"));
+
   DCHECK_EQ(request, request_.get());
   DCHECK(network_task_runner_->BelongsToCurrentThread());
   if (request_->status().is_success()) {
@@ -417,6 +432,11 @@ void URLFetcherCore::OnCertificateRequested(
 
 void URLFetcherCore::OnReadCompleted(URLRequest* request,
                                      int bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLFetcherCore::OnReadCompleted"));
+
   DCHECK(request == request_);
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
@@ -425,15 +445,35 @@ void URLFetcherCore::OnReadCompleted(URLRequest* request,
   URLRequestThrottlerManager* throttler_manager =
       request->context()->throttler_manager();
   if (throttler_manager) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLFetcherCore::OnReadCompleted1"));
+
     url_throttler_entry_ = throttler_manager->RegisterRequestUrl(url_);
   }
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLFetcherCore::OnReadCompleted2"));
 
   do {
     if (!request_->status().is_success() || bytes_read <= 0)
       break;
 
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLFetcherCore::OnReadCompleted3"));
+
     current_response_bytes_ += bytes_read;
     InformDelegateDownloadProgress();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile4(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLFetcherCore::OnReadCompleted4"));
 
     const int result =
         WriteBuffer(new DrainableIOBuffer(buffer_.get(), bytes_read));
@@ -445,17 +485,38 @@ void URLFetcherCore::OnReadCompleted(URLRequest* request,
 
   const URLRequestStatus status = request_->status();
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLFetcherCore::OnReadCompleted5"));
+
   if (status.is_success())
     request_->GetResponseCookies(&cookies_);
 
   // See comments re: HEAD requests in ReadResponse().
   if (!status.is_io_pending() || request_type_ == URLFetcher::HEAD) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile6(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLFetcherCore::OnReadCompleted6"));
+
     status_ = status;
     ReleaseRequest();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile7(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLFetcherCore::OnReadCompleted7"));
 
     // No more data to write.
     const int result = response_writer_->Finish(
         base::Bind(&URLFetcherCore::DidFinishWriting, this));
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile8(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 URLFetcherCore::OnReadCompleted8"));
+
     if (result != ERR_IO_PENDING)
       DidFinishWriting(result);
   }
@@ -469,10 +530,6 @@ int URLFetcherCore::GetNumFetcherCores() {
   return g_registry.Get().size();
 }
 
-void URLFetcherCore::SetEnableInterceptionForTests(bool enabled) {
-  g_interception_enabled = enabled;
-}
-
 void URLFetcherCore::SetIgnoreCertificateRequests(bool ignored) {
   g_ignore_certificate_requests = ignored;
 }
@@ -484,6 +541,10 @@ URLFetcherCore::~URLFetcherCore() {
 }
 
 void URLFetcherCore::StartOnIOThread() {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLFetcherCore::StartOnIOThread"));
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
   if (!response_writer_)
@@ -496,6 +557,10 @@ void URLFetcherCore::StartOnIOThread() {
 }
 
 void URLFetcherCore::StartURLRequest() {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLFetcherCore::StartURLRequest"));
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
   if (was_cancelled_) {
@@ -513,8 +578,6 @@ void URLFetcherCore::StartURLRequest() {
       original_url_, DEFAULT_PRIORITY, this, NULL);
   request_->set_stack_trace(stack_trace_);
   int flags = request_->load_flags() | load_flags_;
-  if (!g_interception_enabled)
-    flags = flags | LOAD_DISABLE_INTERCEPT;
 
   if (is_chunked_upload_)
     request_->EnableChunkedUpload();
@@ -548,8 +611,8 @@ void URLFetcherCore::StartURLRequest() {
       if (!upload_content_.empty()) {
         scoped_ptr<UploadElementReader> reader(new UploadBytesElementReader(
             upload_content_.data(), upload_content_.size()));
-        request_->set_upload(make_scoped_ptr(
-            UploadDataStream::CreateWithReader(reader.Pass(), 0)));
+        request_->set_upload(
+            ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0));
       } else if (!upload_file_path_.empty()) {
         scoped_ptr<UploadElementReader> reader(
             new UploadFileElementReader(upload_file_task_runner_.get(),
@@ -557,8 +620,12 @@ void URLFetcherCore::StartURLRequest() {
                                         upload_range_offset_,
                                         upload_range_length_,
                                         base::Time()));
-        request_->set_upload(make_scoped_ptr(
-            UploadDataStream::CreateWithReader(reader.Pass(), 0)));
+        request_->set_upload(
+            ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0));
+      } else if (!upload_stream_factory_.is_null()) {
+        scoped_ptr<UploadDataStream> stream = upload_stream_factory_.Run();
+        DCHECK(stream);
+        request_->set_upload(stream.Pass());
       }
 
       current_upload_bytes_ = -1;
@@ -610,8 +677,13 @@ void URLFetcherCore::StartURLRequestWhenAppropriate() {
 
   DCHECK(request_context_getter_.get());
 
-  int64 delay = INT64_C(0);
+  int64 delay = 0;
   if (!original_url_throttler_entry_.get()) {
+    // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is
+    // fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "456327 URLFetcherCore::StartURLRequestWhenAppropriate1"));
     URLRequestThrottlerManager* manager =
         request_context_getter_->GetURLRequestContext()->throttler_manager();
     if (manager) {
@@ -620,11 +692,16 @@ void URLFetcherCore::StartURLRequestWhenAppropriate() {
     }
   }
   if (original_url_throttler_entry_.get()) {
+    // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is
+    // fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "456327 URLFetcherCore::StartURLRequestWhenAppropriate2"));
     delay = original_url_throttler_entry_->ReserveSendingTimeForNextRequest(
         GetBackoffReleaseTime());
   }
 
-  if (delay == INT64_C(0)) {
+  if (delay == 0) {
     StartURLRequest();
   } else {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -885,7 +962,18 @@ void URLFetcherCore::InformDelegateUploadProgressInDelegateThread(
 }
 
 void URLFetcherCore::InformDelegateDownloadProgress() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLFetcherCore::InformDelegateDownloadProgress1"));
+
   DCHECK(network_task_runner_->BelongsToCurrentThread());
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLFetcherCore::InformDelegateDownloadProgress2"));
+
   delegate_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(
@@ -898,6 +986,13 @@ void URLFetcherCore::InformDelegateDownloadProgressInDelegateThread(
   DCHECK(delegate_task_runner_->BelongsToCurrentThread());
   if (delegate_)
     delegate_->OnURLFetchDownloadProgress(fetcher_, current, total);
+}
+
+void URLFetcherCore::AssertHasNoUploadData() const {
+  DCHECK(!upload_content_set_);
+  DCHECK(upload_content_.empty());
+  DCHECK(upload_file_path_.empty());
+  DCHECK(upload_stream_factory_.is_null());
 }
 
 }  // namespace net

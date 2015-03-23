@@ -32,7 +32,7 @@ const char* kSimpleArticlePath = "/dom_distiller/simple_article.html";
 
 class DomDistillerTabUtilsBrowserTest : public InProcessBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableDomDistiller);
   }
 };
@@ -45,8 +45,8 @@ class WebContentsMainFrameHelper : public content::WebContentsObserver {
     content::WebContentsObserver::Observe(web_contents);
   }
 
-  virtual void DidFinishLoad(content::RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE {
+  void DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override {
     if (!render_frame_host->GetParent() &&
         validated_url.scheme() == kDomDistillerScheme)
       callback_.Run();
@@ -56,7 +56,14 @@ class WebContentsMainFrameHelper : public content::WebContentsObserver {
   base::Closure callback_;
 };
 
-IN_PROC_BROWSER_TEST_F(DomDistillerTabUtilsBrowserTest, TestSwapWebContents) {
+#if (defined(OS_LINUX) && defined(OS_CHROMEOS))
+#define MAYBE_TestSwapWebContents DISABLED_TestSwapWebContents
+#else
+#define MAYBE_TestSwapWebContents TestSwapWebContents
+#endif
+
+IN_PROC_BROWSER_TEST_F(DomDistillerTabUtilsBrowserTest,
+                       MAYBE_TestSwapWebContents) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   content::WebContents* initial_web_contents =

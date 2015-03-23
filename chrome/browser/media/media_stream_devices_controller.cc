@@ -8,7 +8,6 @@
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -83,6 +83,61 @@ enum DevicePermissionActions {
   kCancel,
   kPermissionActionsMax  // Must always be last!
 };
+
+// This is a wrapper around the call to
+// TabSpecificContentSettings::OnMediaStreamPermissionSet, precomputing the
+// information from |request_permissions| to a form which is understood by
+// TabSpecificContentSettings.
+void OnMediaStreamPermissionSet(
+    TabSpecificContentSettings* content_settings,
+    content::WebContents* web_contents,
+    const GURL& request_origin,
+    const MediaStreamDevicesController::MediaStreamTypeSettingsMap&
+        request_permissions) {
+  TabSpecificContentSettings::MicrophoneCameraState microphone_camera_state =
+      TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED;
+  std::string selected_audio_device;
+  std::string selected_video_device;
+  std::string requested_audio_device;
+  std::string requested_video_device;
+
+  PrefService* prefs = Profile::FromBrowserContext(
+      web_contents->GetBrowserContext())->GetPrefs();
+  auto it = request_permissions.find(content::MEDIA_DEVICE_AUDIO_CAPTURE);
+  if (it != request_permissions.end()) {
+    requested_audio_device = it->second.requested_device_id;
+    selected_audio_device = requested_audio_device.empty() ?
+            prefs->GetString(prefs::kDefaultAudioCaptureDevice) :
+            requested_audio_device;
+    DCHECK_NE(MediaStreamDevicesController::MEDIA_NONE, it->second.permission);
+    bool mic_allowed =
+        it->second.permission == MediaStreamDevicesController::MEDIA_ALLOWED;
+    microphone_camera_state |=
+        TabSpecificContentSettings::MICROPHONE_ACCESSED |
+        (mic_allowed ? 0 : TabSpecificContentSettings::MICROPHONE_BLOCKED);
+  }
+
+  it = request_permissions.find(content::MEDIA_DEVICE_VIDEO_CAPTURE);
+  if (it != request_permissions.end()) {
+    requested_video_device = it->second.requested_device_id;
+    selected_video_device = requested_video_device.empty() ?
+            prefs->GetString(prefs::kDefaultVideoCaptureDevice) :
+            requested_video_device;
+    DCHECK_NE(MediaStreamDevicesController::MEDIA_NONE, it->second.permission);
+    bool cam_allowed =
+        it->second.permission == MediaStreamDevicesController::MEDIA_ALLOWED;
+    microphone_camera_state |=
+        TabSpecificContentSettings::CAMERA_ACCESSED |
+        (cam_allowed ? 0 : TabSpecificContentSettings::CAMERA_BLOCKED);
+  }
+
+  content_settings->OnMediaStreamPermissionSet(request_origin,
+                                               microphone_camera_state,
+                                               selected_audio_device,
+                                               selected_video_device,
+                                               requested_audio_device,
+                                               requested_video_device);
+}
 
 }  // namespace
 
@@ -330,7 +385,7 @@ void MediaStreamDevicesController::Accept(bool update_content_setting) {
     if (update_content_setting) {
       if ((IsSchemeSecure() && !devices.empty()) ||
           request_.request_type == content::MEDIA_OPEN_DEVICE) {
-        SetPermission(true);
+        StorePermission(true);
       }
     }
 
@@ -369,8 +424,9 @@ void MediaStreamDevicesController::Deny(
   NotifyUIRequestDenied();
 
   if (update_content_setting) {
+    // Store sticky permissions if |update_content_setting|.
     CHECK_EQ(content::MEDIA_DEVICE_PERMISSION_DENIED, result);
-    SetPermission(false);
+    StorePermission(false);
   }
 
   content::MediaResponseCallback cb = callback_;
@@ -462,7 +518,7 @@ bool MediaStreamDevicesController::IsRequestAllowedByDefault() const {
       CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(device_checks); ++i) {
+  for (size_t i = 0; i < arraysize(device_checks); ++i) {
     if (!device_checks[i].has_capability)
       continue;
 
@@ -544,7 +600,7 @@ bool MediaStreamDevicesController::IsSchemeSecure() const {
       request_.security_origin.SchemeIs(extensions::kExtensionScheme);
 }
 
-void MediaStreamDevicesController::SetPermission(bool allowed) const {
+void MediaStreamDevicesController::StorePermission(bool allowed) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromURLNoWildcard(request_.security_origin);
@@ -579,8 +635,10 @@ void MediaStreamDevicesController::NotifyUIRequestAccepted() const {
   if (!content_settings_)
     return;
 
-  content_settings_->OnMediaStreamPermissionSet(request_.security_origin,
-                                                request_permissions_);
+  OnMediaStreamPermissionSet(content_settings_,
+                             web_contents_,
+                             request_.security_origin,
+                             request_permissions_);
 }
 
 void MediaStreamDevicesController::NotifyUIRequestDenied() {
@@ -596,8 +654,10 @@ void MediaStreamDevicesController::NotifyUIRequestDenied() {
         MEDIA_BLOCKED_BY_USER;
   }
 
-  content_settings_->OnMediaStreamPermissionSet(request_.security_origin,
-                                                request_permissions_);
+  OnMediaStreamPermissionSet(content_settings_,
+                             web_contents_,
+                             request_.security_origin,
+                             request_permissions_);
 }
 
 bool MediaStreamDevicesController::IsDeviceAudioCaptureRequestedAndAllowed()

@@ -19,14 +19,13 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "content/browser/browser_child_process_host_impl.h"
-#include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/plugin_process_messages.h"
@@ -48,7 +47,7 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #endif
 
 #if defined(OS_WIN)
@@ -104,22 +103,20 @@ class PluginSandboxedProcessLauncherDelegate
 #endif  // OS_POSIX
   {}
 
-  virtual ~PluginSandboxedProcessLauncherDelegate() {}
+  ~PluginSandboxedProcessLauncherDelegate() override {}
 
 #if defined(OS_WIN)
-  virtual bool ShouldSandbox() OVERRIDE {
+  virtual bool ShouldSandbox() override {
     return false;
   }
 
 #elif defined(OS_POSIX)
-  virtual int GetIpcFd() OVERRIDE {
-    return ipc_fd_;
-  }
+  base::ScopedFD TakeIpcFd() override { return ipc_fd_.Pass(); }
 #endif  // OS_WIN
 
  private:
 #if defined(OS_POSIX)
-  int ipc_fd_;
+  base::ScopedFD ipc_fd_;
 #endif  // OS_POSIX
 
   DISALLOW_COPY_AND_ASSIGN(PluginSandboxedProcessLauncherDelegate);
@@ -265,10 +262,11 @@ bool PluginProcessHost::Init(const WebPluginInfo& info) {
       base::Bind(&PluginProcessHost::GetContexts,
       base::Unretained(this)));
 
-  // TODO(jam): right now we're passing NULL for appcache, blob storage, and
-  // file system. If NPAPI plugins actually use this, we'll have to plumb them.
+  // TODO(jam): right now we're passing NULL for appcache, blob storage, file
+  // system and host zoom level context. If NPAPI plugins actually use this,
+  // we'll have to plumb them.
   ResourceMessageFilter* resource_message_filter = new ResourceMessageFilter(
-      process_->GetData().id, PROCESS_TYPE_PLUGIN, NULL, NULL, NULL, NULL,
+      process_->GetData().id, PROCESS_TYPE_PLUGIN, NULL, NULL, NULL, NULL, NULL,
       get_contexts_callback);
   process_->AddFilter(resource_message_filter);
   return true;

@@ -3,19 +3,19 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/gpu_channel.h"
+#include "content/common/gpu/media/vaapi_picture.h"
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/video/picture.h"
 #include "ui/gl/gl_bindings.h"
-#include "ui/gl/scoped_binders.h"
+#include "ui/gl/gl_image.h"
 
 static void ReportToUMA(
     content::VaapiH264Decoder::VAVDAH264DecoderFailure failure) {
@@ -30,7 +30,7 @@ namespace content {
 #define RETURN_AND_NOTIFY_ON_FAILURE(result, log, error_code, ret)  \
   do {                                                              \
     if (!(result)) {                                                \
-      DVLOG(1) << log;                                              \
+      LOG(ERROR) << log;                                            \
       NotifyError(error_code);                                      \
       return ret;                                                   \
     }                                                               \
@@ -54,172 +54,18 @@ void VaapiVideoDecodeAccelerator::NotifyError(Error error) {
   message_loop_->PostTask(FROM_HERE, base::Bind(
       &VaapiVideoDecodeAccelerator::Cleanup, weak_this_));
 
-  DVLOG(1) << "Notifying of error " << error;
+  LOG(ERROR) << "Notifying of error " << error;
   if (client_) {
     client_->NotifyError(error);
     client_ptr_factory_.reset();
   }
 }
 
-// TFPPicture allocates X Pixmaps and binds them to textures passed
-// in PictureBuffers from clients to them. TFPPictures are created as
-// a consequence of receiving a set of PictureBuffers from clients and released
-// at the end of decode (or when a new set of PictureBuffers is required).
-//
-// TFPPictures are used for output, contents of VASurfaces passed from decoder
-// are put into the associated pixmap memory and sent to client.
-class VaapiVideoDecodeAccelerator::TFPPicture : public base::NonThreadSafe {
- public:
-  ~TFPPicture();
-
-  static linked_ptr<TFPPicture> Create(
-      const base::Callback<bool(void)>& make_context_current,
-      const GLXFBConfig& fb_config,
-      Display* x_display,
-      int32 picture_buffer_id,
-      uint32 texture_id,
-      gfx::Size size);
-
-  int32 picture_buffer_id() {
-    return picture_buffer_id_;
-  }
-
-  gfx::Size size() {
-    return size_;
-  }
-
-  int x_pixmap() {
-    return x_pixmap_;
-  }
-
-  // Bind texture to pixmap. Needs to be called every frame.
-  bool Bind();
-
- private:
-  TFPPicture(const base::Callback<bool(void)>& make_context_current,
-             Display* x_display,
-             int32 picture_buffer_id,
-             uint32 texture_id,
-             gfx::Size size);
-
-  bool Initialize(const GLXFBConfig& fb_config);
-
-  base::Callback<bool(void)> make_context_current_;
-
-  Display* x_display_;
-
-  // Output id for the client.
-  int32 picture_buffer_id_;
-  uint32 texture_id_;
-
-  gfx::Size size_;
-
-  // Pixmaps bound to this texture.
-  Pixmap x_pixmap_;
-  GLXPixmap glx_pixmap_;
-
-  DISALLOW_COPY_AND_ASSIGN(TFPPicture);
-};
-
-VaapiVideoDecodeAccelerator::TFPPicture::TFPPicture(
-    const base::Callback<bool(void)>& make_context_current,
-    Display* x_display,
-    int32 picture_buffer_id,
-    uint32 texture_id,
-    gfx::Size size)
-    : make_context_current_(make_context_current),
-      x_display_(x_display),
-      picture_buffer_id_(picture_buffer_id),
-      texture_id_(texture_id),
-      size_(size),
-      x_pixmap_(0),
-      glx_pixmap_(0) {
-  DCHECK(!make_context_current_.is_null());
-};
-
-linked_ptr<VaapiVideoDecodeAccelerator::TFPPicture>
-VaapiVideoDecodeAccelerator::TFPPicture::Create(
-    const base::Callback<bool(void)>& make_context_current,
-    const GLXFBConfig& fb_config,
-    Display* x_display,
-    int32 picture_buffer_id,
-    uint32 texture_id,
-    gfx::Size size) {
-
-  linked_ptr<TFPPicture> tfp_picture(
-      new TFPPicture(make_context_current, x_display, picture_buffer_id,
-                     texture_id, size));
-
-  if (!tfp_picture->Initialize(fb_config))
-    tfp_picture.reset();
-
-  return tfp_picture;
-}
-
-bool VaapiVideoDecodeAccelerator::TFPPicture::Initialize(
-    const GLXFBConfig& fb_config) {
-  DCHECK(CalledOnValidThread());
-  if (!make_context_current_.Run())
-    return false;
-
-  XWindowAttributes win_attr;
-  int screen = DefaultScreen(x_display_);
-  XGetWindowAttributes(x_display_, RootWindow(x_display_, screen), &win_attr);
-  //TODO(posciak): pass the depth required by libva, not the RootWindow's depth
-  x_pixmap_ = XCreatePixmap(x_display_, RootWindow(x_display_, screen),
-                            size_.width(), size_.height(), win_attr.depth);
-  if (!x_pixmap_) {
-    DVLOG(1) << "Failed creating an X Pixmap for TFP";
-    return false;
-  }
-
-  static const int pixmap_attr[] = {
-    GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
-    GLX_TEXTURE_FORMAT_EXT, GLX_TEXTURE_FORMAT_RGB_EXT,
-    GL_NONE,
-  };
-
-  glx_pixmap_ = glXCreatePixmap(x_display_, fb_config, x_pixmap_, pixmap_attr);
-  if (!glx_pixmap_) {
-    // x_pixmap_ will be freed in the destructor.
-    DVLOG(1) << "Failed creating a GLX Pixmap for TFP";
-    return false;
-  }
-
-  return true;
-}
-
-VaapiVideoDecodeAccelerator::TFPPicture::~TFPPicture() {
-  DCHECK(CalledOnValidThread());
-  // Unbind surface from texture and deallocate resources.
-  if (glx_pixmap_ && make_context_current_.Run()) {
-    glXReleaseTexImageEXT(x_display_, glx_pixmap_, GLX_FRONT_LEFT_EXT);
-    glXDestroyPixmap(x_display_, glx_pixmap_);
-  }
-
-  if (x_pixmap_)
-    XFreePixmap(x_display_, x_pixmap_);
-  XSync(x_display_, False);  // Needed to work around buggy vdpau-driver.
-}
-
-bool VaapiVideoDecodeAccelerator::TFPPicture::Bind() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(x_pixmap_);
-  DCHECK(glx_pixmap_);
-  if (!make_context_current_.Run())
-    return false;
-
-  gfx::ScopedTextureBinder texture_binder(GL_TEXTURE_2D, texture_id_);
-  glXBindTexImageEXT(x_display_, glx_pixmap_, GLX_FRONT_LEFT_EXT, NULL);
-
-  return true;
-}
-
-VaapiVideoDecodeAccelerator::TFPPicture*
-    VaapiVideoDecodeAccelerator::TFPPictureById(int32 picture_buffer_id) {
-  TFPPictures::iterator it = tfp_pictures_.find(picture_buffer_id);
-  if (it == tfp_pictures_.end()) {
-    DVLOG(1) << "Picture id " << picture_buffer_id << " does not exist";
+VaapiPicture* VaapiVideoDecodeAccelerator::PictureById(
+    int32 picture_buffer_id) {
+  Pictures::iterator it = pictures_.find(picture_buffer_id);
+  if (it == pictures_.end()) {
+    LOG(ERROR) << "Picture id " << picture_buffer_id << " does not exist";
     return NULL;
   }
 
@@ -227,10 +73,10 @@ VaapiVideoDecodeAccelerator::TFPPicture*
 }
 
 VaapiVideoDecodeAccelerator::VaapiVideoDecodeAccelerator(
-    Display* x_display,
-    const base::Callback<bool(void)>& make_context_current)
-    : x_display_(x_display),
-      make_context_current_(make_context_current),
+    const base::Callback<bool(void)>& make_context_current,
+    const base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)>&
+        bind_image)
+    : make_context_current_(make_context_current),
       state_(kUninitialized),
       input_ready_(&lock_),
       surfaces_available_(&lock_),
@@ -241,6 +87,7 @@ VaapiVideoDecodeAccelerator::VaapiVideoDecodeAccelerator(
       finish_flush_pending_(false),
       awaiting_va_surfaces_recycle_(false),
       requested_num_pics_(0),
+      bind_image_(bind_image),
       weak_this_factory_(this) {
   weak_this_ = weak_this_factory_.GetWeakPtr();
   va_surface_release_cb_ = media::BindToCurrentLoop(
@@ -249,35 +96,6 @@ VaapiVideoDecodeAccelerator::VaapiVideoDecodeAccelerator(
 
 VaapiVideoDecodeAccelerator::~VaapiVideoDecodeAccelerator() {
   DCHECK_EQ(message_loop_, base::MessageLoop::current());
-}
-
-class XFreeDeleter {
- public:
-  void operator()(void* x) const {
-    ::XFree(x);
-  }
-};
-
-bool VaapiVideoDecodeAccelerator::InitializeFBConfig() {
-  const int fbconfig_attr[] = {
-    GLX_DRAWABLE_TYPE, GLX_PIXMAP_BIT,
-    GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_TEXTURE_2D_BIT_EXT,
-    GLX_BIND_TO_TEXTURE_RGB_EXT, GL_TRUE,
-    GLX_Y_INVERTED_EXT, GL_TRUE,
-    GL_NONE,
-  };
-
-  int num_fbconfigs;
-  scoped_ptr<GLXFBConfig, XFreeDeleter> glx_fb_configs(
-      glXChooseFBConfig(x_display_, DefaultScreen(x_display_), fbconfig_attr,
-                        &num_fbconfigs));
-  if (!glx_fb_configs)
-    return false;
-  if (!num_fbconfigs)
-    return false;
-
-  fb_config_ = glx_fb_configs.get()[0];
-  return true;
 }
 
 bool VaapiVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
@@ -291,22 +109,26 @@ bool VaapiVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
   DCHECK_EQ(state_, kUninitialized);
   DVLOG(2) << "Initializing VAVDA, profile: " << profile;
 
-  if (!make_context_current_.Run())
-    return false;
-
-  if (!InitializeFBConfig()) {
-    DVLOG(1) << "Could not get a usable FBConfig";
+#if defined(USE_X11)
+  if (gfx::GetGLImplementation() != gfx::kGLImplementationDesktopGL) {
+    DVLOG(1) << "HW video decode acceleration not available without "
+                "DesktopGL (GLX).";
     return false;
   }
+#elif defined(USE_OZONE)
+  if (gfx::GetGLImplementation() != gfx::kGLImplementationEGLGLES2) {
+    DVLOG(1) << "HW video decode acceleration not available without "
+             << "EGLGLES2.";
+    return false;
+  }
+#endif  // USE_X11
 
-  vaapi_wrapper_ = VaapiWrapper::Create(
-      VaapiWrapper::kDecode,
-      profile,
-      x_display_,
+  vaapi_wrapper_ = VaapiWrapper::CreateForVideoCodec(
+      VaapiWrapper::kDecode, profile,
       base::Bind(&ReportToUMA, content::VaapiH264Decoder::VAAPI_ERROR));
 
   if (!vaapi_wrapper_.get()) {
-    DVLOG(1) << "Failed initializing VAAPI";
+    LOG(ERROR) << "Failed initializing VAAPI";
     return false;
   }
 
@@ -344,10 +166,10 @@ void VaapiVideoDecodeAccelerator::SurfaceReady(
 void VaapiVideoDecodeAccelerator::OutputPicture(
     const scoped_refptr<VASurface>& va_surface,
     int32 input_id,
-    TFPPicture* tfp_picture) {
+    VaapiPicture* picture) {
   DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
-  int32 output_id  = tfp_picture->picture_buffer_id();
+  int32 output_id = picture->picture_buffer_id();
 
   TRACE_EVENT2("Video Decoder", "VAVDA::OutputSurface",
                "input_id", input_id,
@@ -356,15 +178,9 @@ void VaapiVideoDecodeAccelerator::OutputPicture(
   DVLOG(3) << "Outputting VASurface " << va_surface->id()
            << " into pixmap bound to picture buffer id " << output_id;
 
-  RETURN_AND_NOTIFY_ON_FAILURE(tfp_picture->Bind(),
-                               "Failed binding texture to pixmap",
+  RETURN_AND_NOTIFY_ON_FAILURE(picture->DownloadFromSurface(va_surface),
+                               "Failed putting surface into pixmap",
                                PLATFORM_FAILURE, );
-
-  RETURN_AND_NOTIFY_ON_FAILURE(
-      vaapi_wrapper_->PutSurfaceIntoPixmap(va_surface->id(),
-                                           tfp_picture->x_pixmap(),
-                                           tfp_picture->size()),
-      "Failed putting surface into pixmap", PLATFORM_FAILURE, );
 
   // Notify the client a picture is ready to be displayed.
   ++num_frames_at_client_;
@@ -374,8 +190,9 @@ void VaapiVideoDecodeAccelerator::OutputPicture(
   // TODO(posciak): Use visible size from decoder here instead
   // (crbug.com/402760).
   if (client_)
-    client_->PictureReady(
-        media::Picture(output_id, input_id, gfx::Rect(tfp_picture->size())));
+    client_->PictureReady(media::Picture(output_id, input_id,
+                                         gfx::Rect(picture->size()),
+                                         picture->AllowOverlay()));
 }
 
 void VaapiVideoDecodeAccelerator::TryOutputSurface() {
@@ -391,11 +208,11 @@ void VaapiVideoDecodeAccelerator::TryOutputSurface() {
   OutputCB output_cb = pending_output_cbs_.front();
   pending_output_cbs_.pop();
 
-  TFPPicture* tfp_picture = TFPPictureById(output_buffers_.front());
-  DCHECK(tfp_picture);
+  VaapiPicture* picture = PictureById(output_buffers_.front());
+  DCHECK(picture);
   output_buffers_.pop();
 
-  output_cb.Run(tfp_picture);
+  output_cb.Run(picture);
 
   if (finish_flush_pending_ && pending_output_cbs_.empty())
     FinishFlush();
@@ -504,9 +321,11 @@ bool VaapiVideoDecodeAccelerator::FeedDecoderWithOutputSurfaces_Locked() {
   if (state_ != kDecoding && state_ != kFlushing && state_ != kIdle)
     return false;
 
+  DCHECK(!awaiting_va_surfaces_recycle_);
   while (!available_va_surfaces_.empty()) {
     scoped_refptr<VASurface> va_surface(
-        new VASurface(available_va_surfaces_.front(), va_surface_release_cb_));
+        new VASurface(available_va_surfaces_.front(), requested_pic_size_,
+                      va_surface_release_cb_));
     available_va_surfaces_.pop_front();
     decoder_->ReuseSurface(va_surface);
   }
@@ -598,7 +417,7 @@ void VaapiVideoDecodeAccelerator::TryFinishSurfaceSetChange() {
     return;
 
   if (!pending_output_cbs_.empty() ||
-      tfp_pictures_.size() != available_va_surfaces_.size()) {
+      pictures_.size() != available_va_surfaces_.size()) {
     // Either:
     // 1. Not all pending pending output callbacks have been executed yet.
     // Wait for the client to return enough pictures and retry later.
@@ -616,21 +435,22 @@ void VaapiVideoDecodeAccelerator::TryFinishSurfaceSetChange() {
   available_va_surfaces_.clear();
   vaapi_wrapper_->DestroySurfaces();
 
-  for (TFPPictures::iterator iter = tfp_pictures_.begin();
-       iter != tfp_pictures_.end(); ++iter) {
+  for (Pictures::iterator iter = pictures_.begin(); iter != pictures_.end();
+       ++iter) {
     DVLOG(2) << "Dismissing picture id: " << iter->first;
     if (client_)
       client_->DismissPictureBuffer(iter->first);
   }
-  tfp_pictures_.clear();
+  pictures_.clear();
 
   // And ask for a new set as requested.
   DVLOG(1) << "Requesting " << requested_num_pics_ << " pictures of size: "
            << requested_pic_size_.ToString();
 
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &Client::ProvidePictureBuffers, client_,
-      requested_num_pics_, requested_pic_size_, GL_TEXTURE_2D));
+  message_loop_->PostTask(
+      FROM_HERE,
+      base::Bind(&Client::ProvidePictureBuffers, client_, requested_num_pics_,
+                 requested_pic_size_, VaapiPicture::GetGLTextureTarget()));
 }
 
 void VaapiVideoDecodeAccelerator::Decode(
@@ -682,7 +502,7 @@ void VaapiVideoDecodeAccelerator::AssignPictureBuffers(
   DCHECK_EQ(message_loop_, base::MessageLoop::current());
 
   base::AutoLock auto_lock(lock_);
-  DCHECK(tfp_pictures_.empty());
+  DCHECK(pictures_.empty());
 
   while (!output_buffers_.empty())
     output_buffers_.pop();
@@ -706,17 +526,22 @@ void VaapiVideoDecodeAccelerator::AssignPictureBuffers(
              << " to texture id: " << buffers[i].texture_id()
              << " VASurfaceID: " << va_surface_ids[i];
 
-    linked_ptr<TFPPicture> tfp_picture(
-        TFPPicture::Create(make_context_current_, fb_config_, x_display_,
-                           buffers[i].id(), buffers[i].texture_id(),
-                           requested_pic_size_));
+    linked_ptr<VaapiPicture> picture(VaapiPicture::CreatePicture(
+        vaapi_wrapper_.get(), make_context_current_, buffers[i].id(),
+        buffers[i].texture_id(), requested_pic_size_));
+
+    scoped_refptr<gfx::GLImage> image = picture->GetImageToBind();
+    if (image) {
+      bind_image_.Run(buffers[i].internal_texture_id(),
+                      VaapiPicture::GetGLTextureTarget(), image);
+    }
 
     RETURN_AND_NOTIFY_ON_FAILURE(
-        tfp_picture.get(), "Failed assigning picture buffer to a texture.",
+        picture.get(), "Failed assigning picture buffer to a texture.",
         PLATFORM_FAILURE, );
 
-    bool inserted = tfp_pictures_.insert(std::make_pair(
-        buffers[i].id(), tfp_picture)).second;
+    bool inserted =
+        pictures_.insert(std::make_pair(buffers[i].id(), picture)).second;
     DCHECK(inserted);
 
     output_buffers_.push(buffers[i].id());

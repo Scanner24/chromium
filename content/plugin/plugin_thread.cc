@@ -39,10 +39,10 @@ class EnsureTerminateMessageFilter : public IPC::MessageFilter {
   EnsureTerminateMessageFilter() {}
 
  protected:
-  virtual ~EnsureTerminateMessageFilter() {}
+  ~EnsureTerminateMessageFilter() override {}
 
   // IPC::MessageFilter:
-  virtual void OnChannelError() OVERRIDE {
+  void OnChannelError() override {
     // How long we wait before forcibly shutting down the process.
     const base::TimeDelta kPluginProcessTerminateTimeout =
         base::TimeDelta::FromSeconds(3);
@@ -70,7 +70,7 @@ PluginThread::PluginThread()
     : preloaded_plugin_module_(NULL),
       forcefully_terminate_plugin_process_(false) {
   base::FilePath plugin_path =
-      CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
           switches::kPluginPath);
 
   lazy_tls.Pointer()->Set(this);
@@ -93,9 +93,9 @@ PluginThread::PluginThread()
 
   channel()->AddFilter(new EnsureTerminateMessageFilter());
 
-  // This is needed because we call some code which uses WebKit strings.
-  webkit_platform_support_.reset(new BlinkPlatformImpl);
-  blink::initialize(webkit_platform_support_.get());
+  // This is needed because we call some code which uses Blink strings.
+  blink_platform_impl_.reset(new BlinkPlatformImpl);
+  blink::initialize(blink_platform_impl_.get());
 }
 
 PluginThread::~PluginThread() {
@@ -106,7 +106,7 @@ void PluginThread::SetForcefullyTerminatePluginProcess() {
 }
 
 void PluginThread::Shutdown() {
-  ChildThread::Shutdown();
+  ChildThreadImpl::Shutdown();
 
   if (preloaded_plugin_module_) {
     base::UnloadNativeLibrary(preloaded_plugin_module_);
@@ -146,7 +146,7 @@ void PluginThread::OnCreateChannel(int renderer_id,
 #if defined(OS_POSIX)
     // On POSIX, pass the renderer-side FD.
     channel_handle.socket =
-        base::FileDescriptor(channel->TakeRendererFileDescriptor(), true);
+        base::FileDescriptor(channel->TakeRendererFileDescriptor());
 #endif
     channel->set_incognito(incognito);
   }

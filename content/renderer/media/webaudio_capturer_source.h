@@ -16,7 +16,6 @@
 
 namespace content {
 
-class WebRtcAudioCapturer;
 class WebRtcLocalAudioTrack;
 
 // WebAudioCapturerSource is the missing link between
@@ -34,17 +33,17 @@ class WebAudioCapturerSource
 
   // WebAudioDestinationConsumer implementation.
   // setFormat() is called early on, so that we can configure the audio track.
-  virtual void setFormat(size_t number_of_channels, float sample_rate) OVERRIDE;
+  virtual void setFormat(size_t number_of_channels, float sample_rate) override;
   // MediaStreamAudioDestinationNode periodically calls consumeAudio().
   // Called on the WebAudio audio thread.
   virtual void consumeAudio(const blink::WebVector<const float*>& audio_data,
-      size_t number_of_frames) OVERRIDE;
+      size_t number_of_frames) override;
 
   // Called when the WebAudioCapturerSource is hooking to a media audio track.
   // |track| is the sink of the data flow. |source_provider| is the source of
   // the data flow where stream information like delay, volume, key_pressed,
   // is stored.
-  void Start(WebRtcLocalAudioTrack* track, WebRtcAudioCapturer* capturer);
+  void Start(WebRtcLocalAudioTrack* track);
 
   // Called when the media audio track is stopping.
   void Stop();
@@ -62,11 +61,6 @@ class WebAudioCapturerSource
   // To avoid circular reference, a raw pointer is kept here.
   WebRtcLocalAudioTrack* track_;
 
-  // A raw pointer to the capturer to get audio processing params like
-  // delay, volume, key_pressed information.
-  // This |capturer_| is guaranteed to outlive this object.
-  WebRtcAudioCapturer* capturer_;
-
   media::AudioParameters params_;
 
   // Flag to help notify the |track_| when the audio format has changed.
@@ -80,9 +74,6 @@ class WebAudioCapturerSource
 
   // Handles mismatch between WebAudio buffer size and WebRTC.
   scoped_ptr<media::AudioFifo> fifo_;
-
-  // Buffer to pass audio data to WebRtc.
-  scoped_ptr<int16[]> audio_data_;
 
   // Synchronizes HandleCapture() with AudioCapturerSource calls.
   base::Lock lock_;

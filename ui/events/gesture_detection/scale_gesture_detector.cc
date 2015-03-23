@@ -10,6 +10,7 @@
 #include "base/float_util.h"
 #include "base/logging.h"
 #include "ui/events/gesture_detection/motion_event.h"
+#include "ui/events/gesture_detection/scale_gesture_listeners.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -29,7 +30,8 @@ const float kScaleFactor = .5f;
 }  // namespace
 
 // Note: These constants were taken directly from the default (unscaled)
-// versions found in Android's ViewConfiguration.
+// versions found in Android's ViewConfiguration. Do not change these default
+// values without explicitly consulting an OWNER.
 ScaleGestureDetector::Config::Config()
     : span_slop(16),
       min_scaling_touch_major(48),
@@ -38,19 +40,6 @@ ScaleGestureDetector::Config::Config()
 }
 
 ScaleGestureDetector::Config::~Config() {}
-
-bool ScaleGestureDetector::SimpleScaleGestureListener::OnScale(
-    const ScaleGestureDetector&, const MotionEvent&) {
-  return false;
-}
-
-bool ScaleGestureDetector::SimpleScaleGestureListener::OnScaleBegin(
-    const ScaleGestureDetector&, const MotionEvent&) {
-  return true;
-}
-
-void ScaleGestureDetector::SimpleScaleGestureListener::OnScaleEnd(
-    const ScaleGestureDetector&, const MotionEvent&) {}
 
 ScaleGestureDetector::ScaleGestureDetector(const Config& config,
                                            ScaleGestureListener* listener)

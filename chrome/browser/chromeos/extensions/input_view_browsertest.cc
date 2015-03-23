@@ -11,8 +11,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
@@ -24,6 +22,8 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/ime/input_method.h"
 
 namespace {
@@ -77,21 +77,24 @@ class InputViewBrowserTest : public VirtualKeyboardBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(InputViewBrowserTest, TypingTest) {
+// Disabled for flaking. See crbug.com/459420.
+IN_PROC_BROWSER_TEST_F(InputViewBrowserTest, DISABLED_TypingTest) {
   std::string id = InstallIMEExtension();
   ASSERT_FALSE(id.empty());
   RunTest(base::FilePath("typing_test.js"),
           InputViewConfig(id, kDefaultLayout));
 }
 
-IN_PROC_BROWSER_TEST_F(InputViewBrowserTest, CompactTypingTest) {
+// Disabled for flaking. See crbug.com/459420.
+IN_PROC_BROWSER_TEST_F(InputViewBrowserTest, DISABLED_CompactTypingTest) {
   std::string id = InstallIMEExtension();
   ASSERT_FALSE(id.empty());
   RunTest(base::FilePath("typing_test.js"),
           InputViewConfig(id, kCompactLayout));
 }
 
-IN_PROC_BROWSER_TEST_F(InputViewBrowserTest, CompactLongpressTest) {
+// Disabled for flaking. See crbug.com/459420.
+IN_PROC_BROWSER_TEST_F(InputViewBrowserTest, DISABLED_CompactLongpressTest) {
   std::string id = InstallIMEExtension();
   ASSERT_FALSE(id.empty());
   RunTest(base::FilePath("longpress_test.js"),

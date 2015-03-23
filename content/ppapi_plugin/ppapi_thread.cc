@@ -24,7 +24,7 @@
 #include "content/common/sandbox_util.h"
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
-#include "content/ppapi_plugin/ppapi_webkitplatformsupport_impl.h"
+#include "content/ppapi_plugin/ppapi_blink_platform_impl.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
@@ -91,8 +91,7 @@ static void WarmupWindowsLocales(const ppapi::PpapiPermissions& permissions) {
     }
   }
 }
-#else
-extern void* g_target_services;
+
 #endif
 
 namespace content {
@@ -100,19 +99,18 @@ namespace content {
 typedef int32_t (*InitializeBrokerFunc)
     (PP_ConnectInstance_Func* connect_instance_func);
 
-PpapiThread::PpapiThread(const CommandLine& command_line, bool is_broker)
+PpapiThread::PpapiThread(const base::CommandLine& command_line, bool is_broker)
     : is_broker_(is_broker),
       connect_instance_func_(NULL),
-      local_pp_module_(
-          base::RandInt(0, std::numeric_limits<PP_Module>::max())),
+      local_pp_module_(base::RandInt(0, std::numeric_limits<PP_Module>::max())),
       next_plugin_dispatcher_id_(1) {
   ppapi::proxy::PluginGlobals* globals = ppapi::proxy::PluginGlobals::Get();
   globals->SetPluginProxyDelegate(this);
   globals->set_command_line(
       command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
 
-  webkit_platform_support_.reset(new PpapiWebKitPlatformSupportImpl);
-  blink::initialize(webkit_platform_support_.get());
+  blink_platform_impl_.reset(new PpapiBlinkPlatformImpl);
+  blink::initialize(blink_platform_impl_.get());
 
   if (!is_broker_) {
     channel()->AddFilter(
@@ -125,19 +123,19 @@ PpapiThread::~PpapiThread() {
 }
 
 void PpapiThread::Shutdown() {
-  ChildThread::Shutdown();
+  ChildThreadImpl::Shutdown();
 
   ppapi::proxy::PluginGlobals::Get()->ResetPluginProxyDelegate();
   if (plugin_entry_points_.shutdown_module)
     plugin_entry_points_.shutdown_module();
-  webkit_platform_support_->Shutdown();
+  blink_platform_impl_->Shutdown();
   blink::shutdown();
 }
 
 bool PpapiThread::Send(IPC::Message* msg) {
   // Allow access from multiple threads.
   if (base::MessageLoop::current() == message_loop())
-    return ChildThread::Send(msg);
+    return ChildThreadImpl::Send(msg);
 
   return sync_message_filter()->Send(msg);
 }
@@ -159,7 +157,7 @@ bool PpapiThread::OnControlMessageReceived(const IPC::Message& msg) {
 }
 
 void PpapiThread::OnChannelConnected(int32 peer_pid) {
-  ChildThread::OnChannelConnected(peer_pid);
+  ChildThreadImpl::OnChannelConnected(peer_pid);
 #if defined(OS_WIN)
   if (is_broker_)
     peer_handle_.Set(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, peer_pid));
@@ -199,14 +197,13 @@ IPC::Sender* PpapiThread::GetBrowserSender() {
 }
 
 std::string PpapiThread::GetUILanguage() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return command_line->GetSwitchValueASCII(switches::kLang);
 }
 
 void PpapiThread::PreCacheFont(const void* logfontw) {
 #if defined(OS_WIN)
-  Send(new ChildProcessHostMsg_PreCacheFont(
-      *static_cast<const LOGFONTW*>(logfontw)));
+  ChildThreadImpl::PreCacheFont(*static_cast<const LOGFONTW*>(logfontw));
 #endif
 }
 
@@ -360,6 +357,12 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
 
     WarmupWindowsLocales(permissions);
 
+#if defined(ADDRESS_SANITIZER)
+    // Bind and leak dbghelp.dll before the token is lowered, otherwise
+    // AddressSanitizer will crash when trying to symbolize a report.
+    LoadLibraryA("dbghelp.dll");
+#endif
+
     g_target_services->LowerToken();
   }
 #endif
@@ -492,7 +495,7 @@ bool PpapiThread::SetupRendererChannel(base::ProcessId renderer_pid,
   // On POSIX, transfer ownership of the renderer-side (client) FD.
   // This ensures this process will be notified when it is closed even if a
   // connection is not established.
-  handle->socket = base::FileDescriptor(dispatcher->TakeRendererFD(), true);
+  handle->socket = base::FileDescriptor(dispatcher->TakeRendererFD());
   if (handle->socket.fd == -1)
     return false;
 #endif

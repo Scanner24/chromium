@@ -182,7 +182,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
   // This method is used to dispatch IPC messages to the renderer. We intercept
   // these messages here and dispatch to our mock methods to verify the
   // conversation between this object and the renderer.
-  virtual bool Send(IPC::Message* message) OVERRIDE {
+  virtual bool Send(IPC::Message* message) override {
     CHECK(message);
 
     // In this method we dispatch the messages to the according handlers as if
@@ -287,7 +287,7 @@ class VideoCaptureHostTest : public testing::Test {
         message_loop_(base::MessageLoopProxy::current()),
         opened_session_id_(kInvalidMediaCaptureSessionId) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     SetBrowserClientForTesting(&browser_client_);
 
 #if defined(OS_CHROMEOS)
@@ -310,7 +310,7 @@ class VideoCaptureHostTest : public testing::Test {
     OpenSession();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     // Verifies and removes the expectations on host_ and
     // returns true iff successful.
     Mock::VerifyAndClearExpectations(host_.get());
@@ -431,6 +431,7 @@ class VideoCaptureHostTest : public testing::Test {
     host_->OnStartCapture(kDeviceId, opened_session_id_, params);
     host_->OnStopCapture(kDeviceId);
     run_loop.RunUntilIdle();
+    WaitForVideoDeviceThread();
   }
 
 #ifdef DUMP_VIDEO
@@ -491,6 +492,16 @@ class VideoCaptureHostTest : public testing::Test {
     host_->OnError(id);
     // Wait for the error callback.
     base::RunLoop().RunUntilIdle();
+  }
+
+  void WaitForVideoDeviceThread() {
+    base::RunLoop run_loop;
+    media_stream_manager_->video_capture_manager()->device_task_runner()
+        ->PostTaskAndReply(
+            FROM_HERE,
+            base::Bind(&base::DoNothing),
+            run_loop.QuitClosure());
+    run_loop.Run();
   }
 
   scoped_refptr<MockVideoCaptureHost> host_;

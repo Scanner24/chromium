@@ -16,6 +16,7 @@ namespace content {
 namespace webcrypto {
 
 class CryptoData;
+class GenerateKeyResult;
 class Status;
 
 // AlgorithmImplementation is a base class for *executing* the operations of an
@@ -71,32 +72,36 @@ class AlgorithmImplementation {
                         const CryptoData& data,
                         std::vector<uint8_t>* buffer) const;
 
-  // VerifyKeyUsagesBeforeGenerateKey() must be called prior to
-  // GenerateSecretKey() to validate the requested key usages.
-  virtual Status VerifyKeyUsagesBeforeGenerateKey(
-      blink::WebCryptoKeyUsageMask usage_mask) const;
-
   // This method corresponds to Web Crypto's crypto.subtle.generateKey().
-  virtual Status GenerateSecretKey(const blink::WebCryptoAlgorithm& algorithm,
-                                   bool extractable,
-                                   blink::WebCryptoKeyUsageMask usage_mask,
-                                   blink::WebCryptoKey* key) const;
+  //
+  // Implementations MUST verify |usages| and return an error if it is not
+  // appropriate.
+  virtual Status GenerateKey(const blink::WebCryptoAlgorithm& algorithm,
+                             bool extractable,
+                             blink::WebCryptoKeyUsageMask usages,
+                             GenerateKeyResult* result) const;
 
-  // VerifyKeyUsagesBeforeGenerateKeyPair() must be called prior to
-  // GenerateKeyPair() to validate the requested key usages.
-  virtual Status VerifyKeyUsagesBeforeGenerateKeyPair(
-      blink::WebCryptoKeyUsageMask combined_usage_mask,
-      blink::WebCryptoKeyUsageMask* public_usage_mask,
-      blink::WebCryptoKeyUsageMask* private_usage_mask) const;
+  // This method corresponds to Web Crypto's "derive bits" operation. It is
+  // essentially crypto.subtle.deriveBits() with the exception that the length
+  // can be "null" (|has_length_bits = true|).
+  //
+  // In cases where the length was not specified, an appropriate default for the
+  // algorithm should be used (as described by the spec).
+  virtual Status DeriveBits(const blink::WebCryptoAlgorithm& algorithm,
+                            const blink::WebCryptoKey& base_key,
+                            bool has_optional_length_bits,
+                            unsigned int optional_length_bits,
+                            std::vector<uint8_t>* derived_bytes) const;
 
-  // This method corresponds to Web Crypto's crypto.subtle.generateKey().
-  virtual Status GenerateKeyPair(
-      const blink::WebCryptoAlgorithm& algorithm,
-      bool extractable,
-      blink::WebCryptoKeyUsageMask public_usage_mask,
-      blink::WebCryptoKeyUsageMask private_usage_mask,
-      blink::WebCryptoKey* public_key,
-      blink::WebCryptoKey* private_key) const;
+  // This method corresponds with Web Crypto's "Get key length" operation.
+  //
+  // In the Web Crypto spec the operation returns either "null" or an
+  // "Integer". In this code "null" is represented by setting
+  // |*has_length_bits = false|.
+  virtual Status GetKeyLength(
+      const blink::WebCryptoAlgorithm& key_length_algorithm,
+      bool* has_length_bits,
+      unsigned int* length_bits) const;
 
   // -----------------------------------------------
   // Key import
@@ -116,14 +121,22 @@ class AlgorithmImplementation {
   // ImportKeyJwk() must do the final usage check.
   virtual Status VerifyKeyUsagesBeforeImportKey(
       blink::WebCryptoKeyFormat format,
-      blink::WebCryptoKeyUsageMask usage_mask) const;
+      blink::WebCryptoKeyUsageMask usages) const;
+
+  // Dispatches to the format-specific ImportKey* method.
+  Status ImportKey(blink::WebCryptoKeyFormat format,
+                   const CryptoData& key_data,
+                   const blink::WebCryptoAlgorithm& algorithm,
+                   bool extractable,
+                   blink::WebCryptoKeyUsageMask usages,
+                   blink::WebCryptoKey* key) const;
 
   // This method corresponds to Web Crypto's
   // crypto.subtle.importKey(format='raw').
   virtual Status ImportKeyRaw(const CryptoData& key_data,
                               const blink::WebCryptoAlgorithm& algorithm,
                               bool extractable,
-                              blink::WebCryptoKeyUsageMask usage_mask,
+                              blink::WebCryptoKeyUsageMask usages,
                               blink::WebCryptoKey* key) const;
 
   // This method corresponds to Web Crypto's
@@ -131,7 +144,7 @@ class AlgorithmImplementation {
   virtual Status ImportKeyPkcs8(const CryptoData& key_data,
                                 const blink::WebCryptoAlgorithm& algorithm,
                                 bool extractable,
-                                blink::WebCryptoKeyUsageMask usage_mask,
+                                blink::WebCryptoKeyUsageMask usages,
                                 blink::WebCryptoKey* key) const;
 
   // This method corresponds to Web Crypto's
@@ -139,7 +152,7 @@ class AlgorithmImplementation {
   virtual Status ImportKeySpki(const CryptoData& key_data,
                                const blink::WebCryptoAlgorithm& algorithm,
                                bool extractable,
-                               blink::WebCryptoKeyUsageMask usage_mask,
+                               blink::WebCryptoKeyUsageMask usages,
                                blink::WebCryptoKey* key) const;
 
   // This method corresponds to Web Crypto's
@@ -147,12 +160,17 @@ class AlgorithmImplementation {
   virtual Status ImportKeyJwk(const CryptoData& key_data,
                               const blink::WebCryptoAlgorithm& algorithm,
                               bool extractable,
-                              blink::WebCryptoKeyUsageMask usage_mask,
+                              blink::WebCryptoKeyUsageMask usages,
                               blink::WebCryptoKey* key) const;
 
   // -----------------------------------------------
   // Key export
   // -----------------------------------------------
+
+  // Dispatches to the format-specific ExportKey* method.
+  Status ExportKey(blink::WebCryptoKeyFormat format,
+                   const blink::WebCryptoKey& key,
+                   std::vector<uint8_t>* buffer) const;
 
   virtual Status ExportKeyRaw(const blink::WebCryptoKey& key,
                               std::vector<uint8_t>* buffer) const;
@@ -165,6 +183,40 @@ class AlgorithmImplementation {
 
   virtual Status ExportKeyJwk(const blink::WebCryptoKey& key,
                               std::vector<uint8_t>* buffer) const;
+
+  // -----------------------------------------------
+  // Structured clone
+  // -----------------------------------------------
+
+  // The Structured clone methods are used for synchronous serialization /
+  // deserialization of a WebCryptoKey.
+  //
+  // This serialized format is used by Blink to:
+  //   * Copy WebCryptoKeys between threads (postMessage to WebWorkers)
+  //   * Copy WebCryptoKeys between domains (postMessage)
+  //   * Copy WebCryptoKeys within the same domain (postMessage)
+  //   * Persist the key to storage (IndexedDB)
+  //
+  // Implementations of structured cloning must:
+  //   * Be threadsafe (structured cloning is called directly on the Blink
+  //     thread, in contrast to the other methods of AlgorithmImplementation).
+  //   * Use a stable format (a serialized key must forever be de-serializable,
+  //     and be able to survive future migrations to crypto libraries)
+  //   * Work for all keys (including ones marked as non-extractable).
+  //
+  // Tests to verify structured cloning are available in:
+  //   LayoutTests/crypto/clone-*.html
+  virtual Status SerializeKeyForClone(
+      const blink::WebCryptoKey& key,
+      blink::WebVector<uint8_t>* key_data) const;
+
+  virtual Status DeserializeKeyForClone(
+      const blink::WebCryptoKeyAlgorithm& algorithm,
+      blink::WebCryptoKeyType type,
+      bool extractable,
+      blink::WebCryptoKeyUsageMask usages,
+      const CryptoData& key_data,
+      blink::WebCryptoKey* key) const;
 };
 
 }  // namespace webcrypto

@@ -33,9 +33,7 @@ QuicConnectionStats::QuicConnectionStats()
       min_rtt_us(0),
       srtt_us(0),
       max_packet_size(0),
-      estimated_bandwidth(0),
-      congestion_window(0),
-      slow_start_threshold(0),
+      estimated_bandwidth(QuicBandwidth::Zero()),
       packets_reordered(0),
       max_sequence_reordering(0),
       max_time_reordering_us(0),
@@ -72,9 +70,7 @@ ostream& operator<<(ostream& os, const QuicConnectionStats& s) {
      << ", min_rtt(us): " << s.min_rtt_us
      << ", srtt(us): " << s.srtt_us
      << ", max packet size: " << s.max_packet_size
-     << ", estimated bandwidth: " << s.estimated_bandwidth
-     << ", congestion window: " << s.congestion_window
-     << ", slow start threshold: " << s.slow_start_threshold
+     << ", estimated bandwidth: " << s.estimated_bandwidth.ToBytesPerSecond()
      << ", tcp_loss_events: " << s.tcp_loss_events
      << ", packets reordered: " << s.packets_reordered
      << ", max sequence reordering: " << s.max_sequence_reordering

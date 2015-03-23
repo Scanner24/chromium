@@ -93,13 +93,11 @@ class V8ExternalStringFromScriptData
       const scoped_refptr<ProxyResolverScriptData>& script_data)
       : script_data_(script_data) {}
 
-  virtual const uint16_t* data() const OVERRIDE {
+  const uint16_t* data() const override {
     return reinterpret_cast<const uint16*>(script_data_->utf16().data());
   }
 
-  virtual size_t length() const OVERRIDE {
-    return script_data_->utf16().size();
-  }
+  size_t length() const override { return script_data_->utf16().size(); }
 
  private:
   const scoped_refptr<ProxyResolverScriptData> script_data_;
@@ -107,7 +105,8 @@ class V8ExternalStringFromScriptData
 };
 
 // External string wrapper so V8 can access a string literal.
-class V8ExternalASCIILiteral : public v8::String::ExternalAsciiStringResource {
+class V8ExternalASCIILiteral
+    : public v8::String::ExternalOneByteStringResource {
  public:
   // |ascii| must be a NULL-terminated C string, and must remain valid
   // throughout this object's lifetime.
@@ -116,13 +115,9 @@ class V8ExternalASCIILiteral : public v8::String::ExternalAsciiStringResource {
     DCHECK(base::IsStringASCII(ascii));
   }
 
-  virtual const char* data() const OVERRIDE {
-    return ascii_;
-  }
+  const char* data() const override { return ascii_; }
 
-  virtual size_t length() const OVERRIDE {
-    return length_;
-  }
+  size_t length() const override { return length_; }
 
  private:
   const char* ascii_;
@@ -138,7 +133,7 @@ class V8ExternalASCIILiteral : public v8::String::ExternalAsciiStringResource {
 const size_t kMaxStringBytesForCopy = 256;
 
 // Converts a V8 String to a UTF8 std::string.
-std::string V8StringToUTF8(v8::Handle<v8::String> s) {
+std::string V8StringToUTF8(v8::Local<v8::String> s) {
   int len = s->Length();
   std::string result;
   if (len > 0)
@@ -147,7 +142,7 @@ std::string V8StringToUTF8(v8::Handle<v8::String> s) {
 }
 
 // Converts a V8 String to a UTF16 base::string16.
-base::string16 V8StringToUTF16(v8::Handle<v8::String> s) {
+base::string16 V8StringToUTF16(v8::Local<v8::String> s) {
   int len = s->Length();
   base::string16 result;
   // Note that the reinterpret cast is because on Windows string16 is an alias
@@ -194,14 +189,14 @@ v8::Local<v8::String> ASCIILiteralToV8String(v8::Isolate* isolate,
 
 // Stringizes a V8 object by calling its toString() method. Returns true
 // on success. This may fail if the toString() throws an exception.
-bool V8ObjectToUTF16String(v8::Handle<v8::Value> object,
+bool V8ObjectToUTF16String(v8::Local<v8::Value> object,
                            base::string16* utf16_result,
                            v8::Isolate* isolate) {
   if (object.IsEmpty())
     return false;
 
   v8::HandleScope scope(isolate);
-  v8::Local<v8::String> str_object = object->ToString();
+  v8::Local<v8::String> str_object = object->ToString(isolate);
   if (str_object.IsEmpty())
     return false;
   *utf16_result = V8StringToUTF16(str_object);
@@ -216,7 +211,8 @@ bool GetHostnameArgument(const v8::FunctionCallbackInfo<v8::Value>& args,
   if (args.Length() == 0 || args[0].IsEmpty() || !args[0]->IsString())
     return false;
 
-  const base::string16 hostname_utf16 = V8StringToUTF16(args[0]->ToString());
+  const base::string16 hostname_utf16 =
+      V8StringToUTF16(v8::Local<v8::String>::Cast(args[0]));
 
   // If the hostname is already in ASCII, simply return it as is.
   if (base::IsStringASCII(hostname_utf16)) {
@@ -338,6 +334,17 @@ bool IsInNetEx(const std::string& ip_address, const std::string& ip_prefix) {
   return IPNumberMatchesPrefix(address, prefix, prefix_length_in_bits);
 }
 
+// Consider only single component domains like 'foo' as plain host names.
+bool IsPlainHostName(const std::string& hostname_utf8) {
+  if (hostname_utf8.find('.') != std::string::npos)
+    return false;
+
+  // IPv6 literals might not contain any periods, however are not considered
+  // plain host names.
+  IPAddressNumber unused;
+  return !ParseIPLiteralToNumber(hostname_utf8, &unused);
+}
+
 }  // namespace
 
 // ProxyResolverV8::Context ---------------------------------------------------
@@ -378,7 +385,7 @@ class ProxyResolverV8::Context {
       return ERR_PAC_SCRIPT_FAILED;
     }
 
-    v8::Handle<v8::Value> argv[] = {
+    v8::Local<v8::Value> argv[] = {
       ASCIIStringToV8String(isolate_, query_url.spec()),
       ASCIIStringToV8String(isolate_, query_url.HostNoBrackets()),
     };
@@ -398,7 +405,7 @@ class ProxyResolverV8::Context {
       return ERR_PAC_SCRIPT_FAILED;
     }
 
-    base::string16 ret_str = V8StringToUTF16(ret->ToString());
+    base::string16 ret_str = V8StringToUTF16(v8::Local<v8::String>::Cast(ret));
 
     if (!base::IsStringASCII(ret_str)) {
       // TODO(eroman): Rather than failing when a wide string is returned, we
@@ -442,6 +449,11 @@ class ProxyResolverV8::Context {
         v8::FunctionTemplate::New(isolate_, &DnsResolveCallback, v8_this);
     global_template->Set(ASCIILiteralToV8String(isolate_, "dnsResolve"),
                          dns_resolve_template);
+
+    v8::Local<v8::FunctionTemplate> is_plain_host_name_template =
+        v8::FunctionTemplate::New(isolate_, &IsPlainHostNameCallback, v8_this);
+    global_template->Set(ASCIILiteralToV8String(isolate_, "isPlainHostName"),
+                         is_plain_host_name_template);
 
     // Microsoft's PAC extensions:
 
@@ -517,7 +529,7 @@ class ProxyResolverV8::Context {
   }
 
   // Handle an exception thrown by V8.
-  void HandleError(v8::Handle<v8::Message> message) {
+  void HandleError(v8::Local<v8::Message> message) {
     base::string16 error_message;
     int line_number = -1;
 
@@ -531,7 +543,7 @@ class ProxyResolverV8::Context {
 
   // Compiles and runs |script| in the current V8 context.
   // Returns OK on success, otherwise an error code.
-  int RunScript(v8::Handle<v8::String> script, const char* script_name) {
+  int RunScript(v8::Local<v8::String> script, const char* script_name) {
     v8::TryCatch try_catch;
 
     // Compile the script.
@@ -661,7 +673,8 @@ class ProxyResolverV8::Context {
       return;
     }
 
-    std::string ip_address_list = V8StringToUTF8(args[0]->ToString());
+    std::string ip_address_list =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[0]));
     if (!base::IsStringASCII(ip_address_list)) {
       args.GetReturnValue().SetNull();
       return;
@@ -686,17 +699,35 @@ class ProxyResolverV8::Context {
       return;
     }
 
-    std::string ip_address = V8StringToUTF8(args[0]->ToString());
+    std::string ip_address =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[0]));
     if (!base::IsStringASCII(ip_address)) {
       args.GetReturnValue().Set(false);
       return;
     }
-    std::string ip_prefix = V8StringToUTF8(args[1]->ToString());
+    std::string ip_prefix =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[1]));
     if (!base::IsStringASCII(ip_prefix)) {
       args.GetReturnValue().Set(false);
       return;
     }
     args.GetReturnValue().Set(IsInNetEx(ip_address, ip_prefix));
+  }
+
+  // V8 callback for when "isPlainHostName()" is invoked by the PAC script.
+  static void IsPlainHostNameCallback(
+      const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // Need at least 1 string arguments.
+    if (args.Length() < 1 || args[0].IsEmpty() || !args[0]->IsString()) {
+      args.GetIsolate()->ThrowException(
+          v8::Exception::TypeError(ASCIIStringToV8String(
+              args.GetIsolate(), "Requires 1 string parameter")));
+      return;
+    }
+
+    std::string hostname_utf8 =
+        V8StringToUTF8(v8::Local<v8::String>::Cast(args[0]));
+    args.GetReturnValue().Set(IsPlainHostName(hostname_utf8));
   }
 
   mutable base::Lock lock_;

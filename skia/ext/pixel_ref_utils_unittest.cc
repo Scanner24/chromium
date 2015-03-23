@@ -15,7 +15,7 @@
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/src/core/SkOrderedReadBuffer.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/skia_util.h"
 
 namespace skia {
@@ -34,32 +34,36 @@ class TestDiscardableShader : public SkShader {
     CreateBitmap(gfx::Size(50, 50), "discardable", &bitmap_);
   }
 
-  virtual SkShader::BitmapType asABitmap(SkBitmap* bitmap,
-                                         SkMatrix* matrix,
-                                         TileMode xy[2]) const OVERRIDE {
+  SkShader::BitmapType asABitmap(SkBitmap* bitmap,
+                                 SkMatrix* matrix,
+                                 TileMode xy[2]) const override {
     if (bitmap)
       *bitmap = bitmap_;
     return SkShader::kDefault_BitmapType;
   }
 
   // not indended to return an actual context. Just need to supply this.
-  virtual size_t contextSize() const OVERRIDE {
-    return sizeof(SkShader::Context);
-  }
+  size_t contextSize() const override { return sizeof(SkShader::Context); }
 
-  virtual void flatten(SkWriteBuffer&) const OVERRIDE {}
+  void flatten(SkWriteBuffer&) const override {}
 
-  SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(TestDiscardableShader);
+  // Manual expansion of SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS to
+  // satisfy Chrome's style checker, since Skia isn't ready to make the C++11
+  // leap yet.
+ private:
+  static SkFlattenable* CreateProc(SkReadBuffer&);
+  friend class SkPrivateEffectInitializer;
+
+ public:
+  Factory getFactory() const override { return CreateProc; }
 
  private:
   SkBitmap bitmap_;
 };
 
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
 SkFlattenable* TestDiscardableShader::CreateProc(SkReadBuffer&) {
   return new TestDiscardableShader;
 }
-#endif
 
 void CreateBitmap(gfx::Size size, const char* uri, SkBitmap* bitmap) {
   bitmap->allocN32Pixels(size.width(), size.height());

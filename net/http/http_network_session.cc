@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -26,6 +27,7 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_pool_manager_impl.h"
 #include "net/socket/next_proto.h"
+#include "net/socket/ssl_client_socket.h"
 #include "net/spdy/hpack_huffman_aggregator.h"
 #include "net/spdy/spdy_session_pool.h"
 
@@ -34,23 +36,20 @@ namespace {
 net::ClientSocketPoolManager* CreateSocketPoolManager(
     net::HttpNetworkSession::SocketPoolType pool_type,
     const net::HttpNetworkSession::Params& params) {
+  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "454983 CreateSocketPoolManager"));
   // TODO(yutak): Differentiate WebSocket pool manager and allow more
   // simultaneous connections for WebSockets.
   return new net::ClientSocketPoolManagerImpl(
-      params.net_log,
-      params.client_socket_factory
-          ? params.client_socket_factory
-          : net::ClientSocketFactory::GetDefaultFactory(),
-      params.host_resolver,
-      params.cert_verifier,
-      params.channel_id_service,
-      params.transport_security_state,
-      params.cert_transparency_verifier,
-      params.ssl_session_cache_shard,
-      params.proxy_service,
-      params.ssl_config_service,
-      params.enable_ssl_connect_job_waiting,
-      params.proxy_delegate,
+      params.net_log, params.client_socket_factory
+                          ? params.client_socket_factory
+                          : net::ClientSocketFactory::GetDefaultFactory(),
+      params.host_resolver, params.cert_verifier, params.channel_id_service,
+      params.transport_security_state, params.cert_transparency_verifier,
+      params.cert_policy_enforcer, params.ssl_session_cache_shard,
+      params.ssl_config_service, params.enable_ssl_connect_job_waiting,
       pool_type);
 }
 
@@ -62,6 +61,7 @@ HttpNetworkSession::Params::Params()
     : client_socket_factory(NULL),
       host_resolver(NULL),
       cert_verifier(NULL),
+      cert_policy_enforcer(NULL),
       channel_id_service(NULL),
       transport_security_state(NULL),
       cert_transparency_verifier(NULL),
@@ -73,6 +73,7 @@ HttpNetworkSession::Params::Params()
       host_mapping_rules(NULL),
       enable_ssl_connect_job_waiting(false),
       ignore_certificate_errors(false),
+      use_stale_while_revalidate(false),
       testing_fixed_http_port(0),
       testing_fixed_https_port(0),
       enable_tcp_fast_open_for_ssl(false),
@@ -88,19 +89,23 @@ HttpNetworkSession::Params::Params()
       force_spdy_always(false),
       use_alternate_protocols(false),
       alternate_protocol_probability_threshold(1),
-      enable_websocket_over_spdy(false),
       enable_quic(false),
+      enable_quic_for_proxies(false),
       enable_quic_port_selection(true),
-      enable_quic_time_based_loss_detection(false),
       quic_always_require_handshake_confirmation(false),
       quic_disable_connection_pooling(false),
+      quic_load_server_info_timeout_ms(0),
+      quic_load_server_info_timeout_srtt_multiplier(0.0f),
+      quic_enable_truncated_connection_ids(false),
+      quic_enable_connection_racing(false),
+      quic_disable_disk_cache(false),
       quic_clock(NULL),
       quic_random(NULL),
       quic_max_packet_length(kDefaultMaxPacketSize),
       enable_user_alternate_protocol_ports(false),
       quic_crypto_client_stream_factory(NULL),
       proxy_delegate(NULL) {
-  quic_supported_versions.push_back(QUIC_VERSION_23);
+  quic_supported_versions.push_back(QUIC_VERSION_24);
 }
 
 HttpNetworkSession::Params::~Params() {}
@@ -134,9 +139,13 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
           params.quic_user_agent_id,
           params.quic_supported_versions,
           params.enable_quic_port_selection,
-          params.enable_quic_time_based_loss_detection,
           params.quic_always_require_handshake_confirmation,
           params.quic_disable_connection_pooling,
+          params.quic_load_server_info_timeout_ms,
+          params.quic_load_server_info_timeout_srtt_multiplier,
+          params.quic_enable_truncated_connection_ids,
+          params.quic_enable_connection_racing,
+          params.quic_disable_disk_cache,
           params.quic_connection_options),
       spdy_session_pool_(params.host_resolver,
                          params.ssl_config_service,
@@ -157,6 +166,10 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
   DCHECK(proxy_service_);
   DCHECK(ssl_config_service_.get());
   CHECK(http_server_properties_);
+  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "454983 HttpNetworkSession::HttpNetworkSession"));
 
   for (int i = ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION;
        i <= ALTERNATE_PROTOCOL_MAXIMUM_VALID_VERSION; ++i) {
@@ -172,7 +185,7 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
     // Add the protocol to the TLS next protocol list, except for QUIC
     // since it uses UDP.
     if (proto != kProtoQUIC1SPDY3) {
-      next_protos_.push_back(SSLClientSocket::NextProtoToString(proto));
+      next_protos_.push_back(proto);
     }
 
     // Enable the corresponding alternate protocol, except for HTTP
@@ -255,6 +268,7 @@ base::Value* HttpNetworkSession::QuicInfoToValue() const {
   base::DictionaryValue* dict = new base::DictionaryValue();
   dict->Set("sessions", quic_stream_factory_.QuicStreamFactoryInfoToValue());
   dict->SetBoolean("quic_enabled", params_.enable_quic);
+  dict->SetBoolean("quic_enabled_for_proxies", params_.enable_quic_for_proxies);
   dict->SetBoolean("enable_quic_port_selection",
                    params_.enable_quic_port_selection);
   base::ListValue* connection_options = new base::ListValue;
@@ -264,8 +278,6 @@ base::Value* HttpNetworkSession::QuicInfoToValue() const {
     connection_options->AppendString("'" + QuicUtils::TagToString(*it) + "'");
   }
   dict->Set("connection_options", connection_options);
-  dict->SetBoolean("enable_quic_time_based_loss_detection",
-                   params_.enable_quic_time_based_loss_detection);
   dict->SetString("origin_to_force_quic_on",
                   params_.origin_to_force_quic_on.ToString());
   dict->SetDouble("alternate_protocol_probability_threshold",
@@ -292,8 +304,7 @@ bool HttpNetworkSession::IsProtocolEnabled(AlternateProtocol protocol) const {
       protocol - ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION];
 }
 
-void HttpNetworkSession::GetNextProtos(
-    std::vector<std::string>* next_protos) const {
+void HttpNetworkSession::GetNextProtos(NextProtoVector* next_protos) const {
   if (HttpStreamFactory::spdy_enabled()) {
     *next_protos = next_protos_;
   } else {

@@ -31,9 +31,11 @@ AlgorithmImplementation* CreatePlatformAesKwImplementation();
 AlgorithmImplementation* CreatePlatformHmacImplementation();
 AlgorithmImplementation* CreatePlatformRsaOaepImplementation();
 AlgorithmImplementation* CreatePlatformRsaSsaImplementation();
-
-bool PlatformSerializeKeyForClone(const blink::WebCryptoKey& key,
-                                  blink::WebVector<uint8_t>* key_data);
+AlgorithmImplementation* CreatePlatformRsaPssImplementation();
+AlgorithmImplementation* CreatePlatformEcdsaImplementation();
+AlgorithmImplementation* CreatePlatformEcdhImplementation();
+AlgorithmImplementation* CreatePlatformHkdfImplementation();
+AlgorithmImplementation* CreatePlatformPbkdf2Implementation();
 
 }  // namespace webcrypto
 

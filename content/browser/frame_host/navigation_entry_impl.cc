@@ -37,23 +37,8 @@ NavigationEntryImpl* NavigationEntryImpl::FromNavigationEntry(
 }
 
 NavigationEntryImpl::NavigationEntryImpl()
-    : unique_id_(GetUniqueIDInConstructor()),
-      site_instance_(NULL),
-      bindings_(kInvalidBindings),
-      page_type_(PAGE_TYPE_NORMAL),
-      update_virtual_url_with_url_(false),
-      page_id_(-1),
-      transition_type_(ui::PAGE_TRANSITION_LINK),
-      has_post_data_(false),
-      post_id_(-1),
-      restore_type_(RESTORE_NONE),
-      is_overriding_user_agent_(false),
-      http_status_code_(0),
-      is_renderer_initiated_(false),
-      should_replace_entry_(false),
-      should_clear_history_list_(false),
-      can_load_local_resources_(false),
-      frame_tree_node_id_(-1) {
+    : NavigationEntryImpl(nullptr, -1, GURL(), Referrer(), base::string16(),
+                          ui::PAGE_TRANSITION_LINK, false) {
 }
 
 NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
@@ -63,12 +48,10 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
                                          const base::string16& title,
                                          ui::PageTransition transition_type,
                                          bool is_renderer_initiated)
-    : unique_id_(GetUniqueIDInConstructor()),
-      site_instance_(instance),
+    : frame_entry_(instance, url, referrer),
+      unique_id_(GetUniqueIDInConstructor()),
       bindings_(kInvalidBindings),
       page_type_(PAGE_TYPE_NORMAL),
-      url_(url),
-      referrer_(referrer),
       update_virtual_url_with_url_(false),
       title_(title),
       page_id_(page_id),
@@ -97,12 +80,12 @@ PageType NavigationEntryImpl::GetPageType() const {
 }
 
 void NavigationEntryImpl::SetURL(const GURL& url) {
-  url_ = url;
+  frame_entry_.set_url(url);
   cached_display_title_.clear();
 }
 
 const GURL& NavigationEntryImpl::GetURL() const {
-  return url_;
+  return frame_entry_.url();
 }
 
 void NavigationEntryImpl::SetBaseURLForDataURL(const GURL& url) {
@@ -114,20 +97,20 @@ const GURL& NavigationEntryImpl::GetBaseURLForDataURL() const {
 }
 
 void NavigationEntryImpl::SetReferrer(const Referrer& referrer) {
-  referrer_ = referrer;
+  frame_entry_.set_referrer(referrer);
 }
 
 const Referrer& NavigationEntryImpl::GetReferrer() const {
-  return referrer_;
+  return frame_entry_.referrer();
 }
 
 void NavigationEntryImpl::SetVirtualURL(const GURL& url) {
-  virtual_url_ = (url == url_) ? GURL() : url;
+  virtual_url_ = (url == GetURL()) ? GURL() : url;
   cached_display_title_.clear();
 }
 
 const GURL& NavigationEntryImpl::GetVirtualURL() const {
-  return virtual_url_.is_empty() ? url_ : virtual_url_;
+  return virtual_url_.is_empty() ? GetURL() : virtual_url_;
 }
 
 void NavigationEntryImpl::SetTitle(const base::string16& title) {
@@ -156,7 +139,12 @@ int32 NavigationEntryImpl::GetPageID() const {
 }
 
 void NavigationEntryImpl::set_site_instance(SiteInstanceImpl* site_instance) {
-  site_instance_ = site_instance;
+  frame_entry_.set_site_instance(site_instance);
+}
+
+void NavigationEntryImpl::set_source_site_instance(
+    SiteInstanceImpl* source_site_instance) {
+  source_site_instance_ = source_site_instance;
 }
 
 void NavigationEntryImpl::SetBindings(int bindings) {
@@ -182,12 +170,12 @@ const base::string16& NavigationEntryImpl::GetTitleForDisplay(
   base::string16 title;
   if (!virtual_url_.is_empty()) {
     title = net::FormatUrl(virtual_url_, languages);
-  } else if (!url_.is_empty()) {
-    title = net::FormatUrl(url_, languages);
+  } else if (!GetURL().is_empty()) {
+    title = net::FormatUrl(GetURL(), languages);
   }
 
   // For file:// URLs use the filename as the title, not the full path.
-  if (url_.SchemeIsFile()) {
+  if (GetURL().SchemeIsFile()) {
     base::string16::size_type slashpos = title.rfind('/');
     if (slashpos != base::string16::npos)
       title = title.substr(slashpos + 1);
@@ -340,13 +328,20 @@ void NavigationEntryImpl::ClearExtraData(const std::string& key) {
 void NavigationEntryImpl::ResetForCommit() {
   // Any state that only matters when a navigation entry is pending should be
   // cleared here.
-  SetBrowserInitiatedPostData(NULL);
+  SetBrowserInitiatedPostData(nullptr);
   set_is_renderer_initiated(false);
   set_transferred_global_request_id(GlobalRequestID());
   set_should_replace_entry(false);
 
   set_should_clear_history_list(false);
   set_frame_tree_node_id(-1);
+  set_source_site_instance(nullptr);
+
+#if defined(OS_ANDROID)
+  // Reset the time stamp so that the metrics are not reported if this entry is
+  // loaded again in the future.
+  set_intent_received_timestamp(base::TimeTicks());
+#endif
 }
 
 void NavigationEntryImpl::SetScreenshotPNGData(

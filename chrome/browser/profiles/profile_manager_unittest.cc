@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -45,7 +44,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -71,8 +70,7 @@ class UnittestProfileManager : public ::ProfileManagerWithoutInit {
       : ::ProfileManagerWithoutInit(user_data_dir) {}
 
  protected:
-  virtual Profile* CreateProfileHelper(
-      const base::FilePath& file_path) OVERRIDE {
+  Profile* CreateProfileHelper(const base::FilePath& file_path) override {
     if (!base::PathExists(file_path)) {
       if (!base::CreateDirectory(file_path))
         return NULL;
@@ -80,8 +78,8 @@ class UnittestProfileManager : public ::ProfileManagerWithoutInit {
     return new TestingProfile(file_path, NULL);
   }
 
-  virtual Profile* CreateProfileAsyncHelper(const base::FilePath& path,
-                                            Delegate* delegate) OVERRIDE {
+  Profile* CreateProfileAsyncHelper(const base::FilePath& path,
+                                    Delegate* delegate) override {
     // This is safe while all file operations are done on the FILE thread.
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
@@ -105,19 +103,19 @@ class ProfileManagerTest : public testing::Test {
       : local_state_(TestingBrowserProcess::GetGlobal()) {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     // Create a new temporary directory, and store the path
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     TestingBrowserProcess::GetGlobal()->SetProfileManager(
         new UnittestProfileManager(temp_dir_.path()));
 
 #if defined(OS_CHROMEOS)
-    CommandLine* cl = CommandLine::ForCurrentProcess();
+    base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
     cl->AppendSwitch(switches::kTestType);
 #endif
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     TestingBrowserProcess::GetGlobal()->SetProfileManager(NULL);
     base::RunLoop().RunUntilIdle();
   }
@@ -224,7 +222,8 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
             profile_manager->GetInitialProfileDir().value());
 
   const char kTestUserName[] = "test-user@example.com";
-  chromeos::FakeUserManager* user_manager = new chromeos::FakeUserManager();
+  chromeos::FakeChromeUserManager* user_manager =
+      new chromeos::FakeChromeUserManager();
   chromeos::ScopedUserManagerEnabler enabler(user_manager);
 
   const user_manager::User* active_user = user_manager->AddUser(kTestUserName);
@@ -265,15 +264,15 @@ TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
 
   // Force lazy-init of some profile services to simulate use.
   ASSERT_TRUE(profile1->CreateHistoryService(true, false));
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile1,
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile1, ServiceAccessType::EXPLICIT_ACCESS));
   profile1->CreateBookmarkModel(true);
   EXPECT_TRUE(BookmarkModelFactory::GetForProfile(profile1));
   profile2->CreateBookmarkModel(true);
   EXPECT_TRUE(BookmarkModelFactory::GetForProfile(profile2));
   ASSERT_TRUE(profile2->CreateHistoryService(true, false));
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile2,
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile2, ServiceAccessType::EXPLICIT_ACCESS));
 
   // Make sure any pending tasks run before we destroy the profiles.
     base::RunLoop().RunUntilIdle();
@@ -386,14 +385,20 @@ TEST_F(ProfileManagerTest, GetGuestProfilePath) {
   EXPECT_EQ(expected_path, guest_path);
 }
 
+TEST_F(ProfileManagerTest, GetSystemProfilePath) {
+  base::FilePath system_profile_path = ProfileManager::GetSystemProfilePath();
+  base::FilePath expected_path = temp_dir_.path();
+  expected_path = expected_path.Append(chrome::kSystemProfileDir);
+  EXPECT_EQ(expected_path, system_profile_path);
+}
+
 class UnittestGuestProfileManager : public UnittestProfileManager {
  public:
   explicit UnittestGuestProfileManager(const base::FilePath& user_data_dir)
       : UnittestProfileManager(user_data_dir) {}
 
  protected:
-  virtual Profile* CreateProfileHelper(
-      const base::FilePath& file_path) OVERRIDE {
+  Profile* CreateProfileHelper(const base::FilePath& file_path) override {
     TestingProfile::Builder builder;
     builder.SetGuestSession();
     builder.SetPath(file_path);
@@ -404,14 +409,14 @@ class UnittestGuestProfileManager : public UnittestProfileManager {
 
 class ProfileManagerGuestTest : public ProfileManagerTest  {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     // Create a new temporary directory, and store the path
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     TestingBrowserProcess::GetGlobal()->SetProfileManager(
         new UnittestGuestProfileManager(temp_dir_.path()));
 
 #if defined(OS_CHROMEOS)
-    CommandLine* cl = CommandLine::ForCurrentProcess();
+    base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
     // This switch is needed to skip non-test specific behavior in
     // ProfileManager (accessing DBusThreadManager).
     cl->AppendSwitch(switches::kTestType);
@@ -997,7 +1002,8 @@ TEST_F(ProfileManagerTest, ProfileDisplayNameResetsDefaultName) {
     return;
 
   // The command line is reset at the end of every test by the test suite.
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
@@ -1035,7 +1041,8 @@ TEST_F(ProfileManagerTest, ProfileDisplayNamePreservesCustomName) {
     return;
 
   // The command line is reset at the end of every test by the test suite.
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
@@ -1081,7 +1088,8 @@ TEST_F(ProfileManagerTest, ProfileDisplayNamePreservesSignedInName) {
     return;
 
   // The command line is reset at the end of every test by the test suite.
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
@@ -1135,7 +1143,8 @@ TEST_F(ProfileManagerTest, ProfileDisplayNameIsEmailIfDefaultName) {
     return;
 
   // The command line is reset at the end of every test by the test suite.
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();

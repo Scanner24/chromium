@@ -10,7 +10,7 @@ found in the LICENSE file.
       android:versionCode="1"
       android:versionName="1.0">
 
-    <uses-sdk android:minSdkVersion="14" android:targetSdkVersion="20" />
+    <uses-sdk android:minSdkVersion="14" android:targetSdkVersion="21" />
 
     <application android:label="ChromeNativeTests"
             android:name="org.chromium.chrome.unit_tests_apk.ChromeNativeTestApplication">
@@ -23,6 +23,10 @@ found in the LICENSE file.
             </intent-filter>
         </activity>
     </application>
+
+    <instrumentation android:name="org.chromium.native_test.ChromeNativeTestInstrumentationTestRunner"
+            android:targetPackage="org.chromium.native_test"
+            android:label="Instrumentation entry point for org.chromium.native_test"/>
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET"/>

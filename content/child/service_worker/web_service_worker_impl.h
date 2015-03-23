@@ -47,11 +47,11 @@ class WebServiceWorkerImpl
   virtual void setProxy(blink::WebServiceWorkerProxy* proxy);
   virtual blink::WebServiceWorkerProxy* proxy();
   virtual void proxyReadyChanged();
-  virtual blink::WebURL scope() const;
   virtual blink::WebURL url() const;
   virtual blink::WebServiceWorkerState state() const;
   virtual void postMessage(const blink::WebString& message,
                            blink::WebMessagePortChannelArray* channels);
+  virtual void terminate();
 
  private:
   // Commits the new state internally and notifies the proxy of the change.

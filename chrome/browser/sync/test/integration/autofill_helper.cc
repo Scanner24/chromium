@@ -167,7 +167,7 @@ AutofillProfile CreateAutofillProfile(ProfileType type) {
 
 scoped_refptr<AutofillWebDataService> GetWebDataService(int index) {
   return WebDataServiceFactory::GetAutofillWebDataForProfile(
-      test()->GetProfile(index), Profile::EXPLICIT_ACCESS);
+      test()->GetProfile(index), ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 PersonalDataManager* GetPersonalDataManager(int index) {
@@ -242,10 +242,10 @@ namespace {
 class KeysMatchStatusChecker : public MultiClientStatusChangeChecker {
  public:
   KeysMatchStatusChecker(int profile_a, int profile_b);
-  virtual ~KeysMatchStatusChecker();
+  ~KeysMatchStatusChecker() override;
 
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
-  virtual std::string GetDebugMessage() const OVERRIDE;
+  bool IsExitConditionSatisfied() override;
+  std::string GetDebugMessage() const override;
 
  private:
   const int profile_a_;
@@ -419,14 +419,14 @@ class ProfilesMatchStatusChecker : public StatusChangeChecker,
                                    public PersonalDataManagerObserver {
  public:
   ProfilesMatchStatusChecker(int profile_a, int profile_b);
-  virtual ~ProfilesMatchStatusChecker();
+  ~ProfilesMatchStatusChecker() override;
 
   // StatusChangeChecker implementation.
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
-  virtual std::string GetDebugMessage() const OVERRIDE;
+  bool IsExitConditionSatisfied() override;
+  std::string GetDebugMessage() const override;
 
   // PersonalDataManager implementation.
-  virtual void OnPersonalDataChanged() OVERRIDE;
+  void OnPersonalDataChanged() override;
 
   // Wait for conidtion to beome true.
   void Wait();

@@ -63,10 +63,15 @@ void SupervisedUserSettingsService::Init(
   PersistentPrefStore* store = new JsonPrefStore(
       path, sequenced_task_runner, scoped_ptr<PrefFilter>());
   Init(store);
-  if (load_synchronously)
+  if (load_synchronously) {
     store_->ReadPrefs();
-  else
+    // TODO(bauerb): Temporary CHECK while investigating
+    // https://crbug.com/425785. Remove (or change to DCHECK) once the bug
+    // is fixed.
+    CHECK(store_->IsInitializationComplete());
+  } else {
     store_->ReadPrefsAsync(NULL);
+  }
 }
 
 void SupervisedUserSettingsService::Init(
@@ -135,7 +140,7 @@ void SupervisedUserSettingsService::UploadItem(const std::string& key,
   dict->SetWithoutPathExpansion(key_suffix, value.release());
 }
 
-void SupervisedUserSettingsService::SetLocalSettingForTesting(
+void SupervisedUserSettingsService::SetLocalSetting(
     const std::string& key,
     scoped_ptr<base::Value> value) {
   if (value)
@@ -173,11 +178,10 @@ SyncMergeResult SupervisedUserSettingsService::MergeDataAndStartSyncing(
 
   // Clear all atomic and split settings, then recreate them from Sync data.
   Clear();
-  for (SyncDataList::const_iterator it = initial_sync_data.begin();
-       it != initial_sync_data.end(); ++it) {
-    DCHECK_EQ(SUPERVISED_USER_SETTINGS, it->GetDataType());
+  for (const SyncData& sync_data : initial_sync_data) {
+    DCHECK_EQ(SUPERVISED_USER_SETTINGS, sync_data.GetDataType());
     const ::sync_pb::ManagedUserSettingSpecifics& supervised_user_setting =
-        it->GetSpecifics().managed_user_setting();
+        sync_data.GetSpecifics().managed_user_setting();
     scoped_ptr<base::Value> value(
         JSONReader::Read(supervised_user_setting.value()));
     std::string name_suffix = supervised_user_setting.name();
@@ -248,24 +252,24 @@ SyncDataList SupervisedUserSettingsService::GetAllSyncData(
 SyncError SupervisedUserSettingsService::ProcessSyncChanges(
     const tracked_objects::Location& from_here,
     const SyncChangeList& change_list) {
-  for (SyncChangeList::const_iterator it = change_list.begin();
-       it != change_list.end(); ++it) {
-    SyncData data = it->sync_data();
+  for (const SyncChange& sync_change : change_list) {
+    SyncData data = sync_change.sync_data();
     DCHECK_EQ(SUPERVISED_USER_SETTINGS, data.GetDataType());
     const ::sync_pb::ManagedUserSettingSpecifics& supervised_user_setting =
         data.GetSpecifics().managed_user_setting();
     std::string key = supervised_user_setting.name();
     base::DictionaryValue* dict = GetDictionaryAndSplitKey(&key);
-    switch (it->change_type()) {
+    SyncChange::SyncChangeType change_type = sync_change.change_type();
+    switch (change_type) {
       case SyncChange::ACTION_ADD:
       case SyncChange::ACTION_UPDATE: {
         scoped_ptr<base::Value> value(
             JSONReader::Read(supervised_user_setting.value()));
         if (dict->HasKey(key)) {
-          DLOG_IF(WARNING, it->change_type() == SyncChange::ACTION_ADD)
+          DLOG_IF(WARNING, change_type == SyncChange::ACTION_ADD)
               << "Value for key " << key << " already exists";
         } else {
-          DLOG_IF(WARNING, it->change_type() == SyncChange::ACTION_UPDATE)
+          DLOG_IF(WARNING, change_type == SyncChange::ACTION_UPDATE)
               << "Value for key " << key << " doesn't exist yet";
         }
         dict->SetWithoutPathExpansion(key, value.release());
@@ -295,8 +299,10 @@ void SupervisedUserSettingsService::OnPrefValueChanged(const std::string& key) {
 }
 
 void SupervisedUserSettingsService::OnInitializationCompleted(bool success) {
-  DCHECK(success);
-  DCHECK(IsReady());
+  // TODO(bauerb): Temporary CHECK while investigating https://crbug.com/425785.
+  // Remove (or change back to DCHECK) once the bug is fixed.
+  CHECK(success);
+  CHECK(IsReady());
   InformSubscribers();
 }
 
@@ -379,8 +385,6 @@ void SupervisedUserSettingsService::InformSubscribers() {
     return;
 
   scoped_ptr<base::DictionaryValue> settings = GetSettings();
-  for (std::vector<SettingsCallback>::iterator it = subscribers_.begin();
-       it != subscribers_.end(); ++it) {
-    it->Run(settings.get());
-  }
+  for (const auto& callback : subscribers_)
+    callback.Run(settings.get());
 }

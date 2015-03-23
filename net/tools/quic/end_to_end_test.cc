@@ -70,8 +70,8 @@ namespace tools {
 namespace test {
 namespace {
 
-const char* kFooResponseBody = "Artichoke hearts make me happy.";
-const char* kBarResponseBody = "Palm hearts are pretty delicious, also.";
+const char kFooResponseBody[] = "Artichoke hearts make me happy.";
+const char kBarResponseBody[] = "Palm hearts are pretty delicious, also.";
 
 // Run all tests with the cross products of all versions.
 struct TestParams {
@@ -117,6 +117,15 @@ vector<TestParams> GetTestParams() {
   // TODO(rtenneti): Add kTBBR after BBR code is checked in.
   // QuicTag congestion_control_tags[] = {kRENO, kTBBR, kQBIC};
   QuicTag congestion_control_tags[] = {kRENO, kQBIC};
+  QuicVersionVector spdy3_versions;
+  QuicVersionVector spdy4_versions;
+  for (QuicVersion version : all_supported_versions) {
+    if (version > QUIC_VERSION_23) {
+      spdy4_versions.push_back(version);
+    } else {
+      spdy3_versions.push_back(version);
+    }
+  }
   for (size_t congestion_control_index = 0;
        congestion_control_index < arraysize(congestion_control_tags);
        congestion_control_index++) {
@@ -124,33 +133,26 @@ vector<TestParams> GetTestParams() {
         congestion_control_tags[congestion_control_index];
     for (int use_fec = 0; use_fec < 2; ++use_fec) {
       for (int use_pacing = 0; use_pacing < 2; ++use_pacing) {
-        // Add an entry for server and client supporting all versions.
-        params.push_back(TestParams(all_supported_versions,
-                                    all_supported_versions,
-                                    all_supported_versions[0],
-                                    use_pacing != 0,
-                                    use_fec != 0,
-                                    congestion_control_tag));
+        for (int spdy_version = 3; spdy_version <= 4; ++spdy_version) {
+          const QuicVersionVector* client_versions =
+              spdy_version == 3 ? &spdy3_versions : &spdy4_versions;
+          // Add an entry for server and client supporting all versions.
+          params.push_back(TestParams(*client_versions, all_supported_versions,
+                                      (*client_versions)[0], use_pacing != 0,
+                                      use_fec != 0, congestion_control_tag));
 
-        // Test client supporting all versions and server supporting 1 version.
-        // Simulate an old server and exercise version downgrade in the client.
-        // Protocol negotiation should occur. Skip the i = 0 case because it is
-        // essentially the same as the default case.
-        for (size_t i = 1; i < all_supported_versions.size(); ++i) {
-          QuicVersionVector server_supported_versions;
-          server_supported_versions.push_back(all_supported_versions[i]);
-          if (all_supported_versions[i] >= QUIC_VERSION_18) {
-            // Until flow control is globally rolled out and we remove
-            // QUIC_VERSION_16, the server MUST support at least one QUIC
-            // version that does not use flow control.
-            server_supported_versions.push_back(QUIC_VERSION_16);
+          // Test client supporting all versions and server supporting 1
+          // version. Simulate an old server and exercise version downgrade in
+          // the client. Protocol negotiation should occur. Skip the i = 0 case
+          // because it is essentially the same as the default case.
+          for (QuicVersion version : *client_versions) {
+            QuicVersionVector server_supported_versions;
+            server_supported_versions.push_back(version);
+            params.push_back(
+                TestParams(*client_versions, server_supported_versions,
+                           server_supported_versions[0], use_pacing != 0,
+                           use_fec != 0, congestion_control_tag));
           }
-          params.push_back(TestParams(all_supported_versions,
-                                      server_supported_versions,
-                                      server_supported_versions[0],
-                                      use_pacing != 0,
-                                      use_fec != 0,
-                                      congestion_control_tag));
         }
       }
     }
@@ -164,11 +166,12 @@ class ServerDelegate : public PacketDroppingTestWriter::Delegate {
                  QuicDispatcher* dispatcher)
       : writer_factory_(writer_factory),
         dispatcher_(dispatcher) {}
-  virtual ~ServerDelegate() {}
-  virtual void OnPacketSent(WriteResult result) OVERRIDE {
+  ~ServerDelegate() override {}
+  void OnPacketSent(WriteResult result) override {
     writer_factory_->OnPacketSent(result);
   }
-  virtual void OnCanWrite() OVERRIDE { dispatcher_->OnCanWrite(); }
+  void OnCanWrite() override { dispatcher_->OnCanWrite(); }
+
  private:
   TestWriterFactory* writer_factory_;
   QuicDispatcher* dispatcher_;
@@ -177,12 +180,13 @@ class ServerDelegate : public PacketDroppingTestWriter::Delegate {
 class ClientDelegate : public PacketDroppingTestWriter::Delegate {
  public:
   explicit ClientDelegate(QuicClient* client) : client_(client) {}
-  virtual ~ClientDelegate() {}
-  virtual void OnPacketSent(WriteResult result) OVERRIDE {}
-  virtual void OnCanWrite() OVERRIDE {
+  ~ClientDelegate() override {}
+  void OnPacketSent(WriteResult result) override {}
+  void OnCanWrite() override {
     EpollEvent event(EPOLLOUT, false);
     client_->OnEvent(client_->fd(), &event);
   }
+
  private:
   QuicClient* client_;
 };
@@ -204,18 +208,11 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
 
     VLOG(1) << "Using Configuration: " << GetParam();
 
-    client_config_.SetDefaults();
-    server_config_.SetDefaults();
-
     // Use different flow control windows for client/server.
-    client_config_.SetInitialFlowControlWindowToSend(
-        2 * kInitialSessionFlowControlWindowForTest);
     client_config_.SetInitialStreamFlowControlWindowToSend(
         2 * kInitialStreamFlowControlWindowForTest);
     client_config_.SetInitialSessionFlowControlWindowToSend(
         2 * kInitialSessionFlowControlWindowForTest);
-    server_config_.SetInitialFlowControlWindowToSend(
-        3 * kInitialSessionFlowControlWindowForTest);
     server_config_.SetInitialStreamFlowControlWindowToSend(
         3 * kInitialStreamFlowControlWindowForTest);
     server_config_.SetInitialSessionFlowControlWindowToSend(
@@ -228,7 +225,7 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
                "HTTP/1.1", "200", "OK", kBarResponseBody);
   }
 
-  virtual ~EndToEndTest() {
+  ~EndToEndTest() override {
     // TODO(rtenneti): port RecycleUnusedPort if needed.
     // RecycleUnusedPort(server_address_.port());
     QuicInMemoryCachePeer::ResetForTests();
@@ -246,40 +243,28 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     return client;
   }
 
-  void set_client_initial_flow_control_receive_window(uint32 window) {
-    CHECK(client_.get() == NULL);
-    DVLOG(1) << "Setting client initial flow control window: " << window;
-    client_config_.SetInitialFlowControlWindowToSend(window);
-  }
-
   void set_client_initial_stream_flow_control_receive_window(uint32 window) {
-    CHECK(client_.get() == NULL);
+    CHECK(client_.get() == nullptr);
     DVLOG(1) << "Setting client initial stream flow control window: " << window;
     client_config_.SetInitialStreamFlowControlWindowToSend(window);
   }
 
   void set_client_initial_session_flow_control_receive_window(uint32 window) {
-    CHECK(client_.get() == NULL);
+    CHECK(client_.get() == nullptr);
     DVLOG(1) << "Setting client initial session flow control window: "
              << window;
     client_config_.SetInitialSessionFlowControlWindowToSend(window);
   }
 
-  void set_server_initial_flow_control_receive_window(uint32 window) {
-    CHECK(server_thread_.get() == NULL);
-    DVLOG(1) << "Setting server initial flow control window: " << window;
-    server_config_.SetInitialFlowControlWindowToSend(window);
-  }
-
   void set_server_initial_stream_flow_control_receive_window(uint32 window) {
-    CHECK(server_thread_.get() == NULL);
+    CHECK(server_thread_.get() == nullptr);
     DVLOG(1) << "Setting server initial stream flow control window: "
              << window;
     server_config_.SetInitialStreamFlowControlWindowToSend(window);
   }
 
   void set_server_initial_session_flow_control_receive_window(uint32 window) {
-    CHECK(server_thread_.get() == NULL);
+    CHECK(server_thread_.get() == nullptr);
     DVLOG(1) << "Setting server initial session flow control window: "
              << window;
     server_config_.SetInitialSessionFlowControlWindowToSend(window);
@@ -329,16 +314,16 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     return client_->client()->connected();
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // The ownership of these gets transferred to the QuicPacketWriterWrapper
     // and TestWriterFactory when Initialize() is executed.
     client_writer_ = new PacketDroppingTestWriter();
     server_writer_ = new PacketDroppingTestWriter();
+    // TODO(ianswett): Remove this once it's fully rolled out.
+    FLAGS_quic_enable_pacing = false;
   }
 
-  virtual void TearDown() OVERRIDE {
-    StopServer();
-  }
+  void TearDown() override { StopServer(); }
 
   void StartServer() {
     server_thread_.reset(
@@ -480,18 +465,17 @@ TEST_P(EndToEndTest, SeparateFinPacket) {
                       HttpConstants::POST, "/foo");
   request.set_has_complete_message(false);
 
+  // Send a request in two parts: the request and then an empty packet with FIN.
   client_->SendMessage(request);
-
-  client_->SendData(string(), true);
-
+  client_->SendData("", true);
   client_->WaitForResponse();
   EXPECT_EQ(kFooResponseBody, client_->response_body());
   EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
 
+  // Now do the same thing but with a content length.
   request.AddBody("foo", true);
-
   client_->SendMessage(request);
-  client_->SendData(string(), true);
+  client_->SendData("", true);
   client_->WaitForResponse();
   EXPECT_EQ(kFooResponseBody, client_->response_body());
   EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
@@ -508,7 +492,7 @@ TEST_P(EndToEndTest, MultipleRequestResponse) {
 
 TEST_P(EndToEndTest, MultipleClients) {
   ASSERT_TRUE(Initialize());
-  scoped_ptr<QuicTestClient> client2(CreateQuicClient(NULL));
+  scoped_ptr<QuicTestClient> client2(CreateQuicClient(nullptr));
 
   HTTPMessage request(HttpConstants::HTTP_1_1,
                       HttpConstants::POST, "/foo");
@@ -693,14 +677,6 @@ TEST_P(EndToEndTest, LargePostZeroRTTFailure) {
 
   // The 0-RTT handshake should succeed.
   client_->Connect();
-  if (client_supported_versions_[0] >= QUIC_VERSION_18 &&
-      negotiated_version_ <= QUIC_VERSION_16) {
-    // If the version negotiation has resulted in a downgrade, then the client
-    // must wait for the handshake to complete before sending any data.
-    // Otherwise it may have queued frames which will trigger a
-    // DFATAL when they are serialized after the downgrade.
-    client_->client()->WaitForCryptoHandshakeConfirmed();
-  }
   client_->WaitForResponseForMs(-1);
   ASSERT_TRUE(client_->client()->connected());
   EXPECT_EQ(kFooResponseBody, client_->SendCustomSynchronousRequest(request));
@@ -714,14 +690,6 @@ TEST_P(EndToEndTest, LargePostZeroRTTFailure) {
   StartServer();
 
   client_->Connect();
-  if (client_supported_versions_[0] >= QUIC_VERSION_18 &&
-      negotiated_version_ <= QUIC_VERSION_16) {
-    // If the version negotiation has resulted in a downgrade, then the client
-    // must wait for the handshake to complete before sending any data.
-    // Otherwise it may have queued frames which will trigger a
-    // DFATAL when they are serialized after the downgrade.
-    client_->client()->WaitForCryptoHandshakeConfirmed();
-  }
   ASSERT_TRUE(client_->client()->connected());
   EXPECT_EQ(kFooResponseBody, client_->SendCustomSynchronousRequest(request));
   EXPECT_EQ(2, client_->client()->session()->GetNumSentClientHellos());
@@ -787,15 +755,12 @@ TEST_P(EndToEndTest, DoNotSetResumeWriteAlarmIfConnectionFlowControlBlocked) {
   // an infinite loop in the EpollServer, as the alarm fires and is immediately
   // rescheduled.
   ASSERT_TRUE(Initialize());
-  if (negotiated_version_ < QUIC_VERSION_19) {
-    return;
-  }
   client_->client()->WaitForCryptoHandshakeConfirmed();
 
   // Ensure both stream and connection level are flow control blocked by setting
   // the send window offset to 0.
   const uint64 kFlowControlWindow =
-      server_config_.GetInitialFlowControlWindowToSend();
+      server_config_.GetInitialStreamFlowControlWindowToSend();
   QuicSpdyClientStream* stream = client_->GetOrCreateStream();
   QuicSession* session = client_->client()->session();
   QuicFlowControllerPeer::SetSendWindowOffset(stream->flow_controller(), 0);
@@ -855,7 +820,7 @@ TEST_P(EndToEndTest, DISABLED_MultipleTermination) {
   // before HTTP framing is complete, we send an error and close the stream,
   // and the second write is picked up as writing on a closed stream.
   QuicSpdyClientStream* stream = client_->GetOrCreateStream();
-  ASSERT_TRUE(stream != NULL);
+  ASSERT_TRUE(stream != nullptr);
   ReliableQuicStreamPeer::SetStreamBytesWritten(3, stream);
 
   client_->SendData("bar", true);
@@ -870,7 +835,7 @@ TEST_P(EndToEndTest, DISABLED_MultipleTermination) {
 }
 
 TEST_P(EndToEndTest, Timeout) {
-  client_config_.set_idle_connection_state_lifetime(
+  client_config_.SetIdleConnectionStateLifetime(
       QuicTime::Delta::FromMicroseconds(500),
       QuicTime::Delta::FromMicroseconds(500));
   // Note: we do NOT ASSERT_TRUE: we may time out during initial handshake:
@@ -883,21 +848,24 @@ TEST_P(EndToEndTest, Timeout) {
 
 TEST_P(EndToEndTest, NegotiateMaxOpenStreams) {
   // Negotiate 1 max open stream.
-  client_config_.set_max_streams_per_connection(1, 1);
+  client_config_.SetMaxStreamsPerConnection(1, 1);
   ASSERT_TRUE(Initialize());
   client_->client()->WaitForCryptoHandshakeConfirmed();
 
   // Make the client misbehave after negotiation.
-  QuicSessionPeer::SetMaxOpenStreams(client_->client()->session(), 10);
+  const int kServerMaxStreams = kMaxStreamsMinimumIncrement + 1;
+  QuicSessionPeer::SetMaxOpenStreams(client_->client()->session(),
+                                     kServerMaxStreams + 1);
 
-  HTTPMessage request(HttpConstants::HTTP_1_1,
-                      HttpConstants::POST, "/foo");
+  HTTPMessage request(HttpConstants::HTTP_1_1, HttpConstants::POST, "/foo");
   request.AddHeader("content-length", "3");
   request.set_has_complete_message(false);
 
-  // Open two simultaneous streams.
-  client_->SendMessage(request);
-  client_->SendMessage(request);
+  // The server supports a small number of additional streams beyond the
+  // negotiated limit. Open enough streams to go beyond that limit.
+  for (int i = 0; i < kServerMaxStreams + 1; ++i) {
+    client_->SendMessage(request);
+  }
   client_->WaitForResponse();
 
   EXPECT_FALSE(client_->connected());
@@ -906,10 +874,11 @@ TEST_P(EndToEndTest, NegotiateMaxOpenStreams) {
 }
 
 TEST_P(EndToEndTest, NegotiateCongestionControl) {
+  ValueRestore<bool> old_flag(&FLAGS_quic_allow_bbr, true);
   ASSERT_TRUE(Initialize());
   client_->client()->WaitForCryptoHandshakeConfirmed();
 
-  CongestionControlType expected_congestion_control_type;
+  CongestionControlType expected_congestion_control_type = kReno;
   switch (GetParam().congestion_control_tag) {
     case kRENO:
       expected_congestion_control_type = kReno;
@@ -925,28 +894,27 @@ TEST_P(EndToEndTest, NegotiateCongestionControl) {
   }
 
   EXPECT_EQ(expected_congestion_control_type,
-            QuicSentPacketManagerPeer::GetCongestionControlAlgorithm(
+            QuicSentPacketManagerPeer::GetSendAlgorithm(
                 *GetSentPacketManagerFromFirstServerSession())
             ->GetCongestionControlType());
 }
 
 TEST_P(EndToEndTest, LimitMaxOpenStreams) {
   // Server limits the number of max streams to 2.
-  server_config_.set_max_streams_per_connection(2, 2);
+  server_config_.SetMaxStreamsPerConnection(2, 2);
   // Client tries to negotiate for 10.
-  client_config_.set_max_streams_per_connection(10, 5);
+  client_config_.SetMaxStreamsPerConnection(10, 5);
 
   ASSERT_TRUE(Initialize());
   client_->client()->WaitForCryptoHandshakeConfirmed();
   QuicConfig* client_negotiated_config = client_->client()->session()->config();
-  EXPECT_EQ(2u, client_negotiated_config->max_streams_per_connection());
+  EXPECT_EQ(2u, client_negotiated_config->MaxStreamsPerConnection());
 }
 
-TEST_P(EndToEndTest, LimitCongestionWindowAndRTT) {
-  // Client tries to request twice the server's max initial window, and the
-  // server limits it to the max.
-  client_config_.SetInitialCongestionWindowToSend(2 * kMaxInitialWindow);
-  client_config_.SetInitialRoundTripTimeUsToSend(1000);
+TEST_P(EndToEndTest, ClientSuggestsRTT) {
+  // Client suggests initial RTT, verify it is used.
+  const uint32 kInitialRTT = 20000;
+  client_config_.SetInitialRoundTripTimeUsToSend(kInitialRTT);
 
   ASSERT_TRUE(Initialize());
   client_->client()->WaitForCryptoHandshakeConfirmed();
@@ -962,33 +930,21 @@ TEST_P(EndToEndTest, LimitCongestionWindowAndRTT) {
   const QuicSentPacketManager& server_sent_packet_manager =
       *GetSentPacketManagerFromFirstServerSession();
 
-  // The client shouldn't set it's initial window based on the negotiated value.
-  EXPECT_EQ(kDefaultInitialWindow * kDefaultTCPMSS,
-            client_sent_packet_manager.GetCongestionWindow());
-  EXPECT_EQ(kMaxInitialWindow * kDefaultTCPMSS,
-            server_sent_packet_manager.GetCongestionWindow());
+  // BBR automatically enables pacing.
+  EXPECT_EQ(GetParam().use_pacing ||
+            (FLAGS_quic_allow_bbr &&
+             GetParam().congestion_control_tag == kTBBR),
+            server_sent_packet_manager.using_pacing());
+  EXPECT_EQ(GetParam().use_pacing ||
+            (FLAGS_quic_allow_bbr &&
+             GetParam().congestion_control_tag == kTBBR),
+            client_sent_packet_manager.using_pacing());
 
-  EXPECT_EQ(GetParam().use_pacing, server_sent_packet_manager.using_pacing());
-  EXPECT_EQ(GetParam().use_pacing, client_sent_packet_manager.using_pacing());
-
-  // The client *should* set the intitial RTT.
-  EXPECT_EQ(1000u, client_sent_packet_manager.GetRttStats()->initial_rtt_us());
-  EXPECT_EQ(1000u, server_sent_packet_manager.GetRttStats()->initial_rtt_us());
-
-  // Now use the negotiated limits with packet loss.
-  SetPacketLossPercentage(30);
-
-  // 10 KB body.
-  string body;
-  GenerateBody(&body, 1024 * 10);
-
-  HTTPMessage request(HttpConstants::HTTP_1_1,
-                      HttpConstants::POST, "/foo");
-  request.AddBody(body, true);
-
+  EXPECT_EQ(kInitialRTT,
+            client_sent_packet_manager.GetRttStats()->initial_rtt_us());
+  EXPECT_EQ(kInitialRTT,
+            server_sent_packet_manager.GetRttStats()->initial_rtt_us());
   server_thread_->Resume();
-
-  EXPECT_EQ(kFooResponseBody, client_->SendCustomSynchronousRequest(request));
 }
 
 TEST_P(EndToEndTest, MaxInitialRTT) {
@@ -1009,18 +965,17 @@ TEST_P(EndToEndTest, MaxInitialRTT) {
   QuicSession* session = dispatcher->session_map().begin()->second;
   const QuicSentPacketManager& client_sent_packet_manager =
       client_->client()->session()->connection()->sent_packet_manager();
-  const QuicSentPacketManager& server_sent_packet_manager =
-      session->connection()->sent_packet_manager();
 
   // Now that acks have been exchanged, the RTT estimate has decreased on the
   // server and is not infinite on the client.
   EXPECT_FALSE(
-      client_sent_packet_manager.GetRttStats()->SmoothedRtt().IsInfinite());
+      client_sent_packet_manager.GetRttStats()->smoothed_rtt().IsInfinite());
+  const RttStats& server_rtt_stats =
+      *session->connection()->sent_packet_manager().GetRttStats();
   EXPECT_EQ(static_cast<int64>(kMaxInitialRoundTripTimeUs),
-            server_sent_packet_manager.GetRttStats()->initial_rtt_us());
-  EXPECT_GE(
-      static_cast<int64>(kMaxInitialRoundTripTimeUs),
-      server_sent_packet_manager.GetRttStats()->SmoothedRtt().ToMicroseconds());
+            server_rtt_stats.initial_rtt_us());
+  EXPECT_GE(static_cast<int64>(kMaxInitialRoundTripTimeUs),
+            server_rtt_stats.smoothed_rtt().ToMicroseconds());
   server_thread_->Resume();
 }
 
@@ -1046,14 +1001,76 @@ TEST_P(EndToEndTest, MinInitialRTT) {
   // Now that acks have been exchanged, the RTT estimate has decreased on the
   // server and is not infinite on the client.
   EXPECT_FALSE(
-      client_sent_packet_manager.GetRttStats()->SmoothedRtt().IsInfinite());
+      client_sent_packet_manager.GetRttStats()->smoothed_rtt().IsInfinite());
   // Expect the default rtt of 100ms.
-  EXPECT_EQ(static_cast<int64>(100 * base::Time::kMicrosecondsPerMillisecond),
+  EXPECT_EQ(static_cast<int64>(100 * kNumMicrosPerMilli),
             server_sent_packet_manager.GetRttStats()->initial_rtt_us());
   // Ensure the bandwidth is valid.
   client_sent_packet_manager.BandwidthEstimate();
   server_sent_packet_manager.BandwidthEstimate();
   server_thread_->Resume();
+}
+
+TEST_P(EndToEndTest, 0ByteConnectionId) {
+  client_config_.SetBytesForConnectionIdToSend(0);
+  ASSERT_TRUE(Initialize());
+
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+
+  QuicPacketHeader* header = QuicConnectionPeer::GetLastHeader(
+      client_->client()->session()->connection());
+  EXPECT_EQ(PACKET_0BYTE_CONNECTION_ID,
+            header->public_header.connection_id_length);
+}
+
+TEST_P(EndToEndTest, 1ByteConnectionId) {
+  client_config_.SetBytesForConnectionIdToSend(1);
+  ASSERT_TRUE(Initialize());
+
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+  QuicPacketHeader* header = QuicConnectionPeer::GetLastHeader(
+      client_->client()->session()->connection());
+  EXPECT_EQ(PACKET_1BYTE_CONNECTION_ID,
+            header->public_header.connection_id_length);
+}
+
+TEST_P(EndToEndTest, 4ByteConnectionId) {
+  client_config_.SetBytesForConnectionIdToSend(4);
+  ASSERT_TRUE(Initialize());
+
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+  QuicPacketHeader* header = QuicConnectionPeer::GetLastHeader(
+      client_->client()->session()->connection());
+  EXPECT_EQ(PACKET_4BYTE_CONNECTION_ID,
+            header->public_header.connection_id_length);
+}
+
+TEST_P(EndToEndTest, 8ByteConnectionId) {
+  client_config_.SetBytesForConnectionIdToSend(8);
+  ASSERT_TRUE(Initialize());
+
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+  QuicPacketHeader* header = QuicConnectionPeer::GetLastHeader(
+      client_->client()->session()->connection());
+  EXPECT_EQ(PACKET_8BYTE_CONNECTION_ID,
+            header->public_header.connection_id_length);
+}
+
+TEST_P(EndToEndTest, 15ByteConnectionId) {
+  client_config_.SetBytesForConnectionIdToSend(15);
+  ASSERT_TRUE(Initialize());
+
+  // Our server is permissive and allows for out of bounds values.
+  EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+  QuicPacketHeader* header = QuicConnectionPeer::GetLastHeader(
+      client_->client()->session()->connection());
+  EXPECT_EQ(PACKET_8BYTE_CONNECTION_ID,
+            header->public_header.connection_id_length);
 }
 
 TEST_P(EndToEndTest, ResetConnection) {
@@ -1125,19 +1142,16 @@ class WrongAddressWriter : public QuicPacketWriterWrapper {
     self_address_ = IPEndPoint(ip, 0);
   }
 
-  virtual WriteResult WritePacket(
-      const char* buffer,
-      size_t buf_len,
-      const IPAddressNumber& real_self_address,
-      const IPEndPoint& peer_address) OVERRIDE {
+  WriteResult WritePacket(const char* buffer,
+                          size_t buf_len,
+                          const IPAddressNumber& real_self_address,
+                          const IPEndPoint& peer_address) override {
     // Use wrong address!
     return QuicPacketWriterWrapper::WritePacket(
         buffer, buf_len, self_address_.address(), peer_address);
   }
 
-  virtual bool IsWriteBlockedDataBuffered() const OVERRIDE {
-    return false;
-  }
+  bool IsWriteBlockedDataBuffered() const override { return false; }
 
   IPEndPoint self_address_;
 };
@@ -1215,47 +1229,7 @@ TEST_P(EndToEndTest, ConnectionMigrationClientPortChanged) {
   EXPECT_NE(old_address.port(), new_address.port());
 }
 
-
-TEST_P(EndToEndTest, DifferentFlowControlWindowsQ019) {
-  // TODO(rjshade): Remove this test when removing QUIC_VERSION_19.
-  // Client and server can set different initial flow control receive windows.
-  // These are sent in CHLO/SHLO. Tests that these values are exchanged properly
-  // in the crypto handshake.
-
-  const uint32 kClientIFCW = 123456;
-  set_client_initial_flow_control_receive_window(kClientIFCW);
-
-  const uint32 kServerIFCW = 654321;
-  set_server_initial_flow_control_receive_window(kServerIFCW);
-
-  ASSERT_TRUE(Initialize());
-  if (negotiated_version_ > QUIC_VERSION_19) {
-    return;
-  }
-
-  // Values are exchanged during crypto handshake, so wait for that to finish.
-  client_->client()->WaitForCryptoHandshakeConfirmed();
-  server_thread_->WaitForCryptoHandshakeConfirmed();
-
-  // Client should have the right value for server's receive window.
-  EXPECT_EQ(kServerIFCW, client_->client()
-                             ->session()
-                             ->config()
-                             ->ReceivedInitialFlowControlWindowBytes());
-
-  // Server should have the right value for client's receive window.
-  server_thread_->Pause();
-  QuicDispatcher* dispatcher =
-      QuicServerPeer::GetDispatcher(server_thread_->server());
-  QuicSession* session = dispatcher->session_map().begin()->second;
-  EXPECT_EQ(kClientIFCW,
-            session->config()->ReceivedInitialFlowControlWindowBytes());
-  server_thread_->Resume();
-}
-
-TEST_P(EndToEndTest, DifferentFlowControlWindowsQ020) {
-  // TODO(rjshade): Rename to DifferentFlowControlWindows when removing
-  // QUIC_VERSION_19.
+TEST_P(EndToEndTest, DifferentFlowControlWindows) {
   // Client and server can set different initial flow control receive windows.
   // These are sent in CHLO/SHLO. Tests that these values are exchanged properly
   // in the crypto handshake.
@@ -1270,9 +1244,6 @@ TEST_P(EndToEndTest, DifferentFlowControlWindowsQ020) {
   set_server_initial_session_flow_control_receive_window(kServerSessionIFCW);
 
   ASSERT_TRUE(Initialize());
-  if (negotiated_version_ <= QUIC_VERSION_19) {
-    return;
-  }
 
   // Values are exchanged during crypto handshake, so wait for that to finish.
   client_->client()->WaitForCryptoHandshakeConfirmed();
@@ -1324,9 +1295,6 @@ TEST_P(EndToEndTest, HeadersAndCryptoStreamsNoConnectionFlowControl) {
   set_server_initial_session_flow_control_receive_window(kSessionIFCW);
 
   ASSERT_TRUE(Initialize());
-  if (negotiated_version_ < QUIC_VERSION_21) {
-    return;
-  }
 
   // Wait for crypto handshake to finish. This should have contributed to the
   // crypto stream flow control window, but not affected the session flow
@@ -1385,6 +1353,99 @@ TEST_P(EndToEndTest, RequestWithNoBodyWillNeverSendStreamFrameWithFIN) {
   QuicSession* session = dispatcher->session_map().begin()->second;
   EXPECT_EQ(0u, QuicSessionPeer::GetLocallyClosedStreamsHighestOffset(
       session).size());
+  server_thread_->Resume();
+}
+
+TEST_P(EndToEndTest, EnablePacingViaFlag) {
+  // When pacing is enabled via command-line flag, it will always be enabled,
+  // regardless of the config. or the specific congestion-control algorithm.
+  ValueRestore<bool> old_flag(&FLAGS_quic_enable_pacing, true);
+  ASSERT_TRUE(Initialize());
+
+  client_->client()->WaitForCryptoHandshakeConfirmed();
+  server_thread_->WaitForCryptoHandshakeConfirmed();
+
+  // Pause the server so we can access the server's internals without races.
+  server_thread_->Pause();
+  QuicDispatcher* dispatcher =
+      QuicServerPeer::GetDispatcher(server_thread_->server());
+  ASSERT_EQ(1u, dispatcher->session_map().size());
+  const QuicSentPacketManager& client_sent_packet_manager =
+      client_->client()->session()->connection()->sent_packet_manager();
+  const QuicSentPacketManager& server_sent_packet_manager =
+      *GetSentPacketManagerFromFirstServerSession();
+  EXPECT_TRUE(server_sent_packet_manager.using_pacing());
+  EXPECT_TRUE(client_sent_packet_manager.using_pacing());
+}
+
+// A TestAckNotifierDelegate verifies that its OnAckNotification method has been
+// called exactly once on destruction.
+class TestAckNotifierDelegate : public QuicAckNotifier::DelegateInterface {
+ public:
+  TestAckNotifierDelegate() {}
+
+  void OnAckNotification(int /*num_retransmitted_packets*/,
+                         int /*num_retransmitted_bytes*/,
+                         QuicTime::Delta /*delta_largest_observed*/) override {
+    ASSERT_FALSE(has_been_notified_);
+    has_been_notified_ = true;
+  }
+
+  bool has_been_notified() const { return has_been_notified_; }
+
+ protected:
+  // Object is ref counted.
+  ~TestAckNotifierDelegate() override { EXPECT_TRUE(has_been_notified_); }
+
+ private:
+  bool has_been_notified_ = false;
+};
+
+TEST_P(EndToEndTest, AckNotifierWithPacketLossAndBlockedSocket) {
+  // Verify that even in the presence of packet loss and occasionally blocked
+  // socket,  an AckNotifierDelegate will get informed that the data it is
+  // interested in has been ACKed. This tests end-to-end ACK notification, and
+  // demonstrates that retransmissions do not break this functionality.
+  ValueRestore<bool> old_flag(&FLAGS_quic_attach_ack_notifiers_to_packets,
+                              true);
+
+  SetPacketLossPercentage(5);
+  ASSERT_TRUE(Initialize());
+
+  // Wait for the server SHLO before upping the packet loss.
+  client_->client()->WaitForCryptoHandshakeConfirmed();
+  SetPacketLossPercentage(30);
+  client_writer_->set_fake_blocked_socket_percentage(10);
+
+  // Create a POST request and send the headers only.
+  HTTPMessage request(HttpConstants::HTTP_1_1, HttpConstants::POST, "/foo");
+  request.set_has_complete_message(false);
+  client_->SendMessage(request);
+
+  // The TestAckNotifierDelegate will cause a failure if not notified.
+  scoped_refptr<TestAckNotifierDelegate> delegate(new TestAckNotifierDelegate);
+
+  // Test the AckNotifier's ability to track multiple packets by making the
+  // request body exceed the size of a single packet.
+  string request_string =
+      "a request body bigger than one packet" + string(kMaxPacketSize, '.');
+
+  // Send the request, and register the delegate for ACKs.
+  client_->SendData(request_string, true, delegate.get());
+  client_->WaitForResponse();
+  EXPECT_EQ(kFooResponseBody, client_->response_body());
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+
+  // Send another request to flush out any pending ACKs on the server.
+  client_->SendSynchronousRequest(request_string);
+
+  // Pause the server to avoid races.
+  server_thread_->Pause();
+  // Make sure the delegate does get the notification it expects.
+  while (!delegate->has_been_notified()) {
+    // Waits for up to 50 ms.
+    client_->client()->WaitForEvents();
+  }
   server_thread_->Resume();
 }
 

@@ -45,9 +45,15 @@
       ],
       'sources': [
         # Note: file list duplicated in GN build.
+        'chromeos/configure_displays_task.cc',
+        'chromeos/configure_displays_task.h',
         'chromeos/display_configurator.cc',
         'chromeos/display_configurator.h',
+        'chromeos/display_util.cc',
+        'chromeos/display_util.h',
         'chromeos/ozone/display_configurator_ozone.cc',
+        'chromeos/update_display_configuration_task.cc',
+        'chromeos/update_display_configuration_task.h',
         'chromeos/x11/display_configurator_x11.cc',
         'chromeos/x11/display_mode_x11.cc',
         'chromeos/x11/display_mode_x11.h',
@@ -76,6 +82,11 @@
         ['chromeos == 1', {
           'dependencies': [
             'display_types',
+          ],
+        }],
+        ['chromeos == 1 and use_x11 == 1', {
+          'dependencies': [
+            '../gfx/x/gfx_x11.gyp:gfx_x11',
           ],
         }],
         ['use_ozone == 1', {
@@ -109,6 +120,7 @@
       'conditions': [
         ['use_x11 == 1', {
           'dependencies': [
+            '../../build/linux/system.gyp:x11',
             '../../build/linux/system.gyp:xrandr',
             '../../ui/gfx/x/gfx_x11.gyp:gfx_x11',
           ],
@@ -121,6 +133,8 @@
       ],
     },
     {
+      # Used to share stubs with code outside ui/display
+      #
       # GN version: //ui/display:test_util
       'target_name': 'display_test_util',
       'type': '<(component)',
@@ -145,6 +159,24 @@
         }],
       ],
     },
+    # Internal utilities used by display_unittests
+    {
+      'target_name': 'display_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../../base/base.gyp:base',
+        '../../ui/gfx/gfx.gyp:gfx',
+        '../../ui/gfx/gfx.gyp:gfx_geometry',
+      ],
+      'sources': [
+        'chromeos/test/action_logger.cc',
+        'chromeos/test/action_logger.h',
+        'chromeos/test/action_logger_util.cc',
+        'chromeos/test/action_logger_util.h',
+        'chromeos/test/test_native_display_delegate.cc',
+        'chromeos/test/test_native_display_delegate.h',
+      ],
+    },
     {
       # GN version: //ui/display:display_unittests
       'target_name': 'display_unittests',
@@ -159,7 +191,9 @@
         '../..',
       ],
       'sources': [
+        'chromeos/configure_displays_task_unittest.cc',
         'chromeos/display_configurator_unittest.cc',
+        'chromeos/update_display_configuration_task_unittest.cc',
         'chromeos/x11/display_util_x11_unittest.cc',
         'chromeos/x11/native_display_event_dispatcher_x11_unittest.cc',
         'util/display_util_unittest.cc',
@@ -169,6 +203,7 @@
         ['chromeos == 1', {
           'dependencies': [
             'display',
+            'display_test_support',
             'display_test_util',
             'display_types',
           ],

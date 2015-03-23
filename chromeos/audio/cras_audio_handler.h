@@ -179,28 +179,34 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // we activate the new nodes with the same type(input/output).
   virtual void ChangeActiveNodes(const NodeIdList& new_active_ids);
 
+  // Swaps the left and right channel of the internal speaker.
+  // Swap the left and right channel if |swap| is true; otherwise, swap the left
+  // and right channel back to the normal mode.
+  // If the feature is not supported on the device, nothing happens.
+  virtual void SwapInternalSpeakerLeftRightChannel(bool swap);
+
   // Enables error logging.
   virtual void LogErrors();
 
  protected:
   explicit CrasAudioHandler(
       scoped_refptr<AudioDevicesPrefHandler> audio_pref_handler);
-  virtual ~CrasAudioHandler();
+  ~CrasAudioHandler() override;
 
  private:
   friend class CrasAudioHandlerTest;
 
   // CrasAudioClient::Observer overrides.
-  virtual void AudioClientRestarted() OVERRIDE;
-  virtual void NodesChanged() OVERRIDE;
-  virtual void ActiveOutputNodeChanged(uint64 node_id) OVERRIDE;
-  virtual void ActiveInputNodeChanged(uint64 node_id) OVERRIDE;
+  void AudioClientRestarted() override;
+  void NodesChanged() override;
+  void ActiveOutputNodeChanged(uint64 node_id) override;
+  void ActiveInputNodeChanged(uint64 node_id) override;
 
   // AudioPrefObserver overrides.
-  virtual void OnAudioPolicyPrefChanged() OVERRIDE;
+  void OnAudioPolicyPrefChanged() override;
 
   // SessionManagerClient::Observer overrides.
-  virtual void EmitLoginPromptVisibleCalled() OVERRIDE;
+  void EmitLoginPromptVisibleCalled() override;
 
   // Sets the active audio output/input node to the node with |node_id|.
   // If |notify|, notifies Active*NodeChange.
@@ -240,9 +246,8 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   void SetInputNodeGainPercent(uint64 node_id, int gain_percent);
 
-  // Sets input mute state to |mute_on| internally, returns true if input mute
-  // is set.
-  bool SetInputMuteInternal(bool mute_on);
+  // Sets input mute state to |mute_on| internally.
+  void SetInputMuteInternal(bool mute_on);
 
   // Calling dbus to get nodes data.
   void GetNodes();
@@ -264,7 +269,10 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
 
   // Returns true if there is any device change for for input or output,
   // specified by |is_input|.
-  bool HasDeviceChange(const AudioNodeList& new_nodes, bool is_input);
+  // The new discovered nodes are returned in |new_discovered|.
+  bool HasDeviceChange(const AudioNodeList& new_nodes,
+                       bool is_input,
+                       AudioNodeList* new_discovered);
 
   // Handles dbus callback for GetNodes.
   void HandleGetNodes(const chromeos::AudioNodeList& node_list, bool success);
@@ -285,9 +293,15 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   // Removes |node_id| from additional active nodes.
   void RemoveActiveNodeInternal(uint64 node_id, bool notify);
 
-  // Returns true if |device| is not found in audio_devices_, or it is found
-  // but changed its |active| property.
-  bool FoundNewOrChangedDevice(const AudioDevice& device);
+  enum DeviceStatus {
+    OLD_DEVICE,
+    NEW_DEVICE,
+    CHANGED_DEVICE,
+  };
+
+  // Checks if |device| is a newly discovered, changed, or existing device for
+  // the nodes sent from NodesChanged signal.
+  DeviceStatus CheckDeviceStatus(const AudioDevice& device);
 
   void NotifyActiveNodeChanged(bool is_input);
 
@@ -310,7 +324,6 @@ class CHROMEOS_EXPORT CrasAudioHandler : public CrasAudioClient::Observer,
   bool has_alternative_output_;
 
   bool output_mute_locked_;
-  bool input_mute_locked_;
 
   // Failures are not logged at startup, since CRAS may not be running yet.
   bool log_errors_;

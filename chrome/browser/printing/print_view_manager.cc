@@ -14,7 +14,7 @@
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager_observer.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
-#include "chrome/common/print_messages.h"
+#include "components/printing/common/print_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 
@@ -46,7 +46,7 @@ PrintViewManager::~PrintViewManager() {
   DCHECK_EQ(NOT_PREVIEWING, print_preview_state_);
 }
 
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
 bool PrintViewManager::PrintForSystemDialogNow() {
   return PrintNowInternal(new PrintMsg_PrintForSystemDialog(routing_id()));
 }
@@ -69,7 +69,7 @@ bool PrintViewManager::BasicPrint() {
     return PrintNow();
   }
 }
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 bool PrintViewManager::PrintPreviewNow(bool selection_only) {
   // Users can send print commands all they want and it is beyond
   // PrintViewManager's control. Just ignore the extra commands.

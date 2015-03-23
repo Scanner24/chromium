@@ -5,7 +5,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/nss/aes_key_nss.h"
+#include "content/child/webcrypto/nss/aes_algorithm_nss.h"
 #include "content/child/webcrypto/nss/key_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
 #include "content/child/webcrypto/status.h"
@@ -120,14 +120,9 @@ Status AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
                         : NssRuntimeSupport::Get()->pk11_decrypt_func();
 
   unsigned int output_len = 0;
-  SECStatus result = encrypt_or_decrypt_func(sym_key,
-                                             CKM_AES_GCM,
-                                             &param,
-                                             buffer_data,
-                                             &output_len,
-                                             buffer->size(),
-                                             data.bytes(),
-                                             data.byte_length());
+  SECStatus result = encrypt_or_decrypt_func(
+      sym_key, CKM_AES_GCM, &param, buffer_data, &output_len, buffer->size(),
+      data.bytes(), data.byte_length());
 
   if (result != SECSuccess)
     return Status::OperationError();
@@ -143,36 +138,39 @@ class AesGcmImplementation : public AesAlgorithm {
  public:
   AesGcmImplementation() : AesAlgorithm(CKM_AES_GCM, "GCM") {}
 
-  virtual Status VerifyKeyUsagesBeforeImportKey(
+  Status VerifyKeyUsagesBeforeImportKey(
       blink::WebCryptoKeyFormat format,
-      blink::WebCryptoKeyUsageMask usage_mask) const OVERRIDE {
+      blink::WebCryptoKeyUsageMask usages) const override {
     // Prevent importing AES-GCM keys if it is unavailable.
     Status status = NssSupportsAesGcm();
     if (status.IsError())
       return status;
-    return AesAlgorithm::VerifyKeyUsagesBeforeImportKey(format, usage_mask);
+    return AesAlgorithm::VerifyKeyUsagesBeforeImportKey(format, usages);
   }
 
-  virtual Status VerifyKeyUsagesBeforeGenerateKey(
-      blink::WebCryptoKeyUsageMask usage_mask) const OVERRIDE {
+  Status GenerateKey(const blink::WebCryptoAlgorithm& algorithm,
+                     bool extractable,
+                     blink::WebCryptoKeyUsageMask usages,
+                     GenerateKeyResult* result) const override {
     // Prevent generating AES-GCM keys if it is unavailable.
     Status status = NssSupportsAesGcm();
     if (status.IsError())
       return status;
-    return AesAlgorithm::VerifyKeyUsagesBeforeGenerateKey(usage_mask);
+
+    return AesAlgorithm::GenerateKey(algorithm, extractable, usages, result);
   }
 
-  virtual Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     return AesGcmEncryptDecrypt(ENCRYPT, algorithm, key, data, buffer);
   }
 
-  virtual Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     return AesGcmEncryptDecrypt(DECRYPT, algorithm, key, data, buffer);
   }
 };

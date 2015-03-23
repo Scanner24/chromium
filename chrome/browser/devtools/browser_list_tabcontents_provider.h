@@ -5,34 +5,23 @@
 #ifndef CHROME_BROWSER_DEVTOOLS_BROWSER_LIST_TABCONTENTS_PROVIDER_H_
 #define CHROME_BROWSER_DEVTOOLS_BROWSER_LIST_TABCONTENTS_PROVIDER_H_
 
-#include <set>
-#include <string>
-
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/devtools_http_handler_delegate.h"
 
 class BrowserListTabContentsProvider
     : public content::DevToolsHttpHandlerDelegate {
  public:
-  static void EnableTethering();
-
   explicit BrowserListTabContentsProvider(
       chrome::HostDesktopType host_desktop_type);
-  virtual ~BrowserListTabContentsProvider();
+  ~BrowserListTabContentsProvider() override;
 
-  // DevToolsHttpProtocolHandler::Delegate overrides.
-  virtual std::string GetDiscoveryPageHTML() OVERRIDE;
-  virtual bool BundlesFrontendResources() OVERRIDE;
-  virtual base::FilePath GetDebugFrontendDir() OVERRIDE;
-  virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
-      net::StreamListenSocket::Delegate* delegate,
-      std::string* name) OVERRIDE;
+  // DevToolsHttpHandlerDelegate implementation.
+  std::string GetDiscoveryPageHTML() override;
+  bool BundlesFrontendResources() override;
+  base::FilePath GetDebugFrontendDir() override;
 
  private:
   chrome::HostDesktopType host_desktop_type_;
-  int last_tethering_port_;
   DISALLOW_COPY_AND_ASSIGN(BrowserListTabContentsProvider);
 };
 

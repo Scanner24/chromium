@@ -9,8 +9,8 @@ import unittest
 
 from telemetry.core import browser_options
 from telemetry.core.backends.remote import trybot_browser_finder
-from telemetry.unittest import simple_mock
-from telemetry.unittest import system_stub
+from telemetry.unittest_util import simple_mock
+from telemetry.unittest_util import system_stub
 
 
 class TrybotBrowserFinderTest(unittest.TestCase):
@@ -204,7 +204,7 @@ class TrybotBrowserFinderTest(unittest.TestCase):
         'trybot-android-nexus4', 'somebranch', 'tools/run-perf-test.cfg')
     self.assertEquals(
         ('config = {\n'
-         '  "command": "./tools/perf/run_measurement '
+         '  "command": "./tools/perf/run_benchmark '
          '--browser=android-chrome-shell sunspider",\n'
          '  "max_time_minutes": "120",\n'
          '  "repeat_count": "1",\n'
@@ -216,7 +216,7 @@ class TrybotBrowserFinderTest(unittest.TestCase):
         'trybot-mac-10-9', 'currentwork', 'tools/run-perf-test.cfg')
     self.assertEquals(
         ('config = {\n'
-         '  "command": "./tools/perf/run_measurement '
+         '  "command": "./tools/perf/run_benchmark '
          '--browser=release sunspider",\n'
          '  "max_time_minutes": "120",\n'
          '  "repeat_count": "1",\n'
@@ -228,10 +228,9 @@ class TrybotBrowserFinderTest(unittest.TestCase):
         'trybot-mac-10-9', 'blinkbranch', 'Tools/run-perf-test.cfg', True)
     self.assertEquals(
         ('config = {\n'
-         '  "command": "./tools/perf/run_measurement '
+         '  "command": "./tools/perf/run_benchmark '
          '--browser=release sunspider",\n'
          '  "max_time_minutes": "120",\n'
          '  "repeat_count": "1",\n'
          '  "truncate_percent": "0"\n'
          '}'), config)
-

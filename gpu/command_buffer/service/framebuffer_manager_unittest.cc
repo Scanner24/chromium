@@ -21,6 +21,7 @@ namespace {
 
 const GLint kMaxTextureSize = 64;
 const GLint kMaxCubemapSize = 64;
+const GLint kMaxRectangleTextureSize = 64;
 const GLint kMaxRenderbufferSize = 64;
 const GLint kMaxSamples = 4;
 const uint32 kMaxDrawBuffers = 16;
@@ -38,12 +39,13 @@ class FramebufferManagerTest : public GpuServiceTest {
                          new FeatureInfo(),
                          kMaxTextureSize,
                          kMaxCubemapSize,
+                         kMaxRectangleTextureSize,
                          kUseDefaultTextures),
         renderbuffer_manager_(NULL,
                               kMaxRenderbufferSize,
                               kMaxSamples,
                               kDepth24Supported) {}
-  virtual ~FramebufferManagerTest() {
+  ~FramebufferManagerTest() override {
     manager_.Destroy(false);
     texture_manager_.Destroy(false);
     renderbuffer_manager_.Destroy(false);
@@ -114,21 +116,22 @@ class FramebufferInfoTest : public GpuServiceTest {
                                               feature_info_.get(),
                                               kMaxTextureSize,
                                               kMaxCubemapSize,
+                                              kMaxRectangleTextureSize,
                                               kUseDefaultTextures));
   }
-  virtual ~FramebufferInfoTest() {
+  ~FramebufferInfoTest() override {
     manager_.Destroy(false);
     texture_manager_->Destroy(false);
     renderbuffer_manager_.Destroy(false);
   }
 
  protected:
-  virtual void SetUp() {
-    InitializeContext("", "");
+  void SetUp() override {
+    InitializeContext("2.0", "GL_EXT_framebuffer_object");
   }
 
   void InitializeContext(const char* gl_version, const char* extensions) {
-    GpuServiceTest::SetUp();
+    GpuServiceTest::SetUpWithGLVersion(gl_version, extensions);
     TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(gl_.get(),
         extensions, "", gl_version);
     feature_info_->Initialize();
@@ -673,11 +676,10 @@ class FramebufferInfoFloatTest : public FramebufferInfoTest {
   FramebufferInfoFloatTest()
     : FramebufferInfoTest() {
   }
-  virtual ~FramebufferInfoFloatTest() {
-  }
+  ~FramebufferInfoFloatTest() override {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     InitializeContext("OpenGL ES 3.0",
         "GL_OES_texture_float GL_EXT_color_buffer_float");
   }

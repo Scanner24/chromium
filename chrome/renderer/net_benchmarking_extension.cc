@@ -43,9 +43,9 @@ class NetBenchmarkingWrapper : public v8::Extension {
         "};"
         ) {}
 
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
+  v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate* isolate,
-      v8::Handle<v8::String> name) OVERRIDE {
+      v8::Handle<v8::String> name) override {
     if (name->Equals(v8::String::NewFromUtf8(isolate, "ClearCache"))) {
       return v8::FunctionTemplate::New(isolate, ClearCache);
     } else if (name->Equals(v8::String::NewFromUtf8(
@@ -70,16 +70,14 @@ class NetBenchmarkingWrapper : public v8::Extension {
 
   static void ClearHostResolverCache(
       const v8::FunctionCallbackInfo<v8::Value>& args) {
-    int rv;
     content::RenderThread::Get()->Send(
-        new ChromeViewHostMsg_ClearHostResolverCache(&rv));
+        new ChromeViewHostMsg_ClearHostResolverCache());
   }
 
   static void ClearPredictorCache(
       const v8::FunctionCallbackInfo<v8::Value>& args) {
-    int rv;
     content::RenderThread::Get()->Send(
-        new ChromeViewHostMsg_ClearPredictorCache(&rv));
+        new ChromeViewHostMsg_ClearPredictorCache());
   }
 
   static void CloseConnections(

@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,13 +24,18 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_set.h"
 
 using extensions::Extension;
+using extensions::TestManagementPolicyProvider;
 
 ExtensionSettingsUIBrowserTest::ExtensionSettingsUIBrowserTest()
-    : profile_(NULL) {}
+    : profile_(NULL),
+      policy_provider_(TestManagementPolicyProvider::PROHIBIT_MODIFY_STATUS |
+                       TestManagementPolicyProvider::MUST_REMAIN_ENABLED |
+                       TestManagementPolicyProvider::MUST_REMAIN_INSTALLED) {}
 
 ExtensionSettingsUIBrowserTest::~ExtensionSettingsUIBrowserTest() {}
 
@@ -56,6 +62,11 @@ void ExtensionSettingsUIBrowserTest::InstallGoodExtension() {
   InstallExtension(extensions_data_dir.AppendASCII("good.crx"));
 }
 
+void ExtensionSettingsUIBrowserTest::AddManagedPolicyProvider() {
+  auto* extension_service = extensions::ExtensionSystem::Get(GetProfile());
+  extension_service->management_policy()->RegisterProvider(&policy_provider_);
+}
+
 class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
  public:
   explicit MockAutoConfirmExtensionInstallPrompt(
@@ -63,10 +74,9 @@ class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
     : ExtensionInstallPrompt(web_contents) {}
 
   // Proceed without confirmation prompt.
-  virtual void ConfirmInstall(
-      Delegate* delegate,
-      const Extension* extension,
-      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
+  void ConfirmInstall(Delegate* delegate,
+                      const Extension* extension,
+                      const ShowDialogCallback& show_dialog_callback) override {
     delegate->InstallUIProceed();
   }
 };
@@ -76,8 +86,10 @@ const Extension* ExtensionSettingsUIBrowserTest::InstallExtension(
   Profile* profile = this->GetProfile();
   ExtensionService* service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
+  extensions::ExtensionRegistry* registry =
+      extensions::ExtensionRegistry::Get(profile);
   service->set_show_extensions_prompts(false);
-  size_t num_before = service->extensions()->size();
+  size_t num_before = registry->enabled_extensions().size();
   {
     scoped_ptr<ExtensionInstallPrompt> install_ui;
     install_ui.reset(new MockAutoConfirmExtensionInstallPrompt(
@@ -106,16 +118,15 @@ const Extension* ExtensionSettingsUIBrowserTest::InstallExtension(
     observer_->Wait();
   }
 
-  size_t num_after = service->extensions()->size();
+  size_t num_after = registry->enabled_extensions().size();
   if (num_before + 1 != num_after) {
     VLOG(1) << "Num extensions before: " << base::IntToString(num_before)
             << " num after: " << base::IntToString(num_after)
             << " Installed extensions follow:";
 
-    for (extensions::ExtensionSet::const_iterator it =
-             service->extensions()->begin();
-         it != service->extensions()->end(); ++it)
-      VLOG(1) << "  " << (*it)->id();
+    for (const scoped_refptr<const Extension>& extension :
+         registry->enabled_extensions())
+      VLOG(1) << "  " << extension->id();
 
     VLOG(1) << "Errors follow:";
     const std::vector<base::string16>* errors =

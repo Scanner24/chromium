@@ -21,10 +21,10 @@ namespace content {
 class TestRenderFrameHostCreationObserver : public WebContentsObserver {
  public:
   explicit TestRenderFrameHostCreationObserver(WebContents* web_contents);
-  virtual ~TestRenderFrameHostCreationObserver();
+  ~TestRenderFrameHostCreationObserver() override;
 
   // WebContentsObserver implementation.
-  virtual void RenderFrameCreated(RenderFrameHost* render_frame_host) OVERRIDE;
+  void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
 
   RenderFrameHost* last_created_frame() const { return last_created_frame_; }
 
@@ -35,27 +35,30 @@ class TestRenderFrameHostCreationObserver : public WebContentsObserver {
 class TestRenderFrameHost : public RenderFrameHostImpl,
                             public RenderFrameHostTester {
  public:
-  TestRenderFrameHost(RenderViewHostImpl* render_view_host,
+  TestRenderFrameHost(SiteInstance* site_instance,
+                      RenderViewHostImpl* render_view_host,
                       RenderFrameHostDelegate* delegate,
+                      RenderWidgetHostDelegate* rwh_delegate,
                       FrameTree* frame_tree,
                       FrameTreeNode* frame_tree_node,
                       int routing_id,
-                      bool is_swapped_out);
-  virtual ~TestRenderFrameHost();
+                      int flags);
+  ~TestRenderFrameHost() override;
 
   // RenderFrameHostImpl overrides (same values, but in Test* types)
-  virtual TestRenderViewHost* GetRenderViewHost() OVERRIDE;
+  TestRenderViewHost* GetRenderViewHost() override;
 
   // RenderFrameHostTester implementation.
-  virtual TestRenderFrameHost* AppendChild(
-      const std::string& frame_name) OVERRIDE;
-  virtual void SendNavigateWithTransition(
-      int page_id,
-      const GURL& url,
-      ui::PageTransition transition) OVERRIDE;
+  TestRenderFrameHost* AppendChild(const std::string& frame_name) override;
+  void SendNavigate(int page_id, const GURL& url) override;
+  void SendFailedNavigate(int page_id, const GURL& url) override;
+  void SendNavigateWithTransition(int page_id,
+                                  const GURL& url,
+                                  ui::PageTransition transition) override;
+  void SetContentsMimeType(const std::string& mime_type) override;
+  void SendBeforeUnloadACK(bool proceed) override;
+  void SimulateSwapOutACK() override;
 
-  void SendNavigate(int page_id, const GURL& url);
-  void SendFailedNavigate(int page_id, const GURL& url);
   void SendNavigateWithTransitionAndResponseCode(
       int page_id,
       const GURL& url, ui::PageTransition transition,
@@ -82,13 +85,9 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       int response_code,
       const base::FilePath* file_path_for_history_item,
       const std::vector<GURL>& redirects);
-  void SendBeginNavigationWithURL(const GURL& url);
+  void SendBeginNavigationWithURL(const GURL& url, bool has_user_gesture);
 
   void DidDisownOpener();
-
-  void set_contents_mime_type(const std::string& mime_type) {
-    contents_mime_type_ = mime_type;
-  }
 
   // If set, navigations will appear to have cleared the history list in the
   // RenderFrame
@@ -98,8 +97,18 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
     simulate_history_list_was_cleared_ = cleared;
   }
 
-  // TODO(nick): As necessary for testing, override behavior of RenderFrameHost
-  // here.
+  // Advances the RenderFrameHost (and through it the RenderFrameHostManager) to
+  // a state where a new navigation can be committed by a renderer. Currently,
+  // this simulates a BeforeUnload ACK from the renderer.
+  // PlzNavigate: this simulates a BeforeUnload ACK from the renderer, and the
+  // interaction with the IO thread up until the response is ready to commit.
+  void PrepareForCommit(const GURL& url);
+
+  // Simulate receiving a FrameHostMsg_BeforeUnloadHandlersPresent.
+  void SendBeforeUnloadHandlersPresent(bool present);
+
+  // Simulate receiving a FrameHostMsg_UnloadHandlersPresent.
+  void SendUnloadHandlersPresent(bool present);
 
  private:
   TestRenderFrameHostCreationObserver child_creation_observer_;

@@ -19,7 +19,6 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -30,8 +29,11 @@ SyncSetupHelper::~SyncSetupHelper() {}
 
 bool SyncSetupHelper::InitializeSync(Profile* profile) {
   profile_ = profile;
-  client_.reset(
-      ProfileSyncServiceHarness::Create(profile_, username_, password_));
+  client_.reset(ProfileSyncServiceHarness::Create(
+      profile_,
+      username_,
+      password_,
+      ProfileSyncServiceHarness::SigninType::FAKE_SIGNIN));
 
   if (client_->service()->IsSyncEnabledAndLoggedIn())
     return true;

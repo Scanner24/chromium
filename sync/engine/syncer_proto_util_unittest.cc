@@ -184,13 +184,9 @@ TEST(SyncerProtoUtil, NameExtractionTwoNames) {
 
 class SyncerProtoUtilTest : public testing::Test {
  public:
-  virtual void SetUp() {
-    dir_maker_.SetUp();
-  }
+  void SetUp() override { dir_maker_.SetUp(); }
 
-  virtual void TearDown() {
-    dir_maker_.TearDown();
-  }
+  void TearDown() override { dir_maker_.TearDown(); }
 
   syncable::Directory* directory() {
     return dir_maker_.directory();
@@ -257,10 +253,9 @@ class DummyConnectionManager : public ServerConnectionManager {
         send_error_(false),
         access_denied_(false) {}
 
-  virtual ~DummyConnectionManager() {}
-  virtual bool PostBufferWithCachedAuth(
-      PostBufferParams* params,
-      ScopedServerStatusWatcher* watcher) OVERRIDE {
+  ~DummyConnectionManager() override {}
+  bool PostBufferWithCachedAuth(PostBufferParams* params,
+                                ScopedServerStatusWatcher* watcher) override {
     if (send_error_) {
       return false;
     }

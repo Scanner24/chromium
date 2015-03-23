@@ -4,6 +4,9 @@
 
 # Snappy is a compression library we use.
 # TODO(brettw) It's not clear why this needs to be parameterized.
+
+import("//testing/test.gni")
+
 use_snappy = true
 
 defines = [ "LEVELDB_PLATFORM_CHROMIUM=1" ]
@@ -14,17 +17,12 @@ config("leveldatabase_config") {
     "src",
     "src/include",
   ]
-  if (is_win) {
-    include_dirs += [ "src/port/win" ]
-  }
 }
 
 static_library("leveldatabase") {
   sources = [
     "env_chromium.cc",
     "env_chromium.h",
-    "env_chromium_stdio.cc",
-    "env_chromium_stdio.h",
     "env_idb.h",
     "port/port_chromium.cc",
     "port/port_chromium.h",
@@ -72,6 +70,7 @@ static_library("leveldatabase") {
     "src/include/leveldb/write_batch.h",
     "src/port/port.h",
     "src/port/port_example.h",
+
     #"src/port/port_posix.cc",  # We use the chromium port instead of this.
     #"src/port/port_posix.h",
     "src/table/block.cc",
@@ -207,7 +206,7 @@ if (!is_android) {
 
   test("leveldb_crc32c_test") {
     sources = [
-      "src/util/crc32c_test.cc"
+      "src/util/crc32c_test.cc",
     ]
     configs -= [ "//build/config/compiler:chromium_code" ]
     configs += [ "//build/config/compiler:no_chromium_code" ]

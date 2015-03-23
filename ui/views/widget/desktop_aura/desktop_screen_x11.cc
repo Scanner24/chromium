@@ -10,8 +10,8 @@
 // It clashes with out RootWindow.
 #undef RootWindow
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
@@ -112,10 +112,6 @@ DesktopScreenX11::~DesktopScreenX11() {
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopScreenX11, gfx::Screen implementation:
 
-bool DesktopScreenX11::IsDIPEnabled() {
-  return true;
-}
-
 gfx::Point DesktopScreenX11::GetCursorScreenPoint() {
   TRACE_EVENT0("views", "DesktopScreenX11::GetCursorScreenPoint()");
 
@@ -157,6 +153,9 @@ std::vector<gfx::Display> DesktopScreenX11::GetAllDisplays() const {
 
 gfx::Display DesktopScreenX11::GetDisplayNearestWindow(
     gfx::NativeView window) const {
+  if (!window)
+    return GetPrimaryDisplay();
+
   // Getting screen bounds here safely is hard.
   //
   // You'd think we'd be able to just call window->GetBoundsInScreen(), but we

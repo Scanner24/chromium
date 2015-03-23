@@ -53,7 +53,7 @@ void SimulateGPUCrash(Browser* browser) {
 
 class WebGLInfoBarTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     base::FilePath test_dir;
     ASSERT_TRUE(PathService::Get(content::DIR_TEST_DATA, &test_dir));
     gpu_test_dir_ = test_dir.AppendASCII("gpu");
@@ -66,7 +66,8 @@ IN_PROC_BROWSER_TEST_F(WebGLInfoBarTest, DISABLED_ContextLossRaisesInfoBar) {
 #undef MAYBE_ContextLossRaisesInfoBard
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -98,7 +99,8 @@ IN_PROC_BROWSER_TEST_F(WebGLInfoBarTest, DISABLED_ContextLossRaisesInfoBar) {
 IN_PROC_BROWSER_TEST_F(WebGLInfoBarTest, DISABLED_ContextLossInfoBarReload) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 

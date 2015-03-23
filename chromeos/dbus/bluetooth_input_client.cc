@@ -36,30 +36,28 @@ class BluetoothInputClientImpl
  public:
   BluetoothInputClientImpl() : object_manager_(NULL), weak_ptr_factory_(this) {}
 
-  virtual ~BluetoothInputClientImpl() {
+  ~BluetoothInputClientImpl() override {
     object_manager_->UnregisterInterface(
         bluetooth_input::kBluetoothInputInterface);
   }
 
   // BluetoothInputClient override.
-  virtual void AddObserver(BluetoothInputClient::Observer* observer)
-      OVERRIDE {
+  void AddObserver(BluetoothInputClient::Observer* observer) override {
     DCHECK(observer);
     observers_.AddObserver(observer);
   }
 
   // BluetoothInputClient override.
-  virtual void RemoveObserver(BluetoothInputClient::Observer* observer)
-      OVERRIDE {
+  void RemoveObserver(BluetoothInputClient::Observer* observer) override {
     DCHECK(observer);
     observers_.RemoveObserver(observer);
   }
 
   // dbus::ObjectManager::Interface override.
-  virtual dbus::PropertySet* CreateProperties(
+  dbus::PropertySet* CreateProperties(
       dbus::ObjectProxy* object_proxy,
       const dbus::ObjectPath& object_path,
-      const std::string& interface_name) OVERRIDE {
+      const std::string& interface_name) override {
     Properties* properties = new Properties(
         object_proxy,
         interface_name,
@@ -70,8 +68,7 @@ class BluetoothInputClientImpl
   }
 
   // BluetoothInputClient override.
-  virtual Properties* GetProperties(const dbus::ObjectPath& object_path)
-      OVERRIDE {
+  Properties* GetProperties(const dbus::ObjectPath& object_path) override {
     return static_cast<Properties*>(
         object_manager_->GetProperties(
             object_path,
@@ -79,7 +76,7 @@ class BluetoothInputClientImpl
   }
 
  protected:
-  virtual void Init(dbus::Bus* bus) OVERRIDE {
+  void Init(dbus::Bus* bus) override {
     object_manager_ = bus->GetObjectManager(
         bluetooth_object_manager::kBluetoothObjectManagerServiceName,
         dbus::ObjectPath(
@@ -91,16 +88,16 @@ class BluetoothInputClientImpl
  private:
   // Called by dbus::ObjectManager when an object with the input interface
   // is created. Informs observers.
-  virtual void ObjectAdded(const dbus::ObjectPath& object_path,
-                           const std::string& interface_name) OVERRIDE {
+  void ObjectAdded(const dbus::ObjectPath& object_path,
+                   const std::string& interface_name) override {
     FOR_EACH_OBSERVER(BluetoothInputClient::Observer, observers_,
                       InputAdded(object_path));
   }
 
   // Called by dbus::ObjectManager when an object with the input interface
   // is removed. Informs observers.
-  virtual void ObjectRemoved(const dbus::ObjectPath& object_path,
-                             const std::string& interface_name) OVERRIDE {
+  void ObjectRemoved(const dbus::ObjectPath& object_path,
+                     const std::string& interface_name) override {
     FOR_EACH_OBSERVER(BluetoothInputClient::Observer, observers_,
                       InputRemoved(object_path));
   }

@@ -7,7 +7,7 @@
 #include "ash/wm/window_animations.h"
 #include "grit/ash_resources.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/image_view.h"
@@ -54,7 +54,7 @@ class PopupMessage::MessageBubble : public views::BubbleDelegateView {
 
  private:
   // views::View overrides:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
   // Each component (width/height) can force a size override for that component
   // if not 0.
@@ -108,7 +108,7 @@ PopupMessage::MessageBubble::MessageBubble(const base::string16& caption,
   //       |                                                 |-
   //       +-------------------------------------------------+
   //             |------------details container--------------|
-  // Note that the icon, caption and massage are optional.
+  // Note that the icon, caption and message are optional.
 
   // Add the icon to the first column (if there is one).
   if (message_type != ICON_NONE) {

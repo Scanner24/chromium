@@ -90,15 +90,13 @@ class ScopedUmaskSetter {
 
 class SQLConnectionTest : public testing::Test {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     db_path_ = temp_dir_.path().AppendASCII("SQLConnectionTest.db");
     ASSERT_TRUE(db_.Open(db_path_));
   }
 
-  virtual void TearDown() {
-    db_.Close();
-  }
+  void TearDown() override { db_.Close(); }
 
   sql::Connection& db() { return db_; }
   const base::FilePath& db_path() { return db_path_; }
@@ -239,7 +237,10 @@ TEST_F(SQLConnectionTest, ErrorCallback) {
     sql::ScopedErrorCallback sec(
         &db(), base::Bind(&sql::CaptureErrorCallback, &error));
     EXPECT_FALSE(db().Execute("INSERT INTO foo (id) VALUES (12)"));
-    EXPECT_EQ(SQLITE_CONSTRAINT, error);
+
+    // Later versions of SQLite throw SQLITE_CONSTRAINT_UNIQUE.  The specific
+    // sub-error isn't really important.
+    EXPECT_EQ(SQLITE_CONSTRAINT, (error&0xff));
   }
 
   // Callback is no longer in force due to reset.
@@ -450,12 +451,20 @@ TEST_F(SQLConnectionTest, RazeNOTADB) {
   }
   ASSERT_TRUE(base::PathExists(db_path()));
 
-  // SQLite will successfully open the handle, but will fail with
-  // SQLITE_IOERR_SHORT_READ on pragma statemenets which read the
-  // header.
+  // SQLite will successfully open the handle, but fail when running PRAGMA
+  // statements that access the database.
   {
     sql::ScopedErrorIgnorer ignore_errors;
-    ignore_errors.IgnoreError(SQLITE_IOERR_SHORT_READ);
+
+    // Earlier versions of Chromium compiled against SQLite 3.6.7.3, which
+    // returned SQLITE_IOERR_SHORT_READ in this case.  Some platforms may still
+    // compile against an earlier SQLite via USE_SYSTEM_SQLITE.
+    if (ignore_errors.SQLiteLibVersionNumber() < 3008007) {
+      ignore_errors.IgnoreError(SQLITE_IOERR_SHORT_READ);
+    } else {
+      ignore_errors.IgnoreError(SQLITE_NOTADB);
+    }
+
     EXPECT_TRUE(db().Open(db_path()));
     ASSERT_TRUE(ignore_errors.CheckIgnoredErrors());
   }

@@ -43,15 +43,14 @@ class Logger {
 class FakeUsbMidiDevice : public UsbMidiDevice {
  public:
   explicit FakeUsbMidiDevice(Logger* logger) : logger_(logger) {}
-  virtual ~FakeUsbMidiDevice() {}
+  ~FakeUsbMidiDevice() override {}
 
-  virtual std::vector<uint8> GetDescriptor() OVERRIDE {
+  std::vector<uint8> GetDescriptor() override {
     logger_->AddLog("UsbMidiDevice::GetDescriptor\n");
     return descriptor_;
   }
 
-  virtual void Send(int endpoint_number,
-                    const std::vector<uint8>& data) OVERRIDE {
+  void Send(int endpoint_number, const std::vector<uint8>& data) override {
     logger_->AddLog("UsbMidiDevice::Send ");
     logger_->AddLog(base::StringPrintf("endpoint = %d data =",
                                        endpoint_number));
@@ -77,17 +76,29 @@ class FakeMidiManagerClient : public MidiManagerClient {
       : complete_start_session_(false),
         result_(MIDI_NOT_SUPPORTED),
         logger_(logger) {}
-  virtual ~FakeMidiManagerClient() {}
+  ~FakeMidiManagerClient() override {}
 
-  virtual void CompleteStartSession(int client_id, MidiResult result) OVERRIDE {
+  void AddInputPort(const MidiPortInfo& info) override {
+    input_ports_.push_back(info);
+  }
+
+  void AddOutputPort(const MidiPortInfo& info) override {
+    output_ports_.push_back(info);
+  }
+
+  void SetInputPortState(uint32 port_index, MidiPortState state) override {}
+
+  void SetOutputPortState(uint32 port_index, MidiPortState state) override {}
+
+  void CompleteStartSession(MidiResult result) override {
     complete_start_session_ = true;
     result_ = result;
   }
 
-  virtual void ReceiveMidiData(uint32 port_index,
-                               const uint8* data,
-                               size_t size,
-                               double timestamp) OVERRIDE {
+  void ReceiveMidiData(uint32 port_index,
+                       const uint8* data,
+                       size_t size,
+                       double timestamp) override {
     logger_->AddLog("MidiManagerClient::ReceiveMidiData ");
     logger_->AddLog(base::StringPrintf("port_index = %d data =", port_index));
     for (size_t i = 0; i < size; ++i)
@@ -95,7 +106,7 @@ class FakeMidiManagerClient : public MidiManagerClient {
     logger_->AddLog("\n");
   }
 
-  virtual void AccumulateMidiBytesSent(size_t size) OVERRIDE {
+  void AccumulateMidiBytesSent(size_t size) override {
     logger_->AddLog("MidiManagerClient::AccumulateMidiBytesSent ");
     // Windows has no "%zu".
     logger_->AddLog(base::StringPrintf("size = %u\n",
@@ -104,6 +115,8 @@ class FakeMidiManagerClient : public MidiManagerClient {
 
   bool complete_start_session_;
   MidiResult result_;
+  MidiPortInfoList input_ports_;
+  MidiPortInfoList output_ports_;
 
  private:
   Logger* logger_;
@@ -114,9 +127,9 @@ class FakeMidiManagerClient : public MidiManagerClient {
 class TestUsbMidiDeviceFactory : public UsbMidiDevice::Factory {
  public:
   TestUsbMidiDeviceFactory() {}
-  virtual ~TestUsbMidiDeviceFactory() {}
-  virtual void EnumerateDevices(UsbMidiDeviceDelegate* device,
-                                Callback callback) OVERRIDE {
+  ~TestUsbMidiDeviceFactory() override {}
+  void EnumerateDevices(UsbMidiDeviceDelegate* device,
+                        Callback callback) override {
     callback_ = callback;
   }
 
@@ -130,8 +143,8 @@ class MidiManagerUsbForTesting : public MidiManagerUsb {
  public:
   explicit MidiManagerUsbForTesting(
       scoped_ptr<UsbMidiDevice::Factory> device_factory)
-      : MidiManagerUsb(device_factory.PassAs<UsbMidiDevice::Factory>()) {}
-  virtual ~MidiManagerUsbForTesting() {}
+      : MidiManagerUsb(device_factory.Pass()) {}
+  ~MidiManagerUsbForTesting() override {}
 
   void CallCompleteInitialization(MidiResult result) {
     CompleteInitialization(result);
@@ -148,10 +161,9 @@ class MidiManagerUsbTest : public ::testing::Test {
   MidiManagerUsbTest() : message_loop_(new base::MessageLoop) {
     scoped_ptr<TestUsbMidiDeviceFactory> factory(new TestUsbMidiDeviceFactory);
     factory_ = factory.get();
-    manager_.reset(
-        new MidiManagerUsbForTesting(factory.PassAs<UsbMidiDevice::Factory>()));
+    manager_.reset(new MidiManagerUsbForTesting(factory.Pass()));
   }
-  virtual ~MidiManagerUsbTest() {
+  ~MidiManagerUsbTest() override {
     std::string leftover_logs = logger_.TakeLog();
     if (!leftover_logs.empty()) {
       ADD_FAILURE() << "Log should be empty: " << leftover_logs;
@@ -161,7 +173,7 @@ class MidiManagerUsbTest : public ::testing::Test {
  protected:
   void Initialize() {
     client_.reset(new FakeMidiManagerClient(&logger_));
-    manager_->StartSession(client_.get(), 0);
+    manager_->StartSession(client_.get());
   }
 
   void Finalize() {
@@ -179,10 +191,14 @@ class MidiManagerUsbTest : public ::testing::Test {
   void RunCallbackUntilCallbackInvoked(
       bool result, UsbMidiDevice::Devices* devices) {
     factory_->callback_.Run(result, devices);
-    base::RunLoop run_loop;
-    while (!client_->complete_start_session_)
+    while (!client_->complete_start_session_) {
+      base::RunLoop run_loop;
       run_loop.RunUntilIdle();
+    }
   }
+
+  const MidiPortInfoList& input_ports() { return client_->input_ports_; }
+  const MidiPortInfoList& output_ports() { return client_->output_ports_; }
 
   scoped_ptr<MidiManagerUsbForTesting> manager_;
   scoped_ptr<FakeMidiManagerClient> client_;
@@ -224,8 +240,8 @@ TEST_F(MidiManagerUsbTest, Initialize) {
   RunCallbackUntilCallbackInvoked(true, &devices);
   EXPECT_EQ(MIDI_OK, GetInitializationResult());
 
-  ASSERT_EQ(1u, manager_->input_ports().size());
-  ASSERT_EQ(2u, manager_->output_ports().size());
+  ASSERT_EQ(1u, input_ports().size());
+  ASSERT_EQ(2u, output_ports().size());
   ASSERT_TRUE(manager_->input_stream());
   std::vector<UsbMidiInputStream::JackUniqueKey> keys =
       manager_->input_stream()->RegisteredJackKeysForTesting();
@@ -302,6 +318,50 @@ TEST_F(MidiManagerUsbTest, Send) {
             "0x15 0xf7 0x00 0x00\n"
             "MidiManagerClient::AccumulateMidiBytesSent size = 7\n",
             logger_.TakeLog());
+}
+
+TEST_F(MidiManagerUsbTest, SendFromCompromizedRenderer) {
+  scoped_ptr<FakeUsbMidiDevice> device(new FakeUsbMidiDevice(&logger_));
+  FakeMidiManagerClient client(&logger_);
+  uint8 descriptor[] = {
+    0x12, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x08, 0x86, 0x1a,
+    0x2d, 0x75, 0x54, 0x02, 0x00, 0x02, 0x00, 0x01, 0x09, 0x02,
+    0x75, 0x00, 0x02, 0x01, 0x00, 0x80, 0x30, 0x09, 0x04, 0x00,
+    0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x09, 0x24, 0x01, 0x00,
+    0x01, 0x09, 0x00, 0x01, 0x01, 0x09, 0x04, 0x01, 0x00, 0x02,
+    0x01, 0x03, 0x00, 0x00, 0x07, 0x24, 0x01, 0x00, 0x01, 0x51,
+    0x00, 0x06, 0x24, 0x02, 0x01, 0x02, 0x00, 0x06, 0x24, 0x02,
+    0x01, 0x03, 0x00, 0x06, 0x24, 0x02, 0x02, 0x06, 0x00, 0x09,
+    0x24, 0x03, 0x01, 0x07, 0x01, 0x06, 0x01, 0x00, 0x09, 0x24,
+    0x03, 0x02, 0x04, 0x01, 0x02, 0x01, 0x00, 0x09, 0x24, 0x03,
+    0x02, 0x05, 0x01, 0x03, 0x01, 0x00, 0x09, 0x05, 0x02, 0x02,
+    0x20, 0x00, 0x00, 0x00, 0x00, 0x06, 0x25, 0x01, 0x02, 0x02,
+    0x03, 0x09, 0x05, 0x82, 0x02, 0x20, 0x00, 0x00, 0x00, 0x00,
+    0x05, 0x25, 0x01, 0x01, 0x07,
+  };
+
+  device->SetDescriptor(ToVector(descriptor));
+  uint8 data[] = {
+    0x90, 0x45, 0x7f,
+    0xf0, 0x00, 0x01, 0xf7,
+  };
+
+  Initialize();
+  ScopedVector<UsbMidiDevice> devices;
+  devices.push_back(device.release());
+  EXPECT_FALSE(IsInitializationCallbackInvoked());
+  RunCallbackUntilCallbackInvoked(true, &devices);
+  EXPECT_EQ(MIDI_OK, GetInitializationResult());
+  ASSERT_EQ(2u, manager_->output_streams().size());
+  EXPECT_EQ("UsbMidiDevice::GetDescriptor\n", logger_.TakeLog());
+
+  // The specified port index is invalid. The manager must ignore the request.
+  manager_->DispatchSendMidiData(&client, 99, ToVector(data), 0);
+  EXPECT_EQ("", logger_.TakeLog());
+
+  // The specified port index is invalid. The manager must ignore the request.
+  manager_->DispatchSendMidiData(&client, 2, ToVector(data), 0);
+  EXPECT_EQ("", logger_.TakeLog());
 }
 
 TEST_F(MidiManagerUsbTest, Receive) {

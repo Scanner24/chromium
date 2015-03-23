@@ -40,7 +40,7 @@ UtilityThreadImpl::UtilityThreadImpl() : single_process_(false) {
 }
 
 UtilityThreadImpl::UtilityThreadImpl(const std::string& channel_name)
-    : ChildThread(Options(channel_name, false)),
+    : ChildThreadImpl(Options(channel_name, false)),
       single_process_(true) {
   Init();
 }
@@ -49,14 +49,10 @@ UtilityThreadImpl::~UtilityThreadImpl() {
 }
 
 void UtilityThreadImpl::Shutdown() {
-  ChildThread::Shutdown();
+  ChildThreadImpl::Shutdown();
 
   if (!single_process_)
     blink::shutdown();
-}
-
-bool UtilityThreadImpl::Send(IPC::Message* msg) {
-  return ChildThread::Send(msg);
 }
 
 void UtilityThreadImpl::ReleaseProcessIfNeeded() {
@@ -74,18 +70,6 @@ void UtilityThreadImpl::ReleaseProcessIfNeeded() {
   }
 }
 
-#if defined(OS_WIN)
-
-void UtilityThreadImpl::PreCacheFont(const LOGFONT& log_font) {
-  Send(new ChildProcessHostMsg_PreCacheFont(log_font));
-}
-
-void UtilityThreadImpl::ReleaseCachedFonts() {
-  Send(new ChildProcessHostMsg_ReleaseCachedFonts());
-}
-
-#endif  // OS_WIN
-
 void UtilityThreadImpl::Init() {
   batch_mode_ = false;
   ChildProcess::current()->AddRefProcess();
@@ -94,8 +78,8 @@ void UtilityThreadImpl::Init() {
     // we run the utility thread on separate thread. This means that if any code
     // needs WebKit initialized in the utility process, they need to have
     // another path to support single process mode.
-    webkit_platform_support_.reset(new BlinkPlatformImpl);
-    blink::initialize(webkit_platform_support_.get());
+    blink_platform_impl_.reset(new BlinkPlatformImpl);
+    blink::initialize(blink_platform_impl_.get());
   }
   GetContentClient()->utility()->UtilityThreadStarted();
 }

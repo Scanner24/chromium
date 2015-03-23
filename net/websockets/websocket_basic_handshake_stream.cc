@@ -13,6 +13,7 @@
 #include "base/base64.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
@@ -24,6 +25,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "crypto/random.h"
+#include "net/base/io_buffer.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_body_drainer.h"
@@ -38,13 +40,44 @@
 #include "net/websockets/websocket_deflate_stream.h"
 #include "net/websockets/websocket_deflater.h"
 #include "net/websockets/websocket_extension_parser.h"
+#include "net/websockets/websocket_handshake_challenge.h"
 #include "net/websockets/websocket_handshake_constants.h"
-#include "net/websockets/websocket_handshake_handler.h"
 #include "net/websockets/websocket_handshake_request_info.h"
 #include "net/websockets/websocket_handshake_response_info.h"
 #include "net/websockets/websocket_stream.h"
 
 namespace net {
+
+namespace {
+
+const char kConnectionErrorStatusLine[] = "HTTP/1.1 503 Connection Error";
+
+// TODO(yhirano): Remove these functions once http://crbug.com/399535 is fixed.
+NOINLINE void RunCallbackWithOk(const CompletionCallback& callback,
+                                int result) {
+  DCHECK_EQ(result, OK);
+  callback.Run(OK);
+}
+
+NOINLINE void RunCallbackWithInvalidResponseCausedByRedirect(
+    const CompletionCallback& callback,
+    int result) {
+  DCHECK_EQ(result, ERR_INVALID_RESPONSE);
+  callback.Run(ERR_INVALID_RESPONSE);
+}
+
+NOINLINE void RunCallbackWithInvalidResponse(
+    const CompletionCallback& callback,
+    int result) {
+  DCHECK_EQ(result, ERR_INVALID_RESPONSE);
+  callback.Run(ERR_INVALID_RESPONSE);
+}
+
+NOINLINE void RunCallback(const CompletionCallback& callback, int result) {
+  callback.Run(result);
+}
+
+}  // namespace
 
 // TODO(ricea): If more extensions are added, replace this with a more general
 // mechanism.
@@ -97,7 +130,7 @@ void AddVectorHeaderIfNonEmpty(const char* name,
 GetHeaderResult GetSingleHeaderValue(const HttpResponseHeaders* headers,
                                      const base::StringPiece& name,
                                      std::string* value) {
-  void* state = NULL;
+  void* state = nullptr;
   size_t num_values = 0;
   std::string temp_value;
   while (headers->EnumerateHeader(&state, name, &temp_value)) {
@@ -181,7 +214,7 @@ bool ValidateSubProtocol(
     const std::vector<std::string>& requested_sub_protocols,
     std::string* sub_protocol,
     std::string* failure_message) {
-  void* state = NULL;
+  void* state = nullptr;
   std::string value;
   base::hash_set<std::string> requested_set(requested_sub_protocols.begin(),
                                             requested_sub_protocols.end());
@@ -241,8 +274,8 @@ bool ValidatePerMessageDeflateExtension(const WebSocketExtension& extension,
   static const char kNoContextTakeover[] = "no_context_takeover";
   static const char kMaxWindowBits[] = "max_window_bits";
   const size_t kPrefixLen = arraysize(kClientPrefix) - 1;
-  COMPILE_ASSERT(kPrefixLen == arraysize(kServerPrefix) - 1,
-                 the_strings_server_and_client_must_be_the_same_length);
+  static_assert(kPrefixLen == arraysize(kServerPrefix) - 1,
+                "the strings server and client must be the same length");
   typedef std::vector<WebSocketExtension::Parameter> ParameterVector;
 
   DCHECK_EQ("permessage-deflate", extension.name());
@@ -299,7 +332,7 @@ bool ValidateExtensions(const HttpResponseHeaders* headers,
                         std::string* extensions,
                         std::string* failure_message,
                         WebSocketExtensionParams* params) {
-  void* state = NULL;
+  void* state = nullptr;
   std::string value;
   std::vector<std::string> accepted_extensions;
   // TODO(ricea): If adding support for additional extensions, generalise this
@@ -350,7 +383,7 @@ WebSocketBasicHandshakeStream::WebSocketBasicHandshakeStream(
     std::string* failure_message)
     : state_(connection.release(), using_proxy),
       connect_delegate_(connect_delegate),
-      http_response_info_(NULL),
+      http_response_info_(nullptr),
       requested_sub_protocols_(requested_sub_protocols),
       requested_extensions_(requested_extensions),
       failure_message_(failure_message) {
@@ -405,8 +438,8 @@ int WebSocketBasicHandshakeStream::SendRequest(
                             requested_sub_protocols_,
                             &enriched_headers);
 
-  ComputeSecWebSocketAccept(handshake_challenge,
-                            &handshake_challenge_response_);
+  handshake_challenge_response_ =
+      ComputeSecWebSocketAccept(handshake_challenge);
 
   DCHECK(connect_delegate_);
   scoped_ptr<WebSocketHandshakeRequestInfo> request(
@@ -430,7 +463,8 @@ int WebSocketBasicHandshakeStream::ReadResponseHeaders(
                  callback));
   if (rv == ERR_IO_PENDING)
     return rv;
-  return ValidateResponse(rv);
+  bool is_redirect = false;
+  return ValidateResponse(rv, &is_redirect);
 }
 
 int WebSocketBasicHandshakeStream::ReadResponseBody(
@@ -499,6 +533,15 @@ void WebSocketBasicHandshakeStream::SetPriority(RequestPriority priority) {
   // gone, then copy whatever has happened there over here.
 }
 
+UploadProgress WebSocketBasicHandshakeStream::GetUploadProgress() const {
+  return UploadProgress();
+}
+
+HttpStream* WebSocketBasicHandshakeStream::RenewStreamForAuth() {
+  // Return null because we don't support renewing the stream.
+  return nullptr;
+}
+
 scoped_ptr<WebSocketStream> WebSocketBasicHandshakeStream::Upgrade() {
   // The HttpStreamParser object has a pointer to our ClientSocketHandle. Make
   // sure it does not touch it again before it is destroyed.
@@ -535,7 +578,25 @@ void WebSocketBasicHandshakeStream::SetWebSocketKeyForTesting(
 void WebSocketBasicHandshakeStream::ReadResponseHeadersCallback(
     const CompletionCallback& callback,
     int result) {
-  callback.Run(ValidateResponse(result));
+  bool is_redirect = false;
+  int rv = ValidateResponse(result, &is_redirect);
+
+  // TODO(yhirano): Simplify this statement once http://crbug.com/399535 is
+  // fixed.
+  switch (rv) {
+    case OK:
+      RunCallbackWithOk(callback, rv);
+      break;
+    case ERR_INVALID_RESPONSE:
+      if (is_redirect)
+        RunCallbackWithInvalidResponseCausedByRedirect(callback, rv);
+      else
+        RunCallbackWithInvalidResponse(callback, rv);
+      break;
+    default:
+      RunCallback(callback, rv);
+      break;
+  }
 }
 
 void WebSocketBasicHandshakeStream::OnFinishOpeningHandshake() {
@@ -546,14 +607,17 @@ void WebSocketBasicHandshakeStream::OnFinishOpeningHandshake() {
                                             http_response_info_->response_time);
 }
 
-int WebSocketBasicHandshakeStream::ValidateResponse(int rv) {
+int WebSocketBasicHandshakeStream::ValidateResponse(int rv,
+                                                    bool* is_redirect) {
   DCHECK(http_response_info_);
+  *is_redirect = false;
   // Most net errors happen during connection, so they are not seen by this
   // method. The histogram for error codes is created in
   // Delegate::OnResponseStarted in websocket_stream.cc instead.
   if (rv >= 0) {
     const HttpResponseHeaders* headers = http_response_info_->headers.get();
     const int response_code = headers->response_code();
+    *is_redirect = HttpResponseHeaders::IsRedirectResponseCode(response_code);
     UMA_HISTOGRAM_SPARSE_SLOWLY("Net.WebSocket.ResponseCode", response_code);
     switch (response_code) {
       case HTTP_SWITCHING_PROTOCOLS:
@@ -592,6 +656,16 @@ int WebSocketBasicHandshakeStream::ValidateResponse(int rv) {
     set_failure_message(std::string("Error during WebSocket handshake: ") +
                         ErrorToString(rv));
     OnFinishOpeningHandshake();
+    // Some error codes (for example ERR_CONNECTION_CLOSED) get changed to OK at
+    // higher levels. To prevent an unvalidated connection getting erroneously
+    // upgraded, don't pass through the status code unchanged if it is
+    // HTTP_SWITCHING_PROTOCOLS.
+    if (http_response_info_->headers &&
+        http_response_info_->headers->response_code() ==
+            HTTP_SWITCHING_PROTOCOLS) {
+      http_response_info_->headers->ReplaceStatusLine(
+          kConnectionErrorStatusLine);
+    }
     return rv;
   }
 }

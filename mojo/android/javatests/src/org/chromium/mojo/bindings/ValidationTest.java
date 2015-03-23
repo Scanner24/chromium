@@ -62,10 +62,11 @@ public class ValidationTest extends MojoTestCase {
 
     private static String getStringContent(File f) throws FileNotFoundException {
         Scanner scanner = new Scanner(f).useDelimiter("\\Z");
-        if (scanner.hasNext()) {
-            return scanner.next();
+        StringBuilder result = new StringBuilder();
+        while (scanner.hasNext()) {
+            result.append(scanner.next());
         }
-        return "";
+        return result.toString().trim();
     }
 
     private static List<TestData> getTestData(String prefix)
@@ -97,7 +98,9 @@ public class ValidationTest extends MojoTestCase {
             throws FileNotFoundException {
         List<TestData> testData = getTestData(prefix);
         for (TestData test : testData) {
-            assertNull(test.inputData.getErrorMessage());
+            assertNull("Unable to read: " + test.dataFile.getName()
+                    + ": " + test.inputData.getErrorMessage(),
+                    test.inputData.getErrorMessage());
             List<Handle> handles = new ArrayList<Handle>();
             for (int i = 0; i < test.inputData.getHandlesCount(); ++i) {
                 handles.add(new HandleMock());
@@ -105,13 +108,13 @@ public class ValidationTest extends MojoTestCase {
             Message message = new Message(test.inputData.getData(), handles);
             boolean passed = messageReceiver.accept(message);
             if (passed && !test.expectedResult.equals("PASS")) {
-                fail("Input: " + test.dataFile.getName() +
-                        ": The message should have been refused. Expected error: " +
-                        test.expectedResult);
+                fail("Input: " + test.dataFile.getName()
+                        + ": The message should have been refused. Expected error: "
+                        + test.expectedResult);
             }
             if (!passed && test.expectedResult.equals("PASS")) {
-                fail("Input: " + test.dataFile.getName() +
-                        ": The message should have been accepted.");
+                fail("Input: " + test.dataFile.getName()
+                        + ": The message should have been accepted.");
             }
         }
     }
@@ -189,7 +192,7 @@ public class ValidationTest extends MojoTestCase {
                 new RoutingMessageReceiver(IntegrationTestInterface1.MANAGER.buildStub(null,
                         IntegrationTestInterface1.MANAGER.buildProxy(null,
                                 new SinkMessageReceiver())),
-                        IntegrationTestInterface2TestHelper.
-                                newIntegrationTestInterface2MethodCallback()));
+                        IntegrationTestInterface2TestHelper
+                                .newIntegrationTestInterface2MethodCallback()));
     }
 }

@@ -9,14 +9,15 @@
 #include <windows.h>
 #endif
 
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
@@ -58,8 +59,8 @@
 #include "content/common/sandbox_mac.h"
 #endif
 
-#if defined(ADDRESS_SANITIZER)
-#include <sanitizer/asan_interface.h>
+#if defined(SANITIZER_COVERAGE)
+#include <sanitizer/common_interface_defs.h>
 #endif
 
 const int kGpuTimeout = 10000;
@@ -69,8 +70,8 @@ namespace content {
 namespace {
 
 void GetGpuInfoFromCommandLine(gpu::GPUInfo& gpu_info,
-                               const CommandLine& command_line);
-bool WarmUpSandbox(const CommandLine& command_line);
+                               const base::CommandLine& command_line);
+bool WarmUpSandbox(const base::CommandLine& command_line);
 
 #if !defined(OS_MACOSX)
 bool CollectGraphicsInfo(gpu::GPUInfo& gpu_info);
@@ -104,11 +105,11 @@ bool GpuProcessLogMessageHandler(int severity,
 // Main function for starting the Gpu process.
 int GpuMain(const MainFunctionParams& parameters) {
   TRACE_EVENT0("gpu", "GpuMain");
-  base::debug::TraceLog::GetInstance()->SetProcessName("GPU Process");
-  base::debug::TraceLog::GetInstance()->SetProcessSortIndex(
+  base::trace_event::TraceLog::GetInstance()->SetProcessName("GPU Process");
+  base::trace_event::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventGpuProcessSortIndex);
 
-  const CommandLine& command_line = parameters.command_line;
+  const base::CommandLine& command_line = parameters.command_line;
   if (command_line.HasSwitch(switches::kGpuStartupDialog)) {
     ChildProcess::WaitForDebugger("Gpu");
   }
@@ -277,7 +278,7 @@ int GpuMain(const MainFunctionParams& parameters) {
       // on systems where vendor_id/device_id aren't available.
       if (!command_line.HasSwitch(switches::kDisableGpuDriverBugWorkarounds)) {
         gpu::ApplyGpuDriverBugWorkarounds(
-            gpu_info, const_cast<CommandLine*>(&command_line));
+            gpu_info, const_cast<base::CommandLine*>(&command_line));
       }
 #endif
 
@@ -372,7 +373,7 @@ int GpuMain(const MainFunctionParams& parameters) {
 namespace {
 
 void GetGpuInfoFromCommandLine(gpu::GPUInfo& gpu_info,
-                               const CommandLine& command_line) {
+                               const base::CommandLine& command_line) {
   DCHECK(command_line.HasSwitch(switches::kGpuVendorID) &&
          command_line.HasSwitch(switches::kGpuDeviceID) &&
          command_line.HasSwitch(switches::kGpuDriverVersion));
@@ -391,7 +392,7 @@ void GetGpuInfoFromCommandLine(gpu::GPUInfo& gpu_info,
   GetContentClient()->SetGpuInfo(gpu_info);
 }
 
-bool WarmUpSandbox(const CommandLine& command_line) {
+bool WarmUpSandbox(const base::CommandLine& command_line) {
   {
     TRACE_EVENT0("gpu", "Warm up rand");
     // Warm up the random subsystem, which needs to be done pre-sandbox on all
@@ -411,7 +412,7 @@ bool CollectGraphicsInfo(gpu::GPUInfo& gpu_info) {
       res = false;
       break;
     case gpu::kCollectInfoNonFatalFailure:
-      VLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
+      DVLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
       break;
     case gpu::kCollectInfoNone:
       NOTREACHED();
@@ -430,7 +431,7 @@ bool CanAccessNvidiaDeviceFile() {
   bool res = true;
   base::ThreadRestrictions::AssertIOAllowed();
   if (access("/dev/nvidiactl", R_OK) != 0) {
-    VLOG(1) << "NVIDIA device file /dev/nvidiactl access denied";
+    DVLOG(1) << "NVIDIA device file /dev/nvidiactl access denied";
     res = false;
   }
   return res;
@@ -441,7 +442,7 @@ void CreateDummyGlContext() {
   scoped_refptr<gfx::GLSurface> surface(
       gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size()));
   if (!surface.get()) {
-    VLOG(1) << "gfx::GLSurface::CreateOffscreenGLSurface failed";
+    DVLOG(1) << "gfx::GLSurface::CreateOffscreenGLSurface failed";
     return;
   }
 
@@ -450,7 +451,7 @@ void CreateDummyGlContext() {
   scoped_refptr<gfx::GLContext> context(gfx::GLContext::CreateGLContext(
       NULL, surface.get(), gfx::PreferDiscreteGpu));
   if (!context.get()) {
-    VLOG(1) << "gfx::GLContext::CreateGLContext failed";
+    DVLOG(1) << "gfx::GLContext::CreateGLContext failed";
     return;
   }
 
@@ -458,7 +459,7 @@ void CreateDummyGlContext() {
   if (context->MakeCurrent(surface.get())) {
     context->ReleaseCurrent(surface.get());
   } else {
-    VLOG(1)  << "gfx::GLContext::MakeCurrent failed";
+    DVLOG(1)  << "gfx::GLContext::MakeCurrent failed";
   }
 }
 
@@ -489,7 +490,7 @@ bool StartSandboxLinux(const gpu::GPUInfo& gpu_info,
     LinuxSandbox::StopThread(watchdog_thread);
   }
 
-#if defined(ADDRESS_SANITIZER)
+#if defined(SANITIZER_COVERAGE)
   const std::string sancov_file_name =
       "gpu." + base::Uint64ToString(base::RandUint64());
   LinuxSandbox* linux_sandbox = LinuxSandbox::GetInstance();
@@ -521,6 +522,13 @@ bool StartSandboxWindows(const sandbox::SandboxInterfaceInfo* sandbox_info) {
   // content.
   sandbox::TargetServices* target_services = sandbox_info->target_services;
   if (target_services) {
+#if defined(ADDRESS_SANITIZER)
+    // Bind and leak dbghelp.dll before the token is lowered, otherwise
+    // AddressSanitizer will crash when trying to symbolize a report.
+    if (!LoadLibraryA("dbghelp.dll"))
+      return false;
+#endif
+
     target_services->LowerToken();
     return true;
   }

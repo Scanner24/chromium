@@ -4,10 +4,10 @@
 
 #include "ui/views/widget/widget.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/default_theme_provider.h"
 #include "ui/base/hit_test.h"
@@ -16,6 +16,7 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
 #include "ui/events/event.h"
+#include "ui/events/event_utils.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/menu/menu_controller.h"
@@ -71,19 +72,13 @@ class DefaultWidgetDelegate : public WidgetDelegate {
  public:
   explicit DefaultWidgetDelegate(Widget* widget) : widget_(widget) {
   }
-  virtual ~DefaultWidgetDelegate() {}
+  ~DefaultWidgetDelegate() override {}
 
   // Overridden from WidgetDelegate:
-  virtual void DeleteDelegate() OVERRIDE {
-    delete this;
-  }
-  virtual Widget* GetWidget() OVERRIDE {
-    return widget_;
-  }
-  virtual const Widget* GetWidget() const OVERRIDE {
-    return widget_;
-  }
-  virtual bool ShouldAdvanceFocusToTopLevelWidget() const OVERRIDE {
+  void DeleteDelegate() override { delete this; }
+  Widget* GetWidget() override { return widget_; }
+  const Widget* GetWidget() const override { return widget_; }
+  bool ShouldAdvanceFocusToTopLevelWidget() const override {
     // In most situations where a Widget is used without a delegate the Widget
     // is used as a container, so that we want focus to advance to the top-level
     // widget. A good example of this is the find bar.
@@ -114,7 +109,6 @@ Widget::InitParams::InitParams()
       remove_standard_frame(false),
       use_system_default_icon(false),
       show_state(ui::SHOW_STATE_DEFAULT),
-      double_buffer(false),
       parent(NULL),
       native_widget(NULL),
       desktop_window_tree_host(NULL),
@@ -138,7 +132,6 @@ Widget::InitParams::InitParams(Type type)
       remove_standard_frame(false),
       use_system_default_icon(false),
       show_state(ui::SHOW_STATE_DEFAULT),
-      double_buffer(false),
       parent(NULL),
       native_widget(NULL),
       desktop_window_tree_host(NULL),
@@ -401,7 +394,7 @@ void Widget::RemoveObserver(WidgetObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool Widget::HasObserver(WidgetObserver* observer) {
+bool Widget::HasObserver(const WidgetObserver* observer) const {
   return observers_.HasObserver(observer);
 }
 
@@ -413,7 +406,7 @@ void Widget::RemoveRemovalsObserver(WidgetRemovalsObserver* observer) {
   removals_observers_.RemoveObserver(observer);
 }
 
-bool Widget::HasRemovalsObserver(WidgetRemovalsObserver* observer) {
+bool Widget::HasRemovalsObserver(const WidgetRemovalsObserver* observer) const {
   return removals_observers_.HasObserver(observer);
 }
 
@@ -447,9 +440,9 @@ void Widget::NotifyNativeViewHierarchyChanged() {
 }
 
 void Widget::NotifyWillRemoveView(View* view) {
-    FOR_EACH_OBSERVER(WidgetRemovalsObserver,
-                      removals_observers_,
-                      OnWillRemoveView(this, view));
+  FOR_EACH_OBSERVER(WidgetRemovalsObserver,
+                    removals_observers_,
+                    OnWillRemoveView(this, view));
 }
 
 // Converted methods (see header) ----------------------------------------------
@@ -530,6 +523,14 @@ void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
   native_widget_->SetVisibilityChangedAnimationsEnabled(value);
 }
 
+void Widget::SetVisibilityAnimationDuration(const base::TimeDelta& duration) {
+  native_widget_->SetVisibilityAnimationDuration(duration);
+}
+
+void Widget::SetVisibilityAnimationTransition(VisibilityTransition transition) {
+  native_widget_->SetVisibilityAnimationTransition(transition);
+}
+
 Widget::MoveLoopResult Widget::RunMoveLoop(
     const gfx::Vector2d& drag_offset,
     MoveLoopSource source,
@@ -599,7 +600,9 @@ bool Widget::IsClosed() const {
 }
 
 void Widget::Show() {
-  TRACE_EVENT0("views", "Widget::Show");
+  const ui::Layer* layer = GetLayer();
+  TRACE_EVENT1("views", "Widget::Show", "layer",
+               layer ? layer->name() : "none");
   if (non_client_view_) {
     // While initializing, the kiosk mode will go to full screen before the
     // widget gets shown. In that case we stay in full screen mode, regardless
@@ -756,6 +759,12 @@ const FocusManager* Widget::GetFocusManager() const {
   return toplevel_widget ? toplevel_widget->focus_manager_.get() : NULL;
 }
 
+ui::TextInputClient* Widget::GetFocusedTextInputClient() {
+  FocusManager* focus_manager = GetFocusManager();
+  View* view = focus_manager ? focus_manager->GetFocusedView() : nullptr;
+  return view ? view->GetTextInputClient() : nullptr;
+}
+
 InputMethod* Widget::GetInputMethod() {
   return const_cast<InputMethod*>(
       const_cast<const Widget*>(this)->GetInputMethod());
@@ -788,7 +797,14 @@ void Widget::RunShellDrag(View* view,
                           ui::DragDropTypes::DragEventSource source) {
   dragged_view_ = view;
   OnDragWillStart();
+
+  WidgetDeletionObserver widget_deletion_observer(this);
   native_widget_->RunShellDrag(view, data, location, operation, source);
+
+  // The widget may be destroyed during the drag operation.
+  if (!widget_deletion_observer.IsWidgetAlive())
+    return;
+
   // If the view is removed during the drag operation, dragged_view_ is set to
   // NULL.
   if (view && dragged_view_ == view) {
@@ -854,6 +870,10 @@ void Widget::LocaleChanged() {
   root_view_->LocaleChanged();
 }
 
+void Widget::DeviceScaleFactorChanged(float device_scale_factor) {
+  root_view_->DeviceScaleFactorChanged(device_scale_factor);
+}
+
 void Widget::SetFocusTraversableParent(FocusTraversable* parent) {
   root_view_->SetFocusTraversableParent(parent);
 }
@@ -912,11 +932,7 @@ const ui::Compositor* Widget::GetCompositor() const {
   return native_widget_->GetCompositor();
 }
 
-ui::Compositor* Widget::GetCompositor() {
-  return native_widget_->GetCompositor();
-}
-
-ui::Layer* Widget::GetLayer() {
+const ui::Layer* Widget::GetLayer() const {
   return native_widget_->GetLayer();
 }
 
@@ -976,9 +992,8 @@ gfx::Rect Widget::GetWorkAreaBoundsInScreen() const {
 
 void Widget::SynthesizeMouseMoveEvent() {
   last_mouse_event_was_move_ = false;
-  ui::MouseEvent mouse_event(ui::ET_MOUSE_MOVED,
-                             last_mouse_event_position_,
-                             last_mouse_event_position_,
+  ui::MouseEvent mouse_event(ui::ET_MOUSE_MOVED, last_mouse_event_position_,
+                             last_mouse_event_position_, ui::EventTimeForNow(),
                              ui::EF_IS_SYNTHESIZED, 0);
   root_view_->OnMouseMoved(mouse_event);
 }

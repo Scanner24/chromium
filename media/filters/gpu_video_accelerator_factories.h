@@ -13,8 +13,6 @@
 #include "media/base/media_export.h"
 #include "media/video/video_encode_accelerator.h"
 
-class SkBitmap;
-
 namespace base {
 class SingleThreadTaskRunner;
 class SharedMemory;
@@ -60,15 +58,8 @@ class MEDIA_EXPORT GpuVideoAcceleratorFactories
 
   virtual void WaitSyncPoint(uint32 sync_point) = 0;
 
-  // Read pixels within |visible_rect| boundaries from a native texture and
-  // store into |pixels| as RGBA.
-  virtual void ReadPixels(uint32 texture_id,
-                          const gfx::Rect& visible_rect,
-                          const SkBitmap& pixels) = 0;
-
-  // Allocate & return a shared memory segment.  Caller is responsible for
-  // Close()ing the returned pointer.
-  virtual base::SharedMemory* CreateSharedMemory(size_t size) = 0;
+  // Allocate & return a shared memory segment.
+  virtual scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) = 0;
 
   // Returns the task runner the video accelerator runs on.
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() = 0;

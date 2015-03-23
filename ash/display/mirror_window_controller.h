@@ -10,8 +10,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/aura/window_tree_host_observer.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/size.h"
 
 namespace aura {
 class Window;
@@ -36,7 +36,7 @@ class MirrorWindowTestApi;
 class ASH_EXPORT MirrorWindowController : public aura::WindowTreeHostObserver {
  public:
   MirrorWindowController();
-  virtual ~MirrorWindowController();
+  ~MirrorWindowController() override;
 
   // Updates the root window's bounds using |display_info|.
   // Creates the new root window if one doesn't exist.
@@ -50,7 +50,7 @@ class ASH_EXPORT MirrorWindowController : public aura::WindowTreeHostObserver {
   void Close();
 
   // aura::WindowTreeHostObserver overrides:
-  virtual void OnHostResized(const aura::WindowTreeHost* host) OVERRIDE;
+  void OnHostResized(const aura::WindowTreeHost* host) override;
 
   // Return the root window used to mirror the content. NULL if the
   // display is not mirrored by the compositor path.

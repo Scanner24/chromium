@@ -33,6 +33,7 @@ const CGFloat kMenuXOffsetAdjust = 2.0;
 @interface AvatarBaseController (Private)
 // Shows the avatar bubble.
 - (IBAction)buttonClicked:(id)sender;
+- (IBAction)buttonRightClicked:(id)sender;
 
 - (void)bubbleWillClose:(NSNotification*)notif;
 
@@ -64,7 +65,7 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
       errorController->AddObserver(this);
   }
 
-  virtual ~ProfileInfoUpdateObserver() {
+  ~ProfileInfoUpdateObserver() override {
     g_browser_process->profile_manager()->
         GetProfileInfoCache().RemoveObserver(this);
     SigninErrorController* errorController =
@@ -74,34 +75,37 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
   }
 
   // ProfileInfoCacheObserver:
-  virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE {
+  void OnProfileAdded(const base::FilePath& profile_path) override {
     [avatarController_ updateAvatarButtonAndLayoutParent:YES];
   }
 
-  virtual void OnProfileWasRemoved(
-      const base::FilePath& profile_path,
-      const base::string16& profile_name) OVERRIDE {
-    [avatarController_ updateAvatarButtonAndLayoutParent:YES];
+  void OnProfileWasRemoved(const base::FilePath& profile_path,
+                           const base::string16& profile_name) override {
+    // If deleting the active profile, don't bother updating the avatar
+    // button, as the browser window is being closed anyway.
+    if (profile_->GetPath() != profile_path)
+      [avatarController_ updateAvatarButtonAndLayoutParent:YES];
   }
 
-  virtual void OnProfileNameChanged(
-      const base::FilePath& profile_path,
-      const base::string16& old_profile_name) OVERRIDE {
-    [avatarController_ updateAvatarButtonAndLayoutParent:YES];
+  void OnProfileNameChanged(const base::FilePath& profile_path,
+                            const base::string16& old_profile_name) override {
+    if (profile_->GetPath() == profile_path)
+      [avatarController_ updateAvatarButtonAndLayoutParent:YES];
   }
 
-  virtual void OnProfileAvatarChanged(
-      const base::FilePath& profile_path) OVERRIDE {
-    [avatarController_ updateAvatarButtonAndLayoutParent:YES];
+  void OnProfileAvatarChanged(const base::FilePath& profile_path) override {
+    if (!switches::IsNewAvatarMenu() && profile_->GetPath() == profile_path)
+      [avatarController_ updateAvatarButtonAndLayoutParent:YES];
   }
 
-  virtual void OnProfileSupervisedUserIdChanged(
-      const base::FilePath& profile_path) OVERRIDE {
-    [avatarController_ updateAvatarButtonAndLayoutParent:YES];
+  void OnProfileSupervisedUserIdChanged(
+      const base::FilePath& profile_path) override {
+    if (profile_->GetPath() == profile_path)
+      [avatarController_ updateAvatarButtonAndLayoutParent:YES];
   }
 
   // SigninErrorController::Observer:
-  virtual void OnErrorChanged() OVERRIDE {
+  void OnErrorChanged() override {
     SigninErrorController* errorController =
         profiles::GetSigninErrorController(profile_);
     if (errorController)
@@ -184,6 +188,14 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
     profiles::TutorialMode tutorialMode;
     profiles::BubbleViewModeFromAvatarBubbleMode(
         mode, &viewMode, &tutorialMode);
+    // Don't start creating the view if it would be an empty fast user switcher.
+    // This is the case when there is 0 or 1 profiles (the current one).  It has
+    // to happen here to prevent the creation of an empty container.
+    if (viewMode == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER &&
+        g_browser_process->profile_manager()->GetNumberOfProfiles() <= 1) {
+      return;
+    }
+
     menuController_ =
         [[ProfileChooserController alloc] initWithBrowser:browser_
                                                anchoredAt:point
@@ -207,8 +219,20 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
 }
 
 - (IBAction)buttonClicked:(id)sender {
+  BrowserWindow::AvatarBubbleMode mode =
+      BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+
   [self showAvatarBubbleAnchoredAt:button_
-                          withMode:BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT
+                          withMode:mode
+                   withServiceType:signin::GAIA_SERVICE_TYPE_NONE];
+}
+
+- (IBAction)buttonRightClicked:(id)sender {
+  BrowserWindow::AvatarBubbleMode mode =
+      BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
+
+  [self showAvatarBubbleAnchoredAt:button_
+                          withMode:mode
                    withServiceType:signin::GAIA_SERVICE_TYPE_NONE];
 }
 

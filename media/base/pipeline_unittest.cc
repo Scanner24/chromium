@@ -20,7 +20,7 @@
 #include "media/base/text_track_config.h"
 #include "media/base/time_delta_interpolator.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -55,6 +55,13 @@ ACTION_P2(SetBufferingState, cb, buffering_state) {
   cb->Run(buffering_state);
 }
 
+ACTION_TEMPLATE(PostCallback,
+                HAS_1_TEMPLATE_PARAMS(int, k),
+                AND_1_VALUE_PARAMS(p0)) {
+  return base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(::std::tr1::get<k>(args), p0));
+}
+
 // TODO(scherkus): even though some filters are initialized on separate
 // threads these test aren't flaky... why?  It's because filters' Initialize()
 // is executed on |message_loop_| and the mock filters instantly call
@@ -77,6 +84,7 @@ class PipelineTest : public ::testing::Test {
     MOCK_METHOD1(OnError, void(PipelineStatus));
     MOCK_METHOD1(OnMetadata, void(PipelineMetadata));
     MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
+    MOCK_METHOD1(OnVideoFramePaint, void(const scoped_refptr<VideoFrame>&));
     MOCK_METHOD0(OnDurationChange, void());
 
    private:
@@ -97,9 +105,6 @@ class PipelineTest : public ::testing::Test {
 
     EXPECT_CALL(*demuxer_, GetTimelineOffset())
         .WillRepeatedly(Return(base::Time()));
-
-    EXPECT_CALL(*demuxer_, GetLiveness())
-        .WillRepeatedly(Return(Demuxer::LIVENESS_UNKNOWN));
 
     EXPECT_CALL(*renderer_, GetMediaTime())
         .WillRepeatedly(Return(base::TimeDelta()));
@@ -141,7 +146,7 @@ class PipelineTest : public ::testing::Test {
     EXPECT_CALL(callbacks_, OnDurationChange());
     EXPECT_CALL(*demuxer_, Initialize(_, _, _))
         .WillOnce(DoAll(SetDemuxerProperties(duration),
-                        RunCallback<1>(PIPELINE_OK)));
+                        PostCallback<1>(PIPELINE_OK)));
 
     // Configure the demuxer to return the streams.
     for (size_t i = 0; i < streams->size(); ++i) {
@@ -165,10 +170,10 @@ class PipelineTest : public ::testing::Test {
 
   // Sets up expectations to allow the video renderer to initialize.
   void SetRendererExpectations() {
-    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _))
-        .WillOnce(DoAll(SaveArg<2>(&ended_cb_),
-                        SaveArg<4>(&buffering_state_cb_),
-                        RunCallback<0>()));
+    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
+        .WillOnce(DoAll(SaveArg<3>(&buffering_state_cb_),
+                        SaveArg<5>(&ended_cb_),
+                        PostCallback<1>(PIPELINE_OK)));
     EXPECT_CALL(*renderer_, HasAudio()).WillRepeatedly(Return(audio_stream()));
     EXPECT_CALL(*renderer_, HasVideo()).WillRepeatedly(Return(video_stream()));
   }
@@ -183,13 +188,14 @@ class PipelineTest : public ::testing::Test {
 
   void StartPipeline() {
     pipeline_->Start(
-        demuxer_.get(),
-        scoped_renderer_.PassAs<Renderer>(),
+        demuxer_.get(), scoped_renderer_.Pass(),
         base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnStart, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnMetadata, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnBufferingStateChange,
+                   base::Unretained(&callbacks_)),
+        base::Bind(&CallbackHelper::OnVideoFramePaint,
                    base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnDurationChange,
                    base::Unretained(&callbacks_)),
@@ -373,7 +379,7 @@ TEST_F(PipelineTest, StopWithoutStart) {
 
 TEST_F(PipelineTest, StartThenStopImmediately) {
   EXPECT_CALL(*demuxer_, Initialize(_, _, _))
-      .WillOnce(RunCallback<1>(PIPELINE_OK));
+      .WillOnce(PostCallback<1>(PIPELINE_OK));
   EXPECT_CALL(*demuxer_, Stop());
 
   EXPECT_CALL(callbacks_, OnStart(_));
@@ -407,7 +413,7 @@ TEST_F(PipelineTest, DemuxerErrorDuringStop) {
 
 TEST_F(PipelineTest, URLNotFound) {
   EXPECT_CALL(*demuxer_, Initialize(_, _, _))
-      .WillOnce(RunCallback<1>(PIPELINE_ERROR_URL_NOT_FOUND));
+      .WillOnce(PostCallback<1>(PIPELINE_ERROR_URL_NOT_FOUND));
   EXPECT_CALL(*demuxer_, Stop());
 
   StartPipelineAndExpect(PIPELINE_ERROR_URL_NOT_FOUND);
@@ -415,8 +421,9 @@ TEST_F(PipelineTest, URLNotFound) {
 
 TEST_F(PipelineTest, NoStreams) {
   EXPECT_CALL(*demuxer_, Initialize(_, _, _))
-      .WillOnce(RunCallback<1>(PIPELINE_OK));
+      .WillOnce(PostCallback<1>(PIPELINE_OK));
   EXPECT_CALL(*demuxer_, Stop());
+  EXPECT_CALL(callbacks_, OnMetadata(_));
 
   StartPipelineAndExpect(PIPELINE_ERROR_COULD_NOT_RENDER);
 }
@@ -619,6 +626,9 @@ TEST_F(PipelineTest, EndedCallback) {
   message_loop_.RunUntilIdle();
 
   EXPECT_CALL(callbacks_, OnEnded());
+  // Since the |ended_cb_| is manually invoked above, the duration does not
+  // match the expected duration and is updated upon ended.
+  EXPECT_CALL(callbacks_, OnDurationChange());
   text_stream()->SendEosNotification();
   message_loop_.RunUntilIdle();
 }
@@ -778,7 +788,7 @@ class PipelineTeardownTest : public PipelineTest {
   };
 
   PipelineTeardownTest() {}
-  virtual ~PipelineTeardownTest() {}
+  ~PipelineTeardownTest() override {}
 
   void RunTest(TeardownState state, StopOrError stop_or_error) {
     switch (state) {
@@ -823,12 +833,12 @@ class PipelineTeardownTest : public PipelineTest {
       if (stop_or_error == kStop) {
         EXPECT_CALL(*demuxer_, Initialize(_, _, _))
             .WillOnce(DoAll(Stop(pipeline_.get(), stop_cb),
-                            RunCallback<1>(PIPELINE_OK)));
+                            PostCallback<1>(PIPELINE_OK)));
         ExpectPipelineStopAndDestroyPipeline();
       } else {
         status = DEMUXER_ERROR_COULD_NOT_OPEN;
         EXPECT_CALL(*demuxer_, Initialize(_, _, _))
-            .WillOnce(RunCallback<1>(status));
+            .WillOnce(PostCallback<1>(status));
       }
 
       EXPECT_CALL(*demuxer_, Stop());
@@ -847,23 +857,24 @@ class PipelineTeardownTest : public PipelineTest {
 
     if (state == kInitRenderer) {
       if (stop_or_error == kStop) {
-        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _))
+        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
             .WillOnce(DoAll(Stop(pipeline_.get(), stop_cb),
-                            RunCallback<0>()));
+                            PostCallback<1>(PIPELINE_OK)));
         ExpectPipelineStopAndDestroyPipeline();
       } else {
         status = PIPELINE_ERROR_INITIALIZATION_FAILED;
-        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _))
-            .WillOnce(DoAll(RunCallback<3>(status), RunCallback<0>()));
+        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
+            .WillOnce(PostCallback<1>(status));
       }
 
       EXPECT_CALL(*demuxer_, Stop());
+      EXPECT_CALL(callbacks_, OnMetadata(_));
       return status;
     }
 
-    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _))
-        .WillOnce(DoAll(SaveArg<4>(&buffering_state_cb_),
-                        RunCallback<0>()));
+    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
+        .WillOnce(DoAll(SaveArg<3>(&buffering_state_cb_),
+                        PostCallback<1>(PIPELINE_OK)));
 
     EXPECT_CALL(callbacks_, OnMetadata(_));
 

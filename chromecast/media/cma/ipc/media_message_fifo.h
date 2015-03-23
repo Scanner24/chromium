@@ -174,7 +174,7 @@ class MediaMessageFifo {
   typedef base::subtle::Atomic32 AtomicSize;
 #elif SIZE_MAX == UINT64_MAX
   typedef base::subtle::Atomic64 AtomicSize;
-#elif
+#else
 #error "Unsupported size_t"
 #endif
   AtomicSize* rd_offset_;
@@ -196,8 +196,8 @@ class MediaMessageFifo {
   std::list<scoped_refptr<MediaMessageFlag> > rd_flags_;
   std::list<scoped_refptr<MediaMessageFlag> > wr_flags_;
 
-  base::WeakPtrFactory<MediaMessageFifo> weak_factory_;
   base::WeakPtr<MediaMessageFifo> weak_this_;
+  base::WeakPtrFactory<MediaMessageFifo> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaMessageFifo);
 };

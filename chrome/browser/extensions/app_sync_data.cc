@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/app_sync_data.h"
 
+#include "chrome/common/extensions/manifest_handlers/app_icon_color_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "extensions/common/extension.h"
 #include "sync/api/sync_data.h"
@@ -28,19 +29,22 @@ AppSyncData::AppSyncData(const Extension& extension,
                          bool enabled,
                          bool incognito_enabled,
                          bool remote_install,
+                         ExtensionSyncData::OptionalBoolean all_urls_enabled,
                          const syncer::StringOrdinal& app_launch_ordinal,
                          const syncer::StringOrdinal& page_ordinal,
                          extensions::LaunchType launch_type)
     : extension_sync_data_(extension,
                            enabled,
                            incognito_enabled,
-                           remote_install),
+                           remote_install,
+                           all_urls_enabled),
       app_launch_ordinal_(app_launch_ordinal),
       page_ordinal_(page_ordinal),
       launch_type_(launch_type) {
   if (extension.from_bookmark()) {
     bookmark_app_description_ = extension.description();
     bookmark_app_url_ = AppLaunchInfo::GetLaunchWebURL(&extension).spec();
+    bookmark_app_icon_color_ = AppIconColorInfo::GetIconColorString(&extension);
   }
 }
 
@@ -84,6 +88,9 @@ void AppSyncData::PopulateAppSpecifics(sync_pb::AppSpecifics* specifics) const {
   if (!bookmark_app_description_.empty())
     specifics->set_bookmark_app_description(bookmark_app_description_);
 
+  if (!bookmark_app_icon_color_.empty())
+    specifics->set_bookmark_app_icon_color(bookmark_app_icon_color_);
+
   extension_sync_data_.PopulateExtensionSpecifics(
       specifics->mutable_extension());
 }
@@ -101,6 +108,7 @@ void AppSyncData::PopulateFromAppSpecifics(
 
   bookmark_app_url_ = specifics.bookmark_app_url();
   bookmark_app_description_ = specifics.bookmark_app_description();
+  bookmark_app_icon_color_ = specifics.bookmark_app_icon_color();
 }
 
 void AppSyncData::PopulateFromSyncData(const syncer::SyncData& sync_data) {

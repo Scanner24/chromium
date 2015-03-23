@@ -4,12 +4,20 @@
 
 #include "content/test/test_render_frame_host.h"
 
+#include "base/command_line.h"
 #include "content/browser/frame_host/frame_tree.h"
+#include "content/browser/frame_host/navigation_request.h"
+#include "content/browser/frame_host/navigator.h"
+#include "content/browser/frame_host/navigator_impl.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
 #include "content/common/frame_messages.h"
+#include "content/public/browser/stream_handle.h"
+#include "content/public/common/content_switches.h"
+#include "content/test/browser_side_navigation_test_utils.h"
+#include "content/test/test_navigation_url_loader.h"
 #include "content/test/test_render_view_host.h"
 #include "net/base/load_flags.h"
-#include "third_party/WebKit/public/web/WebPageVisibilityState.h"
+#include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "ui/base/page_transition_types.h"
 
 namespace content {
@@ -27,26 +35,25 @@ void TestRenderFrameHostCreationObserver::RenderFrameCreated(
   last_created_frame_ = render_frame_host;
 }
 
-TestRenderFrameHost::TestRenderFrameHost(RenderViewHostImpl* render_view_host,
+TestRenderFrameHost::TestRenderFrameHost(SiteInstance* site_instance,
+                                         RenderViewHostImpl* render_view_host,
                                          RenderFrameHostDelegate* delegate,
+                                         RenderWidgetHostDelegate* rwh_delegate,
                                          FrameTree* frame_tree,
                                          FrameTreeNode* frame_tree_node,
                                          int routing_id,
-                                         bool is_swapped_out)
-    : RenderFrameHostImpl(render_view_host,
+                                         int flags)
+    : RenderFrameHostImpl(site_instance,
+                          render_view_host,
                           delegate,
+                          rwh_delegate,
                           frame_tree,
                           frame_tree_node,
                           routing_id,
-                          is_swapped_out),
+                          flags),
       child_creation_observer_(delegate ? delegate->GetAsWebContents() : NULL),
       contents_mime_type_("text/html"),
       simulate_history_list_was_cleared_(false) {
-  // Allow TestRenderViewHosts to easily access their main frame RFH.
-  if (frame_tree_node == frame_tree->root()) {
-    static_cast<TestRenderViewHost*>(render_view_host)->
-        set_main_render_frame_host(this);
-  }
 }
 
 TestRenderFrameHost::~TestRenderFrameHost() {}
@@ -58,7 +65,8 @@ TestRenderViewHost* TestRenderFrameHost::GetRenderViewHost() {
 
 TestRenderFrameHost* TestRenderFrameHost::AppendChild(
     const std::string& frame_name) {
-  OnCreateChildFrame(GetProcess()->GetNextRoutingID(), frame_name);
+  OnCreateChildFrame(GetProcess()->GetNextRoutingID(), frame_name,
+                     SandboxFlags::NONE);
   return static_cast<TestRenderFrameHost*>(
       child_creation_observer_.last_created_frame());
 }
@@ -68,6 +76,19 @@ void TestRenderFrameHost::SendNavigateWithTransition(
     const GURL& url,
     ui::PageTransition transition) {
   SendNavigateWithTransitionAndResponseCode(page_id, url, transition, 200);
+}
+
+void TestRenderFrameHost::SetContentsMimeType(const std::string& mime_type) {
+  contents_mime_type_ = mime_type;
+}
+
+void TestRenderFrameHost::SendBeforeUnloadACK(bool proceed) {
+  base::TimeTicks now = base::TimeTicks::Now();
+  OnBeforeUnloadACK(proceed, now, now);
+}
+
+void TestRenderFrameHost::SimulateSwapOutACK() {
+  OnSwappedOut();
 }
 
 void TestRenderFrameHost::SendNavigate(int page_id, const GURL& url) {
@@ -166,21 +187,67 @@ void TestRenderFrameHost::SendNavigateWithParameters(
   OnDidCommitProvisionalLoad(msg);
 }
 
-void TestRenderFrameHost::SendBeginNavigationWithURL(const GURL& url) {
-  FrameHostMsg_BeginNavigation_Params params;
-  params.method = "GET";
-  params.url = url;
-  params.referrer = Referrer(GURL(), blink::WebReferrerPolicyDefault);
-  params.load_flags = net::LOAD_NORMAL;
-  params.has_user_gesture = false;
-  params.transition_type = ui::PAGE_TRANSITION_LINK;
-  params.should_replace_current_entry = false;
-  params.allow_download = true;
-  OnBeginNavigation(params);
+void TestRenderFrameHost::SendBeginNavigationWithURL(const GURL& url,
+                                                     bool has_user_gesture) {
+  BeginNavigationParams begin_params("GET", std::string(), net::LOAD_NORMAL,
+                                     has_user_gesture);
+  CommonNavigationParams common_params;
+  common_params.url = url;
+  common_params.referrer = Referrer(GURL(), blink::WebReferrerPolicyDefault);
+  common_params.transition = ui::PAGE_TRANSITION_LINK;
+  OnBeginNavigation(common_params, begin_params,
+                    scoped_refptr<ResourceRequestBody>());
 }
 
 void TestRenderFrameHost::DidDisownOpener() {
   OnDidDisownOpener();
+}
+
+void TestRenderFrameHost::PrepareForCommit(const GURL& url) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    SendBeforeUnloadACK(true);
+    return;
+  }
+
+  // PlzNavigate
+  // Simulate the network stack commit without any redirects.
+  NavigationRequest* request =
+      static_cast<NavigatorImpl*>(frame_tree_node_->navigator())
+          ->GetNavigationRequestForNodeForTesting(frame_tree_node_);
+
+  // We are simulating a renderer-initiated user-initiated navigation.
+  if (!request) {
+    SendBeginNavigationWithURL(url, true);
+    request = static_cast<NavigatorImpl*>(frame_tree_node_->navigator())
+        ->GetNavigationRequestForNodeForTesting(frame_tree_node_);
+  }
+  ASSERT_TRUE(request);
+
+  // We may not have simulated the renderer response to the navigation request.
+  // Do that now.
+  if (request->state() == NavigationRequest::WAITING_FOR_RENDERER_RESPONSE)
+    SendBeforeUnloadACK(true);
+
+  // We have already simulated the IO thread commit. Only the
+  // DidCommitProvisionalLoad from the renderer is missing.
+  if (request->state() == NavigationRequest::RESPONSE_STARTED)
+    return;
+
+  ASSERT_TRUE(request->state() == NavigationRequest::STARTED);
+  TestNavigationURLLoader* url_loader =
+      static_cast<TestNavigationURLLoader*>(request->loader_for_testing());
+  ASSERT_TRUE(url_loader);
+  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  url_loader->CallOnResponseStarted(response, MakeEmptyStream());
+}
+
+void TestRenderFrameHost::SendBeforeUnloadHandlersPresent(bool present) {
+  OnBeforeUnloadHandlersPresent(present);
+}
+
+void TestRenderFrameHost::SendUnloadHandlersPresent(bool present) {
+  OnUnloadHandlersPresent(present);
 }
 
 }  // namespace content

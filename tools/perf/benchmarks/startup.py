@@ -7,60 +7,48 @@ import page_sets
 from telemetry import benchmark
 
 
+class _StartupCold(benchmark.Benchmark):
+  """Measures cold startup time with a clean profile."""
+  options = {'pageset_repeat': 5}
+
+  @classmethod
+  def Name(cls):
+    return 'startup'
+
+  def CreatePageTest(self, options):
+    return startup.Startup(cold=True)
+
+
+class _StartupWarm(benchmark.Benchmark):
+  """Measures warm startup time with a clean profile."""
+  options = {'pageset_repeat': 20}
+
+  @classmethod
+  def Name(cls):
+    return 'startup'
+
+  def CreatePageTest(self, options):
+    return startup.Startup(cold=False)
+
+
 @benchmark.Enabled('has tabs')
 @benchmark.Disabled('snowleopard') # crbug.com/336913
-class StartupColdBlankPage(benchmark.Benchmark):
+class StartupColdBlankPage(_StartupCold):
+  """Measures cold startup time with a clean profile."""
   tag = 'cold'
-  test = startup.Startup
   page_set = page_sets.BlankPageSet
-  options = {'cold': True,
-             'pageset_repeat': 5}
+
+  @classmethod
+  def Name(cls):
+    return 'startup.cold.blank_page'
 
 
 @benchmark.Enabled('has tabs')
-class StartupWarmBlankPage(benchmark.Benchmark):
+class StartupWarmBlankPage(_StartupWarm):
+  """Measures warm startup time with a clean profile."""
   tag = 'warm'
-  test = startup.Startup
   page_set = page_sets.BlankPageSet
-  options = {'warm': True,
-             'pageset_repeat': 20}
 
-
-@benchmark.Disabled  # crbug.com/336913
-class StartupColdTheme(benchmark.Benchmark):
-  tag = 'theme_cold'
-  test = startup.Startup
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'theme_profile.zip'
-  options = {'cold': True,
-             'pageset_repeat': 5}
-
-
-@benchmark.Disabled
-class StartupWarmTheme(benchmark.Benchmark):
-  tag = 'theme_warm'
-  test = startup.Startup
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'theme_profile.zip'
-  options = {'warm': True,
-             'pageset_repeat': 20}
-
-
-@benchmark.Disabled  # crbug.com/336913
-class StartupColdManyExtensions(benchmark.Benchmark):
-  tag = 'many_extensions_cold'
-  test = startup.Startup
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'many_extensions_profile.zip'
-  options = {'cold': True,
-             'pageset_repeat': 5}
-
-
-@benchmark.Disabled
-class StartupWarmManyExtensions(benchmark.Benchmark):
-  tag = 'many_extensions_warm'
-  test = startup.Startup
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'many_extensions_profile.zip'
-  options = {'warm': True,
-             'pageset_repeat': 20}
+  @classmethod
+  def Name(cls):
+    return 'startup.warm.blank_page'

@@ -79,12 +79,16 @@ void CrashReporterClient::RecordCrashDumpAttempt(bool is_real_crash) {
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
-void CrashReporterClient::GetProductNameAndVersion(std::string* product_name,
-                                                   std::string* version) {
+void CrashReporterClient::GetProductNameAndVersion(const char** product_name,
+                                                   const char** version) {
 }
 
 base::FilePath CrashReporterClient::GetReporterLogFilename() {
   return base::FilePath();
+}
+
+bool CrashReporterClient::HandleCrashDump(const char* crashdump_filename) {
+  return false;
 }
 #endif
 
@@ -113,6 +117,20 @@ bool CrashReporterClient::ReportingIsEnforcedByPolicy(bool* breakpad_enabled) {
 #if defined(OS_ANDROID)
 int CrashReporterClient::GetAndroidMinidumpDescriptor() {
   return 0;
+}
+
+bool CrashReporterClient::ShouldEnableBreakpadMicrodumps() {
+// Always enable microdumps on Android when stripping unwind tables. Rationale:
+// when unwind tables are stripped out (to save binary size) the stack traces
+// produced locally in the case of a crash / CHECK are meaningless. In order to
+// provide meaningful development diagnostics (and keep the binary size savings)
+// on Android we attach a secondary crash handler which serializes a reduced
+// form of logcat on the console.
+#if defined(NO_UNWIND_TABLES)
+  return true;
+#else
+  return false;
+#endif
 }
 #endif
 

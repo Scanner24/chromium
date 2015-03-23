@@ -4,16 +4,18 @@
 
 package org.chromium.android_webview.test;
 
+import android.os.Build;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.base.CommandLine;
-import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 
 /**
  * Test suite for setting by the command line.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class CommandLineTest extends AwTestBase {
     @Override
     protected boolean needsBrowserProcessStarted() {
@@ -35,7 +37,6 @@ public class CommandLineTest extends AwTestBase {
 
         // Setup Chrome.
         AwBrowserProcess.loadLibrary();
-        LibraryLoader.switchCommandLineForWebView();
 
         // Now we should have switched to a native backed command line:
         cl = CommandLine.getInstance();

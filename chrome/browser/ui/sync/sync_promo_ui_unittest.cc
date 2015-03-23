@@ -19,7 +19,7 @@ class SyncPromoUITest : public testing::Test {
   SyncPromoUITest() {}
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
     TestingProfile::Builder builder;
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
@@ -29,7 +29,8 @@ class SyncPromoUITest : public testing::Test {
 
  protected:
   void DisableSync() {
-    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kDisableSync);
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kDisableSync);
   }
 
   scoped_ptr<TestingProfile> profile_;

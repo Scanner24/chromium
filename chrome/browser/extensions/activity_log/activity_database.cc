@@ -43,7 +43,7 @@ ActivityDatabase::ActivityDatabase(ActivityDatabase::Delegate* delegate)
       batch_mode_(true),
       already_closed_(false),
       did_init_(false) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExtensionActivityLogTesting)) {
     batching_period_ = base::TimeDelta::FromSeconds(10);
   } else {
@@ -202,8 +202,8 @@ void ActivityDatabase::SetTimerForTesting(int ms) {
 // static
 bool ActivityDatabase::InitializeTable(sql::Connection* db,
                                        const char* table_name,
-                                       const char* content_fields[],
-                                       const char* field_types[],
+                                       const char* const content_fields[],
+                                       const char* const field_types[],
                                        const int num_content_fields) {
   if (!db->DoesTableExist(table_name)) {
     std::string table_creator =

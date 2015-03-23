@@ -9,11 +9,11 @@
 #include <limits>
 
 #include "base/base64.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -1548,9 +1548,11 @@ bool DirectoryBackingStore::VerifyReferenceIntegrity(
   for (Directory::MetahandlesMap::const_iterator it = handles_map->begin();
        it != handles_map->end(); ++it) {
     EntryKernel* entry = it->second;
-    bool parent_exists = (ids_set.find(entry->ref(PARENT_ID).value()) != end);
-    if (!parent_exists) {
-      return false;
+    if (!entry->ref(PARENT_ID).IsNull()) {
+      bool parent_exists = (ids_set.find(entry->ref(PARENT_ID).value()) != end);
+      if (!parent_exists) {
+        return false;
+      }
     }
   }
   return is_ok;

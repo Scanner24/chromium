@@ -81,10 +81,6 @@ void ExtensionViewViews::SetIsClipped(bool is_clipped) {
   }
 }
 
-void ExtensionViewViews::Init() {
-  // Initialization continues in ViewHierarchyChanged().
-}
-
 Browser* ExtensionViewViews::GetBrowser() {
   return browser_;
 }
@@ -195,7 +191,7 @@ scoped_ptr<ExtensionView> ExtensionViewHost::CreateExtensionView(
   // We own |view_|, so don't auto delete when it's removed from the view
   // hierarchy.
   view->set_owned_by_client();
-  return view.PassAs<ExtensionView>();
+  return view.Pass();
 }
 
 }  // namespace extensions

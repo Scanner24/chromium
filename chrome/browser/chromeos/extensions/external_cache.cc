@@ -17,11 +17,11 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/extensions/updater/chrome_extension_downloader_factory.h"
-#include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/browser/updater/extension_downloader.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -179,18 +179,17 @@ void ExternalCache::OnExtensionDownloadFailed(
 }
 
 void ExternalCache::OnExtensionDownloadFinished(
-    const std::string& id,
-    const base::FilePath& path,
+    const extensions::CRXFileInfo& file,
     bool file_ownership_passed,
     const GURL& download_url,
     const std::string& version,
     const extensions::ExtensionDownloaderDelegate::PingResult& ping_result,
     const std::set<int>& request_ids) {
   DCHECK(file_ownership_passed);
-  local_cache_.PutExtension(id, path, version,
-                            base::Bind(&ExternalCache::OnPutExtension,
-                                       weak_ptr_factory_.GetWeakPtr(),
-                                       id));
+  local_cache_.PutExtension(
+      file.extension_id, file.path, version,
+      base::Bind(&ExternalCache::OnPutExtension, weak_ptr_factory_.GetWeakPtr(),
+                 file.extension_id));
 }
 
 bool ExternalCache::IsExtensionPending(const std::string& id) {

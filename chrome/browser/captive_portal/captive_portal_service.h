@@ -29,9 +29,11 @@ class CaptivePortalService : public KeyedService, public base::NonThreadSafe {
  public:
   enum TestingState {
     NOT_TESTING,
-    DISABLED_FOR_TESTING,  // The service is always disabled.
-    SKIP_OS_CHECK_FOR_TESTING  // The service can be enabled even if the OS has
-                               // native captive portal detection.
+    DISABLED_FOR_TESTING,        // The service is always disabled.
+    SKIP_OS_CHECK_FOR_TESTING,   // The service can be enabled even if the OS
+                                 // has native captive portal detection.
+    IGNORE_REQUESTS_FOR_TESTING  // Disables actual portal checks. This also
+                                 // implies SKIP_OS_CHECK_FOR_TESTING.
   };
 
   // The details sent via a NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT.
@@ -40,10 +42,13 @@ class CaptivePortalService : public KeyedService, public base::NonThreadSafe {
     captive_portal::CaptivePortalResult previous_result;
     // The result of the most recent captive portal check.
     captive_portal::CaptivePortalResult result;
+    // Landing url of the captive portal check ping. If behind a captive portal,
+    // this points to the login page.
+    GURL landing_url;
   };
 
   explicit CaptivePortalService(Profile* profile);
-  virtual ~CaptivePortalService();
+  ~CaptivePortalService() override;
 
   // Triggers a check for a captive portal.  If there's already a check in
   // progress, does nothing.  Throttles the rate at which requests are sent.
@@ -114,11 +119,12 @@ class CaptivePortalService : public KeyedService, public base::NonThreadSafe {
       const captive_portal::CaptivePortalDetector::Results& results);
 
   // KeyedService:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Called when a captive portal check completes.  Passes the result to all
   // observers.
-  void OnResult(captive_portal::CaptivePortalResult result);
+  void OnResult(captive_portal::CaptivePortalResult result,
+                const GURL& landing_url);
 
   // Updates BackoffEntry::Policy and creates a new BackoffEntry, which
   // resets the count used for throttling.

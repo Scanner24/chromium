@@ -26,6 +26,7 @@
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
+#include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/credit_card.h"
@@ -52,6 +53,8 @@ using base::WideToUTF16;
 
 namespace autofill {
 
+// TODO(bondd): PdmChangeWaiter in autofill_uitest_util.cc is a replacement for
+// this class. Remove this class and use helper functions in that file instead.
 class WindowedPersonalDataManagerObserver
     : public PersonalDataManagerObserver,
       public infobars::InfoBarManager::Observer {
@@ -67,7 +70,7 @@ class WindowedPersonalDataManagerObserver
     infobar_service_->AddObserver(this);
   }
 
-  virtual ~WindowedPersonalDataManagerObserver() {
+  ~WindowedPersonalDataManagerObserver() override {
     infobar_service_->RemoveObserver(this);
 
     if (infobar_service_->infobar_count() > 0) {
@@ -85,7 +88,7 @@ class WindowedPersonalDataManagerObserver
   }
 
   // PersonalDataManagerObserver:
-  virtual void OnPersonalDataChanged() OVERRIDE {
+  void OnPersonalDataChanged() override {
     if (has_run_message_loop_) {
       base::MessageLoopForUI::current()->Quit();
       has_run_message_loop_ = false;
@@ -93,12 +96,10 @@ class WindowedPersonalDataManagerObserver
     alerted_ = true;
   }
 
-  virtual void OnInsufficientFormData() OVERRIDE {
-    OnPersonalDataChanged();
-  }
+  void OnInsufficientFormData() override { OnPersonalDataChanged(); }
 
   // infobars::InfoBarManager::Observer:
-  virtual void OnInfoBarAdded(infobars::InfoBar* infobar) OVERRIDE {
+  void OnInfoBarAdded(infobars::InfoBar* infobar) override {
     ConfirmInfoBarDelegate* infobar_delegate =
         infobar_service_->infobar_at(0)->delegate()->AsConfirmInfoBarDelegate();
     ASSERT_TRUE(infobar_delegate);
@@ -116,17 +117,19 @@ class AutofillTest : public InProcessBrowserTest {
  protected:
   AutofillTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Don't want Keychain coming up on Mac.
     test::DisableSystemServices(browser()->profile()->GetPrefs());
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // Make sure to close any showing popups prior to tearing down the UI.
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
-    AutofillManager* autofill_manager = ContentAutofillDriver::FromWebContents(
-                                            web_contents)->autofill_manager();
+    AutofillManager* autofill_manager =
+        ContentAutofillDriverFactory::FromWebContents(web_contents)
+            ->DriverForFrame(web_contents->GetMainFrame())
+            ->autofill_manager();
     autofill_manager->client()->HideAutofillPopup();
   }
 
@@ -486,7 +489,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, PrefsStringSavedAsIs) {
 IN_PROC_BROWSER_TEST_F(AutofillTest, InvalidCreditCardNumberIsNotAggregated) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -506,7 +510,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest,
                        WhitespacesAndSeparatorCharsStrippedForValidCCNums) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -768,7 +773,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, UsePlusSignForInternationalNumber) {
 IN_PROC_BROWSER_TEST_F(AutofillTest, CCInfoNotStoredWhenAutocompleteOff) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 

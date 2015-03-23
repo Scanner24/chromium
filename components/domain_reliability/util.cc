@@ -15,37 +15,12 @@ namespace domain_reliability {
 
 namespace {
 
-class ActualTimer : public MockableTime::Timer {
- public:
-  // Initialize base timer with retain_user_info and is_repeating false.
-  ActualTimer() : base_timer_(false, false) {}
-
-  virtual ~ActualTimer() {}
-
-  // MockableTime::Timer implementation:
-  virtual void Start(const tracked_objects::Location& posted_from,
-                     base::TimeDelta delay,
-                     const base::Closure& user_task) OVERRIDE {
-    base_timer_.Start(posted_from, delay, user_task);
-  }
-
-  virtual void Stop() OVERRIDE {
-    base_timer_.Stop();
-  }
-
-  virtual bool IsRunning() OVERRIDE {
-    return base_timer_.IsRunning();
-  }
-
- private:
-  base::Timer base_timer_;
-};
-
 const struct NetErrorMapping {
   int net_error;
   const char* beacon_status;
 } net_error_map[] = {
   { net::OK, "ok" },
+  { net::ERR_ABORTED, "aborted" },
   { net::ERR_TIMED_OUT, "tcp.connection.timed_out" },
   { net::ERR_CONNECTION_CLOSED, "tcp.connection.closed" },
   { net::ERR_CONNECTION_RESET, "tcp.connection.reset" },
@@ -129,7 +104,8 @@ std::string GetDomainReliabilityProtocol(
       return ssl_info_populated ? "HTTPS" : "HTTP";
     case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY2:
     case net::HttpResponseInfo::CONNECTION_INFO_SPDY3:
-    case net::HttpResponseInfo::CONNECTION_INFO_SPDY4:
+    case net::HttpResponseInfo::CONNECTION_INFO_HTTP2_14:
+    case net::HttpResponseInfo::CONNECTION_INFO_HTTP2_15:
       return "SPDY";
     case net::HttpResponseInfo::CONNECTION_INFO_QUIC1_SPDY3:
       return "QUIC";
@@ -140,6 +116,68 @@ std::string GetDomainReliabilityProtocol(
   NOTREACHED();
   return "";
 }
+
+int GetNetErrorFromURLRequestStatus(const net::URLRequestStatus& status) {
+  switch (status.status()) {
+    case net::URLRequestStatus::SUCCESS:
+      return net::OK;
+    case net::URLRequestStatus::CANCELED:
+      return net::ERR_ABORTED;
+    case net::URLRequestStatus::FAILED:
+      return status.error();
+    default:
+      NOTREACHED();
+      return net::ERR_FAILED;
+  }
+}
+
+void GetUploadResultFromResponseDetails(
+    int net_error,
+    int http_response_code,
+    base::TimeDelta retry_after,
+    DomainReliabilityUploader::UploadResult* result) {
+  if (net_error == net::OK && http_response_code == 200) {
+    result->status = DomainReliabilityUploader::UploadResult::SUCCESS;
+    return;
+  }
+
+  if (net_error == net::OK &&
+      http_response_code == 503 &&
+      retry_after != base::TimeDelta()) {
+    result->status = DomainReliabilityUploader::UploadResult::RETRY_AFTER;
+    result->retry_after = retry_after;
+    return;
+  }
+
+  result->status = DomainReliabilityUploader::UploadResult::FAILURE;
+  return;
+}
+
+namespace {
+
+class ActualTimer : public MockableTime::Timer {
+ public:
+  // Initialize base timer with retain_user_info and is_repeating false.
+  ActualTimer() : base_timer_(false, false) {}
+
+  ~ActualTimer() override {}
+
+  // MockableTime::Timer implementation:
+  void Start(const tracked_objects::Location& posted_from,
+             base::TimeDelta delay,
+             const base::Closure& user_task) override {
+    base_timer_.Start(posted_from, delay, user_task);
+  }
+
+  void Stop() override { base_timer_.Stop(); }
+
+  bool IsRunning() override { return base_timer_.IsRunning(); }
+
+ private:
+  base::Timer base_timer_;
+};
+
+}  // namespace
 
 MockableTime::Timer::~Timer() {}
 MockableTime::Timer::Timer() {}
@@ -155,6 +193,19 @@ base::TimeTicks ActualTime::NowTicks() { return base::TimeTicks::Now(); }
 
 scoped_ptr<MockableTime::Timer> ActualTime::CreateTimer() {
   return scoped_ptr<MockableTime::Timer>(new ActualTimer());
+}
+
+MockableTimeBackoffEntry::MockableTimeBackoffEntry(
+    const net::BackoffEntry::Policy* const policy,
+    MockableTime* time)
+    : net::BackoffEntry(policy),
+      time_(time) {
+}
+
+MockableTimeBackoffEntry::~MockableTimeBackoffEntry() {}
+
+base::TimeTicks MockableTimeBackoffEntry::ImplGetTimeNow() const {
+  return time_->NowTicks();
 }
 
 }  // namespace domain_reliability

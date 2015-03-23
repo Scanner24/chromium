@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "ash/autoclick/autoclick_controller.h"
-#include "ash/magnifier/magnifier_constants.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
@@ -23,23 +22,26 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/chromeos/input_method/input_method_syncer.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
-#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/net/wake_on_wifi_manager.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/ime_keyboard.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/system/statistics_provider.h"
+#include "chromeos/timezone/timezone_resolver.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/user_manager/user.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/chromeos/accessibility_types.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
 #include "url/gurl.h"
@@ -86,6 +88,8 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAccessibilityVirtualKeyboardEnabled,
                                 false);
   registry->RegisterStringPref(prefs::kLogoutStartedLast, std::string());
+  registry->RegisterBooleanPref(prefs::kResolveDeviceTimezoneByGeolocation,
+                                true);
 }
 
 // static
@@ -121,9 +125,8 @@ void Preferences::RegisterProfilePrefs(
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kNaturalScroll,
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kNaturalScrollDefault),
+      prefs::kNaturalScroll, base::CommandLine::ForCurrentProcess()->HasSwitch(
+                                 switches::kNaturalScrollDefault),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
   registry->RegisterBooleanPref(
       prefs::kPrimaryMouseButtonRight,
@@ -159,7 +162,7 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kAccessibilityScreenMagnifierType,
-      ash::kDefaultMagnifierType,
+      ui::kDefaultMagnifierType,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterDoublePref(
       prefs::kAccessibilityScreenMagnifierScale,
@@ -215,9 +218,6 @@ void Preferences::RegisterProfilePrefs(
       prefs::kLanguagePreviousInputMethod,
       "",
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  // We don't sync the list of input methods and preferred languages since a
-  // user might use two or more devices with different hardware keyboards.
-  // crosbug.com/15181
   registry->RegisterStringPref(
       prefs::kLanguagePreferredLanguages,
       kFallbackInputMethodLocale,
@@ -274,6 +274,12 @@ void Preferences::RegisterProfilePrefs(
       language_prefs::kXkbAutoRepeatIntervalInMs,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
+  // We don't sync wake-on-wifi related prefs because they are device specific.
+  registry->RegisterBooleanPref(
+      prefs::kWakeOnWifiSsid,
+      true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
   // Mobile plan notifications default to on.
   registry->RegisterBooleanPref(
       prefs::kShowPlanNotifications,
@@ -311,6 +317,12 @@ void Preferences::RegisterProfilePrefs(
       prefs::kTouchVirtualKeyboardEnabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  registry->RegisterBooleanPref(
+      prefs::kResolveTimezoneByGeolocation, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+
+  input_method::InputMethodSyncer::RegisterProfilePrefs(registry);
 }
 
 void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
@@ -348,12 +360,20 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
       prefs::kLanguageXkbAutoRepeatDelay, prefs, callback);
   xkb_auto_repeat_interval_pref_.Init(
       prefs::kLanguageXkbAutoRepeatInterval, prefs, callback);
+
+  wake_on_wifi_ssid_.Init(prefs::kWakeOnWifiSsid, prefs, callback);
+
+  pref_change_registrar_.Init(prefs);
+  pref_change_registrar_.Add(prefs::kResolveTimezoneByGeolocation, callback);
 }
 
 void Preferences::Init(Profile* profile, const user_manager::User* user) {
   DCHECK(profile);
   DCHECK(user);
   PrefServiceSyncable* prefs = PrefServiceSyncable::FromProfile(profile);
+  // This causes OnIsSyncingChanged to be called when the value of
+  // PrefService::IsSyncing() changes.
+  prefs->AddObserver(this);
   user_ = user;
   user_is_primary_ =
       user_manager::UserManager::Get()->GetPrimaryUser() == user_;
@@ -361,22 +381,28 @@ void Preferences::Init(Profile* profile, const user_manager::User* user) {
 
   user_manager::UserManager::Get()->AddSessionStateObserver(this);
 
-  // This causes OnIsSyncingChanged to be called when the value of
-  // PrefService::IsSyncing() changes.
-  prefs->AddObserver(this);
-
   UserSessionManager* session_manager = UserSessionManager::GetInstance();
   DCHECK(session_manager);
   ime_state_ = session_manager->GetDefaultIMEState(profile);
-  input_method_manager_->SetState(ime_state_);
 
   // Initialize preferences to currently saved state.
   ApplyPreferences(REASON_INITIALIZATION, "");
 
+  // Note that |ime_state_| was modified by ApplyPreferences(), and
+  // SetState() is modifying |current_input_method_| (via
+  // PersistUserInputMethod() ). This way SetState() here may be called only
+  // after ApplyPreferences().
+  input_method_manager_->SetState(ime_state_);
+
+  input_method_syncer_.reset(
+      new input_method::InputMethodSyncer(prefs, ime_state_));
+  input_method_syncer_->Initialize();
+
   // If a guest is logged in, initialize the prefs as if this is the first
   // login. For a regular user this is done in
   // UserSessionManager::InitProfilePreferences().
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kGuestSession))
     session_manager->SetFirstLoginPrefs(profile, std::string(), std::string());
 }
 
@@ -391,6 +417,10 @@ void Preferences::InitUserPrefsForTesting(
     input_method_manager_->SetState(ime_state);
 
   InitUserPrefs(prefs);
+
+  input_method_syncer_.reset(
+      new input_method::InputMethodSyncer(prefs, ime_state_));
+  input_method_syncer_->Initialize();
 }
 
 void Preferences::SetInputMethodListForTesting() {
@@ -529,12 +559,12 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   }
   if (reason != REASON_PREF_CHANGED ||
       pref_name == prefs::kTouchHudProjectionEnabled) {
-#if !defined(USE_ATHENA)
     if (user_is_active) {
       const bool enabled = touch_hud_projection_enabled_.GetValue();
-      ash::Shell::GetInstance()->SetTouchHudProjectionEnabled(enabled);
+      // There may not be a shell, e.g., in some unit tests.
+      if (ash::Shell::HasInstance())
+        ash::Shell::GetInstance()->SetTouchHudProjectionEnabled(enabled);
     }
-#endif
   }
 
   if (reason != REASON_PREF_CHANGED ||
@@ -580,6 +610,40 @@ void Preferences::ApplyPreferences(ApplyReason reason,
         touchpad_settings);
     system::InputDeviceSettings::Get()->UpdateMouseSettings(mouse_settings);
   }
+
+  if (user_is_primary_ && (reason != REASON_PREF_CHANGED ||
+                           pref_name == prefs::kWakeOnWifiSsid)) {
+    int features = wake_on_wifi_ssid_.GetValue() ?
+        WakeOnWifiManager::WAKE_ON_SSID : WakeOnWifiManager::WAKE_ON_NONE;
+    // The flag enables wake on packets but doesn't update a preference.
+    if (base::CommandLine::ForCurrentProcess()->
+            HasSwitch(switches::kWakeOnPackets)) {
+      features |= WakeOnWifiManager::WAKE_ON_PACKET;
+    }
+    WakeOnWifiManager::Get()->OnPreferenceChanged(
+        static_cast<WakeOnWifiManager::WakeOnWifiFeature>(features));
+  }
+
+  if (pref_name == prefs::kResolveTimezoneByGeolocation &&
+      reason != REASON_ACTIVE_USER_CHANGED) {
+    const bool value = prefs_->GetBoolean(prefs::kResolveTimezoneByGeolocation);
+    if (user_is_owner) {
+      g_browser_process->local_state()->SetBoolean(
+          prefs::kResolveDeviceTimezoneByGeolocation, value);
+    }
+    if (user_is_primary_) {
+      if (value) {
+        g_browser_process->platform_part()->GetTimezoneResolver()->Start();
+      } else {
+        g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+        if (reason == REASON_PREF_CHANGED) {
+          // Allow immediate timezone update on Stop + Start.
+          g_browser_process->local_state()->ClearPref(
+              TimeZoneResolver::kLastTimeZoneRefreshTime);
+        }
+      }
+    }
+  }
 }
 
 void Preferences::OnIsSyncingChanged() {
@@ -589,10 +653,9 @@ void Preferences::OnIsSyncingChanged() {
 
 void Preferences::ForceNaturalScrollDefault() {
   DVLOG(1) << "ForceNaturalScrollDefault";
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNaturalScrollDefault) &&
-      prefs_->IsSyncing() &&
-      !prefs_->GetUserPrefValue(prefs::kNaturalScroll)) {
+      prefs_->IsSyncing() && !prefs_->GetUserPrefValue(prefs::kNaturalScroll)) {
     DVLOG(1) << "Natural scroll forced to true";
     natural_scroll_.SetValue(true);
     UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Forced", true);

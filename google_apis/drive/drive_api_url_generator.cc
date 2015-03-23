@@ -27,8 +27,8 @@ const char kDriveV2ChildrenUrlForRemovalFormat[] =
 const char kDriveV2FileCopyUrlFormat[] = "/drive/v2/files/%s/copy";
 const char kDriveV2FileDeleteUrlFormat[] = "/drive/v2/files/%s";
 const char kDriveV2FileTrashUrlFormat[] = "/drive/v2/files/%s/trash";
-const char kDriveV2InitiateUploadNewFileUrl[] = "/upload/drive/v2/files";
-const char kDriveV2InitiateUploadExistingFileUrlPrefix[] =
+const char kDriveV2UploadNewFileUrl[] = "/upload/drive/v2/files";
+const char kDriveV2UploadExistingFileUrlPrefix[] =
     "/upload/drive/v2/files/";
 const char kDriveV2PermissionsUrlFormat[] = "/drive/v2/files/%s/permissions";
 
@@ -38,9 +38,14 @@ const char kDriveV2InternalAppsUrl[] = "/drive/v2internal/apps";
 const char kDriveV2AppsDeleteUrlFormat[] = "/drive/v2internal/apps/%s";
 const char kDriveV2FilesAuthorizeUrlFormat[] =
     "/drive/v2internal/files/%s/authorize?appId=%s";
+const char kDriveV2InternalFileUrlPrefix[] = "/drive/v2internal/files/";
 
 GURL AddResumableUploadParam(const GURL& url) {
   return net::AppendOrReplaceQueryParameter(url, "uploadType", "resumable");
+}
+
+GURL AddMultipartUploadParam(const GURL& url) {
+  return net::AppendOrReplaceQueryParameter(url, "uploadType", "multipart");
 }
 
 }  // namespace
@@ -75,8 +80,25 @@ GURL DriveApiUrlGenerator::GetAppsDeleteUrl(const std::string& app_id) const {
       kDriveV2AppsDeleteUrlFormat, net::EscapePath(app_id).c_str()));
 }
 
-GURL DriveApiUrlGenerator::GetFilesGetUrl(const std::string& file_id) const {
-  return base_url_.Resolve(kDriveV2FileUrlPrefix + net::EscapePath(file_id));
+GURL DriveApiUrlGenerator::GetFilesGetUrl(const std::string& file_id,
+                                          bool use_internal_endpoint,
+                                          const GURL& embed_origin) const {
+  GURL url = base_url_.Resolve(use_internal_endpoint ?
+      kDriveV2InternalFileUrlPrefix + net::EscapePath(file_id) :
+      kDriveV2FileUrlPrefix + net::EscapePath(file_id));
+  if (!embed_origin.is_empty()) {
+    // Construct a valid serialized embed origin from an url, according to
+    // WD-html5-20110525. Such string has to be built manually, since
+    // GURL::spec() always adds the trailing slash. Moreover, ports are
+    // currently not supported.
+    DCHECK(!embed_origin.has_port());
+    DCHECK(!embed_origin.has_path() || embed_origin.path() == "/");
+    const std::string serialized_embed_origin =
+        embed_origin.scheme() + "://" + embed_origin.host();
+    url = net::AppendOrReplaceQueryParameter(
+        url, "embedOrigin", serialized_embed_origin);
+  }
+  return url;
 }
 
 GURL DriveApiUrlGenerator::GetFilesAuthorizeUrl(
@@ -188,7 +210,7 @@ GURL DriveApiUrlGenerator::GetChildrenDeleteUrl(
 GURL DriveApiUrlGenerator::GetInitiateUploadNewFileUrl(
     bool set_modified_date) const {
   GURL url = AddResumableUploadParam(
-      base_url_.Resolve(kDriveV2InitiateUploadNewFileUrl));
+      base_url_.Resolve(kDriveV2UploadNewFileUrl));
 
   // setModifiedDate is "false" by default.
   if (set_modified_date)
@@ -201,9 +223,36 @@ GURL DriveApiUrlGenerator::GetInitiateUploadExistingFileUrl(
     const std::string& resource_id,
     bool set_modified_date) const {
   GURL url = base_url_.Resolve(
-      kDriveV2InitiateUploadExistingFileUrlPrefix +
+      kDriveV2UploadExistingFileUrlPrefix +
       net::EscapePath(resource_id));
   url = AddResumableUploadParam(url);
+
+  // setModifiedDate is "false" by default.
+  if (set_modified_date)
+    url = net::AppendOrReplaceQueryParameter(url, "setModifiedDate", "true");
+
+  return url;
+}
+
+GURL DriveApiUrlGenerator::GetMultipartUploadNewFileUrl(
+    bool set_modified_date) const {
+  GURL url = AddMultipartUploadParam(
+      base_url_.Resolve(kDriveV2UploadNewFileUrl));
+
+  // setModifiedDate is "false" by default.
+  if (set_modified_date)
+    url = net::AppendOrReplaceQueryParameter(url, "setModifiedDate", "true");
+
+  return url;
+}
+
+GURL DriveApiUrlGenerator::GetMultipartUploadExistingFileUrl(
+    const std::string& resource_id,
+    bool set_modified_date) const {
+  GURL url = base_url_.Resolve(
+      kDriveV2UploadExistingFileUrlPrefix +
+      net::EscapePath(resource_id));
+  url = AddMultipartUploadParam(url);
 
   // setModifiedDate is "false" by default.
   if (set_modified_date)

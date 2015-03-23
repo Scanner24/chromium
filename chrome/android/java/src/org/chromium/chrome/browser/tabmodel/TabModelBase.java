@@ -4,13 +4,9 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import android.os.SystemClock;
-
-import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.Tab;
-import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.content_public.browser.WebContents;
 
@@ -20,15 +16,8 @@ import java.util.List;
 /**
  * This is the default implementation of the {@link TabModel} interface.
  */
-public abstract class TabModelBase implements TabModel {
+public abstract class TabModelBase extends TabModelJniBridge {
     private static final String TAG = "TabModelBase";
-
-    // TODO(dtrainor, simonb): Make these non-static so we don't break if we have multiple instances
-    // of chrome running.  Also investigate how this affects document mode.
-    private static long sTabSwitchStartTime;
-    private static TabSelectionType sTabSelectionType;
-    private static boolean sTabSwitchLatencyMetricRequired;
-    private static boolean sPerceivedTabSwitchLatencyMetricLogged;
 
     /**
      * The main list of tabs.  Note that when this changes, all pending closures must be committed
@@ -37,8 +26,6 @@ public abstract class TabModelBase implements TabModel {
      * date.
      */
     private final List<Tab> mTabs = new ArrayList<Tab>();
-
-    private final boolean mIsIncognito;
 
     private final TabModelOrderController mOrderController;
 
@@ -61,26 +48,13 @@ public abstract class TabModelBase implements TabModel {
      */
     private int mIndex = INVALID_TAB_INDEX;
 
-    /** Native Tab pointer which will be set by nativeInit(). */
-    private long mNativeTabModelImpl = 0;
-
     public TabModelBase(boolean incognito, TabModelOrderController orderController,
             TabModelDelegate modelDelegate) {
-        mIsIncognito = incognito;
-        mNativeTabModelImpl = nativeInit(incognito);
+        super(incognito);
+        initializeNative();
         mOrderController = orderController;
         mModelDelegate = modelDelegate;
         mObservers = new ObserverList<TabModelObserver>();
-    }
-
-    @Override
-    public Profile getProfile() {
-        return nativeGetProfileAndroid(mNativeTabModelImpl);
-    }
-
-    @Override
-    public boolean isIncognito() {
-        return mIsIncognito;
     }
 
     @Override
@@ -90,14 +64,10 @@ public abstract class TabModelBase implements TabModel {
         }
 
         mRewoundList.destroy();
-
-        if (mNativeTabModelImpl != 0) {
-            nativeDestroy(mNativeTabModelImpl);
-            mNativeTabModelImpl = 0;
-        }
-
         mTabs.clear();
         mObservers.clear();
+
+        super.destroy();
     }
 
     @Override
@@ -116,52 +86,51 @@ public abstract class TabModelBase implements TabModel {
      */
     @Override
     public void addTab(Tab tab, int index, TabLaunchType type) {
-        TraceEvent.begin();
+        try {
+            TraceEvent.begin("TabModelBase.addTab");
 
-        for (TabModelObserver obs : mObservers) obs.willAddTab(tab, type);
+            for (TabModelObserver obs : mObservers) obs.willAddTab(tab, type);
 
-        boolean selectTab = mOrderController.willOpenInForeground(type, mIsIncognito);
+            boolean selectTab = mOrderController.willOpenInForeground(type, isIncognito());
 
-        index = mOrderController.determineInsertionIndex(type, index, tab);
-        assert index <= mTabs.size();
+            index = mOrderController.determineInsertionIndex(type, index, tab);
+            assert index <= mTabs.size();
 
-        assert tab.isIncognito() == mIsIncognito;
+            assert tab.isIncognito() == isIncognito();
 
-        // TODO(dtrainor): Update the list of undoable tabs instead of committing it.
-        commitAllTabClosures();
+            // TODO(dtrainor): Update the list of undoable tabs instead of committing it.
+            commitAllTabClosures();
 
-        if (index < 0 || index > mTabs.size()) {
-            mTabs.add(tab);
-        } else {
-            mTabs.add(index, tab);
-            if (index <= mIndex) {
-                mIndex++;
+            if (index < 0 || index > mTabs.size()) {
+                mTabs.add(tab);
+            } else {
+                mTabs.add(index, tab);
+                if (index <= mIndex) {
+                    mIndex++;
+                }
             }
+
+            if (!isCurrentModel()) {
+                // When adding new tabs in the background, make sure we set a valid index when the
+                // first one is added.  When in the foreground, calls to setIndex will take care of
+                // this.
+                mIndex = Math.max(mIndex, 0);
+            }
+
+            mRewoundList.resetRewoundState();
+
+            int newIndex = indexOf(tab);
+            tabAddedToModel(tab);
+
+            for (TabModelObserver obs : mObservers) obs.didAddTab(tab, type);
+
+            if (selectTab) {
+                mModelDelegate.selectModel(isIncognito());
+                setIndex(newIndex, TabModel.TabSelectionType.FROM_NEW);
+            }
+        } finally {
+            TraceEvent.end("TabModelBase.addTab");
         }
-
-        if (!isCurrentModel()) {
-            // When adding new tabs in the background, make sure we set a valid index when the
-            // first one is added.  When in the foreground, calls to setIndex will take care of
-            // this.
-            mIndex = Math.max(mIndex, 0);
-        }
-
-        mRewoundList.resetRewoundState();
-
-        int newIndex = indexOf(tab);
-        mModelDelegate.didChange();
-        mModelDelegate.didCreateNewTab(tab);
-
-        if (mNativeTabModelImpl != 0) nativeTabAddedToModel(mNativeTabModelImpl, tab);
-
-        for (TabModelObserver obs : mObservers) obs.didAddTab(tab, type);
-
-        if (selectTab) {
-            mModelDelegate.selectModel(mIsIncognito);
-            setIndex(newIndex, TabModel.TabSelectionType.FROM_NEW);
-        }
-
-        TraceEvent.end();
     }
 
     @Override
@@ -192,20 +161,18 @@ public abstract class TabModelBase implements TabModel {
 
         mRewoundList.resetRewoundState();
 
-        mModelDelegate.didChange();
         for (TabModelObserver obs : mObservers) obs.didMoveTab(tab, newIndex, curIndex);
     }
 
     @Override
-    @CalledByNative
     public boolean closeTab(Tab tab) {
         return closeTab(tab, true, false, false);
     }
 
     private Tab findTabInAllTabModels(int tabId) {
-        Tab tab = TabModelUtils.getTabById(mModelDelegate.getModel(mIsIncognito), tabId);
+        Tab tab = TabModelUtils.getTabById(mModelDelegate.getModel(isIncognito()), tabId);
         if (tab != null) return tab;
-        return TabModelUtils.getTabById(mModelDelegate.getModel(!mIsIncognito), tabId);
+        return TabModelUtils.getTabById(mModelDelegate.getModel(!isIncognito()), tabId);
     }
 
     @Override
@@ -231,7 +198,7 @@ public abstract class TabModelBase implements TabModel {
             nextTab = parentTab;
         } else if (adjacentTab != null) {
             nextTab = adjacentTab;
-        } else if (mIsIncognito) {
+        } else if (isIncognito()) {
             nextTab = TabModelUtils.getCurrentTab(mModelDelegate.getModel(false));
         }
 
@@ -245,7 +212,7 @@ public abstract class TabModelBase implements TabModel {
 
     @Override
     public boolean supportsPendingClosures() {
-        return !mIsIncognito;
+        return !isIncognito();
     }
 
     @Override
@@ -287,7 +254,7 @@ public abstract class TabModelBase implements TabModel {
         // If we're the active model call setIndex to actually select this tab, otherwise just set
         // mIndex but don't kick off everything that happens when calling setIndex().
         if (activeModel) {
-            setIndex(insertIndex);
+            TabModelUtils.setIndex(this, insertIndex);
         } else {
             mIndex = insertIndex;
         }
@@ -314,10 +281,27 @@ public abstract class TabModelBase implements TabModel {
         }
 
         assert !mRewoundList.hasPendingClosures();
+
+        if (supportsPendingClosures()) {
+            for (TabModelObserver obs : mObservers) obs.allTabsClosureCommitted();
+        }
     }
 
     @Override
     public boolean closeTab(Tab tabToClose, boolean animate, boolean uponExit, boolean canUndo) {
+        return closeTab(tabToClose, animate, uponExit, canUndo, canUndo);
+    }
+
+    /**
+     * See TabModel.java documentation for description of other parameters.
+     * @param notify Whether or not to notify observers about the pending closure. If this is
+     *               {@code true}, {@link #supportsPendingClosures()} is {@code true},
+     *               and canUndo is {@code true}, observers will be notified of the pending
+     *               closure. Observers will still be notified of a committed/cancelled closure
+     *               even if they are not notified of a pending closure to start with.
+     */
+    private boolean closeTab(Tab tabToClose, boolean animate, boolean uponExit,
+            boolean canUndo, boolean notify) {
         if (tabToClose == null) {
             assert false : "Tab is null!";
             return false;
@@ -330,10 +314,10 @@ public abstract class TabModelBase implements TabModel {
 
         canUndo &= supportsPendingClosures();
 
-        if (canUndo) {
+        startTabClosure(tabToClose, animate, uponExit, canUndo);
+        if (notify && canUndo) {
             for (TabModelObserver obs : mObservers) obs.tabPendingClosure(tabToClose);
         }
-        startTabClosure(tabToClose, animate, uponExit, canUndo);
         if (!canUndo) finalizeTabClosure(tabToClose);
 
         return true;
@@ -341,6 +325,11 @@ public abstract class TabModelBase implements TabModel {
 
     @Override
     public void closeAllTabs() {
+        closeAllTabs(true, false);
+    }
+
+    @Override
+    public void closeAllTabs(boolean allowDelegation, boolean uponExit) {
         commitAllTabClosures();
 
         while (getCount() > 0) {
@@ -348,8 +337,32 @@ public abstract class TabModelBase implements TabModel {
         }
     }
 
+    /**
+     * Close all tabs on this model without notifying observers about pending tab closures.
+     *
+     * @param animate true iff the closing animation should be displayed
+     * @param uponExit true iff the tabs are being closed upon application exit (after user presses
+     *                 the system back button)
+     * @param canUndo Whether or not this action can be undone. If this is {@code true} and
+     *                {@link #supportsPendingClosures()} is {@code true}, these {@link Tab}s
+     *                will not actually be closed until {@link #commitTabClosure(int)} or
+     *                {@link #commitAllTabClosures()} is called, but they will be effectively
+     *                removed from this list.
+     */
+    public void closeAllTabs(boolean animate, boolean uponExit, boolean canUndo) {
+        ArrayList<Integer> closedTabs = new ArrayList<Integer>();
+        while (getCount() > 0) {
+            Tab tab = getTabAt(0);
+            closedTabs.add(tab.getId());
+            closeTab(tab, animate, uponExit, canUndo, false);
+        }
+
+        if (!uponExit && canUndo && supportsPendingClosures()) {
+            for (TabModelObserver obs : mObservers) obs.allTabsPendingClosure(closedTabs);
+        }
+    }
+
     @Override
-    @CalledByNative
     public Tab getTabAt(int index) {
         // This will catch INVALID_TAB_INDEX and return null
         if (index < 0 || index >= mTabs.size()) return null;
@@ -381,43 +394,32 @@ public abstract class TabModelBase implements TabModel {
     // This function is complex and its behavior depends on persisted state, including mIndex.
     @Override
     public void setIndex(int i, final TabSelectionType type) {
-        TraceEvent.begin();
-        int lastId = getLastId(type);
+        try {
+            TraceEvent.begin("TabModelBase.setIndex");
+            int lastId = getLastId(type);
 
-        if (!isCurrentModel()) {
-            mModelDelegate.selectModel(isIncognito());
+            if (!isCurrentModel()) {
+                mModelDelegate.selectModel(isIncognito());
+            }
+
+            if (mTabs.size() <= 0) {
+                mIndex = INVALID_TAB_INDEX;
+            } else {
+                mIndex = MathUtils.clamp(i, 0, mTabs.size() - 1);
+            }
+
+            Tab tab = TabModelUtils.getCurrentTab(this);
+
+            mModelDelegate.requestToShowTab(tab, type);
+
+            if (tab != null) {
+                for (TabModelObserver obs : mObservers) obs.didSelectTab(tab, type, lastId);
+            }
+
+        } finally {
+            TraceEvent.end("TabModelBase.setIndex");
         }
-
-        if (mTabs.size() <= 0) {
-            mIndex = INVALID_TAB_INDEX;
-        } else {
-            mIndex = MathUtils.clamp(i, 0, mTabs.size() - 1);
-        }
-
-        Tab tab = TabModelUtils.getCurrentTab(this);
-
-        mModelDelegate.requestToShowTab(tab, type);
-
-        if (tab != null) {
-            for (TabModelObserver obs : mObservers) obs.didSelectTab(tab, type, lastId);
-        }
-
-        // notifyDataSetChanged() can call into
-        // ChromeViewHolderTablet.handleTabChangeExternal(), which will eventually move the
-        // ContentView onto the current view hierarchy (with addView()).
-        mModelDelegate.didChange();
-        TraceEvent.end();
     }
-
-    /**
-     * @param incognito
-     * @param nativeWebContents
-     * @param parentId
-     * @return
-     */
-    @CalledByNative
-    protected abstract Tab createTabWithNativeContents(boolean incognito, long nativeWebContents,
-            int parentId);
 
     /**
      * Performs the necessary actions to remove this {@link Tab} from this {@link TabModel}.
@@ -488,7 +490,7 @@ public abstract class TabModelBase implements TabModel {
          * rewindable closes were undone). If there are no possible rewindable closes this list
          * should match {@link #mTabs}.
          */
-        private List<Tab> mRewoundTabs = new ArrayList<Tab>();
+        private final List<Tab> mRewoundTabs = new ArrayList<Tab>();
 
         @Override
         public boolean isIncognito() {
@@ -603,119 +605,23 @@ public abstract class TabModelBase implements TabModel {
         }
     }
 
-    /**
-     * Broadcast a notification (in native code) that all tabs are now loaded from storage.
-     */
-    public void broadcastSessionRestoreComplete() {
-        nativeBroadcastSessionRestoreComplete(mNativeTabModelImpl);
+    @Override
+    protected boolean closeTabAt(int index) {
+        return closeTab(getTabAt(index));
     }
 
-    // JNI related methods -------------------------------------------------------------------------
-
     @Override
-    @CalledByNative
     public int getCount() {
         return mTabs.size();
     }
 
     @Override
-    @CalledByNative
     public int index() {
         return mIndex;
     }
 
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private void setIndex(int index) {
-        TabModelUtils.setIndex(this, index);
-    }
-
-    /**
-     * Used by Developer Tools to create a new tab with a given URL.
-     *
-     * @param url The URL to open.
-     * @return The new tab.
-     */
-    @CalledByNative
-    protected abstract Tab createNewTabForDevTools(String url);
-
-    @CalledByNative
-    private boolean isSessionRestoreInProgress() {
+    @Override
+    protected boolean isSessionRestoreInProgress() {
         return mModelDelegate.isSessionRestoreInProgress();
     }
-
-    /**
-     * Register the start of tab switch latency timing. Called when setIndex() indicates a tab
-     * switch event.
-     * @param type The type of action that triggered the tab selection.
-     */
-    public static void startTabSwitchLatencyTiming(final TabSelectionType type) {
-        sTabSwitchStartTime = SystemClock.uptimeMillis();
-        sTabSelectionType = type;
-        sTabSwitchLatencyMetricRequired = false;
-        sPerceivedTabSwitchLatencyMetricLogged = false;
-    }
-
-    /**
-     * Should be called a visible {@link ChromeTab} gets a frame to render in the browser process.
-     * If we don't get this call, we ignore requests to
-     * {@link #flushActualTabSwitchLatencyMetric()}.
-     */
-    public static void setActualTabSwitchLatencyMetricRequired() {
-        if (sTabSwitchStartTime <= 0) return;
-        sTabSwitchLatencyMetricRequired = true;
-    }
-
-    /**
-     * Logs the perceived tab switching latency metric.  This will automatically be logged if
-     * the actual metric is set and flushed.
-     */
-    public static void logPerceivedTabSwitchLatencyMetric() {
-        if (sTabSwitchStartTime <= 0 || sPerceivedTabSwitchLatencyMetricLogged) return;
-
-        flushTabSwitchLatencyMetric(true);
-        sPerceivedTabSwitchLatencyMetricLogged = true;
-    }
-
-    /**
-     * Flush the latency metric if called after the indication that a frame is ready.
-     */
-    public static void flushActualTabSwitchLatencyMetric() {
-        if (sTabSwitchStartTime <= 0 || !sTabSwitchLatencyMetricRequired) return;
-        logPerceivedTabSwitchLatencyMetric();
-        flushTabSwitchLatencyMetric(false);
-
-        sTabSwitchStartTime = 0;
-        sTabSwitchLatencyMetricRequired = false;
-    }
-
-    private static void flushTabSwitchLatencyMetric(boolean perceived) {
-        if (sTabSwitchStartTime <= 0) return;
-        final long ms = SystemClock.uptimeMillis() - sTabSwitchStartTime;
-        switch (sTabSelectionType) {
-            case FROM_CLOSE:
-                nativeLogFromCloseMetric(ms, perceived);
-                break;
-            case FROM_EXIT:
-                nativeLogFromExitMetric(ms, perceived);
-                break;
-            case FROM_NEW:
-                nativeLogFromNewMetric(ms, perceived);
-                break;
-            case FROM_USER:
-                nativeLogFromUserMetric(ms, perceived);
-                break;
-        }
-    }
-
-    private native long nativeInit(boolean isIncognito);
-    private native void nativeDestroy(long nativeTabModelBase);
-    private native void nativeBroadcastSessionRestoreComplete(long nativeTabModelBase);
-    private native Profile nativeGetProfileAndroid(long nativeTabModelBase);
-    private native void nativeTabAddedToModel(long nativeTabModelBase, Tab tab);
-    // Native methods for tab switch latency metrics.
-    private static native void nativeLogFromCloseMetric(long ms, boolean perceived);
-    private static native void nativeLogFromExitMetric(long ms, boolean perceived);
-    private static native void nativeLogFromNewMetric(long ms, boolean perceived);
-    private static native void nativeLogFromUserMetric(long ms, boolean perceived);
 }

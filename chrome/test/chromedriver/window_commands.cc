@@ -343,7 +343,7 @@ Status ExecuteSwitchToFrame(
     return Status(kUnknownError, "fail to locate the sub frame element");
 
   std::string chrome_driver_id = GenerateId();
-  const char* kSetFrameIdentifier =
+  const char kSetFrameIdentifier[] =
       "function(frame, id) {"
       "  frame.setAttribute('cd_frame_id_', id);"
       "}";
@@ -373,7 +373,7 @@ Status ExecuteGetTitle(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  const char* kGetTitleScript =
+  const char kGetTitleScript[] =
       "function() {"
       "  if (document.title)"
       "    return document.title;"
@@ -389,7 +389,7 @@ Status ExecuteGetPageSource(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  const char* kGetPageSource =
+  const char kGetPageSource[] =
       "function() {"
       "  return new XMLSerializer().serializeToString(document);"
       "}";
@@ -435,8 +435,7 @@ Status ExecuteGoBack(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->EvaluateScript(
-      std::string(), "window.history.back();", value);
+  return web_view->TraverseHistory(-1);
 }
 
 Status ExecuteGoForward(
@@ -444,8 +443,7 @@ Status ExecuteGoForward(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->EvaluateScript(
-      std::string(), "window.history.forward();", value);
+  return web_view->TraverseHistory(1);
 }
 
 Status ExecuteRefresh(
@@ -472,22 +470,15 @@ Status ExecuteMouseMoveTo(
 
   WebPoint location;
   if (has_element) {
-    Status status = ScrollElementIntoView(
-        session, web_view, element_id, &location);
+    WebPoint offset(x_offset, y_offset);
+    Status status = ScrollElementIntoView(session, web_view, element_id,
+        has_offset ? &offset : nullptr, &location);
     if (status.IsError())
       return status;
   } else {
     location = session->mouse_position;
-  }
-
-  if (has_offset) {
-    location.Offset(x_offset, y_offset);
-  } else {
-    WebSize size;
-    Status status = GetElementSize(session, web_view, element_id, &size);
-    if (status.IsError())
-      return status;
-    location.Offset(size.width / 2, size.height / 2);
+    if (has_offset)
+      location.Offset(x_offset, y_offset);
   }
 
   std::list<MouseEvent> events;
@@ -753,10 +744,11 @@ Status ExecuteScreenshot(
     return status;
 
   std::string screenshot;
-  if (session->chrome->GetAsDesktop() && !session->force_devtools_screenshot) {
+  ChromeDesktopImpl* desktop = NULL;
+  status = session->chrome->GetAsDesktop(&desktop);
+  if (status.IsOk() && !session->force_devtools_screenshot) {
     AutomationExtension* extension = NULL;
-    status =
-        session->chrome->GetAsDesktop()->GetAutomationExtension(&extension);
+    status = desktop->GetAutomationExtension(&extension);
     if (status.IsError())
       return status;
     status = extension->CaptureScreenshot(&screenshot);

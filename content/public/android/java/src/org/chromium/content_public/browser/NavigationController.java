@@ -51,6 +51,11 @@ public interface NavigationController {
     void goForward();
 
     /**
+     * @return Whether the tab is navigating to the URL the tab is opened with.
+     */
+    boolean isInitialNavigation();
+
+    /**
      * Loads the current navigation if there is a pending lazy load (after tab restore).
      */
     public void loadIfNecessary();
@@ -137,8 +142,27 @@ public interface NavigationController {
     public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange);
 
     /**
+     * Return the NavigationEntry at the given index.
+     * @param index Index to retrieve the NavigationEntry for.
+     * @return Entry containing info about the navigation, null if the index is out of bounds.
+     */
+    public NavigationEntry getEntryAtIndex(int index);
+
+    /**
      * @return The pending {@link NavigationEntry} for this controller or {@code null} if none
      *         exists.
      */
     public NavigationEntry getPendingEntry();
+
+    /**
+     * @return The index of the last committed entry.
+     */
+    public int getLastCommittedEntryIndex();
+
+    /**
+     * Removes the entry at the specified |index|.
+     * @return false, if the index is the last committed index or the pending entry. Otherwise this
+     *         call discards any transient or pending entries.
+     */
+    public boolean removeEntryAtIndex(int index);
 }

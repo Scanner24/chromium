@@ -176,7 +176,8 @@ TEST_F(BrowserCommandControllerTest, OldAvatarMenuEnabledForOneOrMoreProfiles) {
     return;
 
   // The command line is reset at the end of every test by the test suite.
-  switches::DisableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::DisableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
   ASSERT_FALSE(switches::IsNewAvatarMenu());
 
   TestingProfileManager testing_profile_manager(
@@ -213,7 +214,8 @@ TEST_F(BrowserCommandControllerTest, NewAvatarMenuEnabledWhenOnlyOneProfile) {
     return;
 
   // The command line is reset at the end of every test by the test suite.
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+  switches::EnableNewAvatarMenuForTesting(
+      base::CommandLine::ForCurrentProcess());
 
   TestingProfileManager testing_profile_manager(
       TestingBrowserProcess::GetGlobal());
@@ -232,44 +234,6 @@ TEST_F(BrowserCommandControllerTest, NewAvatarMenuEnabledWhenOnlyOneProfile) {
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
 #endif
   testing_profile_manager.DeleteTestingProfile("p1");
-}
-
-TEST_F(BrowserCommandControllerTest, NewAvatarMenuEnabledInGuestMode) {
-  if (!profiles::IsMultipleProfilesEnabled())
-    return;
-
-  // The command line is reset at the end of every test by the test suite.
-  switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
-
-  TestingProfileManager testing_profile_manager(
-      TestingBrowserProcess::GetGlobal());
-  ASSERT_TRUE(testing_profile_manager.SetUp());
-
-  // Set up guest a profile.
-  scoped_ptr<TestingProfile> original_profile =
-      TestingProfile::Builder().Build();
-  TestingProfile::Builder guest_builder;
-  guest_builder.SetGuestSession();
-  guest_builder.SetPath(ProfileManager::GetGuestProfilePath());
-  // Browsers in Guest mode must be off the record profiles.
-  TestingProfile* guest_profile =
-      guest_builder.BuildIncognito(original_profile.get());
-
-  ASSERT_TRUE(guest_profile->IsGuestSession());
-
-  // Create a new browser based on the guest profile.
-  Browser::CreateParams profile_params(guest_profile,
-                                       chrome::GetActiveDesktop());
-  scoped_ptr<Browser> guest_browser(
-      chrome::CreateBrowserWithTestWindowForParams(&profile_params));
-  chrome::BrowserCommandController command_controller(guest_browser.get());
-  const CommandUpdater* command_updater = command_controller.command_updater();
-#if defined(OS_CHROMEOS)
-  // Chrome OS uses system tray menu to handle multi-profiles.
-  EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
-#else
-  EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
-#endif
 }
 
 TEST_F(BrowserCommandControllerTest, AvatarMenuAlwaysDisabledInIncognitoMode) {
@@ -292,9 +256,11 @@ TEST_F(BrowserCommandControllerTest, AvatarMenuAlwaysDisabledInIncognitoMode) {
   // Both the old style and the new style avatar menu should be disabled.
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
   if (switches::IsNewAvatarMenu()) {
-    switches::DisableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+    switches::DisableNewAvatarMenuForTesting(
+        base::CommandLine::ForCurrentProcess());
   } else {
-    switches::EnableNewAvatarMenuForTesting(CommandLine::ForCurrentProcess());
+    switches::EnableNewAvatarMenuForTesting(
+        base::CommandLine::ForCurrentProcess());
   }
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
   // The command line is reset at the end of every test by the test suite.
@@ -306,22 +272,17 @@ TEST_F(BrowserCommandControllerTest, AvatarMenuAlwaysDisabledInIncognitoMode) {
 class FullscreenTestBrowserWindow : public TestBrowserWindow {
  public:
   FullscreenTestBrowserWindow() : fullscreen_(false) {}
-  virtual ~FullscreenTestBrowserWindow() {}
+  ~FullscreenTestBrowserWindow() override {}
 
   // TestBrowserWindow overrides:
-  virtual bool ShouldHideUIForFullscreen() const OVERRIDE {
-    return fullscreen_;
-  }
-  virtual bool IsFullscreen() const OVERRIDE {
-    return fullscreen_;
-  }
-  virtual void EnterFullscreen(
-      const GURL& url, FullscreenExitBubbleType type) OVERRIDE {
+  bool ShouldHideUIForFullscreen() const override { return fullscreen_; }
+  bool IsFullscreen() const override { return fullscreen_; }
+  void EnterFullscreen(const GURL& url,
+                       ExclusiveAccessBubbleType type,
+                       bool with_toolbar) override {
     fullscreen_ = true;
   }
-  virtual void ExitFullscreen() OVERRIDE {
-    fullscreen_ = false;
-  }
+  void ExitFullscreen() override { fullscreen_ = false; }
 
  private:
   bool fullscreen_;
@@ -334,10 +295,10 @@ class BrowserCommandControllerFullscreenTest
     : public BrowserWithTestWindowTest {
  public:
   BrowserCommandControllerFullscreenTest() {}
-  virtual ~BrowserCommandControllerFullscreenTest() {}
+  ~BrowserCommandControllerFullscreenTest() override {}
 
   // BrowserWithTestWindowTest overrides:
-  virtual BrowserWindow* CreateBrowserWindow() OVERRIDE {
+  BrowserWindow* CreateBrowserWindow() override {
     return new FullscreenTestBrowserWindow;
   }
 

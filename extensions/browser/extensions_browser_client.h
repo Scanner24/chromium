@@ -38,6 +38,7 @@ class ApiActivityMonitor;
 class AppSorting;
 class ComponentExtensionResourceManager;
 class Extension;
+class ExtensionCache;
 class ExtensionHostDelegate;
 class ExtensionPrefsObserver;
 class ExtensionSystem;
@@ -86,6 +87,13 @@ class ExtensionsBrowserClient {
   // |context| is not incognito.
   virtual content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) = 0;
+
+#if defined(OS_CHROMEOS)
+  // Returns a user id hash from |context| or an empty string if no hash could
+  // be extracted.
+  virtual std::string GetUserIdHashFromContext(
+      content::BrowserContext* context) = 0;
+#endif
 
   // Returns true if |context| corresponds to a guest session.
   virtual bool IsGuestSession(content::BrowserContext* context) const = 0;
@@ -176,7 +184,7 @@ class ExtensionsBrowserClient {
 
   // Returns the manager of resource bundles used in extensions. Returns NULL if
   // the manager doesn't exist.
-  virtual ComponentExtensionResourceManager*
+  virtual const ComponentExtensionResourceManager*
   GetComponentExtensionResourceManager() = 0;
 
   // Propagate a event to all the renderers in every browser context. The
@@ -186,6 +194,18 @@ class ExtensionsBrowserClient {
 
   // Returns the embedder's net::NetLog.
   virtual net::NetLog* GetNetLog() = 0;
+
+  // Gets the single ExtensionCache instance shared across the browser process.
+  virtual ExtensionCache* GetExtensionCache() = 0;
+
+  // Indicates whether extension update checks should be allowed.
+  virtual bool IsBackgroundUpdateAllowed() = 0;
+
+  // Indicates whether an extension update which specifies its minimum browser
+  // version as |min_version| can be installed by the client. Not all extensions
+  // embedders share the same versioning model, so interpretation of the string
+  // is left up to the embedder.
+  virtual bool IsMinBrowserVersionSupported(const std::string& min_version) = 0;
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

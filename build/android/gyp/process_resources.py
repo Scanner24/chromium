@@ -21,6 +21,7 @@ import generate_v14_compatible_resources
 
 from util import build_utils
 
+
 def ParseArgs(args):
   """Parses command line options.
 
@@ -37,6 +38,11 @@ def ParseArgs(args):
 
   parser.add_option('--android-manifest', help='AndroidManifest.xml path')
   parser.add_option('--custom-package', help='Java package for R.java')
+  parser.add_option(
+      '--shared-resources',
+      action='store_true',
+      help='Make a resource package that can be loaded by a different'
+      'application at runtime to access the package\'s resources.')
 
   parser.add_option('--resource-dirs',
                     help='Directories containing resources of this target.')
@@ -120,20 +126,56 @@ def CreateExtraRJavaFiles(r_dir, extra_packages):
     # affect how the code in this .apk target could refer to the resources.
 
 
+def CrunchDirectory(aapt, input_dir, output_dir):
+  """Crunches the images in input_dir and its subdirectories into output_dir.
+
+  If an image is already optimized, crunching often increases image size. In
+  this case, the crunched image is overwritten with the original image.
+  """
+  aapt_cmd = [aapt,
+              'crunch',
+              '-C', output_dir,
+              '-S', input_dir,
+              '--ignore-assets', build_utils.AAPT_IGNORE_PATTERN]
+  build_utils.CheckOutput(aapt_cmd, stderr_filter=FilterCrunchStderr,
+                          fail_func=DidCrunchFail)
+
+  # Check for images whose size increased during crunching and replace them
+  # with their originals (except for 9-patches, which must be crunched).
+  for dir_, _, files in os.walk(output_dir):
+    for crunched in files:
+      if crunched.endswith('.9.png'):
+        continue
+      if not crunched.endswith('.png'):
+        raise Exception('Unexpected file in crunched dir: ' + crunched)
+      crunched = os.path.join(dir_, crunched)
+      original = os.path.join(input_dir, os.path.relpath(crunched, output_dir))
+      original_size = os.path.getsize(original)
+      crunched_size = os.path.getsize(crunched)
+      if original_size < crunched_size:
+        shutil.copyfile(original, crunched)
+
+
+def FilterCrunchStderr(stderr):
+  """Filters out lines from aapt crunch's stderr that can safely be ignored."""
+  filtered_lines = []
+  for line in stderr.splitlines(True):
+    # Ignore this libpng warning, which is a known non-error condition.
+    # http://crbug.com/364355
+    if ('libpng warning: iCCP: Not recognizing known sRGB profile that has '
+        + 'been edited' in line):
+      continue
+    filtered_lines.append(line)
+  return ''.join(filtered_lines)
+
+
 def DidCrunchFail(returncode, stderr):
   """Determines whether aapt crunch failed from its return code and output.
 
   Because aapt's return code cannot be trusted, any output to stderr is
-  an indication that aapt has failed (http://crbug.com/314885), except
-  lines that contain "libpng warning", which is a known non-error condition
-  (http://crbug.com/364355).
+  an indication that aapt has failed (http://crbug.com/314885).
   """
-  if returncode != 0:
-    return True
-  for line in stderr.splitlines():
-    if line and not 'libpng warning' in line:
-      return True
-  return False
+  return returncode != 0 or stderr
 
 
 def ZipResources(resource_dirs, zip_path):
@@ -214,7 +256,8 @@ def main():
                        '--auto-add-overlay',
                        '-I', android_jar,
                        '--output-text-symbols', gen_dir,
-                       '-J', gen_dir]
+                       '-J', gen_dir,
+                       '--ignore-assets', build_utils.AAPT_IGNORE_PATTERN]
 
     for d in input_resource_dirs:
       package_command += ['-S', d]
@@ -228,6 +271,8 @@ def main():
       package_command += ['--custom-package', options.custom_package]
     if options.proguard_file:
       package_command += ['-G', options.proguard_file]
+    if options.shared_resources:
+      package_command.append('--shared-lib')
     build_utils.CheckOutput(package_command, print_stderr=False)
 
     if options.extra_res_packages:
@@ -245,15 +290,11 @@ def main():
     # Crunch image resources. This shrinks png files and is necessary for
     # 9-patch images to display correctly. 'aapt crunch' accepts only a single
     # directory at a time and deletes everything in the output directory.
-    for idx, d in enumerate(input_resource_dirs):
+    for idx, input_dir in enumerate(input_resource_dirs):
       crunch_dir = os.path.join(base_crunch_dir, str(idx))
       build_utils.MakeDirectory(crunch_dir)
       zip_resource_dirs.append(crunch_dir)
-      aapt_cmd = [aapt,
-                  'crunch',
-                  '-C', crunch_dir,
-                  '-S', d]
-      build_utils.CheckOutput(aapt_cmd, fail_func=DidCrunchFail)
+      CrunchDirectory(aapt, input_dir, crunch_dir)
 
     ZipResources(zip_resource_dirs, options.resource_zip_out)
 

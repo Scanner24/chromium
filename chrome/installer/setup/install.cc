@@ -15,7 +15,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -259,23 +258,6 @@ void CleanupLegacyShortcuts(const installer::InstallerState& installer_state,
   base::DeleteFile(uninstall_shortcut_path, false);
 }
 
-// Returns the appropriate shortcut operations for App Launcher,
-// based on state of installation and master_preferences.
-installer::InstallShortcutOperation GetAppLauncherShortcutOperation(
-    const installer::InstallationState& original_state,
-    const installer::InstallerState& installer_state) {
-  const installer::ProductState* original_app_host_state =
-      original_state.GetProductState(installer_state.system_install(),
-                                     BrowserDistribution::CHROME_APP_HOST);
-  bool app_launcher_exists = original_app_host_state &&
-      original_app_host_state->uninstall_command()
-          .HasSwitch(installer::switches::kChromeAppLauncher);
-  if (!app_launcher_exists)
-    return installer::INSTALL_SHORTCUT_CREATE_ALL;
-
-  return installer::INSTALL_SHORTCUT_REPLACE_EXISTING;
-}
-
 }  // end namespace
 
 namespace installer {
@@ -303,20 +285,20 @@ bool CreateVisualElementsManifest(const base::FilePath& src_path,
             << installer::kVisualElementsManifest << " to " << src_path.value();
     return true;
   } else {
-    // A printf_p-style format string for generating the visual elements
+    // A printf-style format string for generating the visual elements
     // manifest. Required arguments, in order, are:
     //   - Localized display name for the product.
-    //   - Relative path to the VisualElements directory.
+    //   - Relative path to the VisualElements directory, three times.
     static const char kManifestTemplate[] =
         "<Application>\r\n"
         "  <VisualElements\r\n"
-        "      DisplayName='%1$ls'\r\n"
-        "      Logo='%2$ls\\Logo.png'\r\n"
-        "      SmallLogo='%2$ls\\SmallLogo.png'\r\n"
+        "      DisplayName='%ls'\r\n"
+        "      Logo='%ls\\Logo.png'\r\n"
+        "      SmallLogo='%ls\\SmallLogo.png'\r\n"
         "      ForegroundText='light'\r\n"
         "      BackgroundColor='#323232'>\r\n"
         "    <DefaultTile ShowName='allLogos'/>\r\n"
-        "    <SplashScreen Image='%2$ls\\splash-620x300.png'/>\r\n"
+        "    <SplashScreen Image='%ls\\splash-620x300.png'/>\r\n"
         "  </VisualElements>\r\n"
         "</Application>";
 
@@ -332,7 +314,8 @@ bool CreateVisualElementsManifest(const base::FilePath& src_path,
 
     // Fill the manifest with the desired values.
     base::string16 manifest16(base::StringPrintf(
-        manifest_template.c_str(), display_name.c_str(), elements_dir.c_str()));
+        manifest_template.c_str(), display_name.c_str(), elements_dir.c_str(),
+        elements_dir.c_str(), elements_dir.c_str()));
 
     // Write the manifest to |src_path|.
     const std::string manifest(base::UTF16ToUTF8(manifest16));
@@ -470,9 +453,9 @@ void RegisterChromeOnMachine(const installer::InstallerState& installer_state,
   // Make Chrome the default browser if desired when possible. Otherwise, only
   // register it with Windows.
   BrowserDistribution* dist = product.distribution();
-  const base::string16 chrome_exe(
-      installer_state.target_path().Append(installer::kChromeExe).value());
-  VLOG(1) << "Registering Chrome as browser: " << chrome_exe;
+  const base::FilePath chrome_exe(
+      installer_state.target_path().Append(installer::kChromeExe));
+  VLOG(1) << "Registering Chrome as browser: " << chrome_exe.value();
   if (make_chrome_default && ShellUtil::CanMakeChromeDefaultUnattended()) {
     int level = ShellUtil::CURRENT_USER;
     if (installer_state.system_install())
@@ -529,22 +512,6 @@ InstallStatus InstallOrUpdateProduct(
       CopyPreferenceFileForFirstRun(installer_state, prefs_path);
 
     installer_state.UpdateStage(installer::CREATING_SHORTCUTS);
-
-    const installer::Product* app_launcher_product =
-        installer_state.FindProduct(BrowserDistribution::CHROME_APP_HOST);
-    // Creates shortcuts for App Launcher.
-    if (app_launcher_product) {
-      // TODO(huangs): Remove this check once we have system-level App Host.
-      DCHECK(!installer_state.system_install());
-      const base::FilePath app_host_exe(
-          installer_state.target_path().Append(kChromeAppHostExe));
-      InstallShortcutOperation app_launcher_shortcut_operation =
-          GetAppLauncherShortcutOperation(original_state, installer_state);
-
-      // Always install per-user shortcuts for App Launcher.
-      CreateOrUpdateShortcuts(app_host_exe, *app_launcher_product, prefs,
-                              CURRENT_USER, app_launcher_shortcut_operation);
-    }
 
     const installer::Product* chrome_product =
         installer_state.FindProduct(BrowserDistribution::CHROME_BROWSER);

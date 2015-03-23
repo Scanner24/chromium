@@ -36,7 +36,7 @@ void CreateAndPostKeyEvent(int keycode,
                            int flags,
                            const base::string16& unicode) {
   base::ScopedCFTypeRef<CGEventRef> eventRef(
-      CGEventCreateKeyboardEvent(NULL, keycode, pressed));
+      CGEventCreateKeyboardEvent(nullptr, keycode, pressed));
   if (eventRef) {
     CGEventSetFlags(eventRef, flags);
     if (!unicode.empty())
@@ -60,19 +60,18 @@ class InputInjectorMac : public InputInjector {
  public:
   explicit InputInjectorMac(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  virtual ~InputInjectorMac();
+  ~InputInjectorMac() override;
 
   // ClipboardStub interface.
-  virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
+  void InjectClipboardEvent(const ClipboardEvent& event) override;
 
   // InputStub interface.
-  virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-  virtual void InjectTextEvent(const TextEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+  void InjectKeyEvent(const KeyEvent& event) override;
+  void InjectTextEvent(const TextEvent& event) override;
+  void InjectMouseEvent(const MouseEvent& event) override;
 
   // InputInjector interface.
-  virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
 
  private:
   // The actual implementation resides in InputInjectorMac::Core class.
@@ -304,7 +303,7 @@ void InputInjectorMac::Core::InjectMouseEvent(const MouseEvent& event) {
     int delta_x = static_cast<int>(event.wheel_delta_x());
     int delta_y = static_cast<int>(event.wheel_delta_y());
     base::ScopedCFTypeRef<CGEventRef> event(CGEventCreateScrollWheelEvent(
-        NULL, kCGScrollEventUnitPixel, 2, delta_y, delta_x));
+        nullptr, kCGScrollEventUnitPixel, 2, delta_y, delta_x));
     if (event)
       CGEventPost(kCGSessionEventTap, event);
   }
@@ -328,7 +327,7 @@ void InputInjectorMac::Core::Stop() {
     return;
   }
 
-  clipboard_->Stop();
+  clipboard_.reset();
 }
 
 InputInjectorMac::Core::~Core() {}
@@ -338,7 +337,7 @@ InputInjectorMac::Core::~Core() {}
 scoped_ptr<InputInjector> InputInjector::Create(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
-  return scoped_ptr<InputInjector>(new InputInjectorMac(main_task_runner));
+  return make_scoped_ptr(new InputInjectorMac(main_task_runner));
 }
 
 }  // namespace remoting

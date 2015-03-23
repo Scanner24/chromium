@@ -5,6 +5,7 @@
 #ifndef UI_APP_LIST_SEARCH_RESULT_H_
 #define UI_APP_LIST_SEARCH_RESULT_H_
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -27,10 +28,16 @@ class SearchResultObserver;
 // default style.
 class APP_LIST_EXPORT SearchResult {
  public:
-  // How the result should be displayed.
+  // How the result should be displayed. Do not change the order of these as
+  // they are used for metrics.
   enum DisplayType {
+    DISPLAY_NONE = 0,
     DISPLAY_LIST,
     DISPLAY_TILE,
+    DISPLAY_RECOMMENDATION,
+    // Add new values here.
+
+    DISPLAY_TYPE_LAST,
   };
 
   // A tagged range in search result text.
@@ -95,13 +102,24 @@ class APP_LIST_EXPORT SearchResult {
   void set_details_tags(const Tags& tags) { details_tags_ = tags; }
 
   const std::string& id() const { return id_; }
+
   double relevance() const { return relevance_; }
+  void set_relevance(double relevance) { relevance_ = relevance; }
+
   DisplayType display_type() const { return display_type_; }
+  void set_display_type(DisplayType display_type) {
+    display_type_ = display_type;
+  }
 
   const Actions& actions() const {
     return actions_;
   }
   void SetActions(const Actions& sets);
+
+  // Whether the result can be automatically selected by a voice query.
+  // (Non-voice results can still appear in the results list to be manually
+  // selected.)
+  bool voice_result() const { return voice_result_; }
 
   bool is_installing() const { return is_installing_; }
   void SetIsInstalling(bool is_installing);
@@ -113,15 +131,18 @@ class APP_LIST_EXPORT SearchResult {
   int GetPreferredIconDimension() const;
 
   void NotifyItemInstalled();
-  void NotifyItemUninstalled();
 
   void AddObserver(SearchResultObserver* observer);
   void RemoveObserver(SearchResultObserver* observer);
 
+  // TODO(mukai): Remove this method and really simplify the ownership of
+  // SearchResult. Ideally, SearchResult will be copyable.
+  virtual scoped_ptr<SearchResult> Duplicate() const = 0;
+
   // Opens the result.
   virtual void Open(int event_flags);
 
-  // Invokes a custom action on the result.
+  // Invokes a custom action on the result. It does nothing by default.
   virtual void InvokeAction(int action_index, int event_flags);
 
   // Returns the context menu model for this item, or NULL if there is currently
@@ -131,10 +152,7 @@ class APP_LIST_EXPORT SearchResult {
 
  protected:
   void set_id(const std::string& id) { id_ = id; }
-  void set_relevance(double relevance) { relevance_ = relevance; }
-  void set_display_type(DisplayType display_type) {
-    display_type_ = display_type;
-  }
+  void set_voice_result(bool voice_result) { voice_result_ = voice_result; }
 
  private:
   gfx::ImageSkia icon_;
@@ -150,6 +168,7 @@ class APP_LIST_EXPORT SearchResult {
   DisplayType display_type_;
 
   Actions actions_;
+  bool voice_result_;
 
   bool is_installing_;
   int percent_downloaded_;

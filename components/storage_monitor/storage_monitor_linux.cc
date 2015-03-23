@@ -26,7 +26,7 @@
 #include "components/storage_monitor/storage_info.h"
 #include "components/storage_monitor/udev_util_linux.h"
 #include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
-#include "device/udev_linux/udev.h"
+#include "device/udev_linux/scoped_udev.h"
 
 using content::BrowserThread;
 
@@ -99,7 +99,7 @@ class ScopedGetDeviceInfoResultRecorder {
 uint64 GetDeviceStorageSize(const base::FilePath& device_path,
                             struct udev_device* device) {
   // sysfs provides the device size in units of 512-byte blocks.
-  const std::string partition_size = udev_device_get_sysattr_value(
+  const std::string partition_size = device::udev_device_get_sysattr_value(
       device, kSizeSysAttr);
 
   // Keep track of device size, to see how often this information is
@@ -125,7 +125,7 @@ scoped_ptr<StorageInfo> GetDeviceInfo(const base::FilePath& device_path,
 
   ScopedGetDeviceInfoResultRecorder results_recorder;
 
-  device::ScopedUdevPtr udev_obj(udev_new());
+  device::ScopedUdevPtr udev_obj(device::udev_new());
   if (!udev_obj.get())
     return storage_info.Pass();
 
@@ -142,8 +142,8 @@ scoped_ptr<StorageInfo> GetDeviceInfo(const base::FilePath& device_path,
     return storage_info.Pass();  // Not a supported type.
 
   device::ScopedUdevDevicePtr device(
-      udev_device_new_from_devnum(udev_obj.get(), device_type,
-                                  device_stat.st_rdev));
+      device::udev_device_new_from_devnum(udev_obj.get(), device_type,
+                                          device_stat.st_rdev));
   if (!device.get())
     return storage_info.Pass();
 
@@ -160,15 +160,17 @@ scoped_ptr<StorageInfo> GetDeviceInfo(const base::FilePath& device_path,
   MediaStorageUtil::RecordDeviceInfoHistogram(true, unique_id, volume_label);
 
   const char* value =
-      udev_device_get_sysattr_value(device.get(), kRemovableSysAttr);
+      device::udev_device_get_sysattr_value(device.get(), kRemovableSysAttr);
   if (!value) {
     // |parent_device| is owned by |device| and does not need to be cleaned
     // up.
     struct udev_device* parent_device =
-        udev_device_get_parent_with_subsystem_devtype(device.get(),
-                                                      kBlockSubsystemKey,
-                                                      kDiskDeviceTypeKey);
-    value = udev_device_get_sysattr_value(parent_device, kRemovableSysAttr);
+        device::udev_device_get_parent_with_subsystem_devtype(
+            device.get(),
+            kBlockSubsystemKey,
+            kDiskDeviceTypeKey);
+    value = device::udev_device_get_sysattr_value(parent_device,
+                                                  kRemovableSysAttr);
   }
   const bool is_removable = (value && atoi(value) == 1);
 
@@ -212,15 +214,15 @@ StorageMonitor::EjectStatus EjectPathOnFileThread(
   command.push_back(path.value());
 
   base::LaunchOptions options;
-  base::ProcessHandle handle;
-  if (!base::LaunchProcess(command, options, &handle))
+  base::Process process = base::LaunchProcess(command, options);
+  if (!process.IsValid())
     return StorageMonitor::EJECT_FAILURE;
 
   int exit_code = -1;
-  if (!base::WaitForExitCodeWithTimeout(handle, &exit_code,
-      base::TimeDelta::FromMilliseconds(3000))) {
-    base::KillProcess(handle, -1, false);
-    base::EnsureProcessTerminated(handle);
+  if (!process.WaitForExitWithTimeout(base::TimeDelta::FromMilliseconds(3000),
+                                      &exit_code)) {
+    base::KillProcess(process.Handle(), -1, false);
+    base::EnsureProcessTerminated(process.Pass());
     return StorageMonitor::EJECT_FAILURE;
   }
 

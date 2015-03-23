@@ -8,7 +8,6 @@
 #include "base/bind.h"
 #include "base/callback_forward.h"
 #include "base/callback_helpers.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -21,12 +20,13 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "media/video/capture/video_capture_types.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace content {
 
@@ -134,6 +134,7 @@ bool ThreadSafeCaptureOracle::ObserveEventAndDecideCapture(
         static_cast<uint8*>(output_buffer->data()),
         output_buffer->size(),
         base::SharedMemory::NULLHandle(),
+        0,
         base::TimeDelta(),
         base::Closure());
   }

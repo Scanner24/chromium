@@ -32,25 +32,26 @@ class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
   virtual void Detach() = 0;
 
   // Sends a message to the agent.
-  virtual void DispatchProtocolMessage(const std::string& message) = 0;
+  void DispatchProtocolMessage(const std::string& message) override = 0;
 
   // Opens the inspector for this host.
   void Inspect(BrowserContext* browser_context);
 
   // DevToolsAgentHost implementation.
-  virtual void AttachClient(DevToolsAgentHostClient* client) OVERRIDE;
-  virtual void DetachClient() OVERRIDE;
-  virtual bool IsAttached() OVERRIDE;
-  virtual void InspectElement(int x, int y) OVERRIDE;
-  virtual std::string GetId() OVERRIDE;
-  virtual WebContents* GetWebContents() OVERRIDE;
-  virtual void DisconnectWebContents() OVERRIDE;
-  virtual void ConnectWebContents(WebContents* wc) OVERRIDE;
-  virtual bool IsWorker() const OVERRIDE;
+  void AttachClient(DevToolsAgentHostClient* client) override;
+  void DetachClient() override;
+  bool IsAttached() override;
+  void InspectElement(int x, int y) override;
+  std::string GetId() override;
+  BrowserContext* GetBrowserContext() override;
+  WebContents* GetWebContents() override;
+  void DisconnectWebContents() override;
+  void ConnectWebContents(WebContents* wc) override;
+  bool IsWorker() const override;
 
  protected:
   DevToolsAgentHostImpl();
-  virtual ~DevToolsAgentHostImpl();
+  ~DevToolsAgentHostImpl() override;
 
   void HostClosed();
   void SendMessageToClient(const std::string& message);

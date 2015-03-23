@@ -9,10 +9,11 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/history/history_service.h"
+#include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/test/test_history_database.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -73,7 +74,7 @@ bool NthResultIs(const QueryResults& results,
 
 class HistoryQueryTest : public testing::Test {
  public:
-  HistoryQueryTest() : page_id_(0) {
+  HistoryQueryTest() : nav_entry_id_(0) {
   }
 
   // Acts like a synchronous call to history's QueryHistory.
@@ -146,27 +147,28 @@ class HistoryQueryTest : public testing::Test {
   scoped_ptr<HistoryService> history_;
 
   // Counter used to generate a unique ID for each page added to the history.
-  int32 page_id_;
+  int nav_entry_id_;
 
   void AddEntryToHistory(const TestEntry& entry) {
     // We need the ID scope and page ID so that the visit tracker can find it.
     ContextID context_id = reinterpret_cast<ContextID>(1);
     GURL url(entry.url);
 
-    history_->AddPage(url, entry.time, context_id, page_id_++, GURL(),
+    history_->AddPage(url, entry.time, context_id, nav_entry_id_++, GURL(),
                       history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                       history::SOURCE_BROWSED, false);
     history_->SetPageTitle(url, base::UTF8ToUTF16(entry.title));
   }
 
  private:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
 
     history_.reset(new HistoryService);
-    if (!history_->Init(history_dir_)) {
+    if (!history_->Init(std::string(),
+                        TestHistoryDatabaseParamsForPath(history_dir_))) {
       history_.reset();  // Tests should notice this NULL ptr & fail.
       return;
     }
@@ -180,7 +182,7 @@ class HistoryQueryTest : public testing::Test {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (history_) {
       history_->SetOnBackendDestroyTask(base::MessageLoop::QuitClosure());
       history_->Cleanup();
@@ -402,11 +404,11 @@ TEST_F(HistoryQueryTest, TextSearchIDN) {
   } queries[] = {
     { "bad query", 0 },
     { std::string("xn--d1abbgf6aiiy.xn--p1ai"), 1 },
-    { base::WideToUTF8(std::wstring(L"\u043f\u0440\u0435\u0437") +
+    { base::WideToUTF8(L"\u043f\u0440\u0435\u0437"
                        L"\u0438\u0434\u0435\u043d\u0442.\u0440\u0444"), 1, },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(queries); ++i) {
+  for (size_t i = 0; i < arraysize(queries); ++i) {
     QueryHistory(queries[i].query, options, &results);
     EXPECT_EQ(queries[i].results_size, results.size());
   }

@@ -11,8 +11,8 @@
 #include "remoting/signaling/mock_signal_strategy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/xmpp/constants.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmpp/constants.h"
 
 using ::testing::_;
 using ::testing::DeleteArg;
@@ -113,7 +113,7 @@ TEST_F(IqSenderTest, Timeout) {
 
   request_->SetTimeout(base::TimeDelta::FromMilliseconds(2));
 
-  EXPECT_CALL(callback_, OnReply(request_.get(), NULL))
+  EXPECT_CALL(callback_, OnReply(request_.get(), nullptr))
       .WillOnce(InvokeWithoutArgs(&message_loop_, &base::MessageLoop::Quit));
   message_loop_.Run();
 }

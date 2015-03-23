@@ -12,9 +12,9 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
@@ -24,16 +24,16 @@
 #include "ui/base/dragdrop/os_exchange_data_provider_aurax11.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/device_list_cache_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/events/platform/x11/x11_event_source.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/device_list_cache_x.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
-#include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/path_x11.h"
 #include "ui/gfx/screen.h"
@@ -49,9 +49,12 @@
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_observer_x11.h"
 #include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
 #include "ui/views/widget/desktop_aura/x11_desktop_window_move_client.h"
+#include "ui/views/widget/desktop_aura/x11_pointer_grab.h"
 #include "ui/views/widget/desktop_aura/x11_window_event_filter.h"
 #include "ui/wm/core/compound_event_filter.h"
 #include "ui/wm/core/window_util.h"
+
+DECLARE_WINDOW_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
 
 namespace views {
 
@@ -120,6 +123,9 @@ const char* kAtomsToCache[] = {
   "XdndTypeList",
   NULL
 };
+
+const char kX11WindowRolePopup[] = "popup";
+const char kX11WindowRoleBubble[] = "bubble";
 
 }  // namespace
 
@@ -283,8 +289,7 @@ void DesktopWindowTreeHostX11::OnNativeWidgetCreated(
 }
 
 scoped_ptr<corewm::Tooltip> DesktopWindowTreeHostX11::CreateTooltip() {
-  return scoped_ptr<corewm::Tooltip>(
-      new corewm::TooltipAura(gfx::SCREEN_TYPE_NATIVE));
+  return make_scoped_ptr(new corewm::TooltipAura);
 }
 
 scoped_ptr<aura::client::DragDropClient>
@@ -293,7 +298,7 @@ DesktopWindowTreeHostX11::CreateDragDropClient(
   drag_drop_client_ = new DesktopDragDropClientAuraX11(
       window(), cursor_manager, xdisplay_, xwindow_);
   drag_drop_client_->Init();
-  return scoped_ptr<aura::client::DragDropClient>(drag_drop_client_).Pass();
+  return make_scoped_ptr(drag_drop_client_);
 }
 
 void DesktopWindowTreeHostX11::Close() {
@@ -891,10 +896,6 @@ void DesktopWindowTreeHostX11::SetBounds(const gfx::Rect& requested_bounds) {
   unsigned value_mask = 0;
 
   if (size_changed) {
-    // X11 will send an XError at our process if have a 0 sized window.
-    DCHECK_GT(bounds.width(), 0);
-    DCHECK_GT(bounds.height(), 0);
-
     if (bounds.width() < min_size_.width() ||
         bounds.height() < min_size_.height() ||
         (!max_size_.IsEmpty() &&
@@ -902,6 +903,11 @@ void DesktopWindowTreeHostX11::SetBounds(const gfx::Rect& requested_bounds) {
           bounds.height() > max_size_.height()))) {
       // Update the minimum and maximum sizes in case they have changed.
       UpdateMinAndMaxSize();
+
+      gfx::Size size = bounds.size();
+      size.SetToMin(max_size_);
+      size.SetToMax(min_size_);
+      bounds.set_size(size);
     }
 
     changes.width = bounds.width();
@@ -948,14 +954,14 @@ void DesktopWindowTreeHostX11::SetCapture() {
   // OR
   // - The topmost window underneath the mouse is managed by Chrome.
   DesktopWindowTreeHostX11* old_capturer = g_current_capture;
+
+  // Update |g_current_capture| prior to calling OnHostLostWindowCapture() to
+  // avoid releasing pointer grab.
   g_current_capture = this;
   if (old_capturer)
     old_capturer->OnHostLostWindowCapture();
 
-  unsigned int event_mask = PointerMotionMask | ButtonReleaseMask |
-                            ButtonPressMask;
-  XGrabPointer(xdisplay_, xwindow_, True, event_mask, GrabModeAsync,
-               GrabModeAsync, None, None, CurrentTime);
+  GrabPointer(xwindow_, true, None);
 }
 
 void DesktopWindowTreeHostX11::ReleaseCapture() {
@@ -964,7 +970,7 @@ void DesktopWindowTreeHostX11::ReleaseCapture() {
     // the topmost window underneath the mouse so the capture release being
     // asynchronous is likely inconsequential.
     g_current_capture = NULL;
-    XUngrabPointer(xdisplay_, CurrentTime);
+    UngrabPointer();
 
     OnHostLostWindowCapture();
   }
@@ -982,39 +988,6 @@ void DesktopWindowTreeHostX11::MoveCursorToNative(const gfx::Point& location) {
 void DesktopWindowTreeHostX11::OnCursorVisibilityChangedNative(bool show) {
   // TODO(erg): Conditional on us enabling touch on desktop linux builds, do
   // the same tap-to-click disabling here that chromeos does.
-}
-
-void DesktopWindowTreeHostX11::PostNativeEvent(
-    const base::NativeEvent& native_event) {
-  DCHECK(xwindow_);
-  DCHECK(xdisplay_);
-  XEvent xevent = *native_event;
-  xevent.xany.display = xdisplay_;
-  xevent.xany.window = xwindow_;
-
-  switch (xevent.type) {
-    case EnterNotify:
-    case LeaveNotify:
-    case MotionNotify:
-    case KeyPress:
-    case KeyRelease:
-    case ButtonPress:
-    case ButtonRelease: {
-      // The fields used below are in the same place for all of events
-      // above. Using xmotion from XEvent's unions to avoid repeating
-      // the code.
-      xevent.xmotion.root = x_root_window_;
-      xevent.xmotion.time = CurrentTime;
-
-      gfx::Point point(xevent.xmotion.x, xevent.xmotion.y);
-      ConvertPointToNativeScreen(&point);
-      xevent.xmotion.x_root = point.x();
-      xevent.xmotion.y_root = point.y();
-    }
-    default:
-      break;
-  }
-  XSendEvent(xdisplay_, xwindow_, False, 0, &xevent);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1063,10 +1036,10 @@ void DesktopWindowTreeHostX11::InitX11Window(
   // use the ARGB visual. Otherwise, just use our parent's visual.
   Visual* visual = CopyFromParent;
   int depth = CopyFromParent;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableTransparentVisuals) &&
-      XGetSelectionOwner(xdisplay_,
-                         atom_cache_.GetAtom("_NET_WM_CM_S0")) != None) {
+      XGetSelectionOwner(xdisplay_, atom_cache_.GetAtom("_NET_WM_CM_S0")) !=
+          None) {
     Visual* rgba_visual = GetARGBVisual();
     if (rgba_visual) {
       visual = rgba_visual;
@@ -1130,7 +1103,8 @@ void DesktopWindowTreeHostX11::InitX11Window(
   // Likewise, the X server needs to know this window's pid so it knows which
   // program to kill if the window hangs.
   // XChangeProperty() expects "pid" to be long.
-  COMPILE_ASSERT(sizeof(long) >= sizeof(pid_t), pid_t_bigger_than_long);
+  static_assert(sizeof(long) >= sizeof(pid_t),
+                "pid_t should not be larger than long");
   long pid = getpid();
   XChangeProperty(xdisplay_,
                   xwindow_,
@@ -1184,12 +1158,26 @@ void DesktopWindowTreeHostX11::InitX11Window(
     ui::SetWindowClassHint(
         xdisplay_, xwindow_, params.wm_class_name, params.wm_class_class);
   }
-  if (!params.wm_role_name.empty() ||
-      params.type == Widget::InitParams::TYPE_POPUP) {
-    const char kX11WindowRolePopup[] = "popup";
-    ui::SetWindowRole(xdisplay_, xwindow_, params.wm_role_name.empty() ?
-                      std::string(kX11WindowRolePopup) : params.wm_role_name);
+
+  const char* wm_role_name = NULL;
+  // If the widget isn't overriding the role, provide a default value for popup
+  // and bubble types.
+  if (!params.wm_role_name.empty()) {
+    wm_role_name = params.wm_role_name.c_str();
+  } else {
+    switch (params.type) {
+      case Widget::InitParams::TYPE_POPUP:
+        wm_role_name = kX11WindowRolePopup;
+        break;
+      case Widget::InitParams::TYPE_BUBBLE:
+        wm_role_name = kX11WindowRoleBubble;
+        break;
+      default:
+        break;
+    }
   }
+  if (wm_role_name)
+    ui::SetWindowRole(xdisplay_, xwindow_, std::string(wm_role_name));
 
   if (params.remove_standard_frame) {
     // Setting _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED tells gnome-shell to not force
@@ -1231,13 +1219,18 @@ gfx::Size DesktopWindowTreeHostX11::AdjustSize(
                        requested_size.height() - 1);
     }
   }
-  return requested_size;
+
+  // Do not request a 0x0 window size. It causes an XError.
+  gfx::Size size = requested_size;
+  size.SetToMax(gfx::Size(1,1));
+  return size;
 }
 
 void DesktopWindowTreeHostX11::OnWMStateUpdated() {
   std::vector< ::Atom> atom_list;
-  if (!ui::GetAtomArrayProperty(xwindow_, "_NET_WM_STATE", &atom_list))
-    return;
+  // Ignore the return value of ui::GetAtomArrayProperty(). Fluxbox removes the
+  // _NET_WM_STATE property when no _NET_WM_STATE atoms are set.
+  ui::GetAtomArrayProperty(xwindow_, "_NET_WM_STATE", &atom_list);
 
   bool was_minimized = IsMinimized();
 
@@ -1439,7 +1432,7 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
   } else {
     // Another DesktopWindowTreeHostX11 has installed itself as
     // capture. Translate the event's location and dispatch to the other.
-    event->ConvertLocationToTarget(window(), g_current_capture->window());
+    ConvertEventToDifferentHost(event, g_current_capture);
     g_current_capture->SendEventToProcessor(event);
   }
 }
@@ -1447,11 +1440,27 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
 void DesktopWindowTreeHostX11::DispatchTouchEvent(ui::TouchEvent* event) {
   if (g_current_capture && g_current_capture != this &&
       event->type() == ui::ET_TOUCH_PRESSED) {
-    event->ConvertLocationToTarget(window(), g_current_capture->window());
+    ConvertEventToDifferentHost(event, g_current_capture);
     g_current_capture->SendEventToProcessor(event);
   } else {
     SendEventToProcessor(event);
   }
+}
+
+void DesktopWindowTreeHostX11::ConvertEventToDifferentHost(
+    ui::LocatedEvent* located_event,
+    DesktopWindowTreeHostX11* host) {
+  DCHECK_NE(this, host);
+  const gfx::Display display_src =
+      gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(window());
+  const gfx::Display display_dest =
+      gfx::Screen::GetNativeScreen()->GetDisplayNearestWindow(host->window());
+  DCHECK_EQ(display_src.device_scale_factor(),
+            display_dest.device_scale_factor());
+  gfx::Vector2d offset = GetLocationOnNativeScreen() -
+                         host->GetLocationOnNativeScreen();
+  gfx::Point location_in_pixel_in_host = located_event->location() + offset;
+  located_event->set_location(location_in_pixel_in_host);
 }
 
 void DesktopWindowTreeHostX11::ResetWindowRegion() {

@@ -11,12 +11,12 @@
 // was labelled correctly, and the accessors all give the right data.
 TEST(ProxyServerTest, FromURI) {
   const struct {
-    const char* input_uri;
-    const char* expected_uri;
+    const char* const input_uri;
+    const char* const expected_uri;
     net::ProxyServer::Scheme expected_scheme;
-    const char* expected_host;
+    const char* const expected_host;
     int expected_port;
-    const char* expected_pac_string;
+    const char* const expected_pac_string;
   } tests[] = {
     // HTTP proxy URIs:
     {
@@ -159,7 +159,7 @@ TEST(ProxyServerTest, FromURI) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     net::ProxyServer uri =
         net::ProxyServer::FromURI(tests[i].input_uri,
                                   net::ProxyServer::SCHEME_HTTP);
@@ -191,7 +191,7 @@ TEST(ProxyServerTest, Direct) {
 
 // Test parsing some invalid inputs.
 TEST(ProxyServerTest, Invalid) {
-  const char* tests[] = {
+  const char* const tests[] = {
     "",
     "   ",
     "dddf:",   // not a valid port
@@ -202,7 +202,7 @@ TEST(ProxyServerTest, Invalid) {
     "http:",  // ambiguous, but will fail because of bad port.
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     net::ProxyServer uri =
         net::ProxyServer::FromURI(tests[i], net::ProxyServer::SCHEME_HTTP);
     EXPECT_FALSE(uri.is_valid());
@@ -214,13 +214,13 @@ TEST(ProxyServerTest, Invalid) {
 
 // Test that LWS (SP | HT) is disregarded from the ends.
 TEST(ProxyServerTest, Whitespace) {
-  const char* tests[] = {
+  const char* const tests[] = {
     "  foopy:80",
     "foopy:80   \t",
     "  \tfoopy:80  ",
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     net::ProxyServer uri =
         net::ProxyServer::FromURI(tests[i], net::ProxyServer::SCHEME_HTTP);
     EXPECT_EQ("foopy:80", uri.ToURI());
@@ -230,8 +230,8 @@ TEST(ProxyServerTest, Whitespace) {
 // Test parsing a ProxyServer from a PAC representation.
 TEST(ProxyServerTest, FromPACString) {
   const struct {
-    const char* input_pac;
-    const char* expected_uri;
+    const char* const input_pac;
+    const char* const expected_uri;
   } tests[] = {
     {
        "PROXY foopy:10",
@@ -279,7 +279,7 @@ TEST(ProxyServerTest, FromPACString) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     net::ProxyServer uri = net::ProxyServer::FromPacString(tests[i].input_pac);
     EXPECT_TRUE(uri.is_valid());
     EXPECT_EQ(tests[i].expected_uri, uri.ToURI());
@@ -288,14 +288,14 @@ TEST(ProxyServerTest, FromPACString) {
 
 // Test parsing a ProxyServer from an invalid PAC representation.
 TEST(ProxyServerTest, FromPACStringInvalid) {
-  const char* tests[] = {
+  const char* const tests[] = {
     "PROXY",  // missing host/port.
     "HTTPS",  // missing host/port.
     "SOCKS",  // missing host/port.
     "DIRECT foopy:10",  // direct cannot have host/port.
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     net::ProxyServer uri = net::ProxyServer::FromPacString(tests[i]);
     EXPECT_FALSE(uri.is_valid());
   }
@@ -304,8 +304,8 @@ TEST(ProxyServerTest, FromPACStringInvalid) {
 TEST(ProxyServerTest, ComparatorAndEquality) {
   struct {
     // Inputs.
-    const char* server1;
-    const char* server2;
+    const char* const server1;
+    const char* const server2;
 
     // Expectation.
     //   -1 means server1 is less than server2
@@ -335,7 +335,7 @@ TEST(ProxyServerTest, ComparatorAndEquality) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     // Parse the expected inputs to ProxyServer instances.
     const net::ProxyServer server1 =
         net::ProxyServer::FromURI(

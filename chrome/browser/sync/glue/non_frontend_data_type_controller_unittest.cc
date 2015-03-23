@@ -22,6 +22,7 @@
 #include "components/sync_driver/data_type_controller_mock.h"
 #include "components/sync_driver/model_associator_mock.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 
 using base::WaitableEvent;
@@ -63,45 +64,38 @@ class NonFrontendDataTypeControllerFake : public NonFrontendDataTypeController {
                                       sync_service),
         mock_(mock) {}
 
-  virtual syncer::ModelType type() const OVERRIDE { return syncer::BOOKMARKS; }
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE {
+  syncer::ModelType type() const override { return syncer::BOOKMARKS; }
+  syncer::ModelSafeGroup model_safe_group() const override {
     return syncer::GROUP_DB;
   }
 
  private:
-  virtual ~NonFrontendDataTypeControllerFake() {}
+  ~NonFrontendDataTypeControllerFake() override {}
 
-  virtual ProfileSyncComponentsFactory::SyncComponents
-  CreateSyncComponents() OVERRIDE {
+  ProfileSyncComponentsFactory::SyncComponents CreateSyncComponents() override {
     return profile_sync_factory()->
             CreateBookmarkSyncComponents(profile_sync_service(), this);
   }
 
-  virtual bool PostTaskOnBackendThread(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE {
+  bool PostTaskOnBackendThread(const tracked_objects::Location& from_here,
+                               const base::Closure& task) override {
     return BrowserThread::PostTask(BrowserThread::DB, from_here, task);
   }
 
   // We mock the following methods because their default implementations do
   // nothing, but we still want to make sure they're called appropriately.
-  virtual bool StartModels() OVERRIDE {
-    return mock_->StartModels();
-  }
-  virtual void RecordUnrecoverableError(
-      const tracked_objects::Location& from_here,
-      const std::string& message) OVERRIDE {
+  bool StartModels() override { return mock_->StartModels(); }
+  void RecordUnrecoverableError(const tracked_objects::Location& from_here,
+                                const std::string& message) override {
     mock_->RecordUnrecoverableError(from_here, message);
   }
-  virtual void RecordAssociationTime(base::TimeDelta time) OVERRIDE {
+  void RecordAssociationTime(base::TimeDelta time) override {
     mock_->RecordAssociationTime(time);
   }
-  virtual void RecordStartFailure(
-      DataTypeController::ConfigureResult result) OVERRIDE {
+  void RecordStartFailure(DataTypeController::ConfigureResult result) override {
     mock_->RecordStartFailure(result);
   }
-  virtual void DisconnectProcessor(
-      sync_driver::ChangeProcessor* processor) OVERRIDE{
+  void DisconnectProcessor(sync_driver::ChangeProcessor* processor) override {
     mock_->DisconnectProcessor(processor);
   }
 
@@ -112,14 +106,12 @@ class NonFrontendDataTypeControllerFake : public NonFrontendDataTypeController {
 class SyncNonFrontendDataTypeControllerTest : public testing::Test {
  public:
   SyncNonFrontendDataTypeControllerTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        db_thread_(BrowserThread::DB),
+      : thread_bundle_(content::TestBrowserThreadBundle::REAL_DB_THREAD),
         service_(&profile_),
         model_associator_(NULL),
         change_processor_(NULL) {}
 
-  virtual void SetUp() {
-    db_thread_.Start();
+  void SetUp() override {
     profile_sync_factory_.reset(new ProfileSyncComponentsFactoryMock());
 
     // All of these are refcounted, so don't need to be released.
@@ -131,12 +123,11 @@ class SyncNonFrontendDataTypeControllerTest : public testing::Test {
                                               dtc_mock_.get());
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (non_frontend_dtc_->state() !=
         NonFrontendDataTypeController::NOT_RUNNING) {
       non_frontend_dtc_->Stop();
     }
-    db_thread_.Stop();
   }
 
  protected:
@@ -206,9 +197,7 @@ class SyncNonFrontendDataTypeControllerTest : public testing::Test {
                    base::Unretained(&start_callback_)));
   }
 
-  base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread db_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   scoped_refptr<NonFrontendDataTypeControllerFake> non_frontend_dtc_;
   scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   scoped_refptr<NonFrontendDataTypeControllerMock> dtc_mock_;

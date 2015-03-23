@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_WEBSITE_SETTINGS_PERMISSIONS_BUBBLE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_WEBSITE_SETTINGS_PERMISSIONS_BUBBLE_VIEW_H_
 
+#include <string>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_view.h"
@@ -17,28 +19,28 @@ class PermissionsBubbleDelegateView;
 
 class PermissionBubbleViewViews : public PermissionBubbleView {
  public:
-  explicit PermissionBubbleViewViews(views::View* anchor_view);
-  virtual ~PermissionBubbleViewViews();
+  PermissionBubbleViewViews(views::View* anchor_view,
+                            const std::string& languages);
+  ~PermissionBubbleViewViews() override;
 
   // PermissionBubbleView:
-  virtual void SetDelegate(Delegate* delegate) OVERRIDE;
-  virtual void Show(const std::vector<PermissionBubbleRequest*>& requests,
-                    const std::vector<bool>& accept_state,
-                    bool customization_mode) OVERRIDE;
-  virtual bool CanAcceptRequestUpdate() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual bool IsVisible() OVERRIDE;
+  void SetDelegate(Delegate* delegate) override;
+  void Show(const std::vector<PermissionBubbleRequest*>& requests,
+            const std::vector<bool>& accept_state) override;
+  bool CanAcceptRequestUpdate() override;
+  void Hide() override;
+  bool IsVisible() override;
 
   void Closing();
   void Toggle(int index, bool value);
   void Accept();
   void Deny();
-  void SetCustomizationMode();
 
  private:
   views::View* anchor_view_;
   Delegate* delegate_;
   PermissionsBubbleDelegateView* bubble_delegate_;
+  const std::string languages_;
 
   DISALLOW_COPY_AND_ASSIGN(PermissionBubbleViewViews);
 };

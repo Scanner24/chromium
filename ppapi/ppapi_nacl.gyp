@@ -235,14 +235,26 @@
             },
           ],
         }],
-        ['disable_pnacl==0 and target_arch=="ia32" and OS=="linux"', {
-          # In addition to above configuration, build x86-32-nonsfi .nexe file
-          # by translating from .pexe binary, for non-SFI mode PPAPI testing.
+        ['disable_pnacl==0 and (target_arch=="ia32" or target_arch=="x64" or target_arch=="arm") and OS=="linux"', {
+          # In addition to above configuration, build x86-32 and arm nonsfi
+          # .nexe files by translating from .pexe binary, for non-SFI mode PPAPI
+          # testing.
           'variables': {
-            'enable_x86_32_nonsfi': 1,
             'translate_pexe_with_build': 1,
             'nmf_nonsfi%': '<(PRODUCT_DIR)/>(nexe_target)_pnacl_nonsfi.nmf',
           },
+          'conditions': [
+            ['target_arch=="ia32" or target_arch=="x64"', {
+              'variables': {
+                'enable_x86_32_nonsfi': 1,
+              },
+            }],
+            ['target_arch=="arm"', {
+              'variables': {
+                'enable_arm_nonsfi': 1,
+              },
+            }],
+          ],
           # Shim is a dependency for the nexe because we pre-translate.
          'dependencies': [
             '<(DEPTH)/ppapi/native_client/src/untrusted/pnacl_irt_shim/pnacl_irt_shim.gyp:aot',
@@ -256,7 +268,38 @@
                 'python',
                 '>(create_nonsfi_test_nmf)',
                 '--output=>(nmf_nonsfi)',
-                '--program=>(out_pnacl_newlib_x86_32_nonsfi_nexe)',
+              ],
+              'target_conditions': [
+                ['enable_x86_32_nonsfi==1 and "<(target_arch)"=="ia32"', {
+                  'inputs': ['>(out_pnacl_newlib_x86_32_nonsfi_nexe)'],
+                  'action': [
+                    '--program=>(out_pnacl_newlib_x86_32_nonsfi_nexe)',
+                    '--arch=x86-32',
+                  ]
+                }],
+                ['enable_x86_32_nonsfi==1 and "<(target_arch)"=="x64"', {
+                  'inputs': ['>(out_pnacl_newlib_x86_32_nonsfi_nexe)'],
+                  'action': [
+                    '--program=>(out_pnacl_newlib_x86_32_nonsfi_nexe)',
+                    # This should be used only for nacl_helper_nonsfi test.
+                    # In theory this should be x86-32. However, currently
+                    # fallback logic to x86-32-nonsfi is not implemented,
+                    # and, moreover, it would break the tests for current
+                    # nacl_helper in Non-SFI mode on x64 Chrome.
+                    # So, here we introduce the hack to use "x86-64" in order
+                    # to take the benefit to run nacl_helper_nonsfi tests on
+                    # x64 Chrome.
+                    # TODO(hidehiko): Remove this hack.
+                    '--arch=x86-64',
+                  ]
+                }],
+                ['enable_arm_nonsfi==1', {
+                  'inputs': ['>(out_pnacl_newlib_arm_nonsfi_nexe)'],
+                  'action': [
+                    '--program=>(out_pnacl_newlib_arm_nonsfi_nexe)',
+                    '--arch=arm',
+                  ]
+                }],
               ],
             },
           ],

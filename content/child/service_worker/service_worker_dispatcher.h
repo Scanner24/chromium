@@ -52,7 +52,7 @@ class ServiceWorkerDispatcher : public WorkerTaskRunner::Observer {
       WebServiceWorkerGetRegistrationCallbacks;
 
   explicit ServiceWorkerDispatcher(ThreadSafeSender* thread_safe_sender);
-  virtual ~ServiceWorkerDispatcher();
+  ~ServiceWorkerDispatcher() override;
 
   void OnMessageReceived(const IPC::Message& msg);
   bool Send(IPC::Message* msg);
@@ -83,9 +83,9 @@ class ServiceWorkerDispatcher : public WorkerTaskRunner::Observer {
 
   // Called when navigator.serviceWorker is instantiated or detached
   // for a document whose provider can be identified by |provider_id|.
-  void AddScriptClient(int provider_id,
-                       blink::WebServiceWorkerProviderClient* client);
-  void RemoveScriptClient(int provider_id);
+  void AddProviderClient(int provider_id,
+                         blink::WebServiceWorkerProviderClient* client);
+  void RemoveProviderClient(int provider_id);
 
   // If an existing WebServiceWorkerImpl exists for the Service
   // Worker, it is returned; otherwise a WebServiceWorkerImpl is
@@ -136,10 +136,12 @@ class ServiceWorkerDispatcher : public WorkerTaskRunner::Observer {
       IDMapOwnPointer> UnregistrationCallbackMap;
   typedef IDMap<WebServiceWorkerGetRegistrationCallbacks,
       IDMapOwnPointer> GetRegistrationCallbackMap;
-  typedef std::map<int, blink::WebServiceWorkerProviderClient*> ScriptClientMap;
+
+  typedef std::map<int, blink::WebServiceWorkerProviderClient*>
+      ProviderClientMap;
   typedef std::map<int, ServiceWorkerProviderContext*> ProviderContextMap;
-  typedef std::map<int, WebServiceWorkerImpl*> WorkerObjectMap;
   typedef std::map<int, ServiceWorkerProviderContext*> WorkerToProviderMap;
+  typedef std::map<int, WebServiceWorkerImpl*> WorkerObjectMap;
   typedef std::map<int, WebServiceWorkerRegistrationImpl*>
       RegistrationObjectMap;
 
@@ -147,8 +149,13 @@ class ServiceWorkerDispatcher : public WorkerTaskRunner::Observer {
   friend class WebServiceWorkerRegistrationImpl;
 
   // WorkerTaskRunner::Observer implementation.
-  virtual void OnWorkerRunLoopStopped() OVERRIDE;
+  void OnWorkerRunLoopStopped() override;
 
+  void OnAssociateRegistrationWithServiceWorker(
+      int thread_id,
+      int provider_id,
+      const ServiceWorkerRegistrationObjectInfo& info,
+      const ServiceWorkerVersionAttributes& attrs);
   void OnAssociateRegistration(int thread_id,
                                int provider_id,
                                const ServiceWorkerRegistrationObjectInfo& info,
@@ -191,25 +198,14 @@ class ServiceWorkerDispatcher : public WorkerTaskRunner::Observer {
                      const ServiceWorkerRegistrationObjectInfo& info);
   void OnSetControllerServiceWorker(int thread_id,
                                     int provider_id,
-                                    const ServiceWorkerObjectInfo& info);
+                                    const ServiceWorkerObjectInfo& info,
+                                    bool should_notify_controllerchange);
   void OnPostMessage(int thread_id,
                      int provider_id,
                      const base::string16& message,
                      const std::vector<int>& sent_message_port_ids,
                      const std::vector<int>& new_routing_ids);
 
-  void SetInstallingServiceWorker(
-      int provider_id,
-      int registration_handle_id,
-      const ServiceWorkerObjectInfo& info);
-  void SetWaitingServiceWorker(
-      int provider_id,
-      int registration_handle_id,
-      const ServiceWorkerObjectInfo& info);
-  void SetActiveServiceWorker(
-      int provider_id,
-      int registration_handle_id,
-      const ServiceWorkerObjectInfo& info);
   void SetReadyRegistration(
       int provider_id,
       int registration_handle_id);
@@ -232,8 +228,10 @@ class ServiceWorkerDispatcher : public WorkerTaskRunner::Observer {
   RegistrationCallbackMap pending_registration_callbacks_;
   UnregistrationCallbackMap pending_unregistration_callbacks_;
   GetRegistrationCallbackMap pending_get_registration_callbacks_;
-  ScriptClientMap script_clients_;
+
+  ProviderClientMap provider_clients_;
   ProviderContextMap provider_contexts_;
+
   WorkerObjectMap service_workers_;
   RegistrationObjectMap registrations_;
 

@@ -6,7 +6,6 @@
 
 #include <string>
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
@@ -18,15 +17,16 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/chromeos/policy/app_pack_updater.h"
+#include "chrome/browser/chromeos/policy/affiliated_cloud_policy_invalidator.h"
+#include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider.h"
+#include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider_impl.h"
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
-#include "chrome/browser/chromeos/policy/device_cloud_policy_invalidator.h"
-#include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/policy/device_network_configuration_updater.h"
+#include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -49,6 +49,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "policy/proto/device_management_backend.pb.h"
 
 using content::BrowserThread;
 
@@ -76,7 +77,8 @@ scoped_refptr<base::SequencedTaskRunner> GetBackgroundTaskRunner() {
 }
 
 std::string GetDeviceManagementServerUrlForConsumer() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(
           chromeos::switches::kConsumerDeviceManagementUrl)) {
     return command_line->GetSwitchValueASCII(
@@ -117,6 +119,16 @@ BrowserPolicyConnectorChromeOS::BrowserPolicyConnectorChromeOS()
                            &install_attrs_file));
     install_attributes_->ReadCacheFile(install_attrs_file);
 
+    const base::CommandLine* command_line =
+        base::CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(
+            chromeos::switches::kEnableConsumerManagement)) {
+      consumer_management_service_.reset(
+          new ConsumerManagementService(
+              cryptohome_client,
+              chromeos::DeviceSettingsService::Get()));
+    }
+
     scoped_ptr<DeviceCloudPolicyStoreChromeOS> device_cloud_policy_store(
         new DeviceCloudPolicyStoreChromeOS(
             chromeos::DeviceSettingsService::Get(),
@@ -140,23 +152,22 @@ BrowserPolicyConnectorChromeOS::~BrowserPolicyConnectorChromeOS() {}
 void BrowserPolicyConnectorChromeOS::Init(
     PrefService* local_state,
     scoped_refptr<net::URLRequestContextGetter> request_context) {
+  local_state_ = local_state;
   ChromeBrowserPolicyConnector::Init(local_state, request_context);
 
-  scoped_ptr<DeviceManagementService::Configuration> configuration(
-      new DeviceManagementServiceConfiguration(
-          GetDeviceManagementServerUrlForConsumer()));
-  consumer_device_management_service_.reset(
-      new DeviceManagementService(configuration.Pass()));
-  consumer_device_management_service_->ScheduleInitialization(
-      kServiceInitializationStartupDelay);
+  affiliated_invalidation_service_provider_.reset(
+      new AffiliatedInvalidationServiceProviderImpl);
 
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(chromeos::switches::kEnableConsumerManagement)) {
-    chromeos::CryptohomeClient* cryptohome_client =
-        chromeos::DBusThreadManager::Get()->GetCryptohomeClient();
-    consumer_management_service_.reset(
-        new ConsumerManagementService(cryptohome_client,
-                                      chromeos::DeviceSettingsService::Get()));
+    scoped_ptr<DeviceManagementService::Configuration> configuration(
+        new DeviceManagementServiceConfiguration(
+            GetDeviceManagementServerUrlForConsumer()));
+    consumer_device_management_service_.reset(
+        new DeviceManagementService(configuration.Pass()));
+    consumer_device_management_service_->ScheduleInitialization(
+        kServiceInitializationStartupDelay);
   }
 
   if (device_cloud_policy_manager_) {
@@ -166,22 +177,8 @@ void BrowserPolicyConnectorChromeOS::Init(
     // initialized from here instead of BrowserPolicyConnector::Init().
 
     device_cloud_policy_manager_->Initialize(local_state);
-
-    device_cloud_policy_initializer_.reset(
-        new DeviceCloudPolicyInitializer(
-            local_state,
-            device_management_service(),
-            GetDeviceManagementServiceForConsumer(),
-            GetBackgroundTaskRunner(),
-            install_attributes_.get(),
-            state_keys_broker_.get(),
-            device_cloud_policy_manager_->device_store(),
-            device_cloud_policy_manager_,
-            chromeos::DeviceSettingsService::Get(),
-            base::Bind(&BrowserPolicyConnectorChromeOS::
-                           OnDeviceCloudPolicyManagerConnected,
-                       base::Unretained(this))));
-    device_cloud_policy_initializer_->Init();
+    device_cloud_policy_manager_->AddDeviceCloudPolicyManagerObserver(this);
+    RestartDeviceCloudPolicyInitializer();
   }
 
   device_local_account_policy_service_.reset(
@@ -189,6 +186,7 @@ void BrowserPolicyConnectorChromeOS::Init(
           chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
           chromeos::DeviceSettingsService::Get(),
           chromeos::CrosSettings::Get(),
+          affiliated_invalidation_service_provider_.get(),
           GetBackgroundTaskRunner(),
           GetBackgroundTaskRunner(),
           GetBackgroundTaskRunner(),
@@ -196,12 +194,11 @@ void BrowserPolicyConnectorChromeOS::Init(
               content::BrowserThread::IO),
           request_context));
   device_local_account_policy_service_->Connect(device_management_service());
-  device_cloud_policy_invalidator_.reset(new DeviceCloudPolicyInvalidator);
-
-  // request_context is NULL in unit tests.
-  if (request_context.get() && install_attributes_) {
-    app_pack_updater_.reset(
-        new AppPackUpdater(request_context.get(), install_attributes_.get()));
+  if (device_cloud_policy_manager_) {
+    device_cloud_policy_invalidator_.reset(new AffiliatedCloudPolicyInvalidator(
+        enterprise_management::DeviceRegisterRequest::DEVICE,
+        device_cloud_policy_manager_->core(),
+        affiliated_invalidation_service_provider_.get()));
   }
 
   SetTimezoneIfPolicyAvailable();
@@ -216,27 +213,15 @@ void BrowserPolicyConnectorChromeOS::Init(
 }
 
 void BrowserPolicyConnectorChromeOS::PreShutdown() {
-  // Let the |device_cloud_policy_invalidator_| unregister itself as an
+  // Let the |affiliated_invalidation_service_provider_| unregister itself as an
   // observer of per-Profile InvalidationServices and the device-global
   // invalidation::TiclInvalidationService it may have created as an observer of
   // the DeviceOAuth2TokenService that is destroyed before Shutdown() is called.
-  device_cloud_policy_invalidator_.reset();
-
-  // The |consumer_management_service_| may be observing a
-  // ProfileOAuth2TokenService and needs to be destroyed before the token
-  // service.
-  consumer_management_service_.reset();
+  if (affiliated_invalidation_service_provider_)
+    affiliated_invalidation_service_provider_->Shutdown();
 }
 
 void BrowserPolicyConnectorChromeOS::Shutdown() {
-  // Verify that PreShutdown() has been called first.
-  DCHECK(!device_cloud_policy_invalidator_);
-  DCHECK(!consumer_management_service_);
-
-  // The AppPackUpdater may be observing the |device_cloud_policy_manager_|.
-  // Delete it first.
-  app_pack_updater_.reset();
-
   network_configuration_updater_.reset();
 
   if (device_local_account_policy_service_)
@@ -244,6 +229,9 @@ void BrowserPolicyConnectorChromeOS::Shutdown() {
 
   if (device_cloud_policy_initializer_)
     device_cloud_policy_initializer_->Shutdown();
+
+  if (device_cloud_policy_manager_)
+    device_cloud_policy_manager_->RemoveDeviceCloudPolicyManagerObserver(this);
 
   ChromeBrowserPolicyConnector::Shutdown();
 }
@@ -259,6 +247,14 @@ std::string BrowserPolicyConnectorChromeOS::GetEnterpriseDomain() {
 DeviceMode BrowserPolicyConnectorChromeOS::GetDeviceMode() {
   return install_attributes_ ? install_attributes_->GetMode()
                              : DEVICE_MODE_NOT_SET;
+}
+
+EnrollmentConfig BrowserPolicyConnectorChromeOS::GetPrescribedEnrollmentConfig()
+    const {
+  if (device_cloud_policy_initializer_)
+    return device_cloud_policy_initializer_->GetPrescribedEnrollmentConfig();
+
+  return EnrollmentConfig();
 }
 
 UserAffiliation BrowserPolicyConnectorChromeOS::GetUserAffiliation(
@@ -280,13 +276,14 @@ UserAffiliation BrowserPolicyConnectorChromeOS::GetUserAffiliation(
   return USER_AFFILIATION_NONE;
 }
 
-AppPackUpdater* BrowserPolicyConnectorChromeOS::GetAppPackUpdater() {
-  return app_pack_updater_.get();
-}
-
 void BrowserPolicyConnectorChromeOS::SetUserPolicyDelegate(
     ConfigurationPolicyProvider* user_policy_provider) {
   global_user_cloud_policy_provider_->SetDelegate(user_policy_provider);
+}
+
+void BrowserPolicyConnectorChromeOS::SetConsumerManagementServiceForTesting(
+    scoped_ptr<ConsumerManagementService> service) {
+  consumer_management_service_ = service.Pass();
 }
 
 void BrowserPolicyConnectorChromeOS::SetDeviceCloudPolicyInitializerForTesting(
@@ -294,12 +291,14 @@ void BrowserPolicyConnectorChromeOS::SetDeviceCloudPolicyInitializerForTesting(
   device_cloud_policy_initializer_ = initializer.Pass();
 }
 
+// static
 void BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
     EnterpriseInstallAttributes* attributes) {
   DCHECK(!g_testing_install_attributes);
   g_testing_install_attributes = attributes;
 }
 
+// static
 void BrowserPolicyConnectorChromeOS::RemoveInstallAttributesForTesting() {
   if (g_testing_install_attributes) {
     delete g_testing_install_attributes;
@@ -313,6 +312,22 @@ void BrowserPolicyConnectorChromeOS::RegisterPrefs(
   registry->RegisterIntegerPref(
       prefs::kDevicePolicyRefreshRate,
       CloudPolicyRefreshScheduler::kDefaultRefreshDelayMs);
+}
+
+void BrowserPolicyConnectorChromeOS::OnDeviceCloudPolicyManagerConnected() {
+  CHECK(device_cloud_policy_initializer_);
+
+  // DeviceCloudPolicyInitializer might still be on the call stack, so we
+  // should release the initializer after this function returns.
+  device_cloud_policy_initializer_->Shutdown();
+  base::MessageLoop::current()->DeleteSoon(
+      FROM_HERE, device_cloud_policy_initializer_.release());
+}
+
+void BrowserPolicyConnectorChromeOS::OnDeviceCloudPolicyManagerDisconnected() {
+  DCHECK(!device_cloud_policy_initializer_);
+
+  RestartDeviceCloudPolicyInitializer();
 }
 
 void BrowserPolicyConnectorChromeOS::SetTimezoneIfPolicyAvailable() {
@@ -334,14 +349,18 @@ void BrowserPolicyConnectorChromeOS::SetTimezoneIfPolicyAvailable() {
   }
 }
 
-void BrowserPolicyConnectorChromeOS::OnDeviceCloudPolicyManagerConnected() {
-  // This function is invoked by DCPInitializer, so we should release the
-  // initializer after this function returns.
-  if (device_cloud_policy_initializer_) {
-    device_cloud_policy_initializer_->Shutdown();
-    base::MessageLoop::current()->DeleteSoon(
-        FROM_HERE, device_cloud_policy_initializer_.release());
-  }
+void BrowserPolicyConnectorChromeOS::RestartDeviceCloudPolicyInitializer() {
+  device_cloud_policy_initializer_.reset(
+      new DeviceCloudPolicyInitializer(
+          local_state_,
+          device_management_service(),
+          consumer_device_management_service_.get(),
+          GetBackgroundTaskRunner(),
+          install_attributes_.get(),
+          state_keys_broker_.get(),
+          device_cloud_policy_manager_->device_store(),
+          device_cloud_policy_manager_));
+  device_cloud_policy_initializer_->Init();
 }
 
 }  // namespace policy

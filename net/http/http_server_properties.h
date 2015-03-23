@@ -13,19 +13,15 @@
 #include "base/time/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
+#include "net/base/net_util.h"
+#include "net/quic/quic_bandwidth.h"
 #include "net/socket/next_proto.h"
 #include "net/spdy/spdy_framer.h"  // TODO(willchan): Reconsider this.
+#include "net/spdy/spdy_protocol.h"
 
 namespace net {
 
-enum AlternateProtocolExperiment {
-  // 200 alternate_protocol servers are loaded (persisted 200 MRU servers).
-  ALTERNATE_PROTOCOL_NOT_PART_OF_EXPERIMENT = 0,
-  // 200 alternate_protocol servers are loaded (persisted 1000 MRU servers).
-  ALTERNATE_PROTOCOL_TRUNCATED_200_SERVERS,
-  // 1000 alternate_protocol servers are loaded (persisted 1000 MRU servers).
-  ALTERNATE_PROTOCOL_TRUNCATED_1000_SERVERS,
-};
+struct SSLConfig;
 
 enum AlternateProtocolUsage {
   // Alternate Protocol was used without racing a normal connection.
@@ -44,10 +40,8 @@ enum AlternateProtocolUsage {
   ALTERNATE_PROTOCOL_USAGE_MAX,
 };
 
-// Log a histogram to reflect |usage| and |alternate_protocol_experiment|.
-NET_EXPORT void HistogramAlternateProtocolUsage(
-    AlternateProtocolUsage usage,
-    AlternateProtocolExperiment alternate_protocol_experiment);
+// Log a histogram to reflect |usage|.
+NET_EXPORT void HistogramAlternateProtocolUsage(AlternateProtocolUsage usage);
 
 enum BrokenAlternateProtocolLocation {
   BROKEN_ALTERNATE_PROTOCOL_LOCATION_HTTP_STREAM_FACTORY_IMPL_JOB = 0,
@@ -67,11 +61,11 @@ enum AlternateProtocol {
   NPN_SPDY_MINIMUM_VERSION = DEPRECATED_NPN_SPDY_2,
   NPN_SPDY_3,
   NPN_SPDY_3_1,
-  NPN_SPDY_4,  // SPDY4 is HTTP/2.
-  NPN_SPDY_MAXIMUM_VERSION = NPN_SPDY_4,
+  NPN_SPDY_4_14,  // HTTP/2 draft-14
+  NPN_SPDY_4_15,  // HTTP/2 draft-15
+  NPN_SPDY_MAXIMUM_VERSION = NPN_SPDY_4_15,
   QUIC,
   ALTERNATE_PROTOCOL_MAXIMUM_VALID_VERSION = QUIC,
-  ALTERNATE_PROTOCOL_BROKEN,  // The alternate protocol is known to be broken.
   UNINITIALIZED_ALTERNATE_PROTOCOL,
 };
 
@@ -93,12 +87,28 @@ NET_EXPORT_PRIVATE AlternateProtocol AlternateProtocolFromNextProto(
     NextProto next_proto);
 
 struct NET_EXPORT AlternateProtocolInfo {
+  AlternateProtocolInfo()
+      : port(0),
+        protocol(UNINITIALIZED_ALTERNATE_PROTOCOL),
+        probability(0),
+        is_broken(false) {}
+
   AlternateProtocolInfo(uint16 port,
                         AlternateProtocol protocol,
                         double probability)
       : port(port),
         protocol(protocol),
-        probability(probability) {}
+        probability(probability),
+        is_broken(false) {}
+
+  AlternateProtocolInfo(uint16 port,
+                        AlternateProtocol protocol,
+                        double probability,
+                        bool is_broken)
+      : port(port),
+        protocol(protocol),
+        probability(probability),
+        is_broken(is_broken) {}
 
   bool Equals(const AlternateProtocolInfo& other) const {
     return port == other.port &&
@@ -111,6 +121,7 @@ struct NET_EXPORT AlternateProtocolInfo {
   uint16 port;
   AlternateProtocol protocol;
   double probability;
+  bool is_broken;
 };
 
 struct NET_EXPORT SupportsQuic {
@@ -127,10 +138,17 @@ struct NET_EXPORT SupportsQuic {
   std::string address;
 };
 
+struct NET_EXPORT ServerNetworkStats {
+  ServerNetworkStats() : bandwidth_estimate(QuicBandwidth::Zero()) {}
+
+  base::TimeDelta srtt;
+  QuicBandwidth bandwidth_estimate;
+};
+
 typedef base::MRUCache<
     HostPortPair, AlternateProtocolInfo> AlternateProtocolMap;
 typedef base::MRUCache<HostPortPair, SettingsMap> SpdySettingsMap;
-typedef std::map<HostPortPair, SupportsQuic> SupportsQuicMap;
+typedef base::MRUCache<HostPortPair, ServerNetworkStats> ServerNetworkStatsMap;
 
 extern const char kAlternateProtocolHeader[];
 
@@ -141,11 +159,6 @@ extern const char kAlternateProtocolHeader[];
 // * Spdy Settings (like CWND ID field)
 class NET_EXPORT HttpServerProperties {
  public:
-  struct NetworkStats {
-    base::TimeDelta srtt;
-    uint64 bandwidth_estimate;
-  };
-
   HttpServerProperties() {}
   virtual ~HttpServerProperties() {}
 
@@ -155,19 +168,31 @@ class NET_EXPORT HttpServerProperties {
   // Deletes all data.
   virtual void Clear() = 0;
 
-  // Returns true if |server| supports SPDY.
-  virtual bool SupportsSpdy(const HostPortPair& server) = 0;
+  // Returns true if |server| supports a network protocol which honors
+  // request prioritization.
+  virtual bool SupportsRequestPriority(const HostPortPair& server) = 0;
 
   // Add |server| into the persistent store. Should only be called from IO
   // thread.
   virtual void SetSupportsSpdy(const HostPortPair& server,
                                bool support_spdy) = 0;
 
-  // Returns true if |server| has an Alternate-Protocol header.
-  virtual bool HasAlternateProtocol(const HostPortPair& server) = 0;
+  // Returns true if |server| has required HTTP/1.1 via HTTP/2 error code.
+  virtual bool RequiresHTTP11(const HostPortPair& server) = 0;
 
-  // Returns the Alternate-Protocol and port for |server|.
-  // HasAlternateProtocol(server) must be true.
+  // Require HTTP/1.1 on subsequent connections.  Not persisted.
+  virtual void SetHTTP11Required(const HostPortPair& server) = 0;
+
+  // Modify SSLConfig to force HTTP/1.1.
+  static void ForceHTTP11(SSLConfig* ssl_config);
+
+  // Modify SSLConfig to force HTTP/1.1 if necessary.
+  virtual void MaybeForceHTTP11(const HostPortPair& server,
+                                SSLConfig* ssl_config) = 0;
+
+  // Returns the AlternateProtocol for |server| if it has probability equal to
+  // or exceeding threshold, or else the forced AlternateProtocol if there is
+  // one, or else one with UNINITIALIZED_ALTERNATE_PROTOCOL.
   virtual AlternateProtocolInfo GetAlternateProtocol(
       const HostPortPair& server) = 0;
 
@@ -193,9 +218,6 @@ class NET_EXPORT HttpServerProperties {
   // Returns all Alternate-Protocol mappings.
   virtual const AlternateProtocolMap& alternate_protocol_map() const = 0;
 
-  virtual void SetAlternateProtocolExperiment(
-      AlternateProtocolExperiment experiment) = 0;
-
   // Sets the threshold to be used when evaluating Alternate-Protocol
   // advertisments. Only advertisements with a with a probability
   // greater than |threshold| will be honored. |threshold| must be
@@ -203,9 +225,6 @@ class NET_EXPORT HttpServerProperties {
   // all advertisements will be honored.
   virtual void SetAlternateProtocolProbabilityThreshold(
       double threshold) = 0;
-
-  virtual AlternateProtocolExperiment GetAlternateProtocolExperiment()
-      const = 0;
 
   // Gets a reference to the SettingsMap stored for a host.
   // If no settings are stored, returns an empty SettingsMap.
@@ -228,21 +247,18 @@ class NET_EXPORT HttpServerProperties {
   // Returns all persistent SPDY settings.
   virtual const SpdySettingsMap& spdy_settings_map() const = 0;
 
-  // TODO(rtenneti): Make SupportsQuic a global (instead of per host_port_pair).
-  virtual SupportsQuic GetSupportsQuic(
-      const HostPortPair& host_port_pair) const = 0;
+  virtual bool GetSupportsQuic(IPAddressNumber* last_address) const = 0;
 
-  virtual void SetSupportsQuic(const HostPortPair& host_port_pair,
-                               bool used_quic,
-                               const std::string& address) = 0;
-
-  virtual const SupportsQuicMap& supports_quic_map() const = 0;
+  virtual void SetSupportsQuic(bool used_quic,
+                               const IPAddressNumber& last_address) = 0;
 
   virtual void SetServerNetworkStats(const HostPortPair& host_port_pair,
-                                     NetworkStats stats) = 0;
+                                     ServerNetworkStats stats) = 0;
 
-  virtual const NetworkStats* GetServerNetworkStats(
-      const HostPortPair& host_port_pair) const = 0;
+  virtual const ServerNetworkStats* GetServerNetworkStats(
+      const HostPortPair& host_port_pair) = 0;
+
+  virtual const ServerNetworkStatsMap& server_network_stats_map() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HttpServerProperties);

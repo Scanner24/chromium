@@ -6,6 +6,7 @@
 #define NET_TOOLS_QUIC_TEST_TOOLS_PACKET_DROPPING_TEST_WRITER_H_
 
 #include <list>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -36,7 +37,7 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
 
   PacketDroppingTestWriter();
 
-  virtual ~PacketDroppingTestWriter();
+  ~PacketDroppingTestWriter() override;
 
   // Must be called before blocking, reordering or delaying (loss is OK). May be
   // called after connecting if the helper is not available before.
@@ -45,15 +46,14 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
   void Initialize(QuicEpollConnectionHelper* helper, Delegate* on_can_write);
 
   // QuicPacketWriter methods:
-  virtual WriteResult WritePacket(
-      const char* buffer,
-      size_t buf_len,
-      const IPAddressNumber& self_address,
-      const IPEndPoint& peer_address) OVERRIDE;
+  WriteResult WritePacket(const char* buffer,
+                          size_t buf_len,
+                          const IPAddressNumber& self_address,
+                          const IPEndPoint& peer_address) override;
 
-  virtual bool IsWriteBlocked() const OVERRIDE;
+  bool IsWriteBlocked() const override;
 
-  virtual void SetWritable() OVERRIDE;
+  void SetWritable() override;
 
   // Writes out any packet which should have been sent by now
   // to the contained writer and returns the time
@@ -85,8 +85,7 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
     fake_packet_reorder_percentage_ = fake_packet_reorder_percentage;
   }
 
-  // The percent of time WritePacket will block and set WriteResult's status
-  // to WRITE_STATUS_BLOCKED.
+  // The delay before writing this packet.
   void set_fake_packet_delay(QuicTime::Delta fake_packet_delay) {
     DCHECK(clock_);
     base::AutoLock locked(config_mutex_);
@@ -124,7 +123,7 @@ class PacketDroppingTestWriter : public QuicPacketWriterWrapper {
                  QuicTime send_time);
     ~DelayedWrite();
 
-    string buffer;
+    std::string buffer;
     const IPAddressNumber self_address;
     const IPEndPoint peer_address;
     QuicTime send_time;

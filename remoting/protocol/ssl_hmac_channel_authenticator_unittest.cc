@@ -9,7 +9,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/timer/timer.h"
 #include "crypto/rsa_private_key.h"
@@ -51,10 +50,10 @@ ACTION_P(QuitThreadOnCounter, counter) {
 class SslHmacChannelAuthenticatorTest : public testing::Test {
  public:
   SslHmacChannelAuthenticatorTest() {}
-  virtual ~SslHmacChannelAuthenticatorTest() {}
+  ~SslHmacChannelAuthenticatorTest() override {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     base::FilePath certs_dir(net::GetTestCertsDirectory());
 
     base::FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
@@ -75,12 +74,12 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
     client_fake_socket_->PairWith(host_fake_socket_.get());
 
     client_auth_->SecureAndAuthenticate(
-        client_fake_socket_.PassAs<net::StreamSocket>(),
+        client_fake_socket_.Pass(),
         base::Bind(&SslHmacChannelAuthenticatorTest::OnClientConnected,
                    base::Unretained(this)));
 
     host_auth_->SecureAndAuthenticate(
-        host_fake_socket_.PassAs<net::StreamSocket>(),
+        host_fake_socket_.Pass(),
         base::Bind(&SslHmacChannelAuthenticatorTest::OnHostConnected,
                    base::Unretained(this), std::string("ref argument value")));
 
@@ -89,9 +88,9 @@ class SslHmacChannelAuthenticatorTest : public testing::Test {
     int callback_counter = 2;
 
     if (expected_fail) {
-      EXPECT_CALL(client_callback_, OnDone(net::ERR_FAILED, NULL))
+      EXPECT_CALL(client_callback_, OnDone(net::ERR_FAILED, nullptr))
           .WillOnce(QuitThreadOnCounter(&callback_counter));
-      EXPECT_CALL(host_callback_, OnDone(net::ERR_FAILED, NULL))
+      EXPECT_CALL(host_callback_, OnDone(net::ERR_FAILED, nullptr))
           .WillOnce(QuitThreadOnCounter(&callback_counter));
     } else {
       EXPECT_CALL(client_callback_, OnDone(net::OK, NotNull()))
@@ -152,8 +151,8 @@ TEST_F(SslHmacChannelAuthenticatorTest, SuccessfulAuth) {
 
   RunChannelAuth(false);
 
-  ASSERT_TRUE(client_socket_.get() != NULL);
-  ASSERT_TRUE(host_socket_.get() != NULL);
+  ASSERT_TRUE(client_socket_.get() != nullptr);
+  ASSERT_TRUE(host_socket_.get() != nullptr);
 
   StreamConnectionTester tester(host_socket_.get(), client_socket_.get(),
                                 100, 2);
@@ -172,7 +171,7 @@ TEST_F(SslHmacChannelAuthenticatorTest, InvalidChannelSecret) {
 
   RunChannelAuth(true);
 
-  ASSERT_TRUE(host_socket_.get() == NULL);
+  ASSERT_TRUE(host_socket_.get() == nullptr);
 }
 
 }  // namespace protocol

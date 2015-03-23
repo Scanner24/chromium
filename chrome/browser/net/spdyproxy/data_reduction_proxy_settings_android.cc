@@ -6,16 +6,16 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_configurator.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "jni/DataReductionProxySettings_jni.h"
+#include "net/proxy/proxy_server.h"
 
 
 using base::android::ConvertUTF8ToJavaString;
@@ -31,12 +31,12 @@ DataReductionProxySettingsAndroid::~DataReductionProxySettingsAndroid() {
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyAllowed(
     JNIEnv* env, jobject obj) {
-  return Settings()->params()->allowed();
+  return Settings()->Allowed();
 }
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyPromoAllowed(
     JNIEnv* env, jobject obj) {
-  return Settings()->params()->promo_allowed();
+  return Settings()->PromoAllowed();
 }
 
 jboolean DataReductionProxySettingsAndroid::IsIncludedInAltFieldTrial(
@@ -47,7 +47,7 @@ jboolean DataReductionProxySettingsAndroid::IsIncludedInAltFieldTrial(
 ScopedJavaLocalRef<jstring>
 DataReductionProxySettingsAndroid::GetDataReductionProxyOrigin(
     JNIEnv* env, jobject obj) {
-  return ConvertUTF8ToJavaString(env, Settings()->params()->origin().spec());
+  return ConvertUTF8ToJavaString(env, Settings()->PrimaryOrigin());
 }
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(
@@ -110,8 +110,7 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyUnreachable(
 
 // static
 bool DataReductionProxySettingsAndroid::Register(JNIEnv* env) {
-  bool register_natives_impl_result = RegisterNativesImpl(env);
-  return register_natives_impl_result;
+  return RegisterNativesImpl(env);
 }
 
 ScopedJavaLocalRef<jlongArray>

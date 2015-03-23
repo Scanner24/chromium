@@ -16,12 +16,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "device/usb/usb_device.h"
 #include "device/usb/usb_device_handle.h"
@@ -48,6 +47,15 @@ static const int kRetryPeriod = 50;  // 0.05 seconds
 static const int kReconnectRetries = 100;  // 5 seconds
 static const int kUpdateRetries = 100;  // 5 seconds
 
+// Wait for the given time delta while still running the main loop. This is
+// necessary so that device add/remove events are processed by the UsbService.
+void SleepWithRunLoop(base::TimeDelta delta) {
+  base::RunLoop run_loop;
+  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
+                                                run_loop.QuitClosure(), delta);
+  run_loop.Run();
+}
+
 struct UsbTestGadgetConfiguration {
   UsbTestGadget::Type type;
   const char* http_resource;
@@ -64,14 +72,14 @@ static const struct UsbTestGadgetConfiguration kConfigurations[] = {
 
 class UsbTestGadgetImpl : public UsbTestGadget {
  public:
-  virtual ~UsbTestGadgetImpl();
+  ~UsbTestGadgetImpl() override;
 
-  virtual bool Unclaim() OVERRIDE;
-  virtual bool Disconnect() OVERRIDE;
-  virtual bool Reconnect() OVERRIDE;
-  virtual bool SetType(Type type) OVERRIDE;
-  virtual UsbDevice* GetDevice() const OVERRIDE;
-  virtual std::string GetSerialNumber() const OVERRIDE;
+  bool Unclaim() override;
+  bool Disconnect() override;
+  bool Reconnect() override;
+  bool SetType(Type type) override;
+  UsbDevice* GetDevice() const override;
+  const std::string& GetSerialNumber() const override;
 
  protected:
   UsbTestGadgetImpl();
@@ -93,13 +101,13 @@ class UsbTestGadgetImpl : public UsbTestGadget {
   class Delegate : public net::URLFetcherDelegate {
    public:
     Delegate() {}
-    virtual ~Delegate() {}
+    ~Delegate() override {}
 
     void WaitForCompletion() {
       run_loop_.Run();
     }
 
-    virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+    void OnURLFetchComplete(const net::URLFetcher* source) override {
       run_loop_.Quit();
     }
 
@@ -123,7 +131,7 @@ class UsbTestGadgetImpl : public UsbTestGadget {
 }  // namespace
 
 bool UsbTestGadget::IsTestEnabled() {
-  base::CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return command_line->HasSwitch(kCommandLineSwitch);
 }
 
@@ -136,12 +144,12 @@ scoped_ptr<UsbTestGadget> UsbTestGadget::Claim() {
       LOG(ERROR) << "Failed to find an unclaimed device.";
       return scoped_ptr<UsbTestGadget>();
     }
-    PlatformThread::Sleep(TimeDelta::FromMilliseconds(kRetryPeriod));
+    SleepWithRunLoop(TimeDelta::FromMilliseconds(kRetryPeriod));
   }
   VLOG(1) << "It took " << (kClaimRetries - retries)
           << " retries to find an unclaimed device.";
 
-  return gadget.PassAs<UsbTestGadget>();
+  return gadget.Pass();
 }
 
 UsbTestGadgetImpl::UsbTestGadgetImpl() {
@@ -149,7 +157,7 @@ UsbTestGadgetImpl::UsbTestGadgetImpl() {
   context_builder.set_proxy_service(net::ProxyService::CreateDirect());
   request_context_.reset(context_builder.Build());
 
-  base::ProcessId process_id = base::Process::Current().pid();
+  base::ProcessId process_id = base::GetCurrentProcId();
   session_id_ = base::StringPrintf(
       "%s:%p", base::HexEncode(&process_id, sizeof(process_id)).c_str(), this);
 
@@ -166,7 +174,7 @@ UsbDevice* UsbTestGadgetImpl::GetDevice() const {
   return device_.get();
 }
 
-std::string UsbTestGadgetImpl::GetSerialNumber() const {
+const std::string& UsbTestGadgetImpl::GetSerialNumber() const {
   return device_address_;
 }
 
@@ -176,12 +184,10 @@ scoped_ptr<net::URLFetcher> UsbTestGadgetImpl::CreateURLFetcher(
   scoped_ptr<net::URLFetcher> url_fetcher(
       net::URLFetcher::Create(url, request_type, delegate));
 
-  url_fetcher->SetRequestContext(
-      new net::TrivialURLRequestContextGetter(
-          request_context_.get(),
-          base::MessageLoop::current()->message_loop_proxy()));
+  url_fetcher->SetRequestContext(new net::TrivialURLRequestContextGetter(
+      request_context_.get(), base::MessageLoop::current()->task_runner()));
 
-  return url_fetcher.PassAs<net::URLFetcher>();
+  return url_fetcher;
 }
 
 int UsbTestGadgetImpl::SimplePOSTRequest(const GURL& url,
@@ -311,7 +317,7 @@ bool UsbTestGadgetImpl::Update() {
       LOG(ERROR) << "Device not responding with new version.";
       return false;
     }
-    PlatformThread::Sleep(TimeDelta::FromMilliseconds(kRetryPeriod));
+    SleepWithRunLoop(TimeDelta::FromMilliseconds(kRetryPeriod));
   }
   VLOG(1) << "It took " << (kUpdateRetries - retries)
           << " retries to see the new version.";
@@ -324,7 +330,7 @@ bool UsbTestGadgetImpl::Update() {
       LOG(ERROR) << "Failed to find updated device.";
       return false;
     }
-    PlatformThread::Sleep(TimeDelta::FromMilliseconds(kRetryPeriod));
+    SleepWithRunLoop(TimeDelta::FromMilliseconds(kRetryPeriod));
   }
   VLOG(1) << "It took " << (kReconnectRetries - retries)
           << " retries to find the updated device.";
@@ -426,6 +432,8 @@ bool UsbTestGadgetImpl::Unclaim() {
     LOG(ERROR) << "Unexpected HTTP " << response_code << " from /unclaim.";
     return false;
   }
+
+  device_address_.clear();
   return true;
 }
 
@@ -458,7 +466,7 @@ bool UsbTestGadgetImpl::SetType(Type type) {
       LOG(ERROR) << "Failed to find updated device.";
       return false;
     }
-    PlatformThread::Sleep(TimeDelta::FromMilliseconds(kRetryPeriod));
+    SleepWithRunLoop(TimeDelta::FromMilliseconds(kRetryPeriod));
   }
   VLOG(1) << "It took " << (kReconnectRetries - retries)
           << " retries to find the updated device.";
@@ -486,7 +494,7 @@ bool UsbTestGadgetImpl::Disconnect() {
       LOG(ERROR) << "Device did not disconnect.";
       return false;
     }
-    PlatformThread::Sleep(TimeDelta::FromMilliseconds(kRetryPeriod));
+    SleepWithRunLoop(TimeDelta::FromMilliseconds(kRetryPeriod));
   }
   VLOG(1) << "It took " << (kDisconnectRetries - retries)
           << " retries for the device to disconnect.";
@@ -512,7 +520,7 @@ bool UsbTestGadgetImpl::Reconnect() {
       LOG(ERROR) << "Device did not reconnect.";
       return false;
     }
-    PlatformThread::Sleep(TimeDelta::FromMilliseconds(kRetryPeriod));
+    SleepWithRunLoop(TimeDelta::FromMilliseconds(kRetryPeriod));
   }
   VLOG(1) << "It took " << (kDisconnectRetries - retries)
           << " retries for the device to reconnect.";

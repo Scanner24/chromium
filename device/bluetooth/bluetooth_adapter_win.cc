@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -46,7 +47,7 @@ BluetoothAdapterWin::BluetoothAdapterWin(const InitCallback& init_callback)
 }
 
 BluetoothAdapterWin::~BluetoothAdapterWin() {
-  if (task_manager_) {
+  if (task_manager_.get()) {
     task_manager_->RemoveObserver(this);
     task_manager_->Shutdown();
   }
@@ -183,6 +184,14 @@ void BluetoothAdapterWin::CreateL2capService(
   NOTIMPLEMENTED();
 }
 
+void BluetoothAdapterWin::RegisterAudioSink(
+    const BluetoothAudioSink::Options& options,
+    const AcquiredCallback& callback,
+    const BluetoothAudioSink::ErrorCallback& error_callback) {
+  NOTIMPLEMENTED();
+  error_callback.Run(BluetoothAudioSink::ERROR_UNSUPPORTED_PLATFORM);
+}
+
 void BluetoothAdapterWin::RemovePairingDelegateInternal(
     BluetoothDevice::PairingDelegate* pairing_delegate) {
 }
@@ -280,6 +289,12 @@ void BluetoothAdapterWin::DevicesPolled(
       }
     }
   }
+}
+
+void BluetoothAdapterWin::DeleteOnCorrectThread() const {
+  if (ui_task_runner_->RunsTasksOnCurrentThread() ||
+      !ui_task_runner_->DeleteSoon(FROM_HERE, this))
+    delete this;
 }
 
 // If the method is called when |discovery_status_| is DISCOVERY_STOPPING,

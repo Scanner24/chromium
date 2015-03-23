@@ -29,24 +29,22 @@ class AppInstaller : public extensions::WebstoreStandaloneInstaller {
  protected:
   friend class base::RefCountedThreadSafe<AppInstaller>;
 
-  virtual ~AppInstaller();
+  ~AppInstaller() override;
 
   void OnWebContentsDestroyed(content::WebContents* web_contents);
 
   // WebstoreStandaloneInstaller implementation.
-  virtual bool CheckRequestorAlive() const OVERRIDE;
-  virtual const GURL& GetRequestorURL() const OVERRIDE;
-  virtual bool ShouldShowPostInstallUI() const OVERRIDE;
-  virtual bool ShouldShowAppInstalledBubble() const OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
-      const OVERRIDE;
-  virtual bool CheckInlineInstallPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
-  virtual bool CheckRequestorPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
+  bool CheckRequestorAlive() const override;
+  const GURL& GetRequestorURL() const override;
+  bool ShouldShowPostInstallUI() const override;
+  bool ShouldShowAppInstalledBubble() const override;
+  content::WebContents* GetWebContents() const override;
+  scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
+      const override;
+  bool CheckInlineInstallPermitted(const base::DictionaryValue& webstore_data,
+                                   std::string* error) const override;
+  bool CheckRequestorPermitted(const base::DictionaryValue& webstore_data,
+                               std::string* error) const override;
 
  private:
   class WebContentsObserver;

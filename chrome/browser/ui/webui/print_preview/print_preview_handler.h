@@ -22,6 +22,7 @@
 #endif  // ENABLE_SERVICE_DISCOVERY
 
 class AccountReconcilor;
+class PrinterHandler;
 class PrintSystemTaskProxy;
 
 namespace base {
@@ -49,24 +50,23 @@ class PrintPreviewHandler
       public MergeSessionHelper::Observer {
  public:
   PrintPreviewHandler();
-  virtual ~PrintPreviewHandler();
+  ~PrintPreviewHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void FileSelectionCanceled(void* params) override;
 
   // PrintViewManagerObserver implementation.
-  virtual void OnPrintDialogShown() OVERRIDE;
+  void OnPrintDialogShown() override;
 
   // MergeSessionHelper::Observer implementation.
-  virtual void MergeSessionCompleted(
-      const std::string& account_id,
-      const GoogleServiceAuthError& error) OVERRIDE;
+  void MergeSessionCompleted(const std::string& account_id,
+                             const GoogleServiceAuthError& error) override;
 
   // Displays a modal dialog, prompting the user to select a file.
   void SelectFile(const base::FilePath& default_path);
@@ -79,29 +79,28 @@ class PrintPreviewHandler
   // Called when print preview failed.
   void OnPrintPreviewFailed();
 
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
   // Called when the user press ctrl+shift+p to display the native system
   // dialog.
   void ShowSystemDialog();
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
   // PrivetLocalPrinterLister::Delegate implementation.
-  virtual void LocalPrinterChanged(
+  void LocalPrinterChanged(
       bool added,
       const std::string& name,
       bool has_local_printing,
-      const local_discovery::DeviceDescription& description) OVERRIDE;
-  virtual void LocalPrinterRemoved(const std::string& name) OVERRIDE;
-  virtual void LocalPrinterCacheFlushed() OVERRIDE;
+      const local_discovery::DeviceDescription& description) override;
+  void LocalPrinterRemoved(const std::string& name) override;
+  void LocalPrinterCacheFlushed() override;
 
   // PrivetLocalPrintOperation::Delegate implementation.
-  virtual void OnPrivetPrintingDone(
-      const local_discovery::PrivetLocalPrintOperation*
-      print_operation) OVERRIDE;
-  virtual void OnPrivetPrintingError(
+  void OnPrivetPrintingDone(const local_discovery::PrivetLocalPrintOperation*
+                                print_operation) override;
+  void OnPrivetPrintingError(
       const local_discovery::PrivetLocalPrintOperation* print_operation,
-        int http_code) OVERRIDE;
+      int http_code) override;
 #endif  // ENABLE_SERVICE_DISCOVERY
   int regenerate_preview_request_count() const {
     return regenerate_preview_request_count_;
@@ -125,6 +124,9 @@ class PrintPreviewHandler
 
   // Starts getting all local privet printers. |arg| is unused.
   void HandleGetPrivetPrinters(const base::ListValue* args);
+
+  // Starts getting all local extension managed printers. |arg| is unused.
+  void HandleGetExtensionPrinters(const base::ListValue* args);
 
   // Stops getting all local privet printers. |arg| is unused.
   void HandleStopGetPrivetPrinters(const base::ListValue* args);
@@ -151,11 +153,11 @@ class PrintPreviewHandler
   // Gets the printer capabilities. First element of |args| is the printer name.
   void HandleGetPrinterCapabilities(const base::ListValue* args);
 
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
   // Asks the initiator renderer to show the native print system dialog. |args|
   // is unused.
   void HandleShowSystemDialog(const base::ListValue* args);
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 
   // Callback for the signin dialog to call once signin is complete.
   void OnSigninComplete();
@@ -179,10 +181,6 @@ class PrintPreviewHandler
   // |args| is unused.
   void HandleManagePrinters(const base::ListValue* args);
 
-  // Asks the browser to show the cloud print dialog. |args| is signle int with
-  // page count.
-  void HandlePrintWithCloudPrintDialog(const base::ListValue* args);
-
   // Asks the browser for several settings that are needed before the first
   // preview is displayed.
   void HandleGetInitialSettings(const base::ListValue* args);
@@ -201,6 +199,10 @@ class PrintPreviewHandler
   void HandleForceOpenNewTab(const base::ListValue* args);
 
   void HandleGetPrivetPrinterCapabilities(const base::ListValue* arg);
+
+  // Requests an extension managed printer's capabilities.
+  // |arg| contains the ID of the printer whose capabilities are requested.
+  void HandleGetExtensionPrinterCapabilities(const base::ListValue* args);
 
   void SendInitialSettings(const std::string& default_printer);
 
@@ -227,9 +229,6 @@ class PrintPreviewHandler
 
   // Handles printing to PDF.
   void PrintToPdf();
-
-  // Asks the browser to show the cloud print dialog.
-  void PrintWithCloudPrintDialog();
 
   // Gets the initiator for the print preview dialog.
   content::WebContents* GetInitiator() const;
@@ -291,6 +290,30 @@ class PrintPreviewHandler
       base::DictionaryValue* printer_value);
 #endif
 
+  // Lazily creates |extension_printer_handler_| that can be used to handle
+  // extension printers requests.
+  void EnsureExtensionPrinterHandlerSet();
+
+  // Called when a list of printers is reported by an extension.
+  // |printers|: The list of printers managed by the extension.
+  // |done|: Whether all the extensions have reported the list of printers
+  //     they manage.
+  void OnGotPrintersForExtension(const base::ListValue& printers, bool done);
+
+  // Called when an extension reports the set of print capabilites for a
+  // printer.
+  // |printer_id|: The id of the printer whose capabilities are reported.
+  // |capabilities|: The printer capabilities.
+  void OnGotExtensionPrinterCapabilities(
+      const std::string& printer_id,
+      const base::DictionaryValue& capabilities);
+
+  // Called when an extension print job is completed.
+  // |success|: Whether the job succeeded.
+  // |status|: The returned print job status. Useful for reporting a specific
+  //     error.
+  void OnExtensionPrintResult(bool success, const std::string& status);
+
   // Register/unregister from notifications of changes done to the GAIA
   // cookie.
   void RegisterForMergeSession();
@@ -338,6 +361,10 @@ class PrintPreviewHandler
   scoped_ptr<local_discovery::PrivetLocalPrintOperation>
       privet_local_print_operation_;
 #endif
+
+  // Handles requests for extension printers. Created lazily by calling
+  // |EnsureExtensionPrinterHandlerSet|.
+  scoped_ptr<PrinterHandler> extension_printer_handler_;
 
   // Notifies tests that want to know if the PDF has been saved. This doesn't
   // notify the test if it was a successful save, only that it was attempted.

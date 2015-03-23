@@ -6,11 +6,10 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
-#include "chrome/browser/history/shortcuts_database.h"
+#include "chrome/browser/autocomplete/shortcuts_database.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -35,11 +34,11 @@ class ShortcutsBackendTest : public testing::Test,
     AutocompleteMatch::Type type = AutocompleteMatchType::URL_WHAT_YOU_TYPED);
   void SetSearchProvider();
 
-  virtual void SetUp();
-  virtual void TearDown();
+  void SetUp() override;
+  void TearDown() override;
 
-  virtual void OnShortcutsLoaded() OVERRIDE;
-  virtual void OnShortcutsChanged() OVERRIDE;
+  void OnShortcutsLoaded() override;
+  void OnShortcutsChanged() override;
 
   const ShortcutsBackend::ShortcutMap& shortcuts_map() const {
     return backend_->shortcuts_map();
@@ -193,17 +192,15 @@ TEST_F(ShortcutsBackendTest, SanitizeMatchCore) {
       "0,1",     "0,0",      AutocompleteMatchType::SEARCH_HISTORY },
     { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_ENTITY,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
-    { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_INFINITE,
+    { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_TAIL,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
     { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
     { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_PROFILE,
       "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
-    { "0,1",     "0,0",      AutocompleteMatchType::SEARCH_SUGGEST_ANSWER,
-      "",        "",         AutocompleteMatchType::SEARCH_HISTORY },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     history::ShortcutsDatabase::Shortcut::MatchCore match_core(
         MatchCoreForTesting(std::string(), cases[i].input_contents_class,
                             cases[i].input_description_class,

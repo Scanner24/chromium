@@ -5,9 +5,9 @@
 #include "media/audio/audio_output_device.h"
 
 #include "base/basictypes.h"
-#include "base/debug/trace_event.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/base/limits.h"
 
@@ -23,12 +23,12 @@ class AudioOutputDevice::AudioThreadCallback
                       base::SharedMemoryHandle memory,
                       int memory_length,
                       AudioRendererSink::RenderCallback* render_callback);
-  virtual ~AudioThreadCallback();
+  ~AudioThreadCallback() override;
 
-  virtual void MapSharedMemory() OVERRIDE;
+  void MapSharedMemory() override;
 
   // Called whenever we receive notifications about pending data.
-  virtual void Process(int pending_data) OVERRIDE;
+  void Process(uint32 pending_data) override;
 
  private:
   AudioRendererSink::RenderCallback* render_callback_;
@@ -50,10 +50,10 @@ AudioOutputDevice::AudioOutputDevice(
 
   // The correctness of the code depends on the relative values assigned in the
   // State enum.
-  COMPILE_ASSERT(IPC_CLOSED < IDLE, invalid_enum_value_assignment_0);
-  COMPILE_ASSERT(IDLE < CREATING_STREAM, invalid_enum_value_assignment_1);
-  COMPILE_ASSERT(CREATING_STREAM < PAUSED, invalid_enum_value_assignment_2);
-  COMPILE_ASSERT(PAUSED < PLAYING, invalid_enum_value_assignment_3);
+  static_assert(IPC_CLOSED < IDLE, "invalid enum value assignment 0");
+  static_assert(IDLE < CREATING_STREAM, "invalid enum value assignment 1");
+  static_assert(CREATING_STREAM < PAUSED, "invalid enum value assignment 2");
+  static_assert(PAUSED < PLAYING, "invalid enum value assignment 3");
 }
 
 void AudioOutputDevice::InitializeWithSessionId(const AudioParameters& params,
@@ -285,11 +285,7 @@ void AudioOutputDevice::AudioThreadCallback::MapSharedMemory() {
 }
 
 // Called whenever we receive notifications about pending data.
-void AudioOutputDevice::AudioThreadCallback::Process(int pending_data) {
-  // Negative |pending_data| indicates the browser side stream has stopped.
-  if (pending_data < 0)
-    return;
-
+void AudioOutputDevice::AudioThreadCallback::Process(uint32 pending_data) {
   // Convert the number of pending bytes in the render buffer into milliseconds.
   int audio_delay_milliseconds = pending_data / bytes_per_ms_;
 

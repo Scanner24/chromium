@@ -34,6 +34,10 @@
   border-color: rgb(64, 128, 250);
   border-style: dashed;
   border-width: 1px;
+  /* TODO(raymes): This is a hack needed to force the margins onto separate
+   * layers to work around crbug.com/455439. We can remove this when it's fixed.
+   */
+  will-change: transform;
 }
 
 #preview-area .margin-control-disabled .margin-control-line  {
@@ -56,7 +60,6 @@
   box-sizing: border-box;
   color: white;
   cursor: auto;
-  font-family: arial;
   font-size: 0.8em;
   height: 25px;
   padding: 5px 0;

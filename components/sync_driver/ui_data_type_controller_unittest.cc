@@ -12,6 +12,7 @@
 #include "components/sync_driver/fake_generic_change_processor.h"
 #include "sync/api/fake_syncable_service.h"
 #include "sync/internal_api/public/attachments/attachment_service_impl.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -33,7 +34,7 @@ class SyncUIDataTypeControllerTest : public testing::Test,
       : type_(syncer::PREFERENCES),
         change_processor_(NULL) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     preference_dtc_ =
         new UIDataTypeController(
             base::MessageLoopProxy::current(),
@@ -43,22 +44,24 @@ class SyncUIDataTypeControllerTest : public testing::Test,
     SetStartExpectations();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     // Must be done before we pump the loop.
     syncable_service_.StopSyncing(type_);
     preference_dtc_ = NULL;
     PumpLoop();
   }
 
-  virtual base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
-      syncer::ModelType type) OVERRIDE {
+  base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
+      syncer::ModelType type) override {
     return syncable_service_.AsWeakPtr();
   }
 
-  virtual scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
+  scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
       const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
-      syncer::AttachmentService::Delegate* delegate) OVERRIDE {
+      const std::string& store_birthday,
+      syncer::ModelType model_type,
+      syncer::AttachmentService::Delegate* delegate) override {
     return syncer::AttachmentServiceImpl::CreateForTest();
   }
 

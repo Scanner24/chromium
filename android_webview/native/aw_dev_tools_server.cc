@@ -19,6 +19,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/user_agent.h"
 #include "jni/AwDevToolsServer_jni.h"
+#include "net/base/net_errors.h"
 #include "net/socket/unix_domain_server_socket_posix.h"
 
 using content::DevToolsAgentHost;
@@ -28,34 +29,33 @@ using content::WebContents;
 namespace {
 
 const char kFrontEndURL[] =
-    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
+    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/inspector.html";
 const char kSocketNameFormat[] = "webview_devtools_remote_%d";
+const char kTetheringSocketName[] = "webview_devtools_tethering_%d_%d";
+
+const int kBackLog = 10;
 
 // Delegate implementation for the devtools http handler for WebView. A new
 // instance of this gets created each time web debugging is enabled.
 class AwDevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
  public:
-  AwDevToolsServerDelegate() {}
-  virtual ~AwDevToolsServerDelegate() {}
+  AwDevToolsServerDelegate() {
+  }
+
+  ~AwDevToolsServerDelegate() override {}
 
   // DevToolsHttpProtocolHandler::Delegate overrides.
-  virtual std::string GetDiscoveryPageHTML() OVERRIDE;
+  std::string GetDiscoveryPageHTML() override;
 
-  virtual bool BundlesFrontendResources() OVERRIDE {
+  bool BundlesFrontendResources() override {
     return false;
   }
 
-  virtual base::FilePath GetDebugFrontendDir() OVERRIDE {
+  base::FilePath GetDebugFrontendDir() override {
     return base::FilePath();
   }
-
-  virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
-      net::StreamListenSocket::Delegate* delegate,
-      std::string* name) OVERRIDE {
-    return scoped_ptr<net::StreamListenSocket>();
-  }
-
  private:
+
   DISALLOW_COPY_AND_ASSIGN(AwDevToolsServerDelegate);
 };
 
@@ -75,16 +75,37 @@ class UnixDomainServerSocketFactory
     : public content::DevToolsHttpHandler::ServerSocketFactory {
  public:
   explicit UnixDomainServerSocketFactory(const std::string& socket_name)
-      : content::DevToolsHttpHandler::ServerSocketFactory(socket_name, 0, 1) {}
+      : socket_name_(socket_name),
+        last_tethering_socket_(0) {
+  }
 
  private:
   // content::DevToolsHttpHandler::ServerSocketFactory.
-  virtual scoped_ptr<net::ServerSocket> Create() const OVERRIDE {
-    return scoped_ptr<net::ServerSocket>(
+  scoped_ptr<net::ServerSocket> CreateForHttpServer() override {
+    scoped_ptr<net::ServerSocket> socket(
         new net::UnixDomainServerSocket(
             base::Bind(&content::CanUserConnectToDevTools),
             true /* use_abstract_namespace */));
+    if (socket->ListenWithAddressAndPort(socket_name_, 0, kBackLog) != net::OK)
+      return scoped_ptr<net::ServerSocket>();
+
+    return socket;
   }
+
+  scoped_ptr<net::ServerSocket> CreateForTethering(std::string* name) override {
+    *name = base::StringPrintf(
+        kTetheringSocketName, getpid(), ++last_tethering_socket_);
+    scoped_ptr<net::UnixDomainServerSocket> socket(
+        new net::UnixDomainServerSocket(
+            base::Bind(&content::CanUserConnectToDevTools), true));
+    if (socket->ListenWithAddressAndPort(*name, 0, kBackLog) != net::OK)
+      return scoped_ptr<net::ServerSocket>();
+
+    return socket.Pass();
+  }
+
+  std::string socket_name_;
+  int last_tethering_socket_;
 
   DISALLOW_COPY_AND_ASSIGN(UnixDomainServerSocketFactory);
 };
@@ -93,8 +114,7 @@ class UnixDomainServerSocketFactory
 
 namespace android_webview {
 
-AwDevToolsServer::AwDevToolsServer()
-    : protocol_handler_(NULL) {
+AwDevToolsServer::AwDevToolsServer() {
 }
 
 AwDevToolsServer::~AwDevToolsServer() {
@@ -108,20 +128,15 @@ void AwDevToolsServer::Start() {
   scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory> factory(
       new UnixDomainServerSocketFactory(
           base::StringPrintf(kSocketNameFormat, getpid())));
-  protocol_handler_ = content::DevToolsHttpHandler::Start(
+  protocol_handler_.reset(content::DevToolsHttpHandler::Start(
       factory.Pass(),
       base::StringPrintf(kFrontEndURL, content::GetWebKitRevision().c_str()),
       new AwDevToolsServerDelegate(),
-      base::FilePath());
+      base::FilePath()));
 }
 
 void AwDevToolsServer::Stop() {
-  if (!protocol_handler_)
-    return;
-  // Note that the call to Stop() below takes care of |protocol_handler_|
-  // deletion.
-  protocol_handler_->Stop();
-  protocol_handler_ = NULL;
+  protocol_handler_.reset();
 }
 
 bool AwDevToolsServer::IsStarted() const {

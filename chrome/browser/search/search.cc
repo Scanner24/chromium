@@ -35,7 +35,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
@@ -65,8 +65,6 @@ const char kUseSearchPathForInstant[] = "use_search_path_for_instant";
 const char kAltInstantURLPath[] = "search";
 const char kAltInstantURLQueryParams[] = "&qbp=1";
 
-const char kDisplaySearchButtonFlagName[] = "display_search_button";
-const char kOriginChipFlagName[] = "origin_chip";
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
 const char kEnableQueryExtractionFlagName[] = "query_extraction";
 #endif
@@ -246,7 +244,7 @@ base::string16 GetSearchTermsImpl(const content::WebContents* contents,
 }
 
 bool IsURLAllowedForSupervisedUser(const GURL& url, Profile* profile) {
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
   SupervisedUserURLFilter* url_filter =
@@ -330,7 +328,8 @@ bool IsQueryExtractionEnabled() {
   if (!IsInstantExtendedAPIEnabled())
     return false;
 
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableQueryExtraction))
     return true;
 
@@ -485,8 +484,7 @@ GURL GetInstantURL(Profile* profile, bool force_instant_results) {
   if (!instant_url.SchemeIsSecure() &&
       !google_util::StartsWithCommandLineGoogleBaseURL(instant_url)) {
     GURL::Replacements replacements;
-    const std::string secure_scheme(url::kHttpsScheme);
-    replacements.SetSchemeStr(secure_scheme);
+    replacements.SetSchemeStr(url::kHttpsScheme);
     instant_url = instant_url.ReplaceComponents(replacements);
   }
 
@@ -534,7 +532,7 @@ bool ShouldPrefetchSearchResults() {
     return false;
 
 #if defined(OS_ANDROID)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kPrefetchSearchResults)) {
     return true;
   }
@@ -580,49 +578,6 @@ bool ShouldReuseInstantSearchBasePage() {
 
 GURL GetLocalInstantURL(Profile* profile) {
   return GURL(chrome::kChromeSearchLocalNtpUrl);
-}
-
-DisplaySearchButtonConditions GetDisplaySearchButtonConditions() {
-  const CommandLine* cl = CommandLine::ForCurrentProcess();
-  if (cl->HasSwitch(switches::kDisableSearchButtonInOmnibox))
-    return DISPLAY_SEARCH_BUTTON_NEVER;
-  if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxForStr))
-    return DISPLAY_SEARCH_BUTTON_FOR_STR;
-  if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxForStrOrIip))
-    return DISPLAY_SEARCH_BUTTON_FOR_STR_OR_IIP;
-  if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxAlways))
-    return DISPLAY_SEARCH_BUTTON_ALWAYS;
-
-  FieldTrialFlags flags;
-  if (!GetFieldTrialInfo(&flags))
-    return DISPLAY_SEARCH_BUTTON_NEVER;
-  uint64 value =
-      GetUInt64ValueForFlagWithDefault(kDisplaySearchButtonFlagName, 0, flags);
-  return (value < DISPLAY_SEARCH_BUTTON_NUM_VALUES) ?
-      static_cast<DisplaySearchButtonConditions>(value) :
-      DISPLAY_SEARCH_BUTTON_NEVER;
-}
-
-bool ShouldDisplayOriginChip() {
-  return GetOriginChipCondition() != ORIGIN_CHIP_DISABLED;
-}
-
-OriginChipCondition GetOriginChipCondition() {
-  const CommandLine* cl = CommandLine::ForCurrentProcess();
-  if (cl->HasSwitch(switches::kDisableOriginChip))
-    return ORIGIN_CHIP_DISABLED;
-  if (cl->HasSwitch(switches::kEnableOriginChipAlways))
-    return ORIGIN_CHIP_ALWAYS;
-  if (cl->HasSwitch(switches::kEnableOriginChipOnSrp))
-    return ORIGIN_CHIP_ON_SRP;
-
-  FieldTrialFlags flags;
-  if (!GetFieldTrialInfo(&flags))
-    return ORIGIN_CHIP_DISABLED;
-  uint64 value =
-      GetUInt64ValueForFlagWithDefault(kOriginChipFlagName, 0, flags);
-  return (value < ORIGIN_CHIP_NUM_VALUES) ?
-      static_cast<OriginChipCondition>(value) : ORIGIN_CHIP_DISABLED;
 }
 
 bool ShouldShowGoogleLocalNTP() {
@@ -731,7 +686,7 @@ bool ShouldPrefetchSearchResultsOnSRP() {
 }
 
 void EnableQueryExtractionForTesting() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   cl->AppendSwitch(switches::kEnableQueryExtraction);
 }
 

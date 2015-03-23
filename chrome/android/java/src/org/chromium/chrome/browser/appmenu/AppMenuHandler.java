@@ -105,7 +105,9 @@ public class AppMenuHandler {
         int rotation = mActivity.getWindowManager().getDefaultDisplay().getRotation();
         Point pt = new Point();
         mActivity.getWindowManager().getDefaultDisplay().getSize(pt);
-        mAppMenu.show(wrapper, anchorView, isByHardwareButton, rotation, appRect, pt.y);
+
+        mAppMenu.show(
+                wrapper, anchorView, isByHardwareButton, rotation, appRect, pt.y);
         mAppMenuDragHelper.onShow(startDragging);
         UmaBridge.menuShow();
         return true;

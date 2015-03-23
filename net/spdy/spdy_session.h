@@ -105,6 +105,8 @@ enum SpdyProtocolErrorDetails {
   STATUS_CODE_SETTINGS_TIMEOUT = 32,
   STATUS_CODE_CONNECT_ERROR = 33,
   STATUS_CODE_ENHANCE_YOUR_CALM = 34,
+  STATUS_CODE_INADEQUATE_SECURITY = 35,
+  STATUS_CODE_HTTP_1_1_REQUIRED = 36,
 
   // SpdySession errors
   PROTOCOL_ERROR_UNEXPECTED_PING = 22,
@@ -116,7 +118,7 @@ enum SpdyProtocolErrorDetails {
   PROTOCOL_ERROR_RECEIVE_WINDOW_VIOLATION = 28,
 
   // Next free value.
-  NUM_SPDY_PROTOCOL_ERROR_DETAILS = 35,
+  NUM_SPDY_PROTOCOL_ERROR_DETAILS = 37,
 };
 SpdyProtocolErrorDetails NET_EXPORT_PRIVATE
     MapFramerErrorToProtocolError(SpdyFramer::SpdyError error);
@@ -127,10 +129,10 @@ SpdyGoAwayStatus NET_EXPORT_PRIVATE MapNetErrorToGoAwayStatus(Error err);
 
 // If these compile asserts fail then SpdyProtocolErrorDetails needs
 // to be updated with new values, as do the mapping functions above.
-COMPILE_ASSERT(12 == SpdyFramer::LAST_ERROR,
-               SpdyProtocolErrorDetails_SpdyErrors_mismatch);
-COMPILE_ASSERT(15 == RST_STREAM_NUM_STATUS_CODES,
-               SpdyProtocolErrorDetails_RstStreamStatus_mismatch);
+static_assert(12 == SpdyFramer::LAST_ERROR,
+              "SpdyProtocolErrorDetails / Spdy Errors mismatch");
+static_assert(17 == RST_STREAM_NUM_STATUS_CODES,
+              "SpdyProtocolErrorDetails / RstStreamStatus mismatch");
 
 // Splits pushed |headers| into request and response parts. Request headers are
 // the headers specifying resource URL.
@@ -250,7 +252,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
               const HostPortPair& trusted_spdy_proxy,
               NetLog* net_log);
 
-  virtual ~SpdySession();
+  ~SpdySession() override;
 
   const HostPortPair& host_port_pair() const {
     return spdy_session_key_.host_port_proxy_pair().first;
@@ -509,6 +511,10 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
     return buffered_spdy_framer_->GetDataFrameMaximumPayload();
   }
 
+  static int32 GetInitialWindowSize(NextProto protocol) {
+    return protocol < kProtoSPDY4MinimumVersion ? 65536 : 65535;
+  }
+
   // https://http2.github.io/http2-spec/#TLSUsage mandates minimum security
   // standards for TLS.
   bool HasAcceptableTransportSecurity() const;
@@ -517,7 +523,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   base::WeakPtr<SpdySession> GetWeakPtr();
 
   // HigherLayeredPool implementation:
-  virtual bool CloseOneIdleConnection() OVERRIDE;
+  bool CloseOneIdleConnection() override;
 
  private:
   friend class base::RefCounted<SpdySession>;
@@ -723,7 +729,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
                              RequestPriority priority);
 
   // Send the PING frame.
-  void WritePingFrame(uint32 unique_id, bool is_ack);
+  void WritePingFrame(SpdyPingId unique_id, bool is_ack);
 
   // Post a CheckPingStatus call after delay. Don't post if there is already
   // CheckPingStatus running.
@@ -813,55 +819,51 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   void DeleteExpiredPushedStreams();
 
   // BufferedSpdyFramerVisitorInterface:
-  virtual void OnError(SpdyFramer::SpdyError error_code) OVERRIDE;
-  virtual void OnStreamError(SpdyStreamId stream_id,
-                             const std::string& description) OVERRIDE;
-  virtual void OnPing(SpdyPingId unique_id, bool is_ack) OVERRIDE;
-  virtual void OnRstStream(SpdyStreamId stream_id,
-                           SpdyRstStreamStatus status) OVERRIDE;
-  virtual void OnGoAway(SpdyStreamId last_accepted_stream_id,
-                        SpdyGoAwayStatus status) OVERRIDE;
-  virtual void OnDataFrameHeader(SpdyStreamId stream_id,
-                                 size_t length,
-                                 bool fin) OVERRIDE;
-  virtual void OnStreamFrameData(SpdyStreamId stream_id,
-                                 const char* data,
-                                 size_t len,
-                                 bool fin) OVERRIDE;
-  virtual void OnSettings(bool clear_persisted) OVERRIDE;
-  virtual void OnSetting(
-      SpdySettingsIds id, uint8 flags, uint32 value) OVERRIDE;
-  virtual void OnWindowUpdate(SpdyStreamId stream_id,
-                              uint32 delta_window_size) OVERRIDE;
-  virtual void OnPushPromise(SpdyStreamId stream_id,
-                             SpdyStreamId promised_stream_id,
-                             const SpdyHeaderBlock& headers) OVERRIDE;
-  virtual void OnSynStream(SpdyStreamId stream_id,
-                           SpdyStreamId associated_stream_id,
-                           SpdyPriority priority,
-                           bool fin,
-                           bool unidirectional,
-                           const SpdyHeaderBlock& headers) OVERRIDE;
-  virtual void OnSynReply(
-      SpdyStreamId stream_id,
-      bool fin,
-      const SpdyHeaderBlock& headers) OVERRIDE;
-  virtual void OnHeaders(
-      SpdyStreamId stream_id,
-      bool fin,
-      const SpdyHeaderBlock& headers) OVERRIDE;
-  virtual bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) OVERRIDE;
+  void OnError(SpdyFramer::SpdyError error_code) override;
+  void OnStreamError(SpdyStreamId stream_id,
+                     const std::string& description) override;
+  void OnPing(SpdyPingId unique_id, bool is_ack) override;
+  void OnRstStream(SpdyStreamId stream_id, SpdyRstStreamStatus status) override;
+  void OnGoAway(SpdyStreamId last_accepted_stream_id,
+                SpdyGoAwayStatus status) override;
+  void OnDataFrameHeader(SpdyStreamId stream_id,
+                         size_t length,
+                         bool fin) override;
+  void OnStreamFrameData(SpdyStreamId stream_id,
+                         const char* data,
+                         size_t len,
+                         bool fin) override;
+  void OnSettings(bool clear_persisted) override;
+  void OnSetting(SpdySettingsIds id, uint8 flags, uint32 value) override;
+  void OnWindowUpdate(SpdyStreamId stream_id,
+                      uint32 delta_window_size) override;
+  void OnPushPromise(SpdyStreamId stream_id,
+                     SpdyStreamId promised_stream_id,
+                     const SpdyHeaderBlock& headers) override;
+  void OnSynStream(SpdyStreamId stream_id,
+                   SpdyStreamId associated_stream_id,
+                   SpdyPriority priority,
+                   bool fin,
+                   bool unidirectional,
+                   const SpdyHeaderBlock& headers) override;
+  void OnSynReply(SpdyStreamId stream_id,
+                  bool fin,
+                  const SpdyHeaderBlock& headers) override;
+  void OnHeaders(SpdyStreamId stream_id,
+                 bool has_priority,
+                 SpdyPriority priority,
+                 bool fin,
+                 const SpdyHeaderBlock& headers) override;
+  bool OnUnknownFrame(SpdyStreamId stream_id, int frame_type) override;
 
   // SpdyFramerDebugVisitorInterface
-  virtual void OnSendCompressedFrame(
-      SpdyStreamId stream_id,
-      SpdyFrameType type,
-      size_t payload_len,
-      size_t frame_len) OVERRIDE;
-  virtual void OnReceiveCompressedFrame(
-      SpdyStreamId stream_id,
-      SpdyFrameType type,
-      size_t frame_len) OVERRIDE;
+  void OnSendCompressedFrame(SpdyStreamId stream_id,
+                             SpdyFrameType type,
+                             size_t payload_len,
+                             size_t frame_len) override;
+  void OnReceiveCompressedFrame(SpdyStreamId stream_id,
+                                SpdyFrameType type,
+                                size_t frame_len) override;
 
   // Called when bytes are consumed from a SpdyBuffer for a DATA frame
   // that is to be written or is being written. Increases the send
@@ -946,7 +948,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
 
   int64 pings_in_flight() const { return pings_in_flight_; }
 
-  uint32 next_ping_id() const { return next_ping_id_; }
+  SpdyPingId next_ping_id() const { return next_ping_id_; }
 
   base::TimeTicks last_activity_time() const { return last_activity_time_; }
 
@@ -1083,7 +1085,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   int64 pings_in_flight_;
 
   // This is the next ping_id (unique_id) to be sent in PING frame.
-  uint32 next_ping_id_;
+  SpdyPingId next_ping_id_;
 
   // This is the last time we have sent a PING.
   base::TimeTicks last_ping_sent_time_;

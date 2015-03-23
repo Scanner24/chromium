@@ -118,6 +118,11 @@ void NavigationControllerAndroid::GoToOffset(JNIEnv* env,
   navigation_controller_->GoToOffset(offset);
 }
 
+jboolean NavigationControllerAndroid::IsInitialNavigation(JNIEnv* env,
+                                                          jobject obj) {
+  return navigation_controller_->IsInitialNavigation();
+}
+
 void NavigationControllerAndroid::LoadIfNecessary(JNIEnv* env, jobject obj) {
   navigation_controller_->LoadIfNecessary();
 }
@@ -301,6 +306,18 @@ void NavigationControllerAndroid::SetUseDesktopUserAgent(
 }
 
 base::android::ScopedJavaLocalRef<jobject>
+NavigationControllerAndroid::GetEntryAtIndex(JNIEnv* env,
+                                             jobject obj,
+                                             int index) {
+  if (index < 0 || index >= navigation_controller_->GetEntryCount())
+    return base::android::ScopedJavaLocalRef<jobject>();
+
+  content::NavigationEntry* entry =
+      navigation_controller_->GetEntryAtIndex(index);
+  return CreateJavaNavigationEntry(env, entry, index);
+}
+
+base::android::ScopedJavaLocalRef<jobject>
 NavigationControllerAndroid::GetPendingEntry(JNIEnv* env, jobject obj) {
   content::NavigationEntry* entry = navigation_controller_->GetPendingEntry();
 
@@ -309,6 +326,17 @@ NavigationControllerAndroid::GetPendingEntry(JNIEnv* env, jobject obj) {
 
   return CreateJavaNavigationEntry(
       env, entry, navigation_controller_->GetPendingEntryIndex());
+}
+
+jint NavigationControllerAndroid::GetLastCommittedEntryIndex(JNIEnv* env,
+                                                             jobject obj) {
+  return navigation_controller_->GetLastCommittedEntryIndex();
+}
+
+jboolean NavigationControllerAndroid::RemoveEntryAtIndex(JNIEnv* env,
+                                                         jobject obj,
+                                                         jint index) {
+  return navigation_controller_->RemoveEntryAtIndex(index);
 }
 
 }  // namespace content

@@ -54,6 +54,7 @@
 #oobe.autolaunch #inner-container,
 #oobe.confirm-password #inner-container,
 #oobe.connect #inner-container,
+#oobe.debugging #inner-container,
 #oobe.enrollment #inner-container,
 #oobe.eula #inner-container,
 #oobe.fatal-error #inner-container,
@@ -104,12 +105,23 @@
   top: 15px;
 }
 
+#close-button-item {
+  -webkit-margin-start: 17px;
+  display: flex;
+  position: absolute;
+  right: 15px;
+  top: 15px;
+  width: 30px;
+  height: 30px;
+  z-index: 1;
+}
+
 #progress-dots {
   -webkit-box-pack: center;
-  -webkit-margin-before: 15px;
   -webkit-transition: opacity 200ms ease-in-out,
                       visibility 200ms ease-in-out;
   display: -webkit-box;
+  margin-top: 15px;
 }
 
 /* Hidden for the duration of initial transition. */
@@ -135,6 +147,7 @@
 #autolaunch-dot,
 #confirm-password-dot,
 #controller-pairing-dot,
+#debugging-dot,
 #enrollment-dot,
 #error-message-dot,
 #fatal-error-dot,
@@ -165,7 +178,10 @@
   opacity: 1;
 }
 
-#oobe.reset #progress-dots {
+#oobe.debugging #progress-dots,
+#oobe.reset #progress-dots,
+#oobe.host-pairing #progress-dots,
+#oobe.controller-pairing #progress-dots {
   visibility: hidden;
 }
 

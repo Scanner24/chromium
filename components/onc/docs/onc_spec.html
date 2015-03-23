@@ -251,6 +251,44 @@
       string.
     </dd>
 
+    <dt class="field">IPAddressConfigType</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">Remove</span> is
+        <span class="value">false</span>, otherwise ignored. Defaults to
+        <span class="value">DHCP</span> if
+        <span class="field">NameServersConfigType</span> is specified)
+        <span class="type">string</span>
+      </span>
+      <span class="rule">
+        <span class="rule_id"></span>
+        Allowed values are <span class="value">DHCP</span> and
+        <span class="value">Static</span>.
+      </span>
+      Determines whether the IP Address configuration is statically configured,
+      see <span class="field">StaticIPConfig</span>, or automatically configured
+      using DHCP.
+    </dd>
+
+    <dt class="field">NameServersConfigType</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">Remove</span> is
+        <span class="value">false</span>, otherwise ignored. Defaults to
+        <span class="value">DHCP</span> if
+        <span class="field">IPAddressConfigType</span> is specified)
+        <span class="type">string</span>
+      </span>
+      <span class="rule">
+        <span class="rule_id"></span>
+        Allowed values are <span class="value">DHCP</span> and
+        <span class="value">Static</span>.
+      </span>
+      Determines whether the NameServers configuration is statically configured,
+      see <span class="field">StaticIPConfig</span>, or automatically configured
+      using DHCP.
+    </dd>
+
     <dt class="field">IPConfigs</dt>
     <dd>
       <span class="field_meta">
@@ -263,12 +301,19 @@
     <dt class="field">StaticIPConfig</dt>
     <dd>
       <span class="field_meta">
-        (optional if <span class="field">Remove</span> is
-        <span class="value">false</span>, otherwise ignored)
+        (required if <span class="field">IPAddressConfigType</span> or
+        <span class="field">NameServersConfigType</span> is set to
+        <span class="value">Static</span>)
         <span class="type">IPConfig</span>
       </span>
       Each property set in this IPConfig object overrides the respective
       parameter received over DHCP.
+      If <span class="field">IPAddressConfigType</span> is set to
+      <span class="value">Static</span>, <span class="field">IPAddress</span>
+      and <span class="field">Gateway</span> are required.
+      If <span class="field">NameServersConfigType</span> is set to
+      <span class="value">Static</span>, <span class="field">NameServers</span>
+      is required.
     </dd>
 
     <dt class="field">SavedIPConfig</dt>
@@ -310,30 +355,6 @@
         <span class="type">ProxySettings</span>
       </span>
       Proxy settings for this network
-    </dd>
-
-    <dt class="field">NameServers</dt>
-    <dd>
-      <span class="field_meta">
-        (optional if <span class="field">Remove</span> is
-        <span class="value">false</span>, otherwise ignored)
-        <span class="type">array of string</span>
-      </span>
-      Array of addresses to use for name servers. If not specified, DHCP values
-      will be used.
-    </dd>
-
-    <dt class="field">SearchDomains</dt>
-    <dd>
-      <span class="field_meta">
-        (optional if <span class="field">Remove</span> is
-        <span class="value">false</span>, otherwise ignored)
-        <span class="type">array of string</span>
-      </span>
-      Array of strings to append to names for resolution. Items in this array
-      should not start with a dot. Example:
-      <span class="snippet">["corp.acme.org", "acme.org"]</span>. If not
-      specified, DHCP values will be used.
     </dd>
 
     <dt class="field">VPN</dt>
@@ -530,12 +551,13 @@
 </section>
 
 <section>
-  <h1>IP Config</h1>
+  <h1>IPConfig</h1>
   <p>
-    Field <span class="field">IPConfigs</span> is an array
-    of <span class="type">IPConfig</span>
-    objects. Each <span class="type">IPConfig</span> object describes a
-    particular static IP configuration and contains the following fields:
+    Objects of type <span class="type">IPConfig</span> are used to report the
+    actual IP configuration of a connected network (see
+    <span class="field">IPConfigs</span>), the IP configuration received from
+    DHCP (see <span class="field">SavedIPConfig</span>) and to configure a 
+    static IP configuration (see <span class="field">StaticIPConfig</span>).
   </p>
 
   <dl class="field_list">
@@ -556,7 +578,7 @@
     <dt class="field">IPAddress</dt>
     <dd>
       <span class="field_meta">
-        (required)
+        (optional)
         <span class="type">string</span>
       </span>
       Describes the IPv4 or IPv6 address of a connection, depending on the value
@@ -567,7 +589,8 @@
     <dt class="field">RoutingPrefix</dt>
     <dd>
       <span class="field_meta">
-        (required)
+        (required if <span class="field">IPAddress</span> is set. Otherwise
+        ignored.)
         <span class="type">integer</span>
       </span>
       <span class="rule">
@@ -581,7 +604,8 @@
     <dt class="field">Gateway</dt>
     <dd>
       <span class="field_meta">
-        (optional)
+        (required if <span class="field">IPAddress</span> is set. Otherwise
+        ignored.)
         <span class="type">string</span>
       </span>
       Describes the gateway address to use for the configuration. Must match
@@ -596,9 +620,8 @@
         <span class="type">array of string</span>
       </span>
       Array of addresses to use for name servers. Address format must match that
-      specified in the <span class="field">Type</span> field. Overrides values
-      in the top level NameServers field for this configuration. If not
-      specified, top level values will be used.
+      specified in the <span class="field">Type</span> field. If not specified,
+      DHCP values will be used.
     </dd>
 
     <dt class="field">SearchDomains</dt>
@@ -609,15 +632,14 @@
       </span>
       Array of strings to append to names for resolution. Items in this array
       should not start with a dot. Example: <span class="snippet">[
-      "corp.acme.org", "acme.org" ]</span>. Overrides values in the top level
-      SearchDomains field for this configuration. If not specified, top level
-      values will be used.
+      "corp.acme.org", "acme.org" ]</span>. If not specified, DHCP values will
+      be used.
     </dd>
 
     <dt class="field">WebProxyAutoDiscoveryUrl</dt>
     <dd>
       <span class="field_meta">
-        (optional if part of <span class="field">IPConfigs</span>)
+        (optional if part of <span class="field">IPConfigs</span>, read-only)
         <span class="type">string</span>
       </span>
       The Web Proxy Auto-Discovery URL for this network as reported over DHCP.
@@ -636,6 +658,18 @@
   </p>
 
   <dl class="field_list">
+    <dt class="field">AllowGatewayARPPolling</dt>
+    <dd>
+      <span class="field_meta">
+        (optional, defaults to <span class="value">true</span>)
+        <span class="type">boolean</span>
+      </span>
+      Indicaties if ARP polling of default gateway is allowed.
+      When it is allowed, periodic ARP messages will be sent to
+      the default gateway. This is used for monitoring the status
+      of the current connection.
+    </dd>
+
     <dt class="field">AutoConnect</dt>
     <dd>
       <span class="field_meta">
@@ -655,6 +689,16 @@
         <span class="type">EAP</span>
       </span>
       EAP settings.
+    </dd>
+
+    <dt class="field">HexSSID</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">SSID</span> is set, if so defaults to
+        a hex representation of <span class="field">SSID</span>)
+        <span class="type">string</span>
+      </span>
+      Hex representation of the network's SSID.
     </dd>
 
     <dt class="field">HiddenSSID</dt>
@@ -699,10 +743,20 @@
     <dt class="field">SSID</dt>
     <dd>
       <span class="field_meta">
-        (required)
+        (optional if <span class="field">HexSSID</span> is set, otherwise
+        ignored)
         <span class="type">string</span>
       </span>
-      SSID of the network.
+      Property to access the decoded SSID of a network.<br/>
+      If this field is set, but <span class="field">HexSSID</span> is not,
+      its value will be UTF-8 encoded and the hex representation will be
+      assigned to <span class="field">HexSSID</span>. To configure a non-UTF-8
+      SSID, field <span class="field">HexSSID</span> must be used.<br/>
+      When reading the configuration of a network, both this field and
+      <span class="field">HexSSID</span> might be set. Then this field is the
+      decoding of <span class="field">HexSSID</span>. If possible the HexSSID is
+      decoded using UTF-8, otherwise an encoding is guessed on a best effort
+      basis.
     </dd>
 
     <dt class="field">SignalStrength</dt>
@@ -716,6 +770,14 @@
       be set to '0' or not present.
     </dd>
   </dl>
+  <span class="rule">
+    <span class="rule_id"></span>
+      At least one of the fields <span class="field">HexSSID</span> or
+      <span class="field">SSID</span> must be present. If both
+      <span class="field">HexSSID</span> and <span class="field">SSID</span>
+      are set, the values must be consistent.
+    </span>
+  </span>
 </section>
 
 <section>
@@ -1219,13 +1281,40 @@
       to <span class="value">server</span> if set.
     </dd>
 
+    <dt class="field">OTP</dt>
+    <dd>
+      <span class="field_meta">
+        (optional if <span class="field">UserAuthenticationType</span> is
+        <span class="value">OTP</span>,
+        <span class="value">PasswordAndOTP</span> or unset, otherwise ignored,
+        defaults to empty string)
+        <span class="type">string</span>
+      </span>
+      If <span class="field">UserAuthenticationType</span> is
+      <span class="value">OTP</span> or <span class="value">PasswordAndOTP</span>
+      and this field is not set, the user will be asked for an OTP.
+      The OTP is never persisted and must be provided on every connection
+      attempt.
+    </dd>
+
     <dt class="field">Password</dt>
     <dd>
       <span class="field_meta">
-        (optional)
+        (optional if <span class="field">UserAuthenticationType</span> is
+        <span class="value">Password</span>,
+        <span class="value">PasswordAndOTP</span> or unset, otherwise ignored,
+        defaults to empty string)
         <span class="type">string</span>
       </span>
-      XAUTH password. If not specified, user is prompted at time of connection.
+      If <span class="field">UserAuthenticationType</span> is
+      <span class="value">Password</span> or
+      <span class="value">PasswordAndOTP</span> and this field is not set, the user
+      will be asked for a password.
+      If <span class="field">SaveCredentials</span> is
+      <span class="value">true</span>, the password is persisted for future
+      connection attempts. Otherwise it is not persisted but might still be
+      reused for consecutive connection attempts (opposed to an OTP, which will
+      never be reused).
     </dd>
 
     <dt class="field">Port</dt>
@@ -1382,6 +1471,47 @@
       </span>
       If set, only allow connections to server hosts with X509 name or common
       name equal to this string.
+    </dd>
+
+    <dt class="field">UserAuthenticationType</dt>
+    <dd>
+      <span class="field_meta">
+        (optional, defaults to <span class="value">None</span>)
+        <span class="type">string</span>
+      </span>
+      <span class="rule">
+        <span class="rule_id"></span>
+        Allowed values are <span class="value">None</span>,
+        <span class="value">Password</span>,
+        <span class="value">PasswordAndOTP</span> and
+        <span class="value">OTP</span>.
+      </span>
+      Determines the required form of user authentication:
+      <ul><li>
+        <span class="value">PasswordAndOTP</span>: This VPN requires a password
+        and an OTP (possibly empty). Both will be send to the server in the
+        'password' response using the SCRv1 encoding.
+      </li><li>
+        <span class="value">Password</span>: This VPN requires only a password,
+        which will be send without modification to the server in the 'password'
+        response (no CRv1 or SCRv1 encoding).
+      </li><li>
+        <span class="value">OTP</span>: This VPN requires only an OTP, which
+        will be send without modification to the server in the 'password'
+        response (no CRv1 or SCRv1 encoding).
+      </li><li>
+        <span class="value">None</span>: Neither password nor OTP are required.
+        No password request from the server is expected.
+      </li></ul>
+      If not set, the user can provide a password and an OTP (both not
+      mandatory) and the network manager will send both in the SCRv1 encoding,
+      when the server sends a static-challenge. If the server does not send a
+      static-challenge, the client will reply with only the password (without
+      any encoding). This behavior is deprecated and new configurations should
+      explicitly set one of the above values.
+
+      See the fields <span class="field">Password</span> and
+      <span class="field">OTP</span> for configuring the password and OTP.
     </dd>
 
     <dt class="field">Username</dt>

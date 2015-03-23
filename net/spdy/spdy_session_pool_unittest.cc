@@ -51,8 +51,7 @@ class SpdySessionPoolTest : public ::testing::Test,
 INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdySessionPoolTest,
-    testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
+    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
 
 // A delegate that opens a new session when it is closed.
 class SessionOpeningDelegate : public SpdyStream::Delegate {
@@ -62,20 +61,20 @@ class SessionOpeningDelegate : public SpdyStream::Delegate {
       : spdy_session_pool_(spdy_session_pool),
         key_(key) {}
 
-  virtual ~SessionOpeningDelegate() {}
+  ~SessionOpeningDelegate() override {}
 
-  virtual void OnRequestHeadersSent() OVERRIDE {}
+  void OnRequestHeadersSent() override {}
 
-  virtual SpdyResponseHeadersStatus OnResponseHeadersUpdated(
-      const SpdyHeaderBlock& response_headers) OVERRIDE {
+  SpdyResponseHeadersStatus OnResponseHeadersUpdated(
+      const SpdyHeaderBlock& response_headers) override {
     return RESPONSE_HEADERS_ARE_COMPLETE;
   }
 
-  virtual void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) OVERRIDE {}
+  void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) override {}
 
-  virtual void OnDataSent() OVERRIDE {}
+  void OnDataSent() override {}
 
-  virtual void OnClose(int status) OVERRIDE {
+  void OnClose(int status) override {
     ignore_result(CreateFakeSpdySession(spdy_session_pool_, key_));
   }
 
@@ -339,7 +338,7 @@ void SpdySessionPoolTest::RunIPPoolingTest(
   };
 
   session_deps_.host_resolver->set_synchronous_mode(true);
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_hosts); i++) {
+  for (size_t i = 0; i < arraysize(test_hosts); i++) {
     session_deps_.host_resolver->rules()->AddIPLiteralRule(
         test_hosts[i].name, test_hosts[i].iplist, std::string());
 

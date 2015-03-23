@@ -11,9 +11,9 @@
 
 class AutoLoginInfoBarDelegate;
 class ConfirmInfoBarDelegate;
-class ExtensionInfoBarDelegate;
 class InsecureContentInfoBarDelegate;
 class MediaStreamInfoBarDelegate;
+class NativeAppInfoBarDelegate;
 class PopupBlockedInfoBarDelegate;
 class RegisterProtocolHandlerInfoBarDelegate;
 class ScreenCaptureInfoBarDelegate;
@@ -106,9 +106,9 @@ class InfoBarDelegate {
   // Type-checking downcast routines:
   virtual AutoLoginInfoBarDelegate* AsAutoLoginInfoBarDelegate();
   virtual ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate();
-  virtual ExtensionInfoBarDelegate* AsExtensionInfoBarDelegate();
   virtual InsecureContentInfoBarDelegate* AsInsecureContentInfoBarDelegate();
   virtual MediaStreamInfoBarDelegate* AsMediaStreamInfoBarDelegate();
+  virtual NativeAppInfoBarDelegate* AsNativeAppInfoBarDelegate();
   virtual PopupBlockedInfoBarDelegate* AsPopupBlockedInfoBarDelegate();
   virtual RegisterProtocolHandlerInfoBarDelegate*
       AsRegisterProtocolHandlerInfoBarDelegate();

@@ -20,6 +20,8 @@
 
 using base::ASCIIToUTF16;
 using bookmarks::BookmarkExpandedStateTracker;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 class BookmarkEditorBaseControllerTest : public CocoaProfileTest {
  public:
@@ -82,7 +84,7 @@ class BookmarkEditorBaseControllerTest : public CocoaProfileTest {
                    configuration:BookmarkEditor::SHOW_TREE];
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(profile());
 
@@ -92,12 +94,12 @@ class BookmarkEditorBaseControllerTest : public CocoaProfileTest {
     [controller_ runAsModalSheet];
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     controller_ = NULL;
     CocoaTest::TearDown();
   }
 
-  virtual Browser* CreateBrowser() OVERRIDE {
+  Browser* CreateBrowser() override {
     Browser::CreateParams native_params(profile(), chrome::GetActiveDesktop());
     return chrome::CreateBrowserWithTestWindowForParams(&native_params);
   }

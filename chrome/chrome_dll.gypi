@@ -78,18 +78,18 @@
             'enable_wexit_time_destructors': 1,
           },
           'sources': [
+            '../base/win/dllmain.cc',
             'app/chrome_command_ids.h',
             'app/chrome_dll_resource.h',
             'app/chrome_main.cc',
             'app/chrome_main_delegate.cc',
             'app/chrome_main_delegate.h',
-            'app/chrome_main_mac.mm',
             'app/chrome_main_mac.h',
+            'app/chrome_main_mac.mm',
             'app/close_handle_hook_win.cc',
             'app/close_handle_hook_win.h',
             'app/delay_load_hook_win.cc',
             'app/delay_load_hook_win.h',
-            '../base/win/dllmain.cc',
           ],
           'dependencies': [
             '<@(chromium_browser_dependencies)',
@@ -132,7 +132,7 @@
               ],
               'sources': [
                 'app/chrome_dll.rc',
-                
+
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
 
                 # Cursors.
@@ -222,7 +222,7 @@
                     '<(allocator_target)',
                   ],
                 }],
-                ['enable_printing!=0', {
+                ['enable_basic_printing==1 or enable_print_preview==1', {
                   'dependencies': [
                     '../printing/printing.gyp:printing',
                   ],
@@ -256,14 +256,19 @@
                 '../content/content.gyp:content_app_browser',
               ],
             }],
-            ['cld_version==0 or cld_version==1', {
+            ['chrome_multiple_dll==0 and enable_plugins==1', {
               'dependencies': [
-                '../third_party/cld/cld.gyp:cld',
+                '../pdf/pdf.gyp:pdf',
+              ],
+            }],
+            ['cld_version==1', {
+              'dependencies': [
+                '<(DEPTH)/third_party/cld/cld.gyp:cld',
               ],
             }],
             ['cld_version==0 or cld_version==2', {
               'dependencies': [
-                '../third_party/cld_2/cld_2.gyp:cld_2',
+                '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld_2',
               ],
             }],
             ['OS=="mac" and component!="shared_library"', {
@@ -278,9 +283,6 @@
                 # sets -order_file.
                 'ORDER_FILE': 'app/framework.order',
               },
-              'dependencies': [
-                '../pdf/pdf.gyp:pdf',
-              ],
               'include_dirs': [
                 '<(grit_out_dir)',
               ],
@@ -371,6 +373,11 @@
                   },
                 }],
               ]
+            }],
+            ['enable_plugins==1', {
+              'dependencies': [
+                '../pdf/pdf.gyp:pdf',
+              ],
             }],
           ],
         },  # target chrome_child_dll

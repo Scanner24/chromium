@@ -8,6 +8,7 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chromeos/network/network_event_log.h"
@@ -240,6 +241,39 @@ void ExpandStringsInNetworks(const StringSubstitution& substitution,
   }
 }
 
+void FillInHexSSIDFieldsInOncObject(const OncValueSignature& signature,
+                                    base::DictionaryValue* onc_object) {
+  if (&signature == &kWiFiSignature)
+    FillInHexSSIDField(onc_object);
+
+  // Recurse into nested objects.
+  for (base::DictionaryValue::Iterator it(*onc_object); !it.IsAtEnd();
+       it.Advance()) {
+    base::DictionaryValue* inner_object = nullptr;
+    if (!onc_object->GetDictionaryWithoutPathExpansion(it.key(), &inner_object))
+      continue;
+
+    const OncFieldSignature* field_signature =
+        GetFieldSignature(signature, it.key());
+    if (!field_signature)
+      continue;
+
+    FillInHexSSIDFieldsInOncObject(*field_signature->value_signature,
+                                   inner_object);
+  }
+}
+
+void FillInHexSSIDField(base::DictionaryValue* wifi_fields) {
+  if (!wifi_fields->HasKey(::onc::wifi::kHexSSID)) {
+    std::string ssid_string;
+    wifi_fields->GetStringWithoutPathExpansion(::onc::wifi::kSSID,
+                                               &ssid_string);
+    wifi_fields->SetStringWithoutPathExpansion(
+        ::onc::wifi::kHexSSID,
+        base::HexEncode(ssid_string.c_str(), ssid_string.size()));
+  }
+}
+
 namespace {
 
 class OncMaskValues : public Mapper {
@@ -258,12 +292,11 @@ class OncMaskValues : public Mapper {
       : mask_(mask) {
   }
 
-  virtual scoped_ptr<base::Value> MapField(
-      const std::string& field_name,
-      const OncValueSignature& object_signature,
-      const base::Value& onc_value,
-      bool* found_unknown_field,
-      bool* error) OVERRIDE {
+  scoped_ptr<base::Value> MapField(const std::string& field_name,
+                                   const OncValueSignature& object_signature,
+                                   const base::Value& onc_value,
+                                   bool* found_unknown_field,
+                                   bool* error) override {
     if (FieldIsCredential(object_signature, field_name)) {
       return scoped_ptr<base::Value>(new base::StringValue(mask_));
     } else {
@@ -346,6 +379,16 @@ CertPEMsByGUIDMap GetServerAndCACertsByGUID(
   return certs_by_guid;
 }
 
+void FillInHexSSIDFieldsInNetworks(base::ListValue* network_configs) {
+  for (base::ListValue::iterator it = network_configs->begin();
+       it != network_configs->end(); ++it) {
+    base::DictionaryValue* network = NULL;
+    (*it)->GetAsDictionary(&network);
+    DCHECK(network);
+    FillInHexSSIDFieldsInOncObject(kNetworkConfigurationSignature, network);
+  }
+}
+
 }  // namespace
 
 bool ParseAndValidateOncForImport(const std::string& onc_blob,
@@ -423,6 +466,8 @@ bool ParseAndValidateOncForImport(const std::string& onc_blob,
   base::ListValue* validated_networks = NULL;
   if (toplevel_onc->GetListWithoutPathExpansion(
           toplevel_config::kNetworkConfigurations, &validated_networks)) {
+    FillInHexSSIDFieldsInNetworks(validated_networks);
+
     CertPEMsByGUIDMap server_and_ca_certs =
         GetServerAndCACertsByGUID(*certificates);
 

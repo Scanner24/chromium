@@ -13,9 +13,11 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "build/build_config.h"
+#include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/services/syscall_wrappers.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 #if defined(__mips__)
 // __NR_Linux, is defined in <asm/unistd.h>.
@@ -222,7 +224,7 @@ intptr_t SIGSYSSchedHandler(const struct arch_seccomp_data& args,
     case __NR_sched_setattr:
     case __NR_sched_setparam:
     case __NR_sched_setscheduler:
-      const pid_t tid = syscall(__NR_gettid);
+      const pid_t tid = sys_gettid();
       // The first argument is the pid.  If is our thread id, then replace it
       // with 0, which is equivalent and allowed by the policy.
       if (args.args[0] == static_cast<uint64_t>(tid)) {

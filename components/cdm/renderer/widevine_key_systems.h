@@ -7,7 +7,8 @@
 
 #include <vector>
 
-#include "content/public/renderer/key_system_info.h"
+#include "build/build_config.h"
+#include "media/base/key_system_info.h"
 
 namespace cdm {
 
@@ -20,8 +21,12 @@ enum WidevineCdmType {
 
 void AddWidevineWithCodecs(
     WidevineCdmType widevine_cdm_type,
-    content::SupportedCodecs supported_codecs,
-    std::vector<content::KeySystemInfo>* concrete_key_systems);
+    media::SupportedCodecs supported_codecs,
+    media::EmeSessionTypeSupport persistent_license_support,
+    media::EmeSessionTypeSupport persistent_release_message_support,
+    media::EmeFeatureSupport persistent_state_support,
+    media::EmeFeatureSupport distinctive_identifier_support,
+    std::vector<media::KeySystemInfo>* concrete_key_systems);
 
 }  // namespace cdm
 

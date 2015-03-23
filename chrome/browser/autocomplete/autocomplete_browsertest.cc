@@ -4,7 +4,6 @@
 
 #include "base/command_line.h"
 #include "base/format_macros.h"
-#include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
@@ -71,7 +70,8 @@ class AutocompleteBrowserTest : public ExtensionBrowserTest {
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -121,16 +121,16 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
   WaitForTemplateURLServiceToLoad();
   // The results depend on the history backend being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
-  ui_test_utils::WaitForHistoryToLoad(
-      HistoryServiceFactory::GetForProfile(browser()->profile(),
-                                           Profile::EXPLICIT_ACCESS));
+  ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
+      browser()->profile(), ServiceAccessType::EXPLICIT_ACCESS));
 
   LocationBar* location_bar = GetLocationBar();
   OmniboxView* omnibox_view = location_bar->GetOmniboxView();
@@ -139,7 +139,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
   {
     omnibox_view->model()->SetInputInProgress(true);
     autocomplete_controller->Start(AutocompleteInput(
-        base::ASCIIToUTF16("chrome"), base::string16::npos, base::string16(),
+        base::ASCIIToUTF16("chrome"), base::string16::npos, std::string(),
         GURL(), metrics::OmniboxEventProto::NTP, true, false, true, false,
         ChromeAutocompleteSchemeClassifier(browser()->profile())));
 
@@ -167,7 +167,8 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -195,7 +196,8 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, FocusSearch) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 

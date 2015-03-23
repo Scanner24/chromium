@@ -24,11 +24,11 @@
 #include "ipc/ipc_message_macros.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/events/ipc/latency_info_param_traits.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/vector2d_f.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
@@ -162,6 +162,9 @@ IPC_MESSAGE_ROUTED2(InputMsg_ExecuteEditCommand,
                     std::string, /* name */
                     std::string /* value */)
 
+// Message payload is the name of a WebCore edit command to execute.
+IPC_MESSAGE_ROUTED1(InputMsg_ExecuteNoValueEditCommand, std::string /* name */)
+
 IPC_MESSAGE_ROUTED0(InputMsg_MouseCaptureLost)
 
 // TODO(darin): figure out how this meshes with RestoreFocus
@@ -199,8 +202,13 @@ IPC_MESSAGE_ROUTED0(InputMsg_Unselect)
 // Requests the renderer to select the region between two points.
 // Expects a SelectRange_ACK message when finished.
 IPC_MESSAGE_ROUTED2(InputMsg_SelectRange,
-                    gfx::Point /* start */,
-                    gfx::Point /* end */)
+                    gfx::Point /* base */,
+                    gfx::Point /* extent */)
+
+// Requests the renderer to move the selection extent point to a new position.
+// Expects a MoveRangeSelectionExtent_ACK message when finished.
+IPC_MESSAGE_ROUTED1(InputMsg_MoveRangeSelectionExtent,
+                    gfx::Point /* extent */)
 
 // Requests the renderer to move the caret selection toward the point.
 // Expects a MoveCaret_ACK message when finished.
@@ -237,17 +245,23 @@ IPC_MESSAGE_ROUTED1(InputHostMsg_SetTouchAction,
 IPC_MESSAGE_ROUTED1(InputHostMsg_DidOverscroll,
                     content::DidOverscrollParams /* params */)
 
+// Acknowledges receipt of a InputMsg_MoveCaret message.
+IPC_MESSAGE_ROUTED0(InputHostMsg_MoveCaret_ACK)
+
+// Acknowledges receipt of a InputMsg_MoveRangeSelectionExtent message.
+IPC_MESSAGE_ROUTED0(InputHostMsg_MoveRangeSelectionExtent_ACK)
+
+// Acknowledges receipt of a InputMsg_SelectRange message.
+IPC_MESSAGE_ROUTED0(InputHostMsg_SelectRange_ACK)
+
 // Required for cancelling an ongoing input method composition.
 IPC_MESSAGE_ROUTED0(InputHostMsg_ImeCancelComposition)
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
-// On Mac and Aura IME can request composition character bounds
-// synchronously (see crbug.com/120597). This IPC message sends the character
-// bounds after every composition change to always have correct bound info.
+// This IPC message sends the character bounds after every composition change
+// to always have correct bound info.
 IPC_MESSAGE_ROUTED2(InputHostMsg_ImeCompositionRangeChanged,
                     gfx::Range /* composition range */,
                     std::vector<gfx::Rect> /* character bounds */)
-#endif
 
 // Adding a new message? Stick to the sort order above: first platform
 // independent InputMsg, then ifdefs for platform specific InputMsg, then

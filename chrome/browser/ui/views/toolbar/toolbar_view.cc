@@ -7,10 +7,10 @@
 #include <algorithm>
 
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/i18n/number_formatting.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
@@ -74,6 +74,7 @@
 #include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
+#include "chrome/browser/recovery/recovery_install_global_error_factory.h"
 #include "chrome/browser/ui/views/conflicting_module_view_win.h"
 #include "chrome/browser/ui/views/critical_notification_bubble_view.h"
 #endif
@@ -146,8 +147,7 @@ ToolbarView::ToolbarView(Browser* browser)
   chrome::AddCommandObserver(browser_, IDC_LOAD_NEW_TAB_PAGE, this);
 
   display_mode_ = DISPLAYMODE_LOCATION;
-  if (browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP) ||
-      (browser->is_app() && extensions::util::IsStreamlinedHostedAppsEnabled()))
+  if (browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP))
     display_mode_ = DISPLAYMODE_NORMAL;
 
   if (OutdatedUpgradeBubbleView::IsAvailable()) {
@@ -215,7 +215,6 @@ void ToolbarView::Init() {
 
   browser_actions_ = new BrowserActionsContainer(
       browser_,
-      this,   // Owner.
       NULL);  // No master container for this one (it is master).
 
   app_menu_ = new WrenchToolbarButton(this);
@@ -235,7 +234,7 @@ void ToolbarView::Init() {
 
   LoadImages();
 
-  // Start global error services now so we badge the menu correctly in non-Ash.
+  // Start global error services now so we badge the menu correctly.
 #if !defined(OS_CHROMEOS)
   if (!HasAshShell()) {
     SigninGlobalErrorFactory::GetForProfile(browser_->profile());
@@ -243,6 +242,10 @@ void ToolbarView::Init() {
     SyncGlobalErrorFactory::GetForProfile(browser_->profile());
 #endif
   }
+
+#if defined(OS_WIN)
+  RecoveryInstallGlobalErrorFactory::GetForProfile(browser_->profile());
+#endif
 #endif  // OS_CHROMEOS
 
   // Add any necessary badges to the menu item based on the system state.
@@ -281,14 +284,12 @@ void ToolbarView::OnWidgetActivationChanged(views::Widget* widget,
                                             bool active) {
   extensions::ExtensionCommandsGlobalRegistry* registry =
       extensions::ExtensionCommandsGlobalRegistry::Get(browser_->profile());
-  if (registry) {
-    if (active) {
-      registry->set_registry_for_active_window(
-          browser_actions_->extension_keybinding_registry());
-    } else if (registry->registry_for_active_window() ==
-               browser_actions_->extension_keybinding_registry()) {
-      registry->set_registry_for_active_window(NULL);
-    }
+  if (active) {
+    registry->set_registry_for_active_window(
+        browser_actions_->extension_keybinding_registry());
+  } else if (registry->registry_for_active_window() ==
+             browser_actions_->extension_keybinding_registry()) {
+    registry->set_registry_for_active_window(nullptr);
   }
 }
 
@@ -296,9 +297,14 @@ void ToolbarView::Update(WebContents* tab) {
   if (location_bar_)
     location_bar_->Update(tab);
   if (browser_actions_)
-    browser_actions_->RefreshBrowserActionViews();
+    browser_actions_->RefreshToolbarActionViews();
   if (reload_)
     reload_->set_menu_enabled(chrome::IsDebuggerAttachedToCurrentTab(browser_));
+}
+
+void ToolbarView::ResetTabState(WebContents* tab) {
+  if (location_bar_)
+    location_bar_->ResetTabState(tab);
 }
 
 void ToolbarView::SetPaneFocusAndFocusAppMenu() {
@@ -338,11 +344,13 @@ void ToolbarView::ShowAppMenu(bool for_drop) {
   if (wrench_menu_.get() && wrench_menu_->IsShowing())
     return;
 
+#if defined(USE_AURA)
   if (keyboard::KeyboardController::GetInstance() &&
       keyboard::KeyboardController::GetInstance()->keyboard_visible()) {
     keyboard::KeyboardController::GetInstance()->HideKeyboard(
         keyboard::KeyboardController::HIDE_REASON_AUTOMATIC);
   }
+#endif
 
   wrench_menu_.reset(
       new WrenchMenu(browser_, for_drop ? WrenchMenu::FOR_DROP : 0));
@@ -352,10 +360,6 @@ void ToolbarView::ShowAppMenu(bool for_drop) {
   FOR_EACH_OBSERVER(views::MenuListener, menu_listeners_, OnMenuOpened());
 
   wrench_menu_->RunMenu(app_menu_);
-}
-
-views::MenuButton* ToolbarView::app_menu() const {
-  return app_menu_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -570,8 +574,7 @@ void ToolbarView::Layout() {
   next_element_x = reload_->bounds().right();
 
   if (show_home_button_.GetValue() ||
-      (browser_->is_app() &&
-       extensions::util::IsStreamlinedHostedAppsEnabled())) {
+      (browser_->is_app() && extensions::util::IsNewBookmarkAppsEnabled())) {
     home_->SetVisible(true);
     home_->SetBounds(next_element_x, child_y,
                      home_->GetPreferredSize().width(), child_height);

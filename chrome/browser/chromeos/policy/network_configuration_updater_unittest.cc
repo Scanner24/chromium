@@ -57,10 +57,10 @@ class FakeUser : public user_manager::User {
     set_display_email(kFakeUserEmail);
     set_username_hash(kFakeUsernameHash);
   }
-  virtual ~FakeUser() {}
+  ~FakeUser() override {}
 
   // User overrides
-  virtual user_manager::UserType GetType() const OVERRIDE {
+  user_manager::UserType GetType() const override {
     return user_manager::USER_TYPE_REGULAR;
   }
 
@@ -73,8 +73,8 @@ class FakeWebTrustedCertsObserver
  public:
   FakeWebTrustedCertsObserver() {}
 
-  virtual void OnTrustAnchorsChanged(
-      const net::CertificateList& trust_anchors) OVERRIDE {
+  void OnTrustAnchorsChanged(
+      const net::CertificateList& trust_anchors) override {
     trust_anchors_ = trust_anchors;
   }
   net::CertificateList trust_anchors_;
@@ -84,14 +84,14 @@ class FakeWebTrustedCertsObserver
 };
 
 class FakeNetworkDeviceHandler : public chromeos::FakeNetworkDeviceHandler {
-  public:
-   FakeNetworkDeviceHandler() : allow_roaming_(false) {}
+ public:
+  FakeNetworkDeviceHandler() : allow_roaming_(false) {}
 
-   virtual void SetCellularAllowRoaming(bool allow_roaming) OVERRIDE {
-     allow_roaming_ = allow_roaming;
-   }
+  void SetCellularAllowRoaming(bool allow_roaming) override {
+    allow_roaming_ = allow_roaming;
+  }
 
-   bool allow_roaming_;
+  bool allow_roaming_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeNetworkDeviceHandler);
@@ -101,7 +101,7 @@ class FakeCertificateImporter : public chromeos::onc::CertificateImporter {
  public:
   FakeCertificateImporter()
       : expected_onc_source_(::onc::ONC_SOURCE_UNKNOWN), call_count_(0) {}
-  virtual ~FakeCertificateImporter() {}
+  ~FakeCertificateImporter() override {}
 
   void SetTrustedCertificatesResult(
       net::CertificateList onc_trusted_certificates) {
@@ -122,9 +122,9 @@ class FakeCertificateImporter : public chromeos::onc::CertificateImporter {
     return count;
   }
 
-  virtual void ImportCertificates(const base::ListValue& certificates,
-                                  ::onc::ONCSource source,
-                                  const DoneCallback& done_callback) OVERRIDE {
+  void ImportCertificates(const base::ListValue& certificates,
+                          ::onc::ONCSource source,
+                          const DoneCallback& done_callback) override {
     if (expected_onc_source_ != ::onc::ONC_SOURCE_UNKNOWN)
       EXPECT_EQ(expected_onc_source_, source);
     if (expected_onc_certificates_) {
@@ -150,7 +150,7 @@ const char kFakeONC[] =
     "      \"Type\": \"WiFi\","
     "      \"Name\": \"My WiFi Network\","
     "      \"WiFi\": {"
-    "        \"SSID\": \"ssid-none\","
+    "        \"HexSSID\": \"737369642D6E6F6E65\","  // "ssid-none"
     "        \"Security\": \"None\" }"
     "    }"
     "  ],"
@@ -160,7 +160,7 @@ const char kFakeONC[] =
     "  \"Certificates\": ["
     "    { \"GUID\": \"{f998f760-272b-6939-4c2beffe428697ac}\","
     "      \"PKCS12\": \"abc\","
-    "       \"Type\": \"Client\" }"
+    "      \"Type\": \"Client\" }"
     "  ],"
     "  \"Type\": \"UnencryptedConfiguration\""
     "}";
@@ -202,7 +202,7 @@ class NetworkConfigurationUpdaterTest : public testing::Test {
  protected:
   NetworkConfigurationUpdaterTest() : certificate_importer_(NULL) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(false));
     provider_.Init();
@@ -232,7 +232,7 @@ class NetworkConfigurationUpdaterTest : public testing::Test {
     certificate_importer_owned_.reset(certificate_importer_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     network_configuration_updater_.reset();
     provider_.Shutdown();
     base::RunLoop().RunUntilIdle();

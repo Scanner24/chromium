@@ -7,6 +7,7 @@
 #include "google_apis/drive/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+#include "url/url_util.h"
 
 namespace google_apis {
 
@@ -53,19 +54,48 @@ TEST_F(DriveApiUrlGeneratorTest, GetAppsDeleteUrl) {
 
 TEST_F(DriveApiUrlGeneratorTest, GetFilesGetUrl) {
   // |file_id| should be embedded into the url.
-  EXPECT_EQ("https://www.googleapis.com/drive/v2/files/0ADK06pfg",
-            url_generator_.GetFilesGetUrl("0ADK06pfg").spec());
-  EXPECT_EQ("https://www.googleapis.com/drive/v2/files/0Bz0bd074",
-            url_generator_.GetFilesGetUrl("0Bz0bd074").spec());
-  EXPECT_EQ("https://www.googleapis.com/drive/v2/files/file%3Afile_id",
-            url_generator_.GetFilesGetUrl("file:file_id").spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/drive/v2/files/0ADK06pfg",
+      url_generator_.GetFilesGetUrl("0ADK06pfg", false, GURL()).spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/drive/v2/files/0Bz0bd074",
+      url_generator_.GetFilesGetUrl("0Bz0bd074", false, GURL()).spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/drive/v2/files/file%3Afile_id",
+      url_generator_.GetFilesGetUrl("file:file_id", false, GURL()).spec());
 
-  EXPECT_EQ("http://127.0.0.1:12345/drive/v2/files/0ADK06pfg",
-            test_url_generator_.GetFilesGetUrl("0ADK06pfg").spec());
-  EXPECT_EQ("http://127.0.0.1:12345/drive/v2/files/0Bz0bd074",
-            test_url_generator_.GetFilesGetUrl("0Bz0bd074").spec());
-  EXPECT_EQ("http://127.0.0.1:12345/drive/v2/files/file%3Afile_id",
-            test_url_generator_.GetFilesGetUrl("file:file_id").spec());
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/drive/v2/files/0ADK06pfg",
+      test_url_generator_.GetFilesGetUrl("0ADK06pfg", false, GURL()).spec());
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/drive/v2/files/0Bz0bd074",
+      test_url_generator_.GetFilesGetUrl("0Bz0bd074", false, GURL()).spec());
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/drive/v2/files/file%3Afile_id",
+      test_url_generator_.GetFilesGetUrl("file:file_id", false, GURL()).spec());
+
+  // If |use_internal_endpoint| is true, the generated url should point to the
+  // v2internal.
+  EXPECT_EQ(
+      "https://www.googleapis.com/drive/v2internal/files/0ADK06pfg",
+      url_generator_.GetFilesGetUrl("0ADK06pfg", true, GURL()).spec());
+
+  // If |embed_origin| is not empty, it should be added as a query parameter.
+  url::AddStandardScheme("chrome-extension");
+  EXPECT_EQ(
+      "https://www.googleapis.com/drive/v2/files/0ADK06pfg"
+      "?embedOrigin=chrome-extension%3A%2F%2Ftest",
+      url_generator_.GetFilesGetUrl(
+          "0ADK06pfg",
+          false,
+          GURL("chrome-extension://test")).spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/drive/v2internal/files/0ADK06pfg"
+      "?embedOrigin=chrome-extension%3A%2F%2Ftest",
+      url_generator_.GetFilesGetUrl(
+          "0ADK06pfg",
+          true,
+          GURL("chrome-extension://test")).spec());
 }
 
 TEST_F(DriveApiUrlGeneratorTest, GetFilesAuthorizeUrl) {
@@ -97,7 +127,7 @@ TEST_F(DriveApiUrlGeneratorTest, GetFilePatchUrl) {
     { true, false, "?setModifiedDate=true&updateViewedDate=false" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestPatterns); ++i) {
+  for (size_t i = 0; i < arraysize(kTestPatterns); ++i) {
     EXPECT_EQ(
         "https://www.googleapis.com/drive/v2/files/0ADK06pfg" +
             kTestPatterns[i].expected_query,
@@ -188,7 +218,7 @@ TEST_F(DriveApiUrlGeneratorTest, GetFilesListUrl) {
     { 10, "token", "query", "?maxResults=10&pageToken=token&q=query" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestPatterns); ++i) {
+  for (size_t i = 0; i < arraysize(kTestPatterns); ++i) {
     EXPECT_EQ(
         "https://www.googleapis.com/drive/v2/files" +
             kTestPatterns[i].expected_query,
@@ -288,7 +318,7 @@ TEST_F(DriveApiUrlGeneratorTest, GetChangesListUrl) {
       "&startChangeId=12345" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestPatterns); ++i) {
+  for (size_t i = 0; i < arraysize(kTestPatterns); ++i) {
     EXPECT_EQ(
         "https://www.googleapis.com/drive/v2/changes" +
             kTestPatterns[i].expected_query,
@@ -419,6 +449,72 @@ TEST_F(DriveApiUrlGeneratorTest, GetInitiateUploadExistingFileUrl) {
       "http://127.0.0.1:12345/upload/drive/v2/files/file%3Afile_id"
       "?uploadType=resumable&setModifiedDate=true",
       test_url_generator_.GetInitiateUploadExistingFileUrl(
+          "file:file_id", kSetModifiedDate).spec());
+}
+
+TEST_F(DriveApiUrlGeneratorTest, GetMultipartUploadNewFileUrl) {
+  const bool kSetModifiedDate = true;
+
+  EXPECT_EQ(
+      "https://www.googleapis.com/upload/drive/v2/files?uploadType=multipart",
+      url_generator_.GetMultipartUploadNewFileUrl(!kSetModifiedDate).spec());
+
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/upload/drive/v2/files?uploadType=multipart",
+      test_url_generator_.GetMultipartUploadNewFileUrl(
+          !kSetModifiedDate).spec());
+
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/upload/drive/v2/files?uploadType=multipart&"
+      "setModifiedDate=true",
+      test_url_generator_.GetMultipartUploadNewFileUrl(
+          kSetModifiedDate).spec());
+}
+
+TEST_F(DriveApiUrlGeneratorTest, GetMultipartUploadExistingFileUrl) {
+  const bool kSetModifiedDate = true;
+
+  // |resource_id| should be embedded into the url.
+  EXPECT_EQ(
+      "https://www.googleapis.com/upload/drive/v2/files/0ADK06pfg"
+      "?uploadType=multipart",
+      url_generator_.GetMultipartUploadExistingFileUrl(
+          "0ADK06pfg", !kSetModifiedDate).spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/upload/drive/v2/files/0Bz0bd074"
+      "?uploadType=multipart",
+      url_generator_.GetMultipartUploadExistingFileUrl(
+          "0Bz0bd074", !kSetModifiedDate).spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/upload/drive/v2/files/file%3Afile_id"
+      "?uploadType=multipart",
+      url_generator_.GetMultipartUploadExistingFileUrl(
+          "file:file_id", !kSetModifiedDate).spec());
+  EXPECT_EQ(
+      "https://www.googleapis.com/upload/drive/v2/files/file%3Afile_id"
+      "?uploadType=multipart&setModifiedDate=true",
+      url_generator_.GetMultipartUploadExistingFileUrl(
+          "file:file_id", kSetModifiedDate).spec());
+
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/upload/drive/v2/files/0ADK06pfg"
+      "?uploadType=multipart",
+      test_url_generator_.GetMultipartUploadExistingFileUrl(
+          "0ADK06pfg", !kSetModifiedDate).spec());
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/upload/drive/v2/files/0Bz0bd074"
+      "?uploadType=multipart",
+      test_url_generator_.GetMultipartUploadExistingFileUrl(
+          "0Bz0bd074", !kSetModifiedDate).spec());
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/upload/drive/v2/files/file%3Afile_id"
+      "?uploadType=multipart",
+      test_url_generator_.GetMultipartUploadExistingFileUrl(
+          "file:file_id", !kSetModifiedDate).spec());
+  EXPECT_EQ(
+      "http://127.0.0.1:12345/upload/drive/v2/files/file%3Afile_id"
+      "?uploadType=multipart&setModifiedDate=true",
+      test_url_generator_.GetMultipartUploadExistingFileUrl(
           "file:file_id", kSetModifiedDate).spec());
 }
 

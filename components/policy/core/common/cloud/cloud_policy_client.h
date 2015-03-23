@@ -8,11 +8,13 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -38,8 +40,9 @@ class DeviceManagementService;
 // installed in the cloud policy cache.
 class POLICY_EXPORT CloudPolicyClient {
  public:
-  // Maps a PolicyNamespaceKey to its corresponding PolicyFetchResponse.
-  typedef std::map<PolicyNamespaceKey,
+  // Maps a (policy type, settings entity ID) pair to its corresponding
+  // PolicyFetchResponse.
+  typedef std::map<std::pair<std::string, std::string>,
                    enterprise_management::PolicyFetchResponse*> ResponseMap;
 
   // A callback which receives boolean status of an operation.  If the operation
@@ -68,24 +71,6 @@ class POLICY_EXPORT CloudPolicyClient {
     virtual void OnClientError(CloudPolicyClient* client) = 0;
   };
 
-  // Delegate interface for supplying status information to upload to the server
-  // as part of the policy fetch request.
-  class POLICY_EXPORT StatusProvider {
-   public:
-    virtual ~StatusProvider();
-
-    // Retrieves status information to send with the next policy fetch.
-    // Implementations must return true if status information was filled in.
-    virtual bool GetDeviceStatus(
-        enterprise_management::DeviceStatusReportRequest* status) = 0;
-    virtual bool GetSessionStatus(
-        enterprise_management::SessionStatusReportRequest* status) = 0;
-
-    // Called after the status information has successfully been submitted to
-    // the server.
-    virtual void OnSubmittedSuccessfully() = 0;
-  };
-
   // |provider| and |service| are weak pointers and it's the caller's
   // responsibility to keep them valid for the lifetime of CloudPolicyClient.
   // |verification_key_hash| contains an identifier telling the DMServer which
@@ -95,7 +80,6 @@ class POLICY_EXPORT CloudPolicyClient {
       const std::string& machine_model,
       const std::string& verification_key_hash,
       UserAffiliation user_affiliation,
-      StatusProvider* provider,
       DeviceManagementService* service,
       scoped_refptr<net::URLRequestContextGetter> request_context);
   virtual ~CloudPolicyClient();
@@ -110,9 +94,9 @@ class POLICY_EXPORT CloudPolicyClient {
   // registration change or error notification.
   virtual void Register(
       enterprise_management::DeviceRegisterRequest::Type registration_type,
+      enterprise_management::DeviceRegisterRequest::Flavor flavor,
       const std::string& auth_token,
       const std::string& client_id,
-      bool is_auto_enrollment,
       const std::string& requisition,
       const std::string& current_state_key);
 
@@ -145,6 +129,15 @@ class POLICY_EXPORT CloudPolicyClient {
   virtual void UploadCertificate(const std::string& certificate_data,
                                  const StatusCallback& callback);
 
+  // Uploads device/session status to the server. As above, the client must be
+  // in a registered state. If non-null, |device_status| and |session_status|
+  // will be included in the upload status request. The |callback| will be
+  // called when the operation completes.
+  virtual void UploadDeviceStatus(
+      const enterprise_management::DeviceStatusReportRequest* device_status,
+      const enterprise_management::SessionStatusReportRequest* session_status,
+      const StatusCallback& callback);
+
   // Adds an observer to be called back upon policy and state changes.
   void AddObserver(Observer* observer);
 
@@ -168,11 +161,16 @@ class POLICY_EXPORT CloudPolicyClient {
     public_key_version_valid_ = false;
   }
 
-  // FetchPolicy() calls will request this policy namespace.
-  void AddNamespaceToFetch(const PolicyNamespaceKey& policy_ns_key);
+  // FetchPolicy() calls will request this policy type.
+  // If |settings_entity_id| is empty then it won't be set in the
+  // PolicyFetchRequest.
+  void AddPolicyTypeToFetch(const std::string& policy_type,
+                            const std::string& settings_entity_id);
 
-  // FetchPolicy() calls won't request the given policy namespace anymore.
-  void RemoveNamespaceToFetch(const PolicyNamespaceKey& policy_ns_key);
+  // FetchPolicy() calls won't request the given policy type and optional
+  // |settings_entity_id| anymore.
+  void RemovePolicyTypeToFetch(const std::string& policy_type,
+                               const std::string& settings_entity_id);
 
   // Configures a set of device state keys to transfer to the server in the next
   // policy fetch. If the fetch is successful, the keys will be cleared so they
@@ -196,10 +194,11 @@ class POLICY_EXPORT CloudPolicyClient {
     return responses_;
   }
 
-  // Returns the policy response for |policy_ns_key|, if found in |responses()|;
-  // otherwise returns NULL.
+  // Returns the policy response for the (|policy_type|, |settings_entity_id|)
+  // pair if found in |responses()|. Otherwise returns nullptr.
   const enterprise_management::PolicyFetchResponse* GetPolicyFor(
-      const PolicyNamespaceKey& policy_ns_key) const;
+      const std::string& policy_type,
+      const std::string& settings_entity_id) const;
 
   DeviceManagementStatus status() const {
     return status_;
@@ -218,9 +217,12 @@ class POLICY_EXPORT CloudPolicyClient {
 
   scoped_refptr<net::URLRequestContextGetter> GetRequestContext();
 
+  // Returns the number of active requests.
+  int GetActiveRequestCountForTest() const;
+
  protected:
-  // A set of PolicyNamespaceKeys to fetch.
-  typedef std::set<PolicyNamespaceKey> NamespaceSet;
+  // A set of (policy type, settings entity ID) pairs to fetch.
+  typedef std::set<std::pair<std::string, std::string>> PolicyTypeSet;
 
   // Callback for retries of registration requests.
   void OnRetryRegister(DeviceManagementRequestJob* job);
@@ -251,10 +253,22 @@ class POLICY_EXPORT CloudPolicyClient {
 
   // Callback for certificate upload requests.
   void OnCertificateUploadCompleted(
+      const DeviceManagementRequestJob* job,
       const StatusCallback& callback,
       DeviceManagementStatus status,
       int net_error,
       const enterprise_management::DeviceManagementResponse& response);
+
+  // Callback for status upload requests.
+  void OnStatusUploadCompleted(
+      const DeviceManagementRequestJob* job,
+      const StatusCallback& callback,
+      DeviceManagementStatus status,
+      int net_error,
+      const enterprise_management::DeviceManagementResponse& response);
+
+  // Helper to remove a job from request_jobs_.
+  void RemoveJob(const DeviceManagementRequestJob* job);
 
   // Observer notification helpers.
   void NotifyPolicyFetched();
@@ -267,7 +281,7 @@ class POLICY_EXPORT CloudPolicyClient {
   const std::string machine_model_;
   const std::string verification_key_hash_;
   const UserAffiliation user_affiliation_;
-  NamespaceSet namespaces_to_fetch_;
+  PolicyTypeSet types_to_fetch_;
   std::vector<std::string> state_keys_to_upload_;
 
   std::string dm_token_;
@@ -288,10 +302,14 @@ class POLICY_EXPORT CloudPolicyClient {
 
   // Used for issuing requests to the cloud.
   DeviceManagementService* service_;
-  scoped_ptr<DeviceManagementRequestJob> request_job_;
 
-  // Status upload data is produced by |status_provider_|.
-  StatusProvider* status_provider_;
+  // Only one outstanding policy fetch is allowed, so this is tracked in
+  // its own member variable.
+  scoped_ptr<DeviceManagementRequestJob> policy_fetch_request_job_;
+
+  // All of the outstanding non-policy-fetch request jobs. These jobs are
+  // silently cancelled if Unregister() is called.
+  ScopedVector<DeviceManagementRequestJob> request_jobs_;
 
   // The policy responses returned by the last policy fetch operation.
   ResponseMap responses_;

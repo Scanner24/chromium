@@ -1,6 +1,6 @@
 Name: dom-distiller-js
-URL: https://code.google.com/p/dom-distiller
-Version: bbf7c0181f
+URL: https://github.com/chromium/dom-distiller
+Version: 8c015c13ad
 License: BSD
 Security Critical: yes
 

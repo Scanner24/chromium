@@ -32,6 +32,7 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_member.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_internals_util.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/signin/core/browser/signin_metrics.h"
@@ -44,7 +45,9 @@ class ProfileOAuth2TokenService;
 class SigninAccountIdHelper;
 class SigninClient;
 
-class SigninManager : public SigninManagerBase {
+class SigninManager : public SigninManagerBase,
+                      public AccountTrackerService::Observer,
+                      public MergeSessionHelper::Observer {
  public:
   // The callback invoked once the OAuth token has been fetched during signin,
   // but before the profile transitions to the "signed-in" state. This allows
@@ -63,8 +66,10 @@ class SigninManager : public SigninManagerBase {
   // OneClickSigninHelper.
   static const char kChromeSigninEffectiveSite[];
 
-  SigninManager(SigninClient* client, ProfileOAuth2TokenService* token_service);
-  virtual ~SigninManager();
+  SigninManager(SigninClient* client,
+                ProfileOAuth2TokenService* token_service,
+                AccountTrackerService* account_tracker_service);
+  ~SigninManager() override;
 
   // Returns true if the username is allowed based on the policy string.
   static bool IsUsernameAllowedByPolicy(const std::string& username,
@@ -93,8 +98,11 @@ class SigninManager : public SigninManagerBase {
   // On platforms where SigninManager is responsible for dealing with
   // invalid username policy updates, we need to check this during
   // initialization and sign the user out.
-  virtual void Initialize(PrefService* local_state) OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
+  void Initialize(PrefService* local_state) override;
+  void Shutdown() override;
+
+  // If applicable, merge the signed in account into the cookie jar.
+  void MergeSigninCredentialIntoCookieJar();
 
   // Invoked from an OAuthTokenFetchedCallback to complete user signin.
   virtual void CompletePendingSignin();
@@ -104,9 +112,9 @@ class SigninManager : public SigninManagerBase {
   void OnExternalSigninCompleted(const std::string& username);
 
   // Returns true if there's a signin in progress.
-  virtual bool AuthInProgress() const OVERRIDE;
+  bool AuthInProgress() const override;
 
-  virtual bool IsSigninAllowed() const OVERRIDE;
+  bool IsSigninAllowed() const override;
 
   // Returns true if the passed username is allowed by policy. Virtual for
   // mocking in tests.
@@ -162,6 +170,22 @@ class SigninManager : public SigninManagerBase {
   // a sign-in success notification.
   void OnSignedIn(const std::string& username);
 
+  // Waits for the AccountTrackerService, then sends GoogleSigninSucceeded to
+  // the client and clears the local password.
+  void PostSignedIn();
+
+  // AccountTrackerService::Observer implementation.
+  void OnAccountUpdated(const AccountTrackerService::AccountInfo& info)
+      override;
+  void OnAccountUpdateFailed(const std::string& account_id) override;
+
+  // MergeSessionHelper::Observer implementation. SigninManager controls the
+  // lifetime if the MergeSessionHelper, so SigninManager takes responsibility
+  // for propogating these notifications.
+  void MergeSessionCompleted(const std::string& account_id,
+                             const GoogleServiceAuthError& error) override;
+  void GetCheckConnectionInfoCompleted(bool succeeded) override;
+
   // Called when a new request to re-authenticate a user is in progress.
   // Will clear in memory data but leaves the db as such so when the browser
   // restarts we can use the old token(which might throw a password error).
@@ -199,6 +223,10 @@ class SigninManager : public SigninManagerBase {
   // outlive this object.
   ProfileOAuth2TokenService* token_service_;
 
+  // The AccountTrackerService instance associated with this object. Must
+  // outlive this object.
+  AccountTrackerService* account_tracker_service_;
+
   // Helper object to listen for changes to signin preferences stored in non-
   // profile-specific local prefs (like kGoogleServicesUsernamePattern).
   PrefChangeRegistrar local_state_pref_registrar_;
@@ -208,6 +236,15 @@ class SigninManager : public SigninManagerBase {
 
   // Helper to merge signed in account into the content area.
   scoped_ptr<MergeSessionHelper> merge_session_helper_;
+
+  // Observers of the |merge_session_helper_| across reset()s.
+  ObserverList<MergeSessionHelper::Observer, true> merge_session_observer_list_;
+
+  // Two gate conditions for when PostSignedIn should be called. Verify
+  // that the SigninManager has reached OnSignedIn() and the AccountTracker
+  // has completed calling GetUserInfo.
+  bool signin_manager_signed_in_;
+  bool user_info_fetched_by_account_tracker_;
 
   base::WeakPtrFactory<SigninManager> weak_pointer_factory_;
 

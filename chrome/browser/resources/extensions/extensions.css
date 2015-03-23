@@ -3,7 +3,7 @@
  * found in the LICENSE file. */
 
 html.loading * {
-  -webkit-transition-duration: 0 !important;
+  transition-duration: 0ms !important;
 }
 
 html:not(.focus-outline-visible)
@@ -16,35 +16,44 @@ html:not(.focus-outline-visible)
   overflow-y: hidden;
 }
 
+#extension-settings.showing-banner {
+  margin-top: 45px;
+}
+
 /* Developer mode */
 
 #dev-controls {
   -webkit-margin-end: 20px;
-  -webkit-transition: padding 100ms, height 100ms, opacity 100ms;
-  border-bottom: 1px solid #eee;
   height: 0;
-  opacity: 0;
   overflow: hidden;
 }
 
-#dev-controls .buttons-container {
-  -webkit-padding-end: 3px;
-  -webkit-padding-start: 4px;
+#dev-controls.animated {
+  transition: height 150ms;
 }
 
-#dev-controls .buttons-container {
-  display: -webkit-box;
-  padding-top: 13px;
+.dev-mode #dev-controls {
+  border-bottom: 1px solid #eee;
+}
+
+#dev-controls > * {
+  padding: 8px 3px;
+}
+
+#dev-controls .button-container {
+  display: flex;
+  flex-wrap: wrap;
 }
 
 #dev-controls button {
   white-space: nowrap;
 }
 
+#dev-controls .button-container button:not(:last-of-type) {
+  -webkit-margin-end: 5px;
+}
+
 #apps-developer-tools-promo {
-  -webkit-margin-before: 15px;
-  -webkit-padding-before: 5px;
-  -webkit-padding-end: 3px;
   align-items: center;
   border-top: 1px solid #eee;
   display: flex;
@@ -52,11 +61,11 @@ html:not(.focus-outline-visible)
 }
 
 #apps-developer-tools-promo img {
+  -webkit-margin-end: 5px;
+  -webkit-margin-start: -5px;
   content: url(apps_developer_tools_promo_48.png);
-}
-
-#apps-developer-tools-promo-text {
-  -webkit-margin-start: 5px;
+  margin-bottom: -5px;
+  margin-top: -5px;
 }
 
 #apps-developer-tools-promo-close-wrapper {
@@ -81,19 +90,8 @@ html:not(.focus-outline-visible)
   background-image: url(chrome://theme/IDR_CLOSE_DIALOG_P);
 }
 
-#extension-settings.dev-mode #dev-controls {
-  -webkit-transition-duration: 250ms;
-  height: 45px;
-  opacity: 1;
-  padding-bottom: 7px;
-}
-
-#extension-settings.dev-mode.adt-promo #dev-controls {
-  height: 105px;  /* Allow more height for the Apps Developer Tools promo. */
-}
-
 #dev-controls-spacer {
-  -webkit-box-flex: 1;
+  flex: 1;
 }
 
 #dev-toggle {
@@ -120,10 +118,6 @@ html:not(.focus-outline-visible)
   color: rgba(128, 128, 128, 1);
   flex-shrink: 0;
   text-align: right;
-}
-
-#extension-settings:not(.dev-mode) .developer-extras {
-  display: none;
 }
 
 .developer-extras > div,
@@ -226,10 +220,10 @@ html[dir='rtl'] .extension-list-item {
 }
 
 .action-links {
-  -webkit-margin-after: 0.5em;
+  margin-bottom: 0.5em;
 }
 
-.action-links :-webkit-any(a, .link-button) {
+.action-links a {
   -webkit-margin-end: 1em;
   -webkit-margin-start: 0;
 }
@@ -246,7 +240,7 @@ html[dir='rtl'] .extension-list-item {
 .location-text,
 .blacklist-text,
 .enable-checkbox input:disabled + .enable-checkbox-text {
-  color: rgb(151, 156, 160);
+  color: rgb(115, 119, 122);
 }
 
 .enable-controls {
@@ -255,10 +249,10 @@ html[dir='rtl'] .extension-list-item {
   position: relative;
 }
 
-/* We use x.link-button here so that we get higher specifity than the
- * link-button rules without resorting to the Dark Side (!IMPORTANT). */
-.terminated-reload-link.link-button,
-.corrupted-repair-button.link-button {
+/* We use x[is='action-link'] here so that we get higher specifity than the
+ * action link rules without resorting to the Dark Side (!IMPORTANT). */
+.terminated-reload-link[is='action-link'],
+.corrupted-repair-button[is='action-link'] {
   /* Matches width of trash. */
   -webkit-margin-end: 30px;
 }
@@ -316,11 +310,11 @@ html[dir='rtl'] .extension-list-item {
 
 .error-collection-control {
   -webkit-margin-start: 5px;
-  display: none;
 }
 
-#extension-settings.dev-mode .error-collection-control {
-  display: initial;
+#extension-settings:not(.dev-mode) .developer-extras,
+#extension-settings:not(.dev-mode) .error-collection-control {
+  display: none;
 }
 
 #font-measuring-div {
@@ -366,12 +360,12 @@ html[dir=rtl] .extension-commands-config {
 /* Trash */
 
 #extension-settings .trash {
-  -webkit-transition: opacity 200ms;
   height: 22px;
   opacity: 0.8;
   position: relative;
   right: 0;
   top: 6px;
+  transition: opacity 200ms;
 }
 
 html[dir='rtl'] #extension-settings .trash {
@@ -387,10 +381,17 @@ html[dir='rtl'] #extension-settings .trash {
   visibility: hidden;
 }
 
+/* In case the extension is policy controlled the trash icon must be hidden by
+ * setting display:none rather than only setting visibility:hidden to completely
+ * remove it from the layout and make space for the controlled indicator.
+ * TODO(cschuet): rather than hide always replace it with something meaningful.
+ */
+.extension-list-item-wrapper.policy-controlled .trash {
+  display: none;
+}
+
 .extension-highlight {
-  background: rgb(238, 238, 238);
-  background-position: auto;
-  background-repeat: auto;
+  background: rgb(250, 250, 250);
   border-radius: 3px;
   padding: 5px 0 5px 5px;
 }

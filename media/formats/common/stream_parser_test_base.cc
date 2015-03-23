@@ -19,7 +19,7 @@ static std::string BufferQueueToString(
        itr != buffers.end();
        ++itr) {
     ss << " " << (*itr)->timestamp().InMilliseconds();
-    if ((*itr)->IsKeyframe())
+    if ((*itr)->is_key_frame())
       ss << "K";
   }
   ss << " }";
@@ -73,11 +73,9 @@ bool StreamParserTestBase::AppendDataInPieces(const uint8* data,
 }
 
 void StreamParserTestBase::OnInitDone(
-    bool success,
     const StreamParser::InitParameters& params) {
   EXPECT_TRUE(params.auto_update_timestamp_offset);
-  DVLOG(1) << __FUNCTION__ << "(" << success << ", "
-           << params.duration.InMilliseconds() << ", "
+  DVLOG(1) << __FUNCTION__ << "(" << params.duration.InMilliseconds() << ", "
            << params.auto_update_timestamp_offset << ")";
 }
 

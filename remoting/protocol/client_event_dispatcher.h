@@ -18,20 +18,14 @@ namespace protocol {
 class ClientEventDispatcher : public ChannelDispatcherBase, public InputStub {
  public:
   ClientEventDispatcher();
-  virtual ~ClientEventDispatcher();
+  ~ClientEventDispatcher() override;
 
   // InputStub implementation.
-  virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-  virtual void InjectTextEvent(const TextEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
-
- protected:
-  // ChannelDispatcherBase overrides.
-  virtual void OnInitialized() OVERRIDE;
+  void InjectKeyEvent(const KeyEvent& event) override;
+  void InjectTextEvent(const TextEvent& event) override;
+  void InjectMouseEvent(const MouseEvent& event) override;
 
  private:
-  BufferedSocketWriter writer_;
-
   DISALLOW_COPY_AND_ASSIGN(ClientEventDispatcher);
 };
 

@@ -8,14 +8,16 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/device_hierarchy_observer.h"
+#include "ui/events/devices/input_device_event_observer.h"
 
 namespace chromeos {
 namespace system {
 
-class PointerDeviceObserver : public DeviceHierarchyObserver {
+class PointerDeviceObserver : public DeviceHierarchyObserver,
+                              public ui::InputDeviceEventObserver {
  public:
   PointerDeviceObserver();
-  virtual ~PointerDeviceObserver();
+  ~PointerDeviceObserver() override;
 
   // Start observing device hierarchy.
   void Init();
@@ -36,10 +38,16 @@ class PointerDeviceObserver : public DeviceHierarchyObserver {
   void RemoveObserver(Observer* observer);
 
  private:
-  // DeviceHierarchyObserver implementation.
-  virtual void DeviceHierarchyChanged() OVERRIDE;
-  virtual void DeviceAdded(int device_id) OVERRIDE {}
-  virtual void DeviceRemoved(int device_id) OVERRIDE {}
+  // DeviceHierarchyObserver:
+  void DeviceHierarchyChanged() override;
+  void DeviceAdded(int device_id) override {}
+  void DeviceRemoved(int device_id) override {}
+
+  // InputDeviceEventObserver:
+  void OnTouchscreenDeviceConfigurationChanged() override {}
+  void OnKeyboardDeviceConfigurationChanged() override {}
+  void OnMouseDeviceConfigurationChanged() override;
+  void OnTouchpadDeviceConfigurationChanged() override;
 
   // Check for pointer devices.
   void CheckTouchpadExists();

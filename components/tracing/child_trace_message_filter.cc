@@ -4,12 +4,12 @@
 
 #include "components/tracing/child_trace_message_filter.h"
 
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/trace_event/trace_event.h"
 #include "components/tracing/tracing_messages.h"
 #include "ipc/ipc_channel.h"
 
-using base::debug::TraceLog;
+using base::trace_event::TraceLog;
 
 namespace tracing {
 
@@ -36,8 +36,7 @@ bool ChildTraceMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(TracingMsg_DisableMonitoring, OnDisableMonitoring)
     IPC_MESSAGE_HANDLER(TracingMsg_CaptureMonitoringSnapshot,
                         OnCaptureMonitoringSnapshot)
-    IPC_MESSAGE_HANDLER(TracingMsg_GetTraceBufferPercentFull,
-                        OnGetTraceBufferPercentFull)
+    IPC_MESSAGE_HANDLER(TracingMsg_GetTraceLogStatus, OnGetTraceLogStatus)
     IPC_MESSAGE_HANDLER(TracingMsg_SetWatchEvent, OnSetWatchEvent)
     IPC_MESSAGE_HANDLER(TracingMsg_CancelWatchEvent, OnCancelWatchEvent)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -59,11 +58,11 @@ void ChildTraceMessageFilter::OnBeginTracing(
       browser_time;
   TraceLog::GetInstance()->SetTimeOffset(time_offset);
 #endif
-  base::debug::TraceOptions trace_options;
+  base::trace_event::TraceOptions trace_options;
   trace_options.SetFromString(options);
   TraceLog::GetInstance()->SetEnabled(
-      base::debug::CategoryFilter(category_filter_str),
-      base::debug::TraceLog::RECORDING_MODE,
+      base::trace_event::CategoryFilter(category_filter_str),
+      base::trace_event::TraceLog::RECORDING_MODE,
       trace_options);
 }
 
@@ -82,11 +81,11 @@ void ChildTraceMessageFilter::OnEnableMonitoring(
     const std::string& category_filter_str,
     base::TimeTicks browser_time,
     const std::string& options) {
-  base::debug::TraceOptions trace_options;
+  base::trace_event::TraceOptions trace_options;
   trace_options.SetFromString(options);
   TraceLog::GetInstance()->SetEnabled(
-      base::debug::CategoryFilter(category_filter_str),
-      base::debug::TraceLog::MONITORING_MODE,
+      base::trace_event::CategoryFilter(category_filter_str),
+      base::trace_event::TraceLog::MONITORING_MODE,
       trace_options);
 }
 
@@ -105,10 +104,9 @@ void ChildTraceMessageFilter::OnCaptureMonitoringSnapshot() {
                  this));
 }
 
-void ChildTraceMessageFilter::OnGetTraceBufferPercentFull() {
-  float bpf = TraceLog::GetInstance()->GetBufferPercentFull();
-
-  sender_->Send(new TracingHostMsg_TraceBufferPercentFullReply(bpf));
+void ChildTraceMessageFilter::OnGetTraceLogStatus() {
+  sender_->Send(new TracingHostMsg_TraceLogStatusReply(
+      TraceLog::GetInstance()->GetStatus()));
 }
 
 void ChildTraceMessageFilter::OnSetWatchEvent(const std::string& category_name,

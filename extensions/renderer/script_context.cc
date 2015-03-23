@@ -9,14 +9,15 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "content/public/child/v8_value_converter.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/features/base_feature_provider.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "gin/per_context_data.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -55,6 +56,24 @@ std::string GetContextTypeDescriptionString(Feature::Context context_type) {
 
 }  // namespace
 
+// A gin::Runner that delegates to its ScriptContext.
+class ScriptContext::Runner : public gin::Runner {
+ public:
+  explicit Runner(ScriptContext* context);
+
+  // gin::Runner overrides.
+  void Run(const std::string& source,
+           const std::string& resource_name) override;
+  v8::Handle<v8::Value> Call(v8::Handle<v8::Function> function,
+                             v8::Handle<v8::Value> receiver,
+                             int argc,
+                             v8::Handle<v8::Value> argv[]) override;
+  gin::ContextHolder* GetContextHolder() override;
+
+ private:
+  ScriptContext* context_;
+};
+
 ScriptContext::ScriptContext(const v8::Handle<v8::Context>& v8_context,
                              blink::WebFrame* web_frame,
                              const Extension* extension,
@@ -68,7 +87,9 @@ ScriptContext::ScriptContext(const v8::Handle<v8::Context>& v8_context,
       effective_extension_(effective_extension),
       effective_context_type_(effective_context_type),
       safe_builtins_(this),
-      isolate_(v8_context->GetIsolate()) {
+      isolate_(v8_context->GetIsolate()),
+      url_(web_frame_ ? GetDataSourceURLForFrame(web_frame_) : GURL()),
+      runner_(new Runner(this)) {
   VLOG(1) << "Created context:\n"
           << "  extension id: " << GetExtensionID() << "\n"
           << "  frame:        " << web_frame_ << "\n"
@@ -78,7 +99,7 @@ ScriptContext::ScriptContext(const v8::Handle<v8::Context>& v8_context,
           << (effective_extension_.get() ? effective_extension_->id() : "")
           << "  effective context type: "
           << GetEffectiveContextTypeDescription();
-  gin::PerContextData::From(v8_context)->set_runner(this);
+  gin::PerContextData::From(v8_context)->set_runner(runner_.get());
 }
 
 ScriptContext::~ScriptContext() {
@@ -96,6 +117,7 @@ void ScriptContext::Invalidate() {
     module_system_->Invalidate();
   web_frame_ = NULL;
   v8_context_.reset();
+  runner_.reset();
 }
 
 const std::string& ScriptContext::GetExtensionID() const {
@@ -176,7 +198,7 @@ std::string ScriptContext::GetEffectiveContextTypeDescription() {
 }
 
 GURL ScriptContext::GetURL() const {
-  return web_frame() ? GetDataSourceURLForFrame(web_frame()) : GURL();
+  return url_;
 }
 
 bool ScriptContext::IsAnyFeatureAvailableToContext(const Feature& api) {
@@ -255,21 +277,43 @@ void ScriptContext::OnResponseReceived(const std::string& name,
       << *v8::String::Utf8Value(retval);
 }
 
-void ScriptContext::Run(const std::string& source,
-                        const std::string& resource_name) {
-  module_system_->RunString(source, resource_name);
+void ScriptContext::SetContentCapabilities(
+    const APIPermissionSet& permissions) {
+  content_capabilities_ = permissions;
 }
 
-v8::Handle<v8::Value> ScriptContext::Call(v8::Handle<v8::Function> function,
-                                          v8::Handle<v8::Value> receiver,
-                                          int argc,
-                                          v8::Handle<v8::Value> argv[]) {
-  return CallFunction(function, argc, argv);
+bool ScriptContext::HasAPIPermission(APIPermission::ID permission) const {
+  if (effective_extension_.get()) {
+    return effective_extension_->permissions_data()->HasAPIPermission(
+        permission);
+  } else if (context_type() == Feature::WEB_PAGE_CONTEXT) {
+    // Only web page contexts may be granted content capabilities. Other
+    // contexts are either privileged WebUI or extensions with their own set of
+    // permissions.
+    if (content_capabilities_.find(permission) != content_capabilities_.end())
+      return true;
+  }
+  return false;
 }
 
-gin::ContextHolder* ScriptContext::GetContextHolder() {
-  v8::HandleScope handle_scope(isolate());
-  return gin::PerContextData::From(v8_context())->context_holder();
+ScriptContext::Runner::Runner(ScriptContext* context) : context_(context) {
+}
+void ScriptContext::Runner::Run(const std::string& source,
+                                const std::string& resource_name) {
+  context_->module_system()->RunString(source, resource_name);
+}
+
+v8::Handle<v8::Value> ScriptContext::Runner::Call(
+    v8::Handle<v8::Function> function,
+    v8::Handle<v8::Value> receiver,
+    int argc,
+    v8::Handle<v8::Value> argv[]) {
+  return context_->CallFunction(function, argc, argv);
+}
+
+gin::ContextHolder* ScriptContext::Runner::GetContextHolder() {
+  v8::HandleScope handle_scope(context_->isolate());
+  return gin::PerContextData::From(context_->v8_context())->context_holder();
 }
 
 }  // namespace extensions

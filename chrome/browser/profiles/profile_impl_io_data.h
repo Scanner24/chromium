@@ -22,6 +22,10 @@ namespace content {
 class CookieCryptoDelegate;
 }  // namespace content
 
+namespace data_reduction_proxy {
+class DataReductionProxyNetworkDelegate;
+}  // namespace data_reduction_proxy
+
 namespace domain_reliability {
 class DomainReliabilityMonitor;
 }  // namespace domain_reliability
@@ -32,7 +36,8 @@ class HttpServerProperties;
 class HttpServerPropertiesManager;
 class HttpTransactionFactory;
 class ProxyConfig;
-class SDCHManager;
+class SdchManager;
+class SdchOwner;
 }  // namespace net
 
 namespace storage {
@@ -62,14 +67,7 @@ class ProfileImplIOData : public ProfileIOData {
         content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
         storage::SpecialStoragePolicy* special_storage_policy,
         scoped_ptr<domain_reliability::DomainReliabilityMonitor>
-            domain_reliability_monitor,
-        const base::Callback<void(bool)>& data_reduction_proxy_unavailable,
-        scoped_ptr<DataReductionProxyChromeConfigurator>
-            data_reduction_proxy_chrome_configurator,
-        scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-            data_reduction_proxy_params,
-        scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-            data_reduction_proxy_statistics_prefs);
+            domain_reliability_monitor);
 
     // These Create*ContextGetter() functions are only exposed because the
     // circular relationship between Profile, ProfileIOData::Handle, and the
@@ -170,41 +168,39 @@ class ProfileImplIOData : public ProfileIOData {
   };
 
   ProfileImplIOData();
-  virtual ~ProfileImplIOData();
+  ~ProfileImplIOData() override;
 
-  virtual void InitializeInternal(
+  void InitializeInternal(
+      scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate,
       ProfileParams* profile_params,
       content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors)
-          const OVERRIDE;
-  virtual void InitializeExtensionsRequestContext(
-      ProfileParams* profile_params) const OVERRIDE;
-  virtual net::URLRequestContext* InitializeAppRequestContext(
+      content::URLRequestInterceptorScopedVector
+          request_interceptors) const override;
+  void InitializeExtensionsRequestContext(
+      ProfileParams* profile_params) const override;
+  net::URLRequestContext* InitializeAppRequestContext(
       net::URLRequestContext* main_context,
       const StoragePartitionDescriptor& partition_descriptor,
       scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
           protocol_handler_interceptor,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors)
-          const OVERRIDE;
-  virtual net::URLRequestContext* InitializeMediaRequestContext(
+      const override;
+  net::URLRequestContext* InitializeMediaRequestContext(
       net::URLRequestContext* original_context,
-      const StoragePartitionDescriptor& partition_descriptor) const OVERRIDE;
-  virtual net::URLRequestContext*
-      AcquireMediaRequestContext() const OVERRIDE;
-  virtual net::URLRequestContext* AcquireIsolatedAppRequestContext(
+      const StoragePartitionDescriptor& partition_descriptor) const override;
+  net::URLRequestContext* AcquireMediaRequestContext() const override;
+  net::URLRequestContext* AcquireIsolatedAppRequestContext(
       net::URLRequestContext* main_context,
       const StoragePartitionDescriptor& partition_descriptor,
       scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
           protocol_handler_interceptor,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors)
-          const OVERRIDE;
-  virtual net::URLRequestContext*
-      AcquireIsolatedMediaRequestContext(
-          net::URLRequestContext* app_context,
-          const StoragePartitionDescriptor& partition_descriptor)
-              const OVERRIDE;
+      const override;
+  net::URLRequestContext* AcquireIsolatedMediaRequestContext(
+      net::URLRequestContext* app_context,
+      const StoragePartitionDescriptor& partition_descriptor) const override;
 
   // Deletes all network related data since |time|. It deletes transport
   // security state since |time| and also deletes HttpServerProperties data.
@@ -212,6 +208,9 @@ class ProfileImplIOData : public ProfileIOData {
   // it will be posted on the UI thread once the removal process completes.
   void ClearNetworkingHistorySinceOnIOThread(base::Time time,
                                              const base::Closure& completion);
+
+  mutable scoped_ptr<data_reduction_proxy::DataReductionProxyNetworkDelegate>
+       network_delegate_;
 
   // Lazy initialization params.
   mutable scoped_ptr<LazyParams> lazy_params_;
@@ -234,6 +233,7 @@ class ProfileImplIOData : public ProfileIOData {
       domain_reliability_monitor_;
 
   mutable scoped_ptr<net::SdchManager> sdch_manager_;
+  mutable scoped_ptr<net::SdchOwner> sdch_policy_;
 
   // Parameters needed for isolated apps.
   base::FilePath profile_path_;

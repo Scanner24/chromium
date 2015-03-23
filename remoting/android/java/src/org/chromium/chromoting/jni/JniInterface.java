@@ -318,15 +318,15 @@ public class JniInterface {
     private static void commitPairingCredentials(String host, String id, String secret) {
         // Empty |id| indicates that pairing needs to be removed.
         if (id.isEmpty()) {
-            sContext.getPreferences(Activity.MODE_PRIVATE).edit().
-                    remove(host + "_id").
-                    remove(host + "_secret").
-                    apply();
+            sContext.getPreferences(Activity.MODE_PRIVATE).edit()
+                    .remove(host + "_id")
+                    .remove(host + "_secret")
+                    .apply();
         } else {
-            sContext.getPreferences(Activity.MODE_PRIVATE).edit().
-                    putString(host + "_id", id).
-                    putString(host + "_secret", secret).
-                    apply();
+            sContext.getPreferences(Activity.MODE_PRIVATE).edit()
+                    .putString(host + "_id", id)
+                    .putString(host + "_secret", secret)
+                    .apply();
         }
     }
 
@@ -381,6 +381,21 @@ public class JniInterface {
 
     /** Passes text event information to the native handling code. */
     private static native void nativeSendTextEvent(String text);
+
+    /**
+     * Enables or disables the video channel. Called on the UI thread in response to Activity
+     * lifecycle events.
+     */
+    public static void enableVideoChannel(boolean enable) {
+        if (!sConnected) {
+            return;
+        }
+
+        nativeEnableVideoChannel(enable);
+    }
+
+    /** Native implementation of enableVideoChannel() */
+    private static native void nativeEnableVideoChannel(boolean enable);
 
     /**
      * Sets the redraw callback to the provided functor. Provide a value of null whenever the
@@ -467,10 +482,14 @@ public class JniInterface {
     }
 
     /** Position of cursor hotspot within cursor image. Called on the graphics thread. */
-    public static Point getCursorHotspot() { return sCursorHotspot; }
+    public static Point getCursorHotspot() {
+        return sCursorHotspot;
+    }
 
     /** Returns the current cursor shape. Called on the graphics thread. */
-    public static Bitmap getCursorBitmap() { return sCursorBitmap; }
+    public static Bitmap getCursorBitmap() {
+        return sCursorBitmap;
+    }
 
     //
     // Third Party Authentication

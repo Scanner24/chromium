@@ -105,9 +105,7 @@ class WindowedIncognitoObserver : public chrome::BrowserListObserver {
     BrowserList::AddObserver(this);
   }
 
-  virtual ~WindowedIncognitoObserver() {
-    BrowserList::RemoveObserver(this);
-  }
+  ~WindowedIncognitoObserver() override { BrowserList::RemoveObserver(this); }
 
   // This method can be checked to see whether any incognito window has been
   // opened since the time this object was created.
@@ -117,7 +115,7 @@ class WindowedIncognitoObserver : public chrome::BrowserListObserver {
 
  private:
   // chrome::BrowserListObserver implementation.
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE {
+  void OnBrowserAdded(Browser* browser) override {
     if (browser->profile()->IsOffTheRecord())
       incognito_launched_ = true;
   }
@@ -137,11 +135,10 @@ PerfProvider::PerfProvider()
       AddObserver(this);
 
   // Register as an observer of session restore.
-  // TODO(sque): clean this up to use something other than notifications.
-  session_restore_registrar_.Add(
-      this,
-      chrome::NOTIFICATION_SESSION_RESTORE_DONE,
-      content::NotificationService::AllBrowserContextsAndSources());
+  on_session_restored_callback_subscription_ =
+      SessionRestore::RegisterOnSessionRestoredCallback(
+          base::Bind(&PerfProvider::OnSessionRestoreDone,
+                     weak_factory_.GetWeakPtr()));
 
   // Check the login state. At the time of writing, this class is instantiated
   // before login. A subsequent login would activate the profiling. However,
@@ -213,12 +210,7 @@ void PerfProvider::SuspendDone(const base::TimeDelta& sleep_duration) {
                           collection_delay));
 }
 
-void PerfProvider::Observe(int type,
-                           const content::NotificationSource& source,
-                           const content::NotificationDetails& details) {
-  // Only handle session restore notifications.
-  DCHECK_EQ(type, chrome::NOTIFICATION_SESSION_RESTORE_DONE);
-
+void PerfProvider::OnSessionRestoreDone() {
   // Do not collect a profile unless logged in as a normal user.
   if (!IsNormalUserLoggedIn())
     return;

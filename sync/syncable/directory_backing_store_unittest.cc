@@ -32,9 +32,7 @@ SYNC_EXPORT_PRIVATE extern const int32 kCurrentDBVersion;
 
 class MigrationTest : public testing::TestWithParam<int> {
  public:
-  virtual void SetUp() {
-    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  }
+  void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
 
  protected:
   std::string GetUsername() {
@@ -3836,11 +3834,11 @@ class OnDiskDirectoryBackingStoreForTest : public OnDiskDirectoryBackingStore {
  public:
   OnDiskDirectoryBackingStoreForTest(const std::string& dir_name,
                                      const base::FilePath& backing_filepath);
-  virtual ~OnDiskDirectoryBackingStoreForTest();
+  ~OnDiskDirectoryBackingStoreForTest() override;
   bool DidFailFirstOpenAttempt();
 
  protected:
-  virtual void ReportFirstTryOpenFailure() OVERRIDE;
+  void ReportFirstTryOpenFailure() override;
 
  private:
   bool first_open_failed_;

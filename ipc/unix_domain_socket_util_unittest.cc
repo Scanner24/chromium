@@ -27,7 +27,7 @@ class SocketAcceptor : public base::MessageLoopForIO::Watcher {
         base::Bind(&SocketAcceptor::StartWatching, base::Unretained(this), fd));
   }
 
-  virtual ~SocketAcceptor() {
+  ~SocketAcceptor() override {
     Close();
   }
 
@@ -60,13 +60,13 @@ class SocketAcceptor : public base::MessageLoopForIO::Watcher {
     watcher->StopWatchingFileDescriptor();
     delete watcher;
   }
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE {
+  void OnFileCanReadWithoutBlocking(int fd) override {
     ASSERT_EQ(-1, server_fd_);
     IPC::ServerAcceptConnection(fd, &server_fd_);
     watcher_->StopWatchingFileDescriptor();
     accepted_event_.Signal();
   }
-  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE {}
+  void OnFileCanWriteWithoutBlocking(int fd) override {}
 
   int server_fd_;
   base::MessageLoopProxy* target_thread_;
@@ -78,13 +78,9 @@ class SocketAcceptor : public base::MessageLoopForIO::Watcher {
 };
 
 const base::FilePath GetChannelDir() {
-#if defined(OS_ANDROID)
   base::FilePath tmp_dir;
-  PathService::Get(base::DIR_CACHE, &tmp_dir);
+  PathService::Get(base::DIR_TEMP, &tmp_dir);
   return tmp_dir;
-#else
-  return base::FilePath("/var/tmp");
-#endif
 }
 
 class TestUnixSocketConnection {

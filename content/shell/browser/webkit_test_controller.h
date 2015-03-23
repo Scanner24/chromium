@@ -18,7 +18,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/web_preferences.h"
 #include "content/shell/common/leak_detection_result.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 #if defined(OS_ANDROID)
 #include "base/threading/thread_restrictions.h"
@@ -28,6 +28,7 @@ class SkBitmap;
 
 namespace content {
 
+class LayoutTestDevToolsFrontend;
 class Shell;
 
 #if defined(OS_ANDROID)
@@ -106,7 +107,7 @@ class WebKitTestController : public base::NonThreadSafe,
   static WebKitTestController* Get();
 
   WebKitTestController();
-  virtual ~WebKitTestController();
+  ~WebKitTestController() override;
 
   // True if the controller is ready for testing.
   bool PrepareForLayoutTest(const GURL& test_url,
@@ -132,20 +133,20 @@ class WebKitTestController : public base::NonThreadSafe,
   void DevToolsProcessCrashed();
 
   // WebContentsObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void PluginCrashed(const base::FilePath& plugin_path,
-                             base::ProcessId plugin_pid) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void PluginCrashed(const base::FilePath& plugin_path,
+                     base::ProcessId plugin_pid) override;
+  void RenderViewCreated(RenderViewHost* render_view_host) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void WebContentsDestroyed() override;
 
   // NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const NotificationSource& source,
+               const NotificationDetails& details) override;
 
   // GpuDataManagerObserver implementation.
-  virtual void OnGpuProcessCrashed(base::TerminationStatus exit_code) OVERRIDE;
+  void OnGpuProcessCrashed(base::TerminationStatus exit_code) override;
 
  private:
   enum TestPhase {
@@ -213,6 +214,8 @@ class WebKitTestController : public base::NonThreadSafe,
 
   const bool is_leak_detection_enabled_;
   bool crash_when_leak_found_;
+
+  LayoutTestDevToolsFrontend* devtools_frontend_;
 
 #if defined(OS_ANDROID)
   // Because of the nested message pump implementation, Android needs to allow

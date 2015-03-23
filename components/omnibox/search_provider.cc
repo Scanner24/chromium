@@ -25,11 +25,12 @@
 #include "components/omnibox/autocomplete_result.h"
 #include "components/omnibox/keyword_provider.h"
 #include "components/omnibox/omnibox_field_trial.h"
+#include "components/omnibox/suggestion_answer.h"
 #include "components/omnibox/url_prefix.h"
 #include "components/search/search.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/variations/variations_http_header_provider.h"
+#include "components/variations/net/variations_http_header_provider.h"
 #include "grit/components_strings.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -116,9 +117,6 @@ class SearchProvider::CompareScoredResults {
 
 // SearchProvider -------------------------------------------------------------
 
-// static
-int SearchProvider::kMinimumTimeBetweenSuggestQueriesMs = 100;
-
 SearchProvider::SearchProvider(
     AutocompleteProviderListener* listener,
     TemplateURLService* template_url_service,
@@ -191,7 +189,8 @@ ACMatches::iterator SearchProvider::FindTopMatch(ACMatches* matches) {
 }
 
 void SearchProvider::Start(const AutocompleteInput& input,
-                           bool minimal_changes) {
+                           bool minimal_changes,
+                           bool called_due_to_focus) {
   // Do our best to load the model as early as possible.  This will reduce
   // odds of having the model not ready when really needed (a non-empty input).
   TemplateURLService* model = providers_.template_url_service();
@@ -202,7 +201,8 @@ void SearchProvider::Start(const AutocompleteInput& input,
   field_trial_triggered_ = false;
 
   // Can't return search/suggest results for bogus input.
-  if (input.type() == metrics::OmniboxInputType::INVALID) {
+  if (called_due_to_focus ||
+      input.type() == metrics::OmniboxInputType::INVALID) {
     Stop(true);
     return;
   }
@@ -280,9 +280,6 @@ void SearchProvider::Start(const AutocompleteInput& input,
     // Raw results are not needed any more.
     raw_default_history_results_.clear();
     raw_keyword_history_results_.clear();
-  } else {
-    transformed_default_history_results_.clear();
-    transformed_keyword_history_results_.clear();
   }
 
   StartOrStopSuggestQuery(minimal_changes);
@@ -579,12 +576,30 @@ void SearchProvider::DoHistoryQuery(bool minimal_changes) {
   }
 }
 
+base::TimeDelta SearchProvider::GetSuggestQueryDelay() const {
+  bool from_last_keystroke;
+  int polling_delay_ms;
+  OmniboxFieldTrial::GetSuggestPollingStrategy(&from_last_keystroke,
+                                               &polling_delay_ms);
+
+  base::TimeDelta delay(base::TimeDelta::FromMilliseconds(polling_delay_ms));
+  if (from_last_keystroke)
+    return delay;
+
+  base::TimeDelta time_since_last_suggest_request =
+      base::TimeTicks::Now() - time_suggest_request_sent_;
+  return std::max(base::TimeDelta(), delay - time_since_last_suggest_request);
+}
+
 void SearchProvider::StartOrStopSuggestQuery(bool minimal_changes) {
   if (!IsQuerySuitableForSuggest()) {
     StopSuggest();
     ClearAllResults();
     return;
   }
+
+  if (OmniboxFieldTrial::DisableResultsCaching())
+    ClearAllResults();
 
   // For the minimal_changes case, if we finished the previous query and still
   // have its results, or are allowed to keep running it, just do that, rather
@@ -612,16 +627,16 @@ void SearchProvider::StartOrStopSuggestQuery(bool minimal_changes) {
   if (!input_.want_asynchronous_matches())
     return;
 
-  // To avoid flooding the suggest server, don't send a query until at
-  // least 100 ms since the last query.
-  base::TimeTicks next_suggest_time(time_suggest_request_sent_ +
-      base::TimeDelta::FromMilliseconds(kMinimumTimeBetweenSuggestQueriesMs));
-  base::TimeTicks now(base::TimeTicks::Now());
-  if (now >= next_suggest_time) {
+  // Kick off a timer that will start the URL fetch if it completes before
+  // the user types another character.  Requests may be delayed to avoid
+  // flooding the server with requests that are likely to be thrown away later
+  // anyway.
+  const base::TimeDelta delay = GetSuggestQueryDelay();
+  if (delay <= base::TimeDelta()) {
     Run();
     return;
   }
-  timer_.Start(FROM_HERE, next_suggest_time - now, this, &SearchProvider::Run);
+  timer_.Start(FROM_HERE, delay, this, &SearchProvider::Run);
 }
 
 bool SearchProvider::IsQuerySuitableForSuggest() const {
@@ -823,12 +838,13 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
     // verbatim, and if so, copy over answer contents.
     base::string16 answer_contents;
     base::string16 answer_type;
+    scoped_ptr<SuggestionAnswer> answer;
     for (ACMatches::iterator it = matches_.begin(); it != matches_.end();
          ++it) {
-      if (!it->answer_contents.empty() &&
-          it->fill_into_edit == trimmed_verbatim) {
+      if (it->answer && it->fill_into_edit == trimmed_verbatim) {
         answer_contents = it->answer_contents;
         answer_type = it->answer_type;
+        answer = SuggestionAnswer::copy(it->answer.get());
         break;
       }
     }
@@ -836,8 +852,8 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
     SearchSuggestionParser::SuggestResult verbatim(
         trimmed_verbatim, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
         trimmed_verbatim, base::string16(), base::string16(), answer_contents,
-        answer_type, std::string(), std::string(), false, verbatim_relevance,
-        relevance_from_server, false, trimmed_verbatim);
+        answer_type, answer.Pass(), std::string(), std::string(), false,
+        verbatim_relevance, relevance_from_server, false, trimmed_verbatim);
     AddMatchToMap(verbatim, std::string(), did_not_accept_default_suggestion,
                   false, keyword_url != NULL, &map);
   }
@@ -859,9 +875,9 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
         SearchSuggestionParser::SuggestResult verbatim(
             trimmed_verbatim, AutocompleteMatchType::SEARCH_OTHER_ENGINE,
             trimmed_verbatim, base::string16(), base::string16(),
-            base::string16(), base::string16(), std::string(), std::string(),
-            true, keyword_verbatim_relevance, keyword_relevance_from_server,
-            false, trimmed_verbatim);
+            base::string16(), base::string16(), nullptr, std::string(),
+            std::string(), true, keyword_verbatim_relevance,
+            keyword_relevance_from_server, false, trimmed_verbatim);
         AddMatchToMap(verbatim, std::string(),
                       did_not_accept_keyword_suggestion, false, true, &map);
       }
@@ -941,12 +957,13 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
 void SearchProvider::RemoveExtraAnswers(ACMatches* matches) {
   bool answer_seen = false;
   for (ACMatches::iterator it = matches->begin(); it != matches->end(); ++it) {
-    if (!it->answer_contents.empty()) {
+    if (it->answer) {
       if (!answer_seen) {
         answer_seen = true;
       } else {
         it->answer_contents.clear();
         it->answer_type.clear();
+        it->answer.reset();
       }
     }
   }
@@ -1065,8 +1082,8 @@ SearchProvider::ScoreHistoryResultsHelper(const HistoryResults& results,
     SearchSuggestionParser::SuggestResult history_suggestion(
         trimmed_suggestion, AutocompleteMatchType::SEARCH_HISTORY,
         trimmed_suggestion, base::string16(), base::string16(),
-        base::string16(), base::string16(), std::string(), std::string(),
-        is_keyword, relevance, false, false, trimmed_input);
+        base::string16(), base::string16(), nullptr, std::string(),
+        std::string(), is_keyword, relevance, false, false, trimmed_input);
     // History results are synchronous; they are received on the last keystroke.
     history_suggestion.set_received_after_last_keystroke(false);
     scored_results.insert(insertion_position, history_suggestion);
@@ -1141,8 +1158,9 @@ void SearchProvider::ScoreHistoryResults(
     bool is_keyword,
     SearchSuggestionParser::SuggestResults* scored_results) {
   DCHECK(scored_results);
+  scored_results->clear();
+
   if (results.empty()) {
-    scored_results->clear();
     return;
   }
 

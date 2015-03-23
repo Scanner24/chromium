@@ -14,6 +14,12 @@ assert(is_mac || is_ios)
 import("//build/toolchain/clang.gni")
 import("//build/toolchain/goma.gni")
 
+if (use_goma) {
+  goma_prefix = "$goma_dir/gomacc "
+} else {
+  goma_prefix = ""
+}
+
 if (is_clang) {
   cc = rebase_path("//third_party/llvm-build/Release+Asserts/bin/clang",
                    root_build_dir)
@@ -23,12 +29,14 @@ if (is_clang) {
   cc = "gcc"
   cxx = "g++"
 }
+cc = goma_prefix + cc
+cxx = goma_prefix + cxx
 ld = cxx
 
 # This will copy the gyp-mac-tool to the build directory. We pass in the source
 # file of the win tool.
 gyp_mac_tool_source =
-  rebase_path("//tools/gyp/pylib/gyp/mac_tool.py", root_build_dir)
+    rebase_path("//tools/gyp/pylib/gyp/mac_tool.py", root_build_dir)
 exec_script("setup_toolchain.py", [ gyp_mac_tool_source ])
 
 # Shared toolchain definition. Invocations should set toolchain_os to set the
@@ -110,7 +118,7 @@ template("mac_clang_toolchain") {
       command = "rm -f {{output}} && ./gyp-mac-tool filter-libtool libtool -static -o {{output}} {{inputs}}"
       description = "LIBTOOL-STATIC {{output}}"
       outputs = [
-        "{{target_out_dir}}/{{target_output_name}}{{output_extension}}"
+        "{{target_out_dir}}/{{target_output_name}}{{output_extension}}",
       ]
       default_output_extension = ".a"
       output_prefix = "lib"
@@ -170,7 +178,9 @@ template("mac_clang_toolchain") {
       command = "$ld {{ldflags}} -o $outfile -Wl,-filelist,$rspfile {{solibs}} {{libs}}"
       description = "LINK $outfile"
       rspfile_content = "{{inputs_newline}}"
-      outputs = [ outfile ]
+      outputs = [
+        outfile,
+      ]
     }
 
     tool("stamp") {
@@ -184,14 +194,17 @@ template("mac_clang_toolchain") {
     }
 
     toolchain_args() {
-      os = invoker.toolchain_os
+      current_os = invoker.toolchain_os
+
+      # TODO(dpranke): os is here for backwards compatibility.
+      os = current_os
     }
   }
 }
 
 # Toolchain representing the target build (either mac or iOS).
 mac_clang_toolchain("clang") {
-  toolchain_os = os
+  toolchain_os = current_os
 }
 
 # This toolchain provides a way for iOS target compiles to reference targets

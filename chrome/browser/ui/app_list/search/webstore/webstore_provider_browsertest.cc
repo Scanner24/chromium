@@ -11,7 +11,6 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_provider.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_result.h"
 #include "chrome/common/chrome_switches.h"
@@ -21,6 +20,8 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "ui/app_list/app_list_switches.h"
+#include "ui/app_list/search_result.h"
 
 using content::BrowserThread;
 using extensions::Manifest;
@@ -88,7 +89,7 @@ ParsedSearchResult kParsedThreeResults[] = {
     {"app1_id", "one", "http://host/icon1", true, Manifest::TYPE_PLATFORM_APP,
      1},
     {"app2_id", "two", "http://host/icon2", false, Manifest::TYPE_HOSTED_APP,
-     2},
+     1},
     {"app3_id", "three", "http://host/icon3", false,
      Manifest::TYPE_LEGACY_PACKAGED_APP, 1}};
 
@@ -97,20 +98,20 @@ ParsedSearchResult kParsedThreeResults[] = {
 class WebstoreProviderTest : public InProcessBrowserTest {
  public:
   WebstoreProviderTest() {}
-  virtual ~WebstoreProviderTest() {}
+  ~WebstoreProviderTest() override {}
 
   // InProcessBrowserTest overrides:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     test_server_.reset(new EmbeddedTestServer);
 
     ASSERT_TRUE(test_server_->InitializeAndWaitUntilReady());
     test_server_->RegisterRequestHandler(
         base::Bind(&WebstoreProviderTest::HandleRequest,
                    base::Unretained(this)));
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kAppsGalleryURL, test_server_->base_url().spec());
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableEphemeralApps);
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        ::switches::kAppsGalleryURL, test_server_->base_url().spec());
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableExperimentalAppList);
 
     webstore_provider_.reset(new WebstoreProvider(
         ProfileManager::GetActiveUserProfile(), NULL));
@@ -121,14 +122,14 @@ class WebstoreProviderTest : public InProcessBrowserTest {
     webstore_provider_->set_use_throttling(false);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     EXPECT_TRUE(test_server_->ShutdownAndWaitUntilComplete());
     test_server_.reset();
   }
 
   void RunQuery(const std::string& query,
                 const std::string& mock_server_response) {
-    webstore_provider_->Start(base::UTF8ToUTF16(query));
+    webstore_provider_->Start(false, base::UTF8ToUTF16(query));
 
     if (webstore_provider_->webstore_search_ && !mock_server_response.empty()) {
       mock_server_response_ = mock_server_response;
@@ -206,7 +207,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
       }
     }
 
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   void OnSearchResultsFetched() {
@@ -250,7 +251,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreProviderTest, MAYBE_Basic) {
     {"3 result", kThreeResults, "one,two,three", kParsedThreeResults, 3 },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     if (kTestCases[i].expected_result_titles) {
       RunQuery(kTestCases[i].query, kTestCases[i].mock_server_response);
       ASSERT_EQ(kTestCases[i].expected_result_titles, GetResultTitles())

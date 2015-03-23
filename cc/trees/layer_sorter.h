@@ -11,23 +11,10 @@
 #include "base/containers/hash_tables.h"
 #include "cc/base/cc_export.h"
 #include "cc/layers/layer_impl.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/quad_f.h"
-#include "ui/gfx/rect_f.h"
-#include "ui/gfx/vector3d_f.h"
-
-#if defined(COMPILER_GCC)
-namespace cc { struct GraphEdge; }
-
-namespace BASE_HASH_NAMESPACE {
-template <>
-struct hash<cc::GraphEdge*> {
-  size_t operator()(cc::GraphEdge* ptr) const {
-    return hash<size_t>()(reinterpret_cast<size_t>(ptr));
-  }
-};
-}  // namespace BASE_HASH_NAMESPACE
-#endif  // COMPILER
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/quad_f.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 
 namespace gfx {
 class Transform;
@@ -81,11 +68,7 @@ class CC_EXPORT LayerSorter {
 
   void Sort(LayerImplList::iterator first, LayerImplList::iterator last);
 
-  enum ABCompareResult {
-    ABeforeB,
-    BBeforeA,
-    None
-  };
+  enum ABCompareResult { A_BEFORE_B, B_BEFORE_A, NONE };
 
   static ABCompareResult CheckOverlap(LayerShape* a,
                                       LayerShape* b,

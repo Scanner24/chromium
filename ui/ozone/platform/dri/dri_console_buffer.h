@@ -6,6 +6,7 @@
 #define UI_OZONE_PLATFORM_DRI_DRI_CONSOLE_BUFFER_H_
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -21,16 +22,19 @@ class DriWrapper;
 // memory into a SkSurface which can be used to draw into using Skia.
 class DriConsoleBuffer {
  public:
-  DriConsoleBuffer(DriWrapper* dri, uint32_t framebuffer);
+  DriConsoleBuffer(const scoped_refptr<DriWrapper>& dri, uint32_t framebuffer);
   ~DriConsoleBuffer();
 
   SkCanvas* canvas() { return surface_->getCanvas(); }
+  skia::RefPtr<SkImage> image() {
+    return skia::AdoptRef(surface_->newImageSnapshot());
+  }
 
   // Memory map the backing pixels and wrap them in |surface_|.
   bool Initialize();
 
  protected:
-  DriWrapper* dri_;  // Not owned.
+  scoped_refptr<DriWrapper> dri_;
 
   // Wrapper around the native pixel memory.
   skia::RefPtr<SkSurface> surface_;

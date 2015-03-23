@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/form_field.h"
 #include "components/autofill/core/browser/phone_number.h"
@@ -23,13 +24,13 @@ class AutofillScanner;
 // - number
 class PhoneField : public FormField {
  public:
-  virtual ~PhoneField();
+  ~PhoneField() override;
 
-  static FormField* Parse(AutofillScanner* scanner);
+  static scoped_ptr<FormField> Parse(AutofillScanner* scanner);
 
  protected:
   // FormField:
-  virtual bool ClassifyField(ServerFieldTypeMap* map) const OVERRIDE;
+  bool ClassifyField(ServerFieldTypeMap* map) const override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PhoneFieldTest, ParseOneLinePhone);

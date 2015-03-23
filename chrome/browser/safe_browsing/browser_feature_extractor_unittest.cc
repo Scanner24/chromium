@@ -78,7 +78,7 @@ class MockClientSideDetectionHost : public ClientSideDetectionHost {
 
 class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     ASSERT_TRUE(profile()->CreateHistoryService(
         true /* delete_file */, false /* no_db */));
@@ -93,7 +93,7 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     browse_info_.reset(new BrowseInfo);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     extractor_.reset();
     host_.reset();
     db_manager_ = NULL;
@@ -103,8 +103,8 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
   }
 
   HistoryService* history_service() {
-    return HistoryServiceFactory::GetForProfile(profile(),
-                                                Profile::EXPLICIT_ACCESS);
+    return HistoryServiceFactory::GetForProfile(
+        profile(), ServiceAccessType::EXPLICIT_ACCESS);
   }
 
   void SetRedirectChain(const std::vector<GURL>& redirect_chain,

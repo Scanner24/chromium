@@ -9,6 +9,7 @@
 
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager_export.h"
+#include "components/user_manager/user_type.h"
 
 namespace chromeos {
 class ScopedUserManagerEnabler;
@@ -50,6 +51,9 @@ class USER_MANAGER_EXPORT UserManager {
     // Called right before notifying on user change so that those who rely
     // on user_id hash would be accessing up-to-date value.
     virtual void ActiveUserHashChanged(const std::string& hash);
+
+    // Called when child status has changed.
+    virtual void UserChangedChildStatus(User* user);
 
    protected:
     virtual ~UserSessionStateObserver();
@@ -105,13 +109,13 @@ class USER_MANAGER_EXPORT UserManager {
   // is sorted by last login date with the most recent user at the beginning.
   virtual const UserList& GetUsers() const = 0;
 
-  // Returns list of users admitted for logging in into multi-profile session.
+  // Returns list of users allowed for logging in into multi-profile session.
   // Users that have a policy that prevents them from being added to the
   // multi-profile session will still be part of this list as long as they
   // are regular users (i.e. not a public session/supervised etc.).
   // Returns an empty list in case when primary user is not a regular one or
-  // has a policy that prohibids it to be part of multi-profile session.
-  virtual UserList GetUsersAdmittedForMultiProfile() const = 0;
+  // has a policy that prohibits it to be part of multi-profile session.
+  virtual UserList GetUsersAllowedForMultiProfile() const = 0;
 
   // Returns a list of users who are currently logged in.
   virtual const UserList& GetLoggedInUsers() const = 0;
@@ -232,6 +236,11 @@ class USER_MANAGER_EXPORT UserManager {
   // Otherwise, returns |user_id| itself.
   virtual std::string GetUserDisplayEmail(const std::string& user_id) const = 0;
 
+  // Saves user's type for user |user_id| into local state preferences.
+  // Ignored If there is no such user.
+  virtual void SaveUserType(const std::string& user_id,
+                            const UserType& user_type) = 0;
+
   // Returns true if current user is an owner.
   virtual bool IsCurrentUserOwner() const = 0;
 
@@ -250,11 +259,11 @@ class USER_MANAGER_EXPORT UserManager {
   // Returns true if at least one user has signed in.
   virtual bool IsUserLoggedIn() const = 0;
 
-  // Returns true if we're logged in as a regular user.
-  virtual bool IsLoggedInAsRegularUser() const = 0;
+  // Returns true if we're logged in as a user with gaia account.
+  virtual bool IsLoggedInAsUserWithGaiaAccount() const = 0;
 
-  // Returns true if we're logged in as a demo user.
-  virtual bool IsLoggedInAsDemoUser() const = 0;
+  // Returns true if we're logged in as a child user.
+  virtual bool IsLoggedInAsChildUser() const = 0;
 
   // Returns true if we're logged in as a public account.
   virtual bool IsLoggedInAsPublicAccount() const = 0;
@@ -262,7 +271,7 @@ class USER_MANAGER_EXPORT UserManager {
   // Returns true if we're logged in as a Guest.
   virtual bool IsLoggedInAsGuest() const = 0;
 
-  // Returns true if we're logged in as a supervised user.
+  // Returns true if we're logged in as a legacy supervised user.
   virtual bool IsLoggedInAsSupervisedUser() const = 0;
 
   // Returns true if we're logged in as a kiosk app.
@@ -290,11 +299,12 @@ class USER_MANAGER_EXPORT UserManager {
 
   virtual void NotifyLocalStateChanged() = 0;
 
+  // Changes the child status and notifies observers.
+  virtual void ChangeUserChildStatus(User* user, bool is_child) = 0;
+
+
   // Returns true if supervised users allowed.
   virtual bool AreSupervisedUsersAllowed() const = 0;
-
-  // Force update login state.
-  virtual void ForceUpdateState() {}
 
  protected:
   // Sets UserManager instance.

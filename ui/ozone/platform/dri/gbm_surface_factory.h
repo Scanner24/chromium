@@ -7,52 +7,58 @@
 
 #include "ui/ozone/platform/dri/dri_surface_factory.h"
 
-struct gbm_device;
-
 namespace ui {
 
 class DriWindowDelegate;
 class DriWindowDelegateManager;
+class DrmDeviceManager;
+class GbmWrapper;
 
 class GbmSurfaceFactory : public DriSurfaceFactory {
  public:
   GbmSurfaceFactory(bool allow_surfaceless);
-  virtual ~GbmSurfaceFactory();
+  ~GbmSurfaceFactory() override;
 
-  void InitializeGpu(DriWrapper* dri,
-                     gbm_device* device,
-                     ScreenManager* screen_manager,
+  void InitializeGpu(const scoped_refptr<GbmWrapper>& gbm,
+                     DrmDeviceManager* drm_device_manager,
                      DriWindowDelegateManager* window_manager);
 
   // DriSurfaceFactory:
-  virtual intptr_t GetNativeDisplay() OVERRIDE;
-  virtual const int32_t* GetEGLSurfaceProperties(
-      const int32_t* desired_list) OVERRIDE;
-  virtual bool LoadEGLGLES2Bindings(
+  intptr_t GetNativeDisplay() override;
+  int GetDrmFd() override;
+  const int32_t* GetEGLSurfaceProperties(const int32_t* desired_list) override;
+  bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
-      SetGLGetProcAddressProcCallback set_gl_get_proc_address) OVERRIDE;
-  virtual scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
-      gfx::AcceleratedWidget w) OVERRIDE;
-  virtual scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
-      gfx::AcceleratedWidget widget) OVERRIDE;
-  virtual scoped_refptr<ui::NativePixmap> CreateNativePixmap(
+      SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
+  scoped_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
+      gfx::AcceleratedWidget widget) override;
+  scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
+      gfx::AcceleratedWidget w) override;
+  scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
+      gfx::AcceleratedWidget widget) override;
+  scoped_refptr<ui::NativePixmap> CreateNativePixmap(
+      gfx::AcceleratedWidget widget,
       gfx::Size size,
-      BufferFormat format) OVERRIDE;
-  virtual OverlayCandidatesOzone* GetOverlayCandidates(
-      gfx::AcceleratedWidget w) OVERRIDE;
-  virtual bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                                    int plane_z_order,
-                                    gfx::OverlayTransform plane_transform,
-                                    scoped_refptr<NativePixmap> buffer,
-                                    const gfx::Rect& display_bounds,
-                                    const gfx::RectF& crop_rect) OVERRIDE;
-  virtual bool CanShowPrimaryPlaneAsOverlay() OVERRIDE;
+      BufferFormat format,
+      BufferUsage usage) override;
+  OverlayCandidatesOzone* GetOverlayCandidates(
+      gfx::AcceleratedWidget w) override;
+  bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
+                            int plane_z_order,
+                            gfx::OverlayTransform plane_transform,
+                            scoped_refptr<NativePixmap> buffer,
+                            const gfx::Rect& display_bounds,
+                            const gfx::RectF& crop_rect) override;
+  bool CanShowPrimaryPlaneAsOverlay() override;
+  bool CanCreateNativePixmap(BufferUsage usage) override;
 
  private:
-  DriWindowDelegate* GetOrCreateWindowDelegate(gfx::AcceleratedWidget widget);
+  scoped_refptr<GbmWrapper> GetGbmDevice(gfx::AcceleratedWidget widget);
 
-  gbm_device* device_;  // Not owned.
+  scoped_refptr<GbmWrapper> gbm_;
   bool allow_surfaceless_;
+
+  DrmDeviceManager* drm_device_manager_;  // Not owned.
 
   DISALLOW_COPY_AND_ASSIGN(GbmSurfaceFactory);
 };

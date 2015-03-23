@@ -16,6 +16,7 @@
 #include "base/version.h"
 #include "chrome/browser/component_updater/cld_component_installer.h"
 #include "components/translate/content/browser/browser_cld_data_provider.h"
+#include "components/translate/content/common/cld_data_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -33,8 +34,9 @@ namespace component_updater {
 class CldComponentInstallerTest : public PlatformTest {
  public:
   CldComponentInstallerTest() {}
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     PlatformTest::SetUp();
+    translate::CldDataSource::DisableSanityChecksForTest();
 
     // ScopedTempDir automatically does a recursive delete on the entire
     // directory in its destructor, so no cleanup is required in TearDown.
@@ -51,6 +53,10 @@ class CldComponentInstallerTest : public PlatformTest {
     ASSERT_TRUE(path_now.empty());
   }
 
+  void TearDown() override {
+    // Restore sanity checks.
+    translate::CldDataSource::EnableSanityChecksForTest();
+  }
  protected:
   base::ScopedTempDir temp_dir_;
   CldComponentInstallerTraits traits_;
@@ -70,7 +76,8 @@ TEST_F(CldComponentInstallerTest, SetLatestCldDataFile) {
 TEST_F(CldComponentInstallerTest, VerifyInstallation) {
   // All files are created within a ScopedTempDir, which deletes all
   // children when its destructor is called (at the end of each test).
-  ASSERT_FALSE(traits_.VerifyInstallation(temp_dir_.path()));
+  const base::DictionaryValue manifest;
+  ASSERT_FALSE(traits_.VerifyInstallation(manifest, temp_dir_.path()));
   const base::FilePath data_file_dir =
       temp_dir_.path().Append(FILE_PATH_LITERAL("_platform_specific")).Append(
           FILE_PATH_LITERAL("all"));
@@ -79,7 +86,7 @@ TEST_F(CldComponentInstallerTest, VerifyInstallation) {
   const std::string test_data("fake cld2 data file content here :)");
   ASSERT_EQ(static_cast<int32>(test_data.length()),
             base::WriteFile(data_file, test_data.c_str(), test_data.length()));
-  ASSERT_TRUE(traits_.VerifyInstallation(temp_dir_.path()));
+  ASSERT_TRUE(traits_.VerifyInstallation(manifest, temp_dir_.path()));
 }
 
 TEST_F(CldComponentInstallerTest, OnCustomInstall) {

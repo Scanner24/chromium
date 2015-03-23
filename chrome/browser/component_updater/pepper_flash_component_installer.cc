@@ -30,6 +30,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pepper_flash.h"
 #include "components/component_updater/component_updater_service.h"
+#include "components/update_client/update_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/content_constants.h"
@@ -330,21 +331,24 @@ bool CheckPepperFlashInterfaces(const base::DictionaryValue& manifest) {
 
 }  // namespace
 
-class PepperFlashComponentInstaller : public ComponentInstaller {
+class PepperFlashComponentInstaller : public update_client::ComponentInstaller {
  public:
   explicit PepperFlashComponentInstaller(const Version& version);
 
-  virtual ~PepperFlashComponentInstaller() {}
+  // ComponentInstaller implementation:
+  void OnUpdateError(int error) override;
 
-  virtual void OnUpdateError(int error) OVERRIDE;
+  bool Install(const base::DictionaryValue& manifest,
+               const base::FilePath& unpack_path) override;
 
-  virtual bool Install(const base::DictionaryValue& manifest,
-                       const base::FilePath& unpack_path) OVERRIDE;
+  bool GetInstalledFile(const std::string& file,
+                        base::FilePath* installed_file) override;
 
-  virtual bool GetInstalledFile(const std::string& file,
-                                base::FilePath* installed_file) OVERRIDE;
+  bool Uninstall() override;
 
  private:
+  ~PepperFlashComponentInstaller() override {}
+
   Version current_version_;
 };
 
@@ -393,6 +397,10 @@ bool PepperFlashComponentInstaller::GetInstalledFile(
   return false;
 }
 
+bool PepperFlashComponentInstaller::Uninstall() {
+  return false;
+}
+
 bool CheckPepperFlashManifest(const base::DictionaryValue& manifest,
                               Version* version_out) {
   std::string name;
@@ -438,7 +446,7 @@ namespace {
 void FinishPepperFlashUpdateRegistration(ComponentUpdateService* cus,
                                          const Version& version) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  CrxComponent pepflash;
+  update_client::CrxComponent pepflash;
   pepflash.name = "pepper_flash";
   pepflash.installer = new PepperFlashComponentInstaller(version);
   pepflash.version = version;
@@ -504,7 +512,7 @@ void RegisterPepperFlashComponent(ComponentUpdateService* cus) {
 #if defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)
   // Component updated flash supersedes bundled flash therefore if that one
   // is disabled then this one should never install.
-  CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   if (cmd_line->HasSwitch(switches::kDisableBundledPpapiFlash))
     return;
   BrowserThread::PostTask(BrowserThread::FILE,

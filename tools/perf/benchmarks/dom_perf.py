@@ -7,6 +7,7 @@ import math
 import os
 
 from telemetry import benchmark
+from telemetry import page as page_module
 from telemetry.core import util
 from telemetry.page import page_set
 from telemetry.page import page_test
@@ -38,6 +39,10 @@ SCORE_TRACE_NAME = 'score'
 
 
 class _DomPerfMeasurement(page_test.PageTest):
+  def __init__(self):
+    super(_DomPerfMeasurement, self).__init__(
+        action_name_to_run='RunPageInteractions')
+
   def ValidateAndMeasurePage(self, page, tab, results):
     try:
       def _IsDone():
@@ -66,7 +71,7 @@ class _DomPerfMeasurement(page_test.PageTest):
                            total))
 
 
-@benchmark.Disabled('android', 'linux')
+@benchmark.Disabled('android', 'linux')  # http://crbug.com/458540
 class DomPerf(benchmark.Benchmark):
   """A suite of JavaScript benchmarks for exercising the browser's DOM.
 
@@ -74,6 +79,10 @@ class DomPerf(benchmark.Benchmark):
   Scores are not comparable across benchmark suite versions and higher scores
   means better performance: Bigger is better!"""
   test = _DomPerfMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'dom_perf'
 
   def CreatePageSet(self, options):
     dom_perf_dir = os.path.join(util.GetChromiumSrcDir(), 'data', 'dom_perf')
@@ -91,6 +100,6 @@ class DomPerf(benchmark.Benchmark):
     ]
     ps = page_set.PageSet(file_path=dom_perf_dir)
     for param in run_params:
-      ps.AddPageWithDefaultRunNavigate(
-        'file://run.html?reportInJS=1&run=%s' % param)
+      ps.AddUserStory(page_module.Page(
+          'file://run.html?reportInJS=1&run=%s' % param, ps, ps.base_dir))
     return ps

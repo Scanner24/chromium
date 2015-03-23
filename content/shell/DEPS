@@ -1,8 +1,10 @@
 include_rules = [
+  "+gin/public",
   "+v8/include",
 
   # For chromeos build config
   "+chromeos/dbus",
+  "+device/bluetooth",  # BluetoothAdapterFactory::Shutdown.
 
   # The content_shell is the canonical sample embedder, so it only uses
   # content's public API.
@@ -32,5 +34,10 @@ specific_include_rules = {
   ],
   "content_browser_tests_android\.cc": [
     "+media/base"
+  ],
+  # Test hook.
+  "shell_mojo_test_utils_android\.cc": [
+    "+content/browser/mojo",
+    "+content/common/mojo",
   ],
 }

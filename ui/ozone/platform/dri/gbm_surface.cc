@@ -6,11 +6,12 @@
 
 #include <gbm.h>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "ui/ozone/platform/dri/dri_buffer.h"
 #include "ui/ozone/platform/dri/dri_window_delegate.h"
-#include "ui/ozone/platform/dri/dri_wrapper.h"
 #include "ui/ozone/platform/dri/gbm_buffer_base.h"
+#include "ui/ozone/platform/dri/gbm_wrapper.h"
 #include "ui/ozone/platform/dri/hardware_display_controller.h"
 #include "ui/ozone/platform/dri/scanout_buffer.h"
 
@@ -20,13 +21,14 @@ namespace {
 
 class GbmSurfaceBuffer : public GbmBufferBase {
  public:
-  static scoped_refptr<GbmSurfaceBuffer> CreateBuffer(DriWrapper* dri,
-                                                      gbm_bo* buffer);
+  static scoped_refptr<GbmSurfaceBuffer> CreateBuffer(
+      const scoped_refptr<DriWrapper>& dri,
+      gbm_bo* buffer);
   static scoped_refptr<GbmSurfaceBuffer> GetBuffer(gbm_bo* buffer);
 
  private:
-  GbmSurfaceBuffer(DriWrapper* dri, gbm_bo* bo);
-  virtual ~GbmSurfaceBuffer();
+  GbmSurfaceBuffer(const scoped_refptr<DriWrapper>& dri, gbm_bo* bo);
+  ~GbmSurfaceBuffer() override;
 
   static void Destroy(gbm_bo* buffer, void* data);
 
@@ -40,8 +42,9 @@ class GbmSurfaceBuffer : public GbmBufferBase {
   DISALLOW_COPY_AND_ASSIGN(GbmSurfaceBuffer);
 };
 
-GbmSurfaceBuffer::GbmSurfaceBuffer(DriWrapper* dri, gbm_bo* bo)
-  : GbmBufferBase(dri, bo, true) {
+GbmSurfaceBuffer::GbmSurfaceBuffer(const scoped_refptr<DriWrapper>& dri,
+                                   gbm_bo* bo)
+    : GbmBufferBase(dri, bo, true) {
   if (GetFramebufferId()) {
     self_ = this;
     gbm_bo_set_user_data(bo, this, GbmSurfaceBuffer::Destroy);
@@ -52,7 +55,8 @@ GbmSurfaceBuffer::~GbmSurfaceBuffer() {}
 
 // static
 scoped_refptr<GbmSurfaceBuffer> GbmSurfaceBuffer::CreateBuffer(
-    DriWrapper* dri, gbm_bo* buffer) {
+    const scoped_refptr<DriWrapper>& dri,
+    gbm_bo* buffer) {
   scoped_refptr<GbmSurfaceBuffer> scoped_buffer(new GbmSurfaceBuffer(dri,
                                                                      buffer));
   if (!scoped_buffer->GetFramebufferId())
@@ -76,13 +80,12 @@ void GbmSurfaceBuffer::Destroy(gbm_bo* buffer, void* data) {
 }  // namespace
 
 GbmSurface::GbmSurface(DriWindowDelegate* window_delegate,
-                       gbm_device* device,
-                       DriWrapper* dri)
-    : GbmSurfaceless(window_delegate),
-      gbm_device_(device),
-      dri_(dri),
+                       const scoped_refptr<GbmWrapper>& gbm)
+    : GbmSurfaceless(window_delegate, NULL),
+      gbm_(gbm),
       native_surface_(NULL),
-      current_buffer_(NULL) {
+      current_buffer_(NULL),
+      weak_factory_(this) {
 }
 
 GbmSurface::~GbmSurface() {
@@ -103,12 +106,9 @@ bool GbmSurface::Initialize() {
     size = window_delegate_->GetController()->GetModeSize();
   }
   // TODO(dnicoara) Check underlying system support for pixel format.
-  native_surface_ =
-      gbm_surface_create(gbm_device_,
-                         size.width(),
-                         size.height(),
-                         GBM_BO_FORMAT_XRGB8888,
-                         GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+  native_surface_ = gbm_surface_create(
+      gbm_->device(), size.width(), size.height(), GBM_BO_FORMAT_XRGB8888,
+      GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
 
   if (!native_surface_)
     return false;
@@ -130,15 +130,20 @@ bool GbmSurface::ResizeNativeWindow(const gfx::Size& viewport_size) {
 }
 
 bool GbmSurface::OnSwapBuffers() {
+  return OnSwapBuffersAsync(base::Bind(&base::DoNothing));
+}
+
+bool GbmSurface::OnSwapBuffersAsync(const SwapCompletionCallback& callback) {
   DCHECK(native_surface_);
 
   gbm_bo* pending_buffer = gbm_surface_lock_front_buffer(native_surface_);
   scoped_refptr<GbmSurfaceBuffer> primary =
       GbmSurfaceBuffer::GetBuffer(pending_buffer);
   if (!primary.get()) {
-    primary = GbmSurfaceBuffer::CreateBuffer(dri_, pending_buffer);
+    primary = GbmSurfaceBuffer::CreateBuffer(gbm_, pending_buffer);
     if (!primary.get()) {
       LOG(ERROR) << "Failed to associate the buffer with the controller";
+      callback.Run();
       return false;
     }
   }
@@ -147,15 +152,24 @@ bool GbmSurface::OnSwapBuffers() {
   if (window_delegate_->GetController())
     window_delegate_->GetController()->QueueOverlayPlane(OverlayPlane(primary));
 
-  if (!GbmSurfaceless::OnSwapBuffers())
+  if (!GbmSurfaceless::OnSwapBuffersAsync(
+          base::Bind(&GbmSurface::OnSwapBuffersCallback,
+                     weak_factory_.GetWeakPtr(), callback, pending_buffer))) {
+    callback.Run();
     return false;
+  }
 
+  return true;
+}
+
+void GbmSurface::OnSwapBuffersCallback(const SwapCompletionCallback& callback,
+                                       gbm_bo* pending_buffer) {
   // If there was a frontbuffer, it is no longer active. Release it back to GBM.
   if (current_buffer_)
     gbm_surface_release_buffer(native_surface_, current_buffer_);
 
   current_buffer_ = pending_buffer;
-  return true;
+  callback.Run();
 }
 
 }  // namespace ui

@@ -459,8 +459,8 @@ int MockDiskCache::DoomEntriesSince(const base::Time initial_time,
 
 class MockDiskCache::NotImplementedIterator : public Iterator {
  public:
-  virtual int OpenNextEntry(disk_cache::Entry** next_entry,
-                            const net::CompletionCallback& callback) OVERRIDE {
+  int OpenNextEntry(disk_cache::Entry** next_entry,
+                    const net::CompletionCallback& callback) override {
     return net::ERR_NOT_IMPLEMENTED;
   }
 };
@@ -522,6 +522,10 @@ int MockHttpCache::CreateTransaction(scoped_ptr<net::HttpTransaction>* trans) {
 
 void MockHttpCache::BypassCacheLock() {
   http_cache_.BypassLockForTest();
+}
+
+void MockHttpCache::FailConditionalizations() {
+  http_cache_.FailConditionalizationForTest();
 }
 
 bool MockHttpCache::ReadResponseInfo(disk_cache::Entry* disk_entry,

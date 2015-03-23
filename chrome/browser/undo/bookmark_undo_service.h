@@ -22,43 +22,44 @@ class BookmarkUndoOperation;
 
 // BookmarkUndoService is owned by the profile, and is responsible for observing
 // BookmarkModel changes in order to provide an undo for those changes.
-class BookmarkUndoService : public BaseBookmarkModelObserver,
+class BookmarkUndoService : public bookmarks::BaseBookmarkModelObserver,
                             public KeyedService,
                             public BookmarkRenumberObserver {
  public:
   explicit BookmarkUndoService(Profile* profile);
-  virtual ~BookmarkUndoService();
+  ~BookmarkUndoService() override;
 
   UndoManager* undo_manager() { return &undo_manager_; }
 
  private:
-  // BaseBookmarkModelObserver:
-  virtual void BookmarkModelChanged() OVERRIDE {}
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index) OVERRIDE;
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE;
-  virtual void OnWillRemoveBookmarks(BookmarkModel* model,
-                                     const BookmarkNode* parent,
-                                     int old_index,
-                                     const BookmarkNode* node) OVERRIDE;
-  virtual void OnWillRemoveAllUserBookmarks(BookmarkModel* model) OVERRIDE;
-  virtual void OnWillChangeBookmarkNode(BookmarkModel* model,
-                                        const BookmarkNode* node) OVERRIDE;
-  virtual void OnWillReorderBookmarkNode(BookmarkModel* model,
-                                         const BookmarkNode* node) OVERRIDE;
-  virtual void GroupedBookmarkChangesBeginning(BookmarkModel* model) OVERRIDE;
-  virtual void GroupedBookmarkChangesEnded(BookmarkModel* model) OVERRIDE;
+  // bookmarks::BaseBookmarkModelObserver:
+  void BookmarkModelChanged() override {}
+  void BookmarkModelLoaded(bookmarks::BookmarkModel* model,
+                           bool ids_reassigned) override;
+  void BookmarkModelBeingDeleted(bookmarks::BookmarkModel* model) override;
+  void BookmarkNodeMoved(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* old_parent,
+                         int old_index,
+                         const bookmarks::BookmarkNode* new_parent,
+                         int new_index) override;
+  void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* parent,
+                         int index) override;
+  void OnWillRemoveBookmarks(bookmarks::BookmarkModel* model,
+                             const bookmarks::BookmarkNode* parent,
+                             int old_index,
+                             const bookmarks::BookmarkNode* node) override;
+  void OnWillRemoveAllUserBookmarks(bookmarks::BookmarkModel* model) override;
+  void OnWillChangeBookmarkNode(bookmarks::BookmarkModel* model,
+                                const bookmarks::BookmarkNode* node) override;
+  void OnWillReorderBookmarkNode(bookmarks::BookmarkModel* model,
+                                 const bookmarks::BookmarkNode* node) override;
+  void GroupedBookmarkChangesBeginning(
+      bookmarks::BookmarkModel* model) override;
+  void GroupedBookmarkChangesEnded(bookmarks::BookmarkModel* model) override;
 
   // BookmarkRenumberObserver:
-  virtual void OnBookmarkRenumbered(int64 old_id, int64 new_id) OVERRIDE;
+  void OnBookmarkRenumbered(int64 old_id, int64 new_id) override;
 
   Profile* profile_;
   UndoManager undo_manager_;

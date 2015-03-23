@@ -11,7 +11,7 @@
 #include "grit/theme_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 class WrenchIconPainterTest : public testing::Test,
     public WrenchIconPainter::Delegate {
@@ -20,7 +20,7 @@ class WrenchIconPainterTest : public testing::Test,
     theme_provider_ = ThemeServiceFactory::GetForProfile(&profile_);
   }
 
-  virtual void ScheduleWrenchIconPaint() OVERRIDE { ++schedule_paint_count_; }
+  void ScheduleWrenchIconPaint() override { ++schedule_paint_count_; }
 
  protected:
   base::MessageLoopForUI message_loop_;  // Needed for gfx::Animation.

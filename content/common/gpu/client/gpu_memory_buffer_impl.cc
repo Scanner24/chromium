@@ -4,60 +4,109 @@
 
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 
+#include "base/logging.h"
+#include "base/numerics/safe_math.h"
+#include "content/common/gpu/client/gpu_memory_buffer_impl_shared_memory.h"
 #include "ui/gl/gl_bindings.h"
+
+#if defined(OS_MACOSX)
+#include "content/common/gpu/client/gpu_memory_buffer_impl_io_surface.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "content/common/gpu/client/gpu_memory_buffer_impl_surface_texture.h"
+#endif
+
+#if defined(USE_OZONE)
+#include "content/common/gpu/client/gpu_memory_buffer_impl_ozone_native_buffer.h"
+#endif
 
 namespace content {
 
-GpuMemoryBufferImpl::GpuMemoryBufferImpl(const gfx::Size& size,
-                                         unsigned internalformat,
+GpuMemoryBufferImpl::GpuMemoryBufferImpl(gfx::GpuMemoryBufferId id,
+                                         const gfx::Size& size,
+                                         Format format,
                                          const DestructionCallback& callback)
-    : size_(size),
-      internalformat_(internalformat),
+    : id_(id),
+      size_(size),
+      format_(format),
       callback_(callback),
-      mapped_(false) {
-  DCHECK(IsFormatValid(internalformat));
+      mapped_(false),
+      destruction_sync_point_(0) {
 }
 
 GpuMemoryBufferImpl::~GpuMemoryBufferImpl() {
-  callback_.Run();
+  callback_.Run(destruction_sync_point_);
 }
 
 // static
-bool GpuMemoryBufferImpl::IsFormatValid(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
-    case GL_RGB8_OES:
-      return true;
-    default:
-      return false;
-  }
-}
-
-// static
-bool GpuMemoryBufferImpl::IsUsageValid(unsigned usage) {
-  switch (usage) {
-    case GL_IMAGE_MAP_CHROMIUM:
-    case GL_IMAGE_SCANOUT_CHROMIUM:
-      return true;
-    default:
-      return false;
-  }
-}
-
-// static
-size_t GpuMemoryBufferImpl::BytesPerPixel(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
-    case GL_RGB8_OES:
-      return 4;
+scoped_ptr<GpuMemoryBufferImpl> GpuMemoryBufferImpl::CreateFromHandle(
+    const gfx::GpuMemoryBufferHandle& handle,
+    const gfx::Size& size,
+    Format format,
+    const DestructionCallback& callback) {
+  switch (handle.type) {
+    case gfx::SHARED_MEMORY_BUFFER:
+      return GpuMemoryBufferImplSharedMemory::CreateFromHandle(
+          handle, size, format, callback);
+#if defined(OS_MACOSX)
+    case gfx::IO_SURFACE_BUFFER:
+      return GpuMemoryBufferImplIOSurface::CreateFromHandle(
+          handle, size, format, callback);
+#endif
+#if defined(OS_ANDROID)
+    case gfx::SURFACE_TEXTURE_BUFFER:
+      return GpuMemoryBufferImplSurfaceTexture::CreateFromHandle(
+          handle, size, format, callback);
+#endif
+#if defined(USE_OZONE)
+    case gfx::OZONE_NATIVE_BUFFER:
+      return GpuMemoryBufferImplOzoneNativeBuffer::CreateFromHandle(
+          handle, size, format, callback);
+#endif
     default:
       NOTREACHED();
-      return 0;
+      return scoped_ptr<GpuMemoryBufferImpl>();
   }
 }
 
-bool GpuMemoryBufferImpl::IsMapped() const { return mapped_; }
+// static
+GpuMemoryBufferImpl* GpuMemoryBufferImpl::FromClientBuffer(
+    ClientBuffer buffer) {
+  return reinterpret_cast<GpuMemoryBufferImpl*>(buffer);
+}
+
+// static
+bool GpuMemoryBufferImpl::StrideInBytes(size_t width,
+                                        Format format,
+                                        size_t* stride_in_bytes) {
+  base::CheckedNumeric<size_t> s = width;
+  switch (format) {
+    case RGBA_8888:
+    case RGBX_8888:
+    case BGRA_8888:
+      s *= 4;
+      if (!s.IsValid())
+        return false;
+
+      *stride_in_bytes = s.ValueOrDie();
+      return true;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+gfx::GpuMemoryBuffer::Format GpuMemoryBufferImpl::GetFormat() const {
+  return format_;
+}
+
+bool GpuMemoryBufferImpl::IsMapped() const {
+  return mapped_;
+}
+
+ClientBuffer GpuMemoryBufferImpl::AsClientBuffer() {
+  return reinterpret_cast<ClientBuffer>(this);
+}
 
 }  // namespace content

@@ -58,7 +58,7 @@ class DOMStorageAreaTest : public testing::Test {
   class VerifyChangesCommittedDatabase : public DOMStorageDatabase {
    public:
     VerifyChangesCommittedDatabase() {}
-    virtual ~VerifyChangesCommittedDatabase() {
+    ~VerifyChangesCommittedDatabase() override {
       const base::string16 kKey(ASCIIToUTF16("key"));
       const base::string16 kValue(ASCIIToUTF16("value"));
       DOMStorageValuesMap values;
@@ -443,7 +443,7 @@ TEST_F(DOMStorageAreaTest, DatabaseFileNames) {
       "file__0.localstorage-journal" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kCases); ++i) {
+  for (size_t i = 0; i < arraysize(kCases); ++i) {
     GURL origin = GURL(kCases[i].origin).GetOrigin();
     base::FilePath file_name =
         base::FilePath().AppendASCII(kCases[i].file_name);
@@ -470,6 +470,53 @@ TEST_F(DOMStorageAreaTest, DatabaseFileNames) {
       base::FilePath().AppendASCII(".extensiononly-journal"),
       DOMStorageDatabase::GetJournalFilePath(
           base::FilePath().AppendASCII(".extensiononly")));
+}
+
+TEST_F(DOMStorageAreaTest, RateLimiter) {
+  // Limit to 1000 samples per second
+  DOMStorageArea::RateLimiter rate_limiter(
+      1000, base::TimeDelta::FromSeconds(1));
+
+  // No samples have been added so no time/delay should be needed.
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeTimeNeeded());
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeDelayNeeded(base::TimeDelta()));
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeDelayNeeded(base::TimeDelta::FromDays(1)));
+
+  // Add a seconds worth of samples.
+  rate_limiter.add_samples(1000);
+  EXPECT_EQ(base::TimeDelta::FromSeconds(1),
+            rate_limiter.ComputeTimeNeeded());
+  EXPECT_EQ(base::TimeDelta::FromSeconds(1),
+            rate_limiter.ComputeDelayNeeded(base::TimeDelta()));
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeDelayNeeded(base::TimeDelta::FromSeconds(1)));
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(250),
+            rate_limiter.ComputeDelayNeeded(
+                base::TimeDelta::FromMilliseconds(750)));
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeDelayNeeded(
+                base::TimeDelta::FromDays(1)));
+
+  // And another half seconds worth.
+  rate_limiter.add_samples(500);
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(1500),
+            rate_limiter.ComputeTimeNeeded());
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(1500),
+            rate_limiter.ComputeDelayNeeded(base::TimeDelta()));
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(500),
+            rate_limiter.ComputeDelayNeeded(base::TimeDelta::FromSeconds(1)));
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(750),
+            rate_limiter.ComputeDelayNeeded(
+                base::TimeDelta::FromMilliseconds(750)));
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeDelayNeeded(
+                base::TimeDelta::FromMilliseconds(1500)));
+  EXPECT_EQ(base::TimeDelta(),
+            rate_limiter.ComputeDelayNeeded(
+                base::TimeDelta::FromDays(1)));
 }
 
 }  // namespace content

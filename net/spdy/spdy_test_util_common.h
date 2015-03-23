@@ -125,7 +125,7 @@ class StreamReleaserCallback : public TestCompletionCallbackBase {
  public:
   StreamReleaserCallback();
 
-  virtual ~StreamReleaserCallback();
+  ~StreamReleaserCallback() override;
 
   // Returns a callback that releases |request|'s stream.
   CompletionCallback MakeCallback(SpdyStreamRequest* request);
@@ -157,11 +157,11 @@ class MockECSignatureCreator : public crypto::ECSignatureCreator {
   explicit MockECSignatureCreator(crypto::ECPrivateKey* key);
 
   // crypto::ECSignatureCreator
-  virtual bool Sign(const uint8* data,
-                    int data_len,
-                    std::vector<uint8>* signature) OVERRIDE;
-  virtual bool DecodeSignature(const std::vector<uint8>& signature,
-                               std::vector<uint8>* out_raw_sig) OVERRIDE;
+  bool Sign(const uint8* data,
+            int data_len,
+            std::vector<uint8>* signature) override;
+  bool DecodeSignature(const std::vector<uint8>& signature,
+                       std::vector<uint8>* out_raw_sig) override;
 
  private:
   crypto::ECPrivateKey* key_;
@@ -173,11 +173,10 @@ class MockECSignatureCreator : public crypto::ECSignatureCreator {
 class MockECSignatureCreatorFactory : public crypto::ECSignatureCreatorFactory {
  public:
   MockECSignatureCreatorFactory();
-  virtual ~MockECSignatureCreatorFactory();
+  ~MockECSignatureCreatorFactory() override;
 
   // crypto::ECSignatureCreatorFactory
-  virtual crypto::ECSignatureCreator* Create(
-      crypto::ECPrivateKey* key) OVERRIDE;
+  crypto::ECSignatureCreator* Create(crypto::ECPrivateKey* key) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreatorFactory);
@@ -223,7 +222,6 @@ struct SpdySessionDependencies {
   bool force_spdy_over_ssl;
   bool force_spdy_always;
   bool use_alternate_protocols;
-  bool enable_websocket_over_spdy;
   NetLog* net_log;
 };
 
@@ -232,7 +230,7 @@ class SpdyURLRequestContext : public URLRequestContext {
   SpdyURLRequestContext(NextProto protocol,
                         bool force_spdy_over_ssl,
                         bool force_spdy_always);
-  virtual ~SpdyURLRequestContext();
+  ~SpdyURLRequestContext() override;
 
   MockClientSocketFactory& socket_factory() { return socket_factory_; }
 
@@ -438,7 +436,8 @@ class SpdyTestUtil {
   SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
                                   int extra_header_count,
                                   int stream_id,
-                                  RequestPriority priority) const;
+                                  RequestPriority priority,
+                                  const HostPortPair& host_port_pair) const;
 
   // Constructs a standard SPDY push SYN frame.
   // |extra_headers| are the extra header-value pairs, which typically
@@ -553,8 +552,9 @@ class SpdyTestUtil {
 
   NextProto protocol() const { return protocol_; }
   SpdyMajorVersion spdy_version() const { return spdy_version_; }
-  bool is_spdy2() const { return protocol_ < kProtoSPDY3; }
-  bool include_version_header() const { return protocol_ < kProtoSPDY4; }
+  bool include_version_header() const {
+    return protocol_ < kProtoSPDY4MinimumVersion;
+  }
   scoped_ptr<SpdyFramer> CreateFramer(bool compressed) const;
 
   const char* GetMethodKey() const;

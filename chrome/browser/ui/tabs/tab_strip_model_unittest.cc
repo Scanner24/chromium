@@ -9,7 +9,6 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -59,7 +58,7 @@ class DeleteWebContentsOnDestroyedObserver
         tab_strip_(tab_strip) {
   }
 
-  virtual void WebContentsDestroyed() OVERRIDE {
+  void WebContentsDestroyed() override {
     WebContents* tab_to_delete = tab_to_delete_;
     tab_to_delete_ = NULL;
     TabStripModel* tab_strip_to_delete = tab_strip_;
@@ -78,11 +77,11 @@ class DeleteWebContentsOnDestroyedObserver
 class TabStripDummyDelegate : public TestTabStripModelDelegate {
  public:
   TabStripDummyDelegate() : run_unload_(false) {}
-  virtual ~TabStripDummyDelegate() {}
+  ~TabStripDummyDelegate() override {}
 
   void set_run_unload_listener(bool value) { run_unload_ = value; }
 
-  virtual bool RunUnloadListenerBeforeClosing(WebContents* contents) OVERRIDE {
+  bool RunUnloadListenerBeforeClosing(WebContents* contents) override {
     return run_unload_;
   }
 
@@ -98,7 +97,7 @@ const char kTabStripModelTestIDUserDataKey[] = "TabStripModelTestIDUserData";
 class TabStripModelTestIDUserData : public base::SupportsUserData::Data {
  public:
   explicit TabStripModelTestIDUserData(int id) : id_(id) {}
-  virtual ~TabStripModelTestIDUserData() {}
+  ~TabStripModelTestIDUserData() override {}
   int id() { return id_; }
 
  private:
@@ -113,18 +112,15 @@ class DummySingleWebContentsDialogManager
       web_modal::SingleWebContentsDialogManagerDelegate* delegate)
       : delegate_(delegate),
         dialog_(dialog) {}
-  virtual ~DummySingleWebContentsDialogManager() {}
+  ~DummySingleWebContentsDialogManager() override {}
 
-  virtual void Show() OVERRIDE {}
-  virtual void Hide() OVERRIDE {}
-  virtual void Close() OVERRIDE {
-    delegate_->WillClose(dialog_);
-  }
-  virtual void Focus() OVERRIDE {}
-  virtual void Pulse() OVERRIDE {}
-  virtual void HostChanged(
-      web_modal::WebContentsModalDialogHost* new_host) OVERRIDE {}
-  virtual NativeWebContentsModalDialog dialog() OVERRIDE { return dialog_; }
+  void Show() override {}
+  void Hide() override {}
+  void Close() override { delegate_->WillClose(dialog_); }
+  void Focus() override {}
+  void Pulse() override {}
+  void HostChanged(web_modal::WebContentsModalDialogHost* new_host) override {}
+  NativeWebContentsModalDialog dialog() override { return dialog_; }
 
  private:
   web_modal::SingleWebContentsDialogManagerDelegate* delegate_;
@@ -143,15 +139,15 @@ class TabBlockedStateTestBrowser
     tab_strip_model_->AddObserver(this);
   }
 
-  virtual ~TabBlockedStateTestBrowser() {
+  ~TabBlockedStateTestBrowser() override {
     tab_strip_model_->RemoveObserver(this);
   }
 
  private:
   // TabStripModelObserver
-  virtual void TabInsertedAt(WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE {
+  void TabInsertedAt(WebContents* contents,
+                     int index,
+                     bool foreground) override {
     web_modal::WebContentsModalDialogManager* manager =
         web_modal::WebContentsModalDialogManager::FromWebContents(contents);
     if (manager)
@@ -159,8 +155,8 @@ class TabBlockedStateTestBrowser
   }
 
   // WebContentsModalDialogManagerDelegate
-  virtual void SetWebContentsBlocked(content::WebContents* contents,
-                                     bool blocked) OVERRIDE {
+  void SetWebContentsBlocked(content::WebContents* contents,
+                             bool blocked) override {
     int index = tab_strip_model_->GetIndexOfWebContents(contents);
     ASSERT_GE(index, 0);
     tab_strip_model_->SetTabBlocked(index, blocked);
@@ -186,6 +182,12 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
     EXPECT_EQ(retval->GetRenderProcessHost(),
               web_contents->GetRenderProcessHost());
     return retval;
+  }
+
+  WebContents* CreateWebContentsWithID(int id) {
+    WebContents* contents = CreateWebContents();
+    SetID(contents, id);
+    return contents;
   }
 
   // Sets the id of the specified contents.
@@ -242,11 +244,8 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
                                        int tab_count,
                                        int pinned_count,
                                        const std::string& selected_tabs) {
-    for (int i = 0; i < tab_count; ++i) {
-      WebContents* contents = CreateWebContents();
-      SetID(contents, i);
-      model->AppendWebContents(contents, true);
-    }
+    for (int i = 0; i < tab_count; ++i)
+      model->AppendWebContents(CreateWebContentsWithID(i), true);
     for (int i = 0; i < pinned_count; ++i)
       model->SetTabPinned(i, true);
 
@@ -269,7 +268,7 @@ class MockTabStripModelObserver : public TabStripModelObserver {
       : empty_(true),
         deleted_(false),
         model_(model) {}
-  virtual ~MockTabStripModelObserver() {}
+  ~MockTabStripModelObserver() override {}
 
   enum TabStripModelObserverAction {
     INSERT,
@@ -348,79 +347,71 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   }
 
   // TabStripModelObserver implementation:
-  virtual void TabInsertedAt(WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE {
+  void TabInsertedAt(WebContents* contents,
+                     int index,
+                     bool foreground) override {
     empty_ = false;
     State s(contents, index, INSERT);
     s.foreground = foreground;
     states_.push_back(s);
   }
-  virtual void ActiveTabChanged(WebContents* old_contents,
-                                WebContents* new_contents,
-                                int index,
-                                int reason) OVERRIDE {
+  void ActiveTabChanged(WebContents* old_contents,
+                        WebContents* new_contents,
+                        int index,
+                        int reason) override {
     State s(new_contents, index, ACTIVATE);
     s.src_contents = old_contents;
     s.change_reason = reason;
     states_.push_back(s);
   }
-  virtual void TabSelectionChanged(
-      TabStripModel* tab_strip_model,
-      const ui::ListSelectionModel& old_model) OVERRIDE {
+  void TabSelectionChanged(TabStripModel* tab_strip_model,
+                           const ui::ListSelectionModel& old_model) override {
     State s(model()->GetActiveWebContents(), model()->active_index(), SELECT);
     s.src_contents = model()->GetWebContentsAt(old_model.active());
     s.src_index = old_model.active();
     states_.push_back(s);
   }
-  virtual void TabMoved(WebContents* contents,
-                        int from_index,
-                        int to_index) OVERRIDE {
+  void TabMoved(WebContents* contents, int from_index, int to_index) override {
     State s(contents, to_index, MOVE);
     s.src_index = from_index;
     states_.push_back(s);
   }
 
-  virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            WebContents* contents,
-                            int index) OVERRIDE {
+  void TabClosingAt(TabStripModel* tab_strip_model,
+                    WebContents* contents,
+                    int index) override {
     states_.push_back(State(contents, index, CLOSE));
   }
-  virtual void TabDetachedAt(WebContents* contents, int index) OVERRIDE {
+  void TabDetachedAt(WebContents* contents, int index) override {
     states_.push_back(State(contents, index, DETACH));
   }
-  virtual void TabDeactivated(WebContents* contents) OVERRIDE {
+  void TabDeactivated(WebContents* contents) override {
     states_.push_back(State(contents, model()->active_index(), DEACTIVATE));
   }
-  virtual void TabChangedAt(WebContents* contents,
-                            int index,
-                            TabChangeType change_type) OVERRIDE {
+  void TabChangedAt(WebContents* contents,
+                    int index,
+                    TabChangeType change_type) override {
     states_.push_back(State(contents, index, CHANGE));
   }
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             WebContents* old_contents,
-                             WebContents* new_contents,
-                             int index) OVERRIDE {
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     WebContents* old_contents,
+                     WebContents* new_contents,
+                     int index) override {
     State s(new_contents, index, REPLACED);
     s.src_contents = old_contents;
     states_.push_back(s);
   }
-  virtual void TabPinnedStateChanged(WebContents* contents,
-                                     int index) OVERRIDE {
+  void TabPinnedStateChanged(WebContents* contents, int index) override {
     states_.push_back(State(contents, index, PINNED));
   }
-  virtual void TabStripEmpty() OVERRIDE {
-    empty_ = true;
-  }
-  virtual void WillCloseAllTabs() OVERRIDE {
+  void TabStripEmpty() override { empty_ = true; }
+  void WillCloseAllTabs() override {
     states_.push_back(State(NULL, -1, CLOSE_ALL));
   }
-  virtual void CloseAllTabsCanceled() OVERRIDE {
+  void CloseAllTabsCanceled() override {
     states_.push_back(State(NULL, -1, CLOSE_ALL_CANCELED));
   }
-  virtual void TabStripModelDeleted() OVERRIDE {
-    deleted_ = true;
-  }
+  void TabStripModelDeleted() override { deleted_ = true; }
 
   void ClearStates() {
     states_.clear();
@@ -450,8 +441,7 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
 
   typedef MockTabStripModelObserver::State State;
 
-  WebContents* contents1 = CreateWebContents();
-  SetID(contents1, 1);
+  WebContents* contents1 = CreateWebContentsWithID(1);
 
   // Note! The ordering of these tests is important, each subsequent test
   // builds on the state established in the previous. This is important if you
@@ -478,8 +468,7 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
   EXPECT_EQ("1", GetTabStripStateString(tabstrip));
 
   // Test InsertWebContentsAt, foreground tab.
-  WebContents* contents2 = CreateWebContents();
-  SetID(contents2, 2);
+  WebContents* contents2 = CreateWebContentsWithID(2);
   {
     tabstrip.InsertWebContentsAt(1, contents2, TabStripModel::ADD_ACTIVE);
 
@@ -502,8 +491,7 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
   EXPECT_EQ("1 2", GetTabStripStateString(tabstrip));
 
   // Test InsertWebContentsAt, background tab.
-  WebContents* contents3 = CreateWebContents();
-  SetID(contents3, 3);
+  WebContents* contents3 = CreateWebContentsWithID(3);
   {
     tabstrip.InsertWebContentsAt(2, contents3, TabStripModel::ADD_NONE);
 
@@ -870,6 +858,126 @@ TEST_F(TabStripModelTest, TestInsertionIndexDetermination) {
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextWebContentsOpenedBy(opener, 3, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextWebContentsOpenedBy(opener, 3, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener, 1));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests that non-adjacent tabs with an opener are ignored when deciding where
+// to position tabs.
+TEST_F(TabStripModelTest, TestInsertionIndexDeterminationAfterDragged) {
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+  EXPECT_TRUE(tabstrip.empty());
+
+  // Start with three tabs, of which the first is active.
+  WebContents* opener1 = CreateWebContentsWithID(1);
+  tabstrip.AppendWebContents(opener1, true /* foreground */);
+  tabstrip.AppendWebContents(CreateWebContentsWithID(2), false);
+  tabstrip.AppendWebContents(CreateWebContentsWithID(3), false);
+  EXPECT_EQ("1 2 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Open a link in a new background tab.
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(11),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 2 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Drag that tab (which activates it) one to the right.
+  tabstrip.MoveWebContentsAt(1, 2, true /* select_after_move */);
+  EXPECT_EQ("1 2 11 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(11, GetID(tabstrip.GetActiveWebContents()));
+  // It should no longer be counted by GetIndexOfLastWebContentsOpenedBy,
+  // since there is a tab in between, even though its opener is unchanged.
+  // TODO(johnme): Maybe its opener should be reset when it's dragged away.
+  EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+  EXPECT_EQ(opener1, tabstrip.GetOpenerOfWebContentsAt(2));
+
+  // Activate the parent tab again.
+  tabstrip.ActivateTabAt(0, true /* user_gesture */);
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+
+  // Open another link in a new background tab.
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(12),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  // Tab 12 should be next to 1, and considered opened by it.
+  EXPECT_EQ("1 12 2 11 3", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+// Tests that grandchild tabs are considered to be opened by their grandparent
+// tab when deciding where to position tabs.
+TEST_F(TabStripModelTest, TestInsertionIndexDeterminationNestedOpener) {
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+  EXPECT_TRUE(tabstrip.empty());
+
+  // Start with two tabs, of which the first is active:
+  WebContents* opener1 = CreateWebContentsWithID(1);
+  tabstrip.AppendWebContents(opener1, true /* foreground */);
+  tabstrip.AppendWebContents(CreateWebContentsWithID(2), false);
+  EXPECT_EQ("1 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(-1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Open a link in a new background child tab.
+  WebContents* child11 = CreateWebContentsWithID(11);
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               child11,
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  EXPECT_EQ(1, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+
+  // Activate the child tab:
+  tabstrip.ActivateTabAt(1, true /* user_gesture */);
+  EXPECT_EQ(11, GetID(tabstrip.GetActiveWebContents()));
+
+  // Open a link in a new background grandchild tab.
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(111),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 111 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(11, GetID(tabstrip.GetActiveWebContents()));
+  // The grandchild tab should be counted by GetIndexOfLastWebContentsOpenedBy
+  // as opened by both its parent (child11) and grandparent (opener1).
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(child11, 1));
+
+  // Activate the parent tab again:
+  tabstrip.ActivateTabAt(0, true /* user_gesture */);
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+
+  // Open another link in a new background child tab (a sibling of child11).
+  tabstrip.InsertWebContentsAt(GetInsertionIndex(&tabstrip),
+                               CreateWebContentsWithID(12),
+                               TabStripModel::ADD_INHERIT_GROUP);
+  EXPECT_EQ("1 11 111 12 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  // opener1 has three adjacent descendants (11, 111, 12)
+  EXPECT_EQ(3, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
+  // child11 has only one adjacent descendant (111)
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(child11, 1));
+
+  // Closing a tab should cause its children to inherit the tab's opener.
+  EXPECT_EQ(true, tabstrip.CloseWebContentsAt(
+      1,
+      TabStripModel::CLOSE_USER_GESTURE |
+      TabStripModel::CLOSE_CREATE_HISTORICAL_TAB));
+  EXPECT_EQ("1 111 12 2", GetTabStripStateString(tabstrip));
+  EXPECT_EQ(1, GetID(tabstrip.GetActiveWebContents()));
+  // opener1 is now the opener of 111, so has two adjacent descendants (111, 12)
+  EXPECT_EQ(opener1, tabstrip.GetOpenerOfWebContentsAt(1));
+  EXPECT_EQ(2, tabstrip.GetIndexOfLastWebContentsOpenedBy(opener1, 0));
 
   tabstrip.CloseAllTabs();
   EXPECT_TRUE(tabstrip.empty());
@@ -1829,19 +1937,15 @@ TEST_F(TabStripModelTest, Apps) {
   scoped_refptr<Extension> extension_app(
       Extension::Create(path, extensions::Manifest::INVALID_LOCATION,
                         manifest, Extension::NO_FLAGS, &error));
-  WebContents* contents1 = CreateWebContents();
+  WebContents* contents1 = CreateWebContentsWithID(1);
   extensions::TabHelper::CreateForWebContents(contents1);
   extensions::TabHelper::FromWebContents(contents1)
       ->SetExtensionApp(extension_app.get());
-  WebContents* contents2 = CreateWebContents();
+  WebContents* contents2 = CreateWebContentsWithID(2);
   extensions::TabHelper::CreateForWebContents(contents2);
   extensions::TabHelper::FromWebContents(contents2)
       ->SetExtensionApp(extension_app.get());
-  WebContents* contents3 = CreateWebContents();
-
-  SetID(contents1, 1);
-  SetID(contents2, 2);
-  SetID(contents3, 3);
+  WebContents* contents3 = CreateWebContentsWithID(3);
 
   // Note! The ordering of these tests is important, each subsequent test
   // builds on the state established in the previous. This is important if you
@@ -1951,13 +2055,9 @@ TEST_F(TabStripModelTest, Pinning) {
 
   typedef MockTabStripModelObserver::State State;
 
-  WebContents* contents1 = CreateWebContents();
-  WebContents* contents2 = CreateWebContents();
-  WebContents* contents3 = CreateWebContents();
-
-  SetID(contents1, 1);
-  SetID(contents2, 2);
-  SetID(contents3, 3);
+  WebContents* contents1 = CreateWebContentsWithID(1);
+  WebContents* contents2 = CreateWebContentsWithID(2);
+  WebContents* contents3 = CreateWebContentsWithID(3);
 
   // Note! The ordering of these tests is important, each subsequent test
   // builds on the state established in the previous. This is important if you
@@ -2086,8 +2186,7 @@ TEST_F(TabStripModelTest, Pinning) {
     observer.ClearStates();
   }
 
-  WebContents* contents4 = CreateWebContents();
-  SetID(contents4, 4);
+  WebContents* contents4 = CreateWebContentsWithID(4);
 
   // Insert "4" between "1" and "3". As "1" and "4" are pinned, "4" should end
   // up after them.
@@ -2309,7 +2408,7 @@ TEST_F(TabStripModelTest, MoveSelectedTabsTo) {
     { 7, 4, "2 3 4", 3, "0p 1p 2p 3p 5 4 6" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
+  for (size_t i = 0; i < arraysize(test_data); ++i) {
     TabStripDummyDelegate delegate;
     TabStripModel strip(&delegate, profile());
     ASSERT_NO_FATAL_FAILURE(

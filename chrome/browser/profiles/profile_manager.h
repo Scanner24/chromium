@@ -34,7 +34,7 @@ class ProfileManager : public base::NonThreadSafe,
   typedef base::Callback<void(Profile*, Profile::CreateStatus)> CreateCallback;
 
   explicit ProfileManager(const base::FilePath& user_data_dir);
-  virtual ~ProfileManager();
+  ~ProfileManager() override;
 
 #if defined(ENABLE_SESSION_SERVICE)
   // Invokes SessionServiceFactory::ShutdownForProfile() for all profiles.
@@ -74,6 +74,11 @@ class ProfileManager : public base::NonThreadSafe,
   // Returns a profile for a specific profile directory within the user data
   // dir. This will return an existing profile it had already been created,
   // otherwise it will create and manage it.
+  // Because this method might synchronously create a new profile, it should
+  // only be called for the initial profile or in tests, where blocking is
+  // acceptable.
+  // TODO(bauerb): Migrate calls from other code to GetProfileByPath(), then
+  // make this method private.
   Profile* GetProfile(const base::FilePath& profile_dir);
 
   // Returns total number of profiles available on this machine.
@@ -113,13 +118,13 @@ class ProfileManager : public base::NonThreadSafe,
   std::vector<Profile*> GetLastOpenedProfiles(
       const base::FilePath& user_data_dir);
 
-  // Returns created profiles. Note, profiles order is NOT guaranteed to be
-  // related with the creation order.
+  // Returns created and fully initialized profiles. Note, profiles order is NOT
+  // guaranteed to be related with the creation order.
   std::vector<Profile*> GetLoadedProfiles() const;
 
-  // If a profile with the given path is currently managed by this object,
-  // return a pointer to the corresponding Profile object;
-  // otherwise return NULL.
+  // If a profile with the given path is currently managed by this object and
+  // fully initialized, return a pointer to the corresponding Profile object;
+  // otherwise return null.
   Profile* GetProfileByPath(const base::FilePath& path) const;
 
   // Creates a new profile in the next available multiprofile directory.
@@ -138,6 +143,9 @@ class ProfileManager : public base::NonThreadSafe,
 
   // Returns the full path to be used for guest profiles.
   static base::FilePath GetGuestProfilePath();
+
+  // Returns the full path to be used for system profiles.
+  static base::FilePath GetSystemProfilePath();
 
   // Get the path of the next profile directory and increment the internal
   // count.
@@ -188,14 +196,14 @@ class ProfileManager : public base::NonThreadSafe,
   bool IsLoggedIn() const { return logged_in_; }
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Profile::Delegate implementation:
-  virtual void OnProfileCreated(Profile* profile,
-                                bool success,
-                                bool is_new_profile) OVERRIDE;
+  void OnProfileCreated(Profile* profile,
+                        bool success,
+                        bool is_new_profile) override;
 
  protected:
   // Does final initial actions.
@@ -245,7 +253,7 @@ class ProfileManager : public base::NonThreadSafe,
   // and we can't create it.
   // The profile used can be overridden by using --login-profile on cros.
   Profile* GetActiveUserOrOffTheRecordProfileFromPath(
-               const base::FilePath& user_data_dir);
+      const base::FilePath& user_data_dir);
 
   // Adds a pre-existing Profile object to the set managed by this
   // ProfileManager. This ProfileManager takes ownership of the Profile.
@@ -253,16 +261,27 @@ class ProfileManager : public base::NonThreadSafe,
   // Returns true if the profile was added, false otherwise.
   bool AddProfile(Profile* profile);
 
-  // Schedules the profile at the given path to be deleted on shutdown.
-  void FinishDeletingProfile(const base::FilePath& profile_dir);
+  // Synchronously creates and returns a profile. This handles both the full
+  // creation and adds it to the set managed by this ProfileManager.
+  Profile* CreateAndInitializeProfile(const base::FilePath& profile_dir);
+
+  // Schedules the profile at the given path to be deleted on shutdown,
+  // and marks the new profile as active.
+  void FinishDeletingProfile(const base::FilePath& profile_dir,
+                             const base::FilePath& new_active_profile_dir);
 
   // Registers profile with given info. Returns pointer to created ProfileInfo
   // entry.
   ProfileInfo* RegisterProfile(Profile* profile, bool created);
 
-  // Returns ProfileInfo associated with given |path|, registred earlier with
+  // Returns ProfileInfo associated with given |path|, registered earlier with
   // RegisterProfile.
   ProfileInfo* GetProfileInfoByPath(const base::FilePath& path) const;
+
+  // Returns a registered profile. In contrast to GetProfileByPath(), this will
+  // also return a profile that is not fully initialized yet, so this method
+  // should be used carefully.
+  Profile* GetProfileByPathInternal(const base::FilePath& path) const;
 
   // Adds |profile| to the profile info cache if it hasn't been added yet.
   void AddProfileToCache(Profile* profile);
@@ -287,12 +306,12 @@ class ProfileManager : public base::NonThreadSafe,
   class BrowserListObserver : public chrome::BrowserListObserver {
    public:
     explicit BrowserListObserver(ProfileManager* manager);
-    virtual ~BrowserListObserver();
+    ~BrowserListObserver() override;
 
     // chrome::BrowserListObserver implementation.
-    virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
-    virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
-    virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
+    void OnBrowserAdded(Browser* browser) override;
+    void OnBrowserRemoved(Browser* browser) override;
+    void OnBrowserSetLastActive(Browser* browser) override;
 
    private:
     ProfileManager* profile_manager_;
@@ -300,7 +319,6 @@ class ProfileManager : public base::NonThreadSafe,
   };
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
-#if defined(OS_MACOSX)
   // If the |loaded_profile| has been loaded successfully (according to
   // |status|) and isn't already scheduled for deletion, then finishes adding
   // |profile_to_delete_dir| to the queue of profiles to be deleted, and updates
@@ -312,7 +330,6 @@ class ProfileManager : public base::NonThreadSafe,
       const CreateCallback& original_callback,
       Profile* loaded_profile,
       Profile::CreateStatus status);
-#endif
 
   content::NotificationRegistrar registrar_;
 
@@ -359,8 +376,8 @@ class ProfileManagerWithoutInit : public ProfileManager {
   explicit ProfileManagerWithoutInit(const base::FilePath& user_data_dir);
 
  protected:
-  virtual void DoFinalInitForServices(Profile*, bool) OVERRIDE {}
-  virtual void DoFinalInitLogging(Profile*) OVERRIDE {}
+  void DoFinalInitForServices(Profile*, bool) override {}
+  void DoFinalInitLogging(Profile*) override {}
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_MANAGER_H_

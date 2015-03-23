@@ -13,22 +13,19 @@ namespace android_webview {
 class AwDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
  public:
   AwDevToolsManagerDelegate();
-  virtual ~AwDevToolsManagerDelegate();
+  ~AwDevToolsManagerDelegate() override;
 
   // content::DevToolsManagerDelegate implementation.
-  virtual void Inspect(
-      content::BrowserContext* browser_context,
-      content::DevToolsAgentHost* agent_host) OVERRIDE {}
-  virtual void DevToolsAgentStateChanged(
+  void Inspect(content::BrowserContext* browser_context,
+               content::DevToolsAgentHost* agent_host) override {}
+  void DevToolsAgentStateChanged(content::DevToolsAgentHost* agent_host,
+                                 bool attached) override {}
+  base::DictionaryValue* HandleCommand(
       content::DevToolsAgentHost* agent_host,
-      bool attached) OVERRIDE {}
-  virtual base::DictionaryValue* HandleCommand(
-      content::DevToolsAgentHost* agent_host,
-      base::DictionaryValue* command_dict) OVERRIDE;
-  virtual scoped_ptr<content::DevToolsTarget> CreateNewTarget(
-      const GURL& url) OVERRIDE;
-  virtual void EnumerateTargets(TargetCallback callback) OVERRIDE;
-  virtual std::string GetPageThumbnailData(const GURL& url) OVERRIDE;
+      base::DictionaryValue* command_dict) override;
+  scoped_ptr<content::DevToolsTarget> CreateNewTarget(const GURL& url) override;
+  void EnumerateTargets(TargetCallback callback) override;
+  std::string GetPageThumbnailData(const GURL& url) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AwDevToolsManagerDelegate);

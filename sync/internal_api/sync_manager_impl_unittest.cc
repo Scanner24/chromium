@@ -95,11 +95,25 @@ using syncable::kEncryptedString;
 
 namespace {
 
-// Makes a non-folder child of the root node.  Returns the id of the
+// Makes a child node under the type root folder.  Returns the id of the
 // newly-created node.
 int64 MakeNode(UserShare* share,
                ModelType model_type,
                const std::string& client_tag) {
+  WriteTransaction trans(FROM_HERE, share);
+  WriteNode node(&trans);
+  WriteNode::InitUniqueByCreationResult result =
+      node.InitUniqueByCreation(model_type, client_tag);
+  EXPECT_EQ(WriteNode::INIT_SUCCESS, result);
+  node.SetIsFolder(false);
+  return node.GetId();
+}
+
+// Makes a non-folder child of the root node.  Returns the id of the
+// newly-created node.
+int64 MakeNodeWithRoot(UserShare* share,
+                       ModelType model_type,
+                       const std::string& client_tag) {
   WriteTransaction trans(FROM_HERE, share);
   ReadNode root_node(&trans);
   root_node.InitByRootLookup();
@@ -140,8 +154,7 @@ int64 MakeBookmarkWithParent(UserShare* share,
 // Creates the "synced" root node for a particular datatype. We use the syncable
 // methods here so that the syncer treats these nodes as if they were already
 // received from the server.
-int64 MakeServerNodeForType(UserShare* share,
-                            ModelType model_type) {
+int64 MakeTypeRoot(UserShare* share, ModelType model_type) {
   sync_pb::EntitySpecifics specifics;
   AddDefaultFieldValue(model_type, &specifics);
   syncable::WriteTransaction trans(
@@ -155,7 +168,8 @@ int64 MakeServerNodeForType(UserShare* share,
   entry.PutBaseVersion(1);
   entry.PutServerVersion(1);
   entry.PutIsUnappliedUpdate(false);
-  entry.PutServerParentId(syncable::GetNullId());
+  entry.PutParentId(syncable::Id::GetRoot());
+  entry.PutServerParentId(syncable::Id::GetRoot());
   entry.PutServerIsDir(true);
   entry.PutIsDir(true);
   entry.PutServerSpecifics(specifics);
@@ -199,13 +213,9 @@ int64 MakeServerNode(UserShare* share, ModelType model_type,
 
 class SyncApiTest : public testing::Test {
  public:
-  virtual void SetUp() {
-    test_user_share_.SetUp();
-  }
+  void SetUp() override { test_user_share_.SetUp(); }
 
-  virtual void TearDown() {
-    test_user_share_.TearDown();
-  }
+  void TearDown() override { test_user_share_.TearDown(); }
 
  protected:
   // Create an entry with the given |model_type|, |client_tag| and
@@ -307,21 +317,46 @@ TEST_F(SyncApiTest, BasicTagWrite) {
     ReadTransaction trans(FROM_HERE, user_share());
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
-    EXPECT_EQ(root_node.GetFirstChildId(), 0);
+    EXPECT_EQ(kInvalidId, root_node.GetFirstChildId());
   }
 
-  ignore_result(MakeNode(user_share(), BOOKMARKS, "testtag"));
+  ignore_result(MakeNodeWithRoot(user_share(), BOOKMARKS, "testtag"));
 
   {
     ReadTransaction trans(FROM_HERE, user_share());
     ReadNode node(&trans);
     EXPECT_EQ(BaseNode::INIT_OK,
               node.InitByClientTagLookup(BOOKMARKS, "testtag"));
+    EXPECT_NE(0, node.GetId());
 
     ReadNode root_node(&trans);
     root_node.InitByRootLookup();
-    EXPECT_NE(node.GetId(), 0);
     EXPECT_EQ(node.GetId(), root_node.GetFirstChildId());
+  }
+}
+
+TEST_F(SyncApiTest, BasicTagWriteWithImplicitParent) {
+  int64 type_root = MakeTypeRoot(user_share(), PREFERENCES);
+
+  {
+    ReadTransaction trans(FROM_HERE, user_share());
+    ReadNode type_root_node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK, type_root_node.InitByIdLookup(type_root));
+    EXPECT_EQ(kInvalidId, type_root_node.GetFirstChildId());
+  }
+
+  ignore_result(MakeNode(user_share(), PREFERENCES, "testtag"));
+
+  {
+    ReadTransaction trans(FROM_HERE, user_share());
+    ReadNode node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK,
+              node.InitByClientTagLookup(PREFERENCES, "testtag"));
+    EXPECT_EQ(kInvalidId, node.GetParentId());
+
+    ReadNode type_root_node(&trans);
+    EXPECT_EQ(BaseNode::INIT_OK, type_root_node.InitByIdLookup(type_root));
+    EXPECT_EQ(node.GetId(), type_root_node.GetFirstChildId());
   }
 }
 
@@ -333,9 +368,9 @@ TEST_F(SyncApiTest, ModelTypesSiloed) {
     EXPECT_EQ(root_node.GetFirstChildId(), 0);
   }
 
-  ignore_result(MakeNode(user_share(), BOOKMARKS, "collideme"));
-  ignore_result(MakeNode(user_share(), PREFERENCES, "collideme"));
-  ignore_result(MakeNode(user_share(), AUTOFILL, "collideme"));
+  ignore_result(MakeNodeWithRoot(user_share(), BOOKMARKS, "collideme"));
+  ignore_result(MakeNodeWithRoot(user_share(), PREFERENCES, "collideme"));
+  ignore_result(MakeNodeWithRoot(user_share(), AUTOFILL, "collideme"));
 
   {
     ReadTransaction trans(FROM_HERE, user_share());
@@ -538,7 +573,7 @@ TEST_F(SyncApiTest, WriteEncryptedTitle) {
 }
 
 TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
-  int64 child_id = MakeNode(user_share(), BOOKMARKS, "testtag");
+  int64 child_id = MakeNodeWithRoot(user_share(), BOOKMARKS, "testtag");
   WriteTransaction trans(FROM_HERE, user_share());
   WriteNode node(&trans);
   EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(child_id));
@@ -554,7 +589,7 @@ TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
 }
 
 TEST_F(SyncApiTest, BaseNodeSetSpecificsPreservesUnknownFields) {
-  int64 child_id = MakeNode(user_share(), BOOKMARKS, "testtag");
+  int64 child_id = MakeNodeWithRoot(user_share(), BOOKMARKS, "testtag");
   WriteTransaction trans(FROM_HERE, user_share());
   WriteNode node(&trans);
   EXPECT_EQ(BaseNode::INIT_OK, node.InitByIdLookup(child_id));
@@ -586,7 +621,7 @@ TEST_F(SyncApiTest, EmptyTags) {
 
 // Test counting nodes when the type's root node has no children.
 TEST_F(SyncApiTest, GetTotalNodeCountEmpty) {
-  int64 type_root = MakeServerNodeForType(user_share(), BOOKMARKS);
+  int64 type_root = MakeTypeRoot(user_share(), BOOKMARKS);
   {
     ReadTransaction trans(FROM_HERE, user_share());
     ReadNode type_root_node(&trans);
@@ -598,7 +633,7 @@ TEST_F(SyncApiTest, GetTotalNodeCountEmpty) {
 
 // Test counting nodes when there is one child beneath the type's root.
 TEST_F(SyncApiTest, GetTotalNodeCountOneChild) {
-  int64 type_root = MakeServerNodeForType(user_share(), BOOKMARKS);
+  int64 type_root = MakeTypeRoot(user_share(), BOOKMARKS);
   int64 parent = MakeFolderWithParent(user_share(), BOOKMARKS, type_root, NULL);
   {
     ReadTransaction trans(FROM_HERE, user_share());
@@ -616,7 +651,7 @@ TEST_F(SyncApiTest, GetTotalNodeCountOneChild) {
 // Test counting nodes when there are multiple children beneath the type root,
 // and one of those children has children of its own.
 TEST_F(SyncApiTest, GetTotalNodeCountMultipleChildren) {
-  int64 type_root = MakeServerNodeForType(user_share(), BOOKMARKS);
+  int64 type_root = MakeTypeRoot(user_share(), BOOKMARKS);
   int64 parent = MakeFolderWithParent(user_share(), BOOKMARKS, type_root, NULL);
   ignore_result(MakeFolderWithParent(user_share(), BOOKMARKS, type_root, NULL));
   int64 child1 = MakeFolderWithParent(user_share(), BOOKMARKS, parent, NULL);
@@ -691,38 +726,33 @@ namespace {
 
 class TestHttpPostProviderInterface : public HttpPostProviderInterface {
  public:
-  virtual ~TestHttpPostProviderInterface() {}
+  ~TestHttpPostProviderInterface() override {}
 
-  virtual void SetExtraRequestHeaders(const char* headers) OVERRIDE {}
-  virtual void SetURL(const char* url, int port) OVERRIDE {}
-  virtual void SetPostPayload(const char* content_type,
-                              int content_length,
-                              const char* content) OVERRIDE {}
-  virtual bool MakeSynchronousPost(int* error_code, int* response_code)
-      OVERRIDE {
+  void SetExtraRequestHeaders(const char* headers) override {}
+  void SetURL(const char* url, int port) override {}
+  void SetPostPayload(const char* content_type,
+                      int content_length,
+                      const char* content) override {}
+  bool MakeSynchronousPost(int* error_code, int* response_code) override {
     return false;
   }
-  virtual int GetResponseContentLength() const OVERRIDE {
-    return 0;
-  }
-  virtual const char* GetResponseContent() const OVERRIDE {
-    return "";
-  }
-  virtual const std::string GetResponseHeaderValue(
-      const std::string& name) const OVERRIDE {
+  int GetResponseContentLength() const override { return 0; }
+  const char* GetResponseContent() const override { return ""; }
+  const std::string GetResponseHeaderValue(
+      const std::string& name) const override {
     return std::string();
   }
-  virtual void Abort() OVERRIDE {}
+  void Abort() override {}
 };
 
 class TestHttpPostProviderFactory : public HttpPostProviderFactory {
  public:
-  virtual ~TestHttpPostProviderFactory() {}
-  virtual void Init(const std::string& user_agent) OVERRIDE { }
-  virtual HttpPostProviderInterface* Create() OVERRIDE {
+  ~TestHttpPostProviderFactory() override {}
+  void Init(const std::string& user_agent) override {}
+  HttpPostProviderInterface* Create() override {
     return new TestHttpPostProviderInterface();
   }
-  virtual void Destroy(HttpPostProviderInterface* http) OVERRIDE {
+  void Destroy(HttpPostProviderInterface* http) override {
     delete static_cast<TestHttpPostProviderInterface*>(http);
   }
 };
@@ -840,8 +870,8 @@ class SyncManagerTest : public testing::Test,
     if (initialization_succeeded_) {
       for (ModelSafeRoutingInfo::iterator i = routing_info.begin();
            i != routing_info.end(); ++i) {
-        type_roots_[i->first] = MakeServerNodeForType(
-            sync_manager_.GetUserShare(), i->first);
+        type_roots_[i->first] =
+            MakeTypeRoot(sync_manager_.GetUserShare(), i->first);
       }
     }
 
@@ -877,9 +907,9 @@ class SyncManagerTest : public testing::Test,
       ModelType model_type,
       int64 model_version,
       const BaseTransaction* trans,
-      const ImmutableChangeRecordList& changes) OVERRIDE {}
+      const ImmutableChangeRecordList& changes) override {}
 
-  virtual void OnChangesComplete(ModelType model_type) OVERRIDE {}
+  virtual void OnChangesComplete(ModelType model_type) override {}
 
   // Helper methods.
   bool SetUpEncryption(NigoriStatus nigori_status,
@@ -995,6 +1025,30 @@ class SyncManagerTest : public testing::Test,
 
   InternalComponentsFactory::Switches GetSwitches() const {
     return switches_;
+  }
+
+  void ExpectPassphraseAcceptance() {
+    EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
+    EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
+    EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
+  }
+
+  void SetImplicitPassphraseAndCheck(const std::string& passphrase) {
+    sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
+        passphrase,
+        false);
+    EXPECT_EQ(IMPLICIT_PASSPHRASE,
+              sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  }
+
+  void SetCustomPassphraseAndCheck(const std::string& passphrase) {
+    EXPECT_CALL(encryption_observer_,
+        OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
+    sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
+        passphrase,
+        true);
+    EXPECT_EQ(CUSTOM_PASSPHRASE,
+              sync_manager_.GetEncryptionHandler()->GetPassphraseType());
   }
 
  private:
@@ -1132,13 +1186,13 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
   }
   // Next batch_size nodes are a different type and on their own.
   for (; i < 2*batch_size; ++i) {
-    MakeNode(sync_manager_.GetUserShare(), SESSIONS,
-             base::StringPrintf("%" PRIuS "", i));
+    MakeNodeWithRoot(sync_manager_.GetUserShare(), SESSIONS,
+                     base::StringPrintf("%" PRIuS "", i));
   }
   // Last batch_size nodes are a third type that will not need encryption.
   for (; i < 3*batch_size; ++i) {
-    MakeNode(sync_manager_.GetUserShare(), THEMES,
-             base::StringPrintf("%" PRIuS "", i));
+    MakeNodeWithRoot(sync_manager_.GetUserShare(), THEMES,
+                     base::StringPrintf("%" PRIuS "", i));
   }
 
   {
@@ -1187,13 +1241,8 @@ TEST_F(SyncManagerTest, EncryptDataTypesWithData) {
   testing::Mock::VerifyAndClearExpectations(&encryption_observer_);
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  EXPECT_CALL(encryption_observer_,
-              OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase", true);
+  ExpectPassphraseAcceptance();
+  SetCustomPassphraseAndCheck("new_passphrase");
   EXPECT_TRUE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1229,14 +1278,8 @@ TEST_F(SyncManagerTest, SetInitialGaiaPass) {
   EXPECT_FALSE(SetUpEncryption(DONT_WRITE_NIGORI, UNINITIALIZED));
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase",
-      false);
-  EXPECT_EQ(IMPLICIT_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetImplicitPassphraseAndCheck("new_passphrase");
   EXPECT_FALSE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1264,14 +1307,8 @@ TEST_F(SyncManagerTest, UpdateGaiaPass) {
   }
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase",
-      false);
-  EXPECT_EQ(IMPLICIT_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetImplicitPassphraseAndCheck("new_passphrase");
   EXPECT_FALSE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1312,16 +1349,8 @@ TEST_F(SyncManagerTest, SetPassphraseWithPassword) {
   }
     EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase",
-      true);
-  EXPECT_EQ(CUSTOM_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetCustomPassphraseAndCheck("new_passphrase");
   EXPECT_FALSE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1370,9 +1399,7 @@ TEST_F(SyncManagerTest, SupplyPendingGAIAPass) {
   }
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
+  ExpectPassphraseAcceptance();
   sync_manager_.GetEncryptionHandler()->SetDecryptionPassphrase("passphrase2");
   EXPECT_EQ(IMPLICIT_PASSPHRASE,
             sync_manager_.GetEncryptionHandler()->GetPassphraseType());
@@ -1428,11 +1455,7 @@ TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
       .WillOnce(SaveArg<0>(&bootstrap_token));
   EXPECT_CALL(encryption_observer_, OnPassphraseRequired(_,_));
   EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_gaia",
-      false);
-  EXPECT_EQ(IMPLICIT_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  SetImplicitPassphraseAndCheck("new_gaia");
   EXPECT_FALSE(EncryptEverythingEnabledForTest());
   testing::Mock::VerifyAndClearExpectations(&encryption_observer_);
   {
@@ -1448,14 +1471,8 @@ TEST_F(SyncManagerTest, SupplyPendingOldGAIAPass) {
   }
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "old_gaia",
-      false);
-  EXPECT_EQ(IMPLICIT_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetImplicitPassphraseAndCheck("old_gaia");
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     Cryptographer* cryptographer = trans.GetCryptographer();
@@ -1508,9 +1525,7 @@ TEST_F(SyncManagerTest, SupplyPendingExplicitPass) {
   sync_manager_.GetEncryptionHandler()->Init();
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
+  ExpectPassphraseAcceptance();
   sync_manager_.GetEncryptionHandler()->SetDecryptionPassphrase("explicit");
   EXPECT_EQ(CUSTOM_PASSPHRASE,
             sync_manager_.GetEncryptionHandler()->GetPassphraseType());
@@ -1550,14 +1565,8 @@ TEST_F(SyncManagerTest, SupplyPendingGAIAPassUserProvided) {
   }
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "passphrase",
-      false);
-  EXPECT_EQ(IMPLICIT_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetImplicitPassphraseAndCheck("passphrase");
   EXPECT_FALSE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1583,16 +1592,8 @@ TEST_F(SyncManagerTest, SetPassphraseWithEmptyPasswordNode) {
   }
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase",
-      true);
-  EXPECT_EQ(CUSTOM_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetCustomPassphraseAndCheck("new_passphrase");
   EXPECT_FALSE(EncryptEverythingEnabledForTest());
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
@@ -1621,12 +1622,10 @@ TEST_F(SyncManagerTest, EncryptBookmarksWithLegacyData) {
   std::string url2 = "http://www.bla.com";
 
   // Create a bookmark using the legacy format.
-  int64 node_id1 = MakeNode(sync_manager_.GetUserShare(),
-      BOOKMARKS,
-      "testtag");
-  int64 node_id2 = MakeNode(sync_manager_.GetUserShare(),
-      BOOKMARKS,
-      "testtag2");
+  int64 node_id1 =
+      MakeNodeWithRoot(sync_manager_.GetUserShare(), BOOKMARKS, "testtag");
+  int64 node_id2 =
+      MakeNodeWithRoot(sync_manager_.GetUserShare(), BOOKMARKS, "testtag2");
   {
     WriteTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     WriteNode node(&trans);
@@ -1800,14 +1799,8 @@ TEST_F(SyncManagerTest, UpdateEntryWithEncryption) {
   testing::Mock::VerifyAndClearExpectations(&encryption_observer_);
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase",
-      true);
+  ExpectPassphraseAcceptance();
+  SetCustomPassphraseAndCheck("new_passphrase");
   {
     ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
     ReadNode node(&trans);
@@ -1999,16 +1992,8 @@ TEST_F(SyncManagerTest, UpdatePasswordNewPassphrase) {
   testing::Mock::VerifyAndClearExpectations(&encryption_observer_);
   EXPECT_CALL(encryption_observer_,
               OnBootstrapTokenUpdated(_, PASSPHRASE_BOOTSTRAP_TOKEN));
-  EXPECT_CALL(encryption_observer_, OnPassphraseAccepted());
-  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
-  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
-  EXPECT_CALL(encryption_observer_,
-      OnPassphraseTypeChanged(CUSTOM_PASSPHRASE, _));
-  sync_manager_.GetEncryptionHandler()->SetEncryptionPassphrase(
-      "new_passphrase",
-      true);
-  EXPECT_EQ(CUSTOM_PASSPHRASE,
-            sync_manager_.GetEncryptionHandler()->GetPassphraseType());
+  ExpectPassphraseAcceptance();
+  SetCustomPassphraseAndCheck("new_passphrase");
   EXPECT_TRUE(ResetUnsyncedEntry(PASSWORDS, client_tag));
 }
 
@@ -2406,12 +2391,12 @@ class ComponentsFactory : public TestInternalComponentsFactory {
           switches, InternalComponentsFactory::STORAGE_IN_MEMORY, storage_used),
         scheduler_to_use_(scheduler_to_use),
         session_context_(session_context) {}
-  virtual ~ComponentsFactory() {}
+  ~ComponentsFactory() override {}
 
-  virtual scoped_ptr<SyncScheduler> BuildScheduler(
+  scoped_ptr<SyncScheduler> BuildScheduler(
       const std::string& name,
       sessions::SyncSessionContext* context,
-      CancelationSignal* stop_handle) OVERRIDE {
+      CancelationSignal* stop_handle) override {
     *session_context_ = context;
     return scheduler_to_use_.Pass();
   }
@@ -2424,7 +2409,7 @@ class ComponentsFactory : public TestInternalComponentsFactory {
 class SyncManagerTestWithMockScheduler : public SyncManagerTest {
  public:
   SyncManagerTestWithMockScheduler() : scheduler_(NULL) {}
-  virtual InternalComponentsFactory* GetFactory() OVERRIDE {
+  InternalComponentsFactory* GetFactory() override {
     scheduler_ = new MockSyncScheduler();
     return new ComponentsFactory(GetSwitches(), scheduler_, &session_context_,
                                  &storage_used_);
@@ -2696,7 +2681,7 @@ TEST_F(SyncManagerTest, PurgeUnappliedTypes) {
   AddDefaultFieldValue(BOOKMARKS, &bm_specifics);
   int pref1_meta = MakeServerNode(
       share, PREFERENCES, "pref1", "hash1", pref_specifics);
-  int64 pref2_meta = MakeNode(share, PREFERENCES, "pref2");
+  int64 pref2_meta = MakeNodeWithRoot(share, PREFERENCES, "pref2");
   int pref3_meta = MakeServerNode(
       share, PREFERENCES, "pref3", "hash3", pref_specifics);
   int pref4_meta = MakeServerNode(
@@ -2811,15 +2796,14 @@ TEST_F(SyncManagerTest, PurgeUnappliedTypes) {
 // ChangeProcessor.
 class SyncManagerChangeProcessingTest : public SyncManagerTest {
  public:
-  virtual void OnChangesApplied(
-      ModelType model_type,
-      int64 model_version,
-      const BaseTransaction* trans,
-      const ImmutableChangeRecordList& changes) OVERRIDE {
+  void OnChangesApplied(ModelType model_type,
+                        int64 model_version,
+                        const BaseTransaction* trans,
+                        const ImmutableChangeRecordList& changes) override {
     last_changes_ = changes;
   }
 
-  virtual void OnChangesComplete(ModelType model_type) OVERRIDE {}
+  void OnChangesComplete(ModelType model_type) override {}
 
   const ImmutableChangeRecordList& GetRecentChangeList() {
     return last_changes_;
@@ -3170,7 +3154,7 @@ class SyncManagerInitInvalidStorageTest : public SyncManagerTest {
   SyncManagerInitInvalidStorageTest() {
   }
 
-  virtual InternalComponentsFactory* GetFactory() OVERRIDE {
+  InternalComponentsFactory* GetFactory() override {
     return new TestInternalComponentsFactory(
         GetSwitches(), InternalComponentsFactory::STORAGE_INVALID,
         &storage_used_);

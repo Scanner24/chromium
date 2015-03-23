@@ -6,7 +6,7 @@
 
 #include "base/numerics/safe_math.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/nss/aes_key_nss.h"
+#include "content/child/webcrypto/nss/aes_algorithm_nss.h"
 #include "content/child/webcrypto/nss/key_nss.h"
 #include "content/child/webcrypto/nss/sym_key_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
@@ -55,15 +55,9 @@ Status DoUnwrapSymKeyAesKw(const CryptoData& wrapped_key_data,
   PORT_SetError(0);
 #endif
 
-  crypto::ScopedPK11SymKey new_key(
-      PK11_UnwrapSymKeyWithFlags(wrapping_key,
-                                 CKM_NSS_AES_KEY_WRAP,
-                                 param_item.get(),
-                                 &cipher_text,
-                                 mechanism,
-                                 CKA_FLAGS_ONLY,
-                                 plaintext_length,
-                                 flags));
+  crypto::ScopedPK11SymKey new_key(PK11_UnwrapSymKeyWithFlags(
+      wrapping_key, CKM_NSS_AES_KEY_WRAP, param_item.get(), &cipher_text,
+      mechanism, CKA_FLAGS_ONLY, plaintext_length, flags));
 
   // TODO(padolph): Use NSS PORT_GetError() and friends to report a more
   // accurate error, providing if doesn't leak any information to web pages
@@ -113,11 +107,8 @@ Status WrapSymKeyAesKw(PK11SymKey* key,
   buffer->resize(output_length.ValueOrDie());
   SECItem wrapped_key_item = MakeSECItemForBuffer(CryptoData(*buffer));
 
-  if (SECSuccess != PK11_WrapSymKey(CKM_NSS_AES_KEY_WRAP,
-                                    param_item.get(),
-                                    wrapping_key,
-                                    key,
-                                    &wrapped_key_item)) {
+  if (SECSuccess != PK11_WrapSymKey(CKM_NSS_AES_KEY_WRAP, param_item.get(),
+                                    wrapping_key, key, &wrapped_key_item)) {
     return Status::OperationError();
   }
   if (output_length.ValueOrDie() != wrapped_key_item.len)
@@ -131,14 +122,13 @@ class AesKwCryptoAlgorithmNss : public AesAlgorithm {
   AesKwCryptoAlgorithmNss()
       : AesAlgorithm(
             CKM_NSS_AES_KEY_WRAP,
-            CKF_WRAP | CKF_WRAP,
             blink::WebCryptoKeyUsageWrapKey | blink::WebCryptoKeyUsageUnwrapKey,
             "KW") {}
 
-  virtual Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& wrapping_key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& wrapping_key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     if (data.byte_length() < 16)
       return Status::ErrorDataTooSmall();
     if (data.byte_length() % 8)
@@ -149,23 +139,19 @@ class AesKwCryptoAlgorithmNss : public AesAlgorithm {
     SECItem data_item = MakeSECItemForBuffer(data);
     crypto::ScopedPK11Slot slot(PK11_GetInternalSlot());
     crypto::ScopedPK11SymKey data_as_sym_key(
-        PK11_ImportSymKey(slot.get(),
-                          CKK_GENERIC_SECRET,
-                          PK11_OriginUnwrap,
-                          CKA_SIGN,
-                          &data_item,
-                          NULL));
+        PK11_ImportSymKey(slot.get(), CKK_GENERIC_SECRET, PK11_OriginUnwrap,
+                          CKA_SIGN, &data_item, NULL));
     if (!data_as_sym_key)
       return Status::OperationError();
 
-    return WrapSymKeyAesKw(
-        data_as_sym_key.get(), SymKeyNss::Cast(wrapping_key)->key(), buffer);
+    return WrapSymKeyAesKw(data_as_sym_key.get(),
+                           SymKeyNss::Cast(wrapping_key)->key(), buffer);
   }
 
-  virtual Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& wrapping_key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& wrapping_key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     if (data.byte_length() < 24)
       return Status::ErrorDataTooSmall();
     if (data.byte_length() % 8)
@@ -174,11 +160,9 @@ class AesKwCryptoAlgorithmNss : public AesAlgorithm {
     // Due to limitations in the NSS API for the AES-KW algorithm, |data| must
     // be temporarily viewed as a symmetric key to be unwrapped (decrypted).
     crypto::ScopedPK11SymKey decrypted;
-    Status status = DoUnwrapSymKeyAesKw(data,
-                                        SymKeyNss::Cast(wrapping_key)->key(),
-                                        CKK_GENERIC_SECRET,
-                                        0,
-                                        &decrypted);
+    Status status =
+        DoUnwrapSymKeyAesKw(data, SymKeyNss::Cast(wrapping_key)->key(),
+                            CKK_GENERIC_SECRET, 0, &decrypted);
     if (status.IsError())
       return status;
 

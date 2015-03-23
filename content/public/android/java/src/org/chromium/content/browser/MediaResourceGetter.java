@@ -56,16 +56,24 @@ class MediaResourceGetter {
         // then we must return NaN. If it is unbounded, then positive infinity.
         // http://www.w3.org/html/wg/drafts/html/master/embedded-content-0.html
         @CalledByNative("MediaMetadata")
-        int getDurationInMilliseconds() { return mDurationInMilliseconds; }
+        int getDurationInMilliseconds() {
+            return mDurationInMilliseconds;
+        }
 
         @CalledByNative("MediaMetadata")
-        int getWidth() { return mWidth; }
+        int getWidth() {
+            return mWidth;
+        }
 
         @CalledByNative("MediaMetadata")
-        int getHeight() { return mHeight; }
+        int getHeight() {
+            return mHeight;
+        }
 
         @CalledByNative("MediaMetadata")
-        boolean isSuccess() { return mSuccess; }
+        boolean isSuccess() {
+            return mSuccess;
+        }
 
         @Override
         public String toString() {
@@ -202,7 +210,7 @@ class MediaResourceGetter {
             Log.d(TAG, "extracted valid metadata: " + result.toString());
             return result;
         } catch (RuntimeException e) {
-            Log.e(TAG, "Unable to extract medata", e);
+            Log.e(TAG, "Unable to extract metadata: " + e.getMessage());
             return EMPTY_METADATA;
         }
     }
@@ -213,7 +221,7 @@ class MediaResourceGetter {
         try {
             uri = URI.create(url);
         } catch (IllegalArgumentException  e) {
-            Log.e(TAG, "Cannot parse uri.", e);
+            Log.e(TAG, "Cannot parse uri: " + e.getMessage());
             return false;
         }
         String scheme = uri.getScheme();
@@ -231,29 +239,32 @@ class MediaResourceGetter {
                 configure(file.getAbsolutePath());
                 return true;
             } catch (RuntimeException e) {
-                Log.e(TAG, "Error configuring data source", e);
+                Log.e(TAG, "Error configuring data source: " + e.getMessage());
                 return false;
             }
-        } else {
-            final String host = uri.getHost();
-            if (!isLoopbackAddress(host) && !isNetworkReliable(context)) {
-                Log.w(TAG, "non-file URI can't be read due to unsuitable network conditions");
-                return false;
-            }
-            Map<String, String> headersMap = new HashMap<String, String>();
-            if (!TextUtils.isEmpty(cookies)) {
-                headersMap.put("Cookie", cookies);
-            }
-            if (!TextUtils.isEmpty(userAgent)) {
-                headersMap.put("User-Agent", userAgent);
-            }
-            try {
-                configure(url, headersMap);
-                return true;
-            } catch (RuntimeException e) {
-                Log.e(TAG, "Error configuring data source", e);
-                return false;
-            }
+        }
+        if (uri.getPath() != null && uri.getPath().endsWith(".m3u8")) {
+            // MediaMetadataRetriever does not work with HLS correctly.
+            return false;
+        }
+        final String host = uri.getHost();
+        if (!isLoopbackAddress(host) && !isNetworkReliable(context)) {
+            Log.w(TAG, "non-file URI can't be read due to unsuitable network conditions");
+            return false;
+        }
+        Map<String, String> headersMap = new HashMap<String, String>();
+        if (!TextUtils.isEmpty(cookies)) {
+            headersMap.put("Cookie", cookies);
+        }
+        if (!TextUtils.isEmpty(userAgent)) {
+            headersMap.put("User-Agent", userAgent);
+        }
+        try {
+            configure(url, headersMap);
+            return true;
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Error configuring data source: " + e.getMessage());
+            return false;
         }
     }
 
@@ -264,9 +275,8 @@ class MediaResourceGetter {
      */
     @VisibleForTesting
     boolean isNetworkReliable(Context context) {
-        if (context.checkCallingOrSelfPermission(
-                android.Manifest.permission.ACCESS_NETWORK_STATE) !=
-                PackageManager.PERMISSION_GRANTED) {
+        if (context.checkCallingOrSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
+                != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "permission denied to access network state");
             return false;
         }
@@ -334,8 +344,8 @@ class MediaResourceGetter {
      */
     @VisibleForTesting
     static boolean androidDeviceOk(final String model, final int sdkVersion) {
-        return !("GT-I9100".contentEquals(model) &&
-                 sdkVersion < android.os.Build.VERSION_CODES.JELLY_BEAN);
+        return !("GT-I9100".contentEquals(model)
+                && sdkVersion < android.os.Build.VERSION_CODES.JELLY_BEAN);
     }
 
     // The methods below can be used by unit tests to fake functionality.

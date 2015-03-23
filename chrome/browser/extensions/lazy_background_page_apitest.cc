@@ -8,16 +8,15 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/lazy_background_page_test_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/app_modal/app_modal_dialog.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
@@ -26,7 +25,6 @@
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -35,6 +33,8 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using extensions::Extension;
 using extensions::ResultCatcher;
 
@@ -61,10 +61,10 @@ class LoadedIncognitoObserver : public extensions::ExtensionRegistryObserver {
   }
 
  private:
-  virtual void OnExtensionUnloaded(
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE {
+      extensions::UnloadedExtensionInfo::Reason reason) override {
     original_complete_.reset(new LazyBackgroundObserver(profile_));
     incognito_complete_.reset(
         new LazyBackgroundObserver(profile_->GetOffTheRecordProfile()));
@@ -83,9 +83,9 @@ class LoadedIncognitoObserver : public extensions::ExtensionRegistryObserver {
 class LazyBackgroundPageApiTest : public ExtensionApiTest {
  public:
   LazyBackgroundPageApiTest() {}
-  virtual ~LazyBackgroundPageApiTest() {}
+  ~LazyBackgroundPageApiTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     // Set shorter delays to prevent test timeouts.
     extensions::ProcessManager::SetEventPageIdleTimeForTesting(1);
@@ -107,8 +107,8 @@ class LazyBackgroundPageApiTest : public ExtensionApiTest {
   // Returns true if the lazy background page for the extension with
   // |extension_id| is still running.
   bool IsBackgroundPageAlive(const std::string& extension_id) {
-    extensions::ProcessManager* pm = extensions::ExtensionSystem::Get(
-        browser()->profile())->process_manager();
+    extensions::ProcessManager* pm =
+        extensions::ProcessManager::Get(browser()->profile());
     return pm->GetBackgroundHostForExtension(extension_id);
   }
 
@@ -218,7 +218,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForDialog) {
   ASSERT_TRUE(extension);
 
   // The test extension opens a dialog on installation.
-  AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
+  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
   ASSERT_TRUE(dialog);
 
   // With the dialog open the background page is still alive.
@@ -226,7 +226,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForDialog) {
 
   // Close the dialog. The keep alive count is decremented.
   extensions::ProcessManager* pm =
-      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   int previous_keep_alive_count = pm->GetLazyKeepaliveCount(extension);
   dialog->CloseModalDialog();
   EXPECT_EQ(previous_keep_alive_count - 1,
@@ -282,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForRequest) {
 
   // Lazy Background Page still exists, because the extension started a request.
   extensions::ProcessManager* pm =
-      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   extensions::ExtensionHost* host =
       pm->GetBackgroundHostForExtension(last_loaded_extension_id());
   ASSERT_TRUE(host);
@@ -350,10 +350,9 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, DISABLED_IncognitoSplitMode) {
 
   // Lazy Background Page doesn't exist yet.
   extensions::ProcessManager* pm =
-      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   extensions::ProcessManager* pmi =
-      extensions::ExtensionSystem::Get(incognito_browser->profile())->
-          process_manager();
+      extensions::ProcessManager::Get(incognito_browser->profile());
   EXPECT_FALSE(pm->GetBackgroundHostForExtension(last_loaded_extension_id()));
   EXPECT_FALSE(pmi->GetBackgroundHostForExtension(last_loaded_extension_id()));
 
@@ -385,7 +384,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, DISABLED_IncognitoSplitMode) {
                            page2_complete(incognito_browser->profile());
     BookmarkModel* bookmark_model =
         BookmarkModelFactory::GetForProfile(browser()->profile());
-    test::WaitForBookmarkModelToLoad(bookmark_model);
+    bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
     const BookmarkNode* parent = bookmark_model->bookmark_bar_node();
     bookmark_model->AddURL(
         parent, 0, base::ASCIIToUTF16("Title"), GURL("about:blank"));
@@ -440,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, ImpulseAddsCount) {
 
   // Lazy Background Page doesn't exist yet.
   extensions::ProcessManager* pm =
-      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   EXPECT_FALSE(pm->GetBackgroundHostForExtension(last_loaded_extension_id()));
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
 
@@ -503,7 +502,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, EventDispatchToTab) {
   // Send an event by making a bookmark.
   BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForProfile(browser()->profile());
-  test::WaitForBookmarkModelToLoad(bookmark_model);
+  bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
   bookmarks::AddIfNotBookmarked(bookmark_model,
                                 GURL("http://www.google.com"),
                                 base::UTF8ToUTF16("Google"));

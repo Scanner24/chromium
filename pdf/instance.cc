@@ -17,8 +17,8 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_page_zoom_constants.h"
 #include "chrome/common/content_restriction.h"
+#include "components/ui/zoom/page_zoom_constants.h"
 #include "content/public/common/page_zoom.h"
 #include "net/base/escape.h"
 #include "pdf/draw_utils.h"
@@ -55,6 +55,8 @@ struct ToolbarButtonInfo {
   PP_ResourceImage highlighted;
   PP_ResourceImage pressed;
 };
+
+const uint32 kBackgroundColor = 0xFFCCCCCC;
 
 namespace {
 
@@ -216,9 +218,21 @@ void Transform(PP_Instance instance, PP_PrivatePageTransformType type) {
   }
 }
 
+PP_Bool GetPrintPresetOptionsFromDocument(
+    PP_Instance instance,
+    PP_PdfPrintPresetOptions_Dev* options) {
+  void* object = pp::Instance::GetPerInstanceObject(instance, kPPPPdfInterface);
+  if (object) {
+    Instance* obj_instance = static_cast<Instance*>(object);
+    obj_instance->GetPrintPresetOptionsFromDocument(options);
+  }
+  return PP_TRUE;
+}
+
 const PPP_Pdf ppp_private = {
   &GetLinkAtPosition,
-  &Transform
+  &Transform,
+  &GetPrintPresetOptionsFromDocument
 };
 
 int ExtractPrintPreviewPageIndex(const std::string& src_url) {
@@ -422,7 +436,8 @@ bool Instance::HandleInputEvent(const pp::InputEvent& event) {
     return true;
 #endif
 
-  if (toolbar_->HandleEvent(event_device_res))
+  if (!IsMouseOnScrollbar(event_device_res) &&
+      toolbar_->HandleEvent(event_device_res))
     return true;
 
 #ifdef ENABLE_THUMBNAILS
@@ -484,14 +499,8 @@ bool Instance::HandleInputEvent(const pp::InputEvent& event) {
         if (!IsOverlayScrollbar() &&
             !available_area_.Contains(mouse_event.GetPosition())) {
           try_engine_first = false;
-        } else if (IsOverlayScrollbar()) {
-          pp::Rect temp;
-          if ((v_scrollbar_.get() && v_scrollbar_->GetLocation(&temp) &&
-              temp.Contains(mouse_event_dip.GetPosition())) ||
-              (h_scrollbar_.get() && h_scrollbar_->GetLocation(&temp) &&
-              temp.Contains(mouse_event_dip.GetPosition()))) {
+        } else if (IsOverlayScrollbar() && IsMouseOnScrollbar(event)) {
             try_engine_first = false;
-          }
         }
       }
       break;
@@ -510,8 +519,11 @@ bool Instance::HandleInputEvent(const pp::InputEvent& event) {
     pp::KeyboardInputEvent keyboard_event(event);
     bool no_h_scrollbar = !h_scrollbar_.get();
     uint32_t key_code = keyboard_event.GetKeyCode();
-    bool page_down = no_h_scrollbar && key_code == ui::VKEY_RIGHT;
-    bool page_up = no_h_scrollbar && key_code == ui::VKEY_LEFT;
+    bool has_modifiers = keyboard_event.GetModifiers() != 0;
+    bool page_down =
+        no_h_scrollbar && !has_modifiers && key_code == ui::VKEY_RIGHT;
+    bool page_up =
+        no_h_scrollbar && !has_modifiers && key_code == ui::VKEY_LEFT;
     if (zoom_mode_ == ZOOM_FIT_TO_PAGE) {
       bool has_shift =
           keyboard_event.GetModifiers() & PP_INPUTEVENT_MODIFIER_SHIFTKEY;
@@ -597,7 +609,8 @@ bool Instance::HandleInputEvent(const pp::InputEvent& event) {
           engine_->SelectAll();
           return true;
       }
-    } else if (modifier & PP_INPUTEVENT_MODIFIER_CONTROLKEY) {
+    }
+    if (modifier & PP_INPUTEVENT_MODIFIER_CONTROLKEY) {
       switch (keyboard_event.GetKeyCode()) {
         case ui::VKEY_OEM_4:
           // Left bracket.
@@ -658,6 +671,12 @@ pp::Var Instance::GetInstanceObject() {
   return instance_object_;
 }
 
+void Instance::GetPrintPresetOptionsFromDocument(
+    PP_PdfPrintPresetOptions_Dev* options) {
+  options->is_scaling_disabled = PP_FromBool(IsPrintScalingDisabled());
+  options->copies = engine_->GetCopiesToPrint();
+}
+
 pp::Var Instance::GetLinkAtPosition(const pp::Point& point) {
   pp::Point offset_point(point);
   ScalePoint(device_scale_, &offset_point);
@@ -666,7 +685,7 @@ pp::Var Instance::GetLinkAtPosition(const pp::Point& point) {
 }
 
 pp::Var Instance::GetSelectedText(bool html) {
-  if (html || !engine_->HasPermission(PDFEngine::PERMISSION_COPY))
+  if (html)
     return pp::Var();
   return engine_->GetSelectedText();
 }
@@ -779,6 +798,14 @@ void Instance::StopFind() {
 
 void Instance::Zoom(double scale, bool text_only) {
   UserMetricsRecordAction("PDF.ZoomFromBrowser");
+
+  // If the zoom level doesn't change it means that this zoom change might have
+  // been initiated by the plugin. In that case, we don't want to change the
+  // zoom mode to ZOOM_SCALE as it may have been intentionally set to
+  // ZOOM_FIT_TO_PAGE or some other value when the zoom was last changed.
+  if (scale == zoom_)
+    return;
+
   SetZoom(ZOOM_SCALE, scale);
 }
 
@@ -1201,7 +1228,13 @@ void Instance::NavigateTo(const std::string& url, bool open_in_new_tab) {
     // If |url_copy| starts with '#', then it's for the same URL with a
     // different URL fragment.
     if (url_copy[0] == '#') {
-      url_copy = url_ + url_copy;
+      // if '#' is already present in |url_| then remove old fragment and add
+      // new |url_copy| fragment.
+      std::size_t index = url_.find('#');
+      if (index != std::string::npos)
+        url_copy = url_.substr(0, index) + url_copy;
+      else
+        url_copy = url_ + url_copy;
       // Changing the href does not actually do anything when navigating in the
       // same tab, so do the actual page scroll here. Then fall through so the
       // href gets updated.
@@ -1277,6 +1310,7 @@ void Instance::NotifyNumberOfFindResultsChanged(int total, bool final_result) {
 }
 
 void Instance::NotifySelectedFindResultChanged(int current_find_index) {
+  DCHECK_GE(current_find_index, 0);
   SelectedFindResultChanged(current_find_index);
 }
 
@@ -1573,6 +1607,22 @@ void Instance::RotateCounterclockwise() {
   engine_->RotateCounterclockwise();
 }
 
+bool Instance::IsMouseOnScrollbar(const pp::InputEvent& event) {
+  pp::MouseInputEvent mouse_event(event);
+  if (mouse_event.is_null())
+    return false;
+
+  pp::Point pt = mouse_event.GetPosition();
+  pp::Rect temp;
+  if ((v_scrollbar_.get() && v_scrollbar_->GetLocation(&temp) &&
+       temp.Contains(pt)) ||
+      (h_scrollbar_.get() && h_scrollbar_->GetLocation(&temp) &&
+       temp.Contains(pt))) {
+    return true;
+  }
+  return false;
+}
+
 void Instance::PreviewDocumentLoadComplete() {
   if (preview_document_load_state_ != LOAD_STATE_LOADING ||
       preview_pages_info_.empty()) {
@@ -1809,7 +1859,10 @@ pp::Var Instance::CallScriptableMethod(const pp::Var& method,
           v_scrollbar_.get() ? GetScrollbarReservedThickness() : 0);
   }
   if (method_str == kJSGetSelectedText) {
-    return GetSelectedText(false);
+    std::string selected_text = engine_->GetSelectedText();
+    // Always return unix newlines to JS.
+    base::ReplaceChars(selected_text, "\r", std::string(), &selected_text);
+    return selected_text;
   }
   if (method_str == kJSDocumentLoadComplete) {
     return pp::Var((document_load_state_ != LOAD_STATE_LOADING));
@@ -2523,14 +2576,14 @@ void Instance::UpdateZoomScale() {
 
 double Instance::CalculateZoom(uint32 control_id) const {
   if (control_id == kZoomInButtonId) {
-    for (size_t i = 0; i < chrome_page_zoom::kPresetZoomFactorsSize; ++i) {
-      double current_zoom = chrome_page_zoom::kPresetZoomFactors[i];
+    for (size_t i = 0; i < ui_zoom::kPresetZoomFactorsSize; ++i) {
+      double current_zoom = ui_zoom::kPresetZoomFactors[i];
       if (current_zoom - content::kEpsilon > zoom_)
         return current_zoom;
     }
   } else {
-    for (size_t i = chrome_page_zoom::kPresetZoomFactorsSize; i > 0; --i) {
-      double current_zoom = chrome_page_zoom::kPresetZoomFactors[i - 1];
+    for (size_t i = ui_zoom::kPresetZoomFactorsSize; i > 0; --i) {
+      double current_zoom = ui_zoom::kPresetZoomFactors[i - 1];
       if (current_zoom + content::kEpsilon < zoom_)
         return current_zoom;
     }
@@ -2586,6 +2639,10 @@ void Instance::SetPrintPreviewMode(int page_count) {
 
 bool Instance::IsPrintPreview() {
   return IsPrintPreviewUrl(url_);
+}
+
+uint32 Instance::GetBackgroundColor() {
+  return kBackgroundColor;
 }
 
 int Instance::GetPageNumberToDisplay() {

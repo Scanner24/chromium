@@ -57,7 +57,7 @@ function createLocalOffer(constraints) {
         success_('createOffer');
         setLocalDescription(peerConnection, localOffer);
 
-        returnToTest('ok-' + JSON.stringify(localOffer));
+        returnToTest('ok-' + stringifyDOMObject_(localOffer));
       },
       function(error) { failure_('createOffer', error); },
       constraints);
@@ -89,7 +89,7 @@ function receiveOfferFromPeer(sessionDescJson, constraints) {
       function(answer) {
         success_('createAnswer');
         setLocalDescription(peerConnection, answer);
-        returnToTest('ok-' + JSON.stringify(answer));
+        returnToTest('ok-' + stringifyDOMObject_(answer));
       },
       function(error) { failure_('createAnswer', error); },
       constraints);
@@ -147,24 +147,6 @@ function addAudioFile(url) {
 }
 
 /**
- * Mixes the local audio stream with an audio file through WebAudio.
- *
- * You must have successfully requested access to the user's microphone through
- * getUserMedia before calling this function (see getUserMedia.js).
- * Additionally, you must have loaded an audio file to mix with.
- *
- * When playAudioFile is called, WebAudio will effectively mix the user's
- * microphone input with the previously loaded file and feed that into the
- * peer connection.
- */
-function mixLocalStreamWithPreviouslyLoadedAudioFile() {
-  if (getLocalStream() == null)
-    throw failTest('trying to mix in stream, but we have no stream to mix in.');
-
-  mixLocalStreamIntoPeerConnection(peerConnection_(), getLocalStream());
-}
-
-/**
  * Must be called after addAudioFile.
  */
 function playAudioFile() {
@@ -196,7 +178,7 @@ function getAllIceCandidates() {
     return;
   }
 
-  returnToTest(JSON.stringify(gIceCandidates));
+  returnToTest(stringifyDOMObject_(gIceCandidates));
 }
 
 /**
@@ -263,7 +245,7 @@ function success_(method) {
 
 /** @private */
 function failure_(method, error) {
-  throw failTest(method + '() failed: ' + JSON.stringify(error));
+  throw failTest(method + '() failed: ' + stringifyDOMObject_(error));
 }
 
 /** @private */
@@ -295,6 +277,28 @@ function addStreamCallback_(event) {
 function removeStreamCallback_(event) {
   debug('Call ended.');
   document.getElementById('remote-view').src = '';
+}
+
+/**
+ * Stringifies a DOM object.
+ *
+ * This function stringifies not only own properties but also DOM attributes
+ * which are on a prototype chain.  Note that JSON.stringify only stringifies
+ * own properties.
+ * @private
+ */
+function stringifyDOMObject_(object)
+{
+  function deepCopy(src) {
+    if (typeof src != "object")
+      return src;
+    var dst = Array.isArray(src) ? [] : {};
+    for (var property in src) {
+      dst[property] = deepCopy(src[property]);
+    }
+    return dst;
+  }
+  return JSON.stringify(deepCopy(object));
 }
 
 /**

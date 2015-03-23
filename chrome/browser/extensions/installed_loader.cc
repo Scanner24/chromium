@@ -10,6 +10,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -19,8 +20,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/supervised_user_private/supervised_user_handler.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/common/extensions/chrome_manifest_url_handlers.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -36,6 +36,7 @@
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 
 using base::UserMetricsAction;
 using content::BrowserThread;
@@ -228,6 +229,7 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
 }
 
 void InstalledLoader::LoadAllExtensions() {
+  TRACE_EVENT0("browser,startup", "InstalledLoader::LoadAllExtensions");
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   base::TimeTicks start_time = base::TimeTicks::Now();

@@ -6,7 +6,9 @@
 #define CC_LAYERS_DRAW_PROPERTIES_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "ui/gfx/rect.h"
+#include "cc/trees/occlusion.h"
+#include "third_party/skia/include/core/SkXfermode.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
@@ -17,13 +19,14 @@ template <typename LayerType>
 struct CC_EXPORT DrawProperties {
   DrawProperties()
       : opacity(0.f),
+        blend_mode(SkXfermode::kSrcOver_Mode),
         opacity_is_animating(false),
         screen_space_opacity_is_animating(false),
         target_space_transform_is_animating(false),
         screen_space_transform_is_animating(false),
         can_use_lcd_text(false),
         is_clipped(false),
-        render_target(NULL),
+        render_target(nullptr),
         contents_scale_x(1.f),
         contents_scale_y(1.f),
         num_unclipped_descendants(0),
@@ -48,10 +51,17 @@ struct CC_EXPORT DrawProperties {
   // Transforms objects from content space to screen space (viewport space).
   gfx::Transform screen_space_transform;
 
+  // Known occlusion above the layer mapped to the content space of the layer.
+  Occlusion occlusion_in_content_space;
+
   // DrawProperties::opacity may be different than LayerType::opacity,
   // particularly in the case when a RenderSurface re-parents the layer's
   // opacity, or when opacity is compounded by the hierarchy.
   float opacity;
+
+  // DrawProperties::blend_mode may be different than LayerType::blend_mode,
+  // when a RenderSurface re-parents the layer's blend_mode.
+  SkXfermode::Mode blend_mode;
 
   // xxx_is_animating flags are used to indicate whether the DrawProperties
   // are actually meaningful on the main thread. When the properties are
@@ -72,9 +82,6 @@ struct CC_EXPORT DrawProperties {
   // either the same layer (draw_properties_.render_target == this) or an
   // ancestor of this layer.
   LayerType* render_target;
-
-  // The surface that this layer and its subtree would contribute to.
-  scoped_ptr<typename LayerType::RenderSurfaceType> render_surface;
 
   // This rect is in the layer's content space.
   gfx::Rect visible_content_rect;

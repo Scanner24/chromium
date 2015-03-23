@@ -32,6 +32,7 @@ class ReliableQuicStream;
 }  // namespace net
 
 using std::pair;
+using std::string;
 using testing::_;
 
 namespace net {
@@ -41,7 +42,7 @@ class QuicCryptoServerConfigPeer {
  public:
   static string GetPrimaryOrbit(const QuicCryptoServerConfig& config) {
     base::AutoLock lock(config.configs_lock_);
-    CHECK(config.primary_config_.get() != NULL);
+    CHECK(config.primary_config_.get() != nullptr);
     return string(reinterpret_cast<const char*>(config.primary_config_->orbit),
                   kOrbitSize);
   }
@@ -55,14 +56,12 @@ const uint16 kServerPort = 80;
 class QuicCryptoServerStreamTest : public ::testing::TestWithParam<bool> {
  public:
   QuicCryptoServerStreamTest()
-      : connection_(new PacketSavingConnection(true)),
+      : connection_(new PacketSavingConnection(/*is_server=*/true)),
         session_(connection_, DefaultQuicConfig()),
         crypto_config_(QuicCryptoServerConfig::TESTING,
                        QuicRandom::GetInstance()),
         stream_(crypto_config_, &session_),
-        strike_register_client_(NULL) {
-    config_.SetDefaults();
-    session_.config()->SetDefaults();
+        strike_register_client_(nullptr) {
     session_.SetCryptoStream(&stream_);
     // We advance the clock initially because the default time is zero and the
     // strike register worries that we've just overflowed a uint32 time.
@@ -131,32 +130,31 @@ TEST_P(QuicCryptoServerStreamTest, ConnectedAfterCHLO) {
   EXPECT_EQ(2, CompleteCryptoHandshake());
   EXPECT_TRUE(stream_.encryption_established());
   EXPECT_TRUE(stream_.handshake_confirmed());
-  EXPECT_EQ(1, stream_.num_server_config_update_messages_sent());
 }
 
 TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
-  PacketSavingConnection* client_conn = new PacketSavingConnection(false);
-  PacketSavingConnection* server_conn = new PacketSavingConnection(false);
+  PacketSavingConnection* client_conn =
+      new PacketSavingConnection(/*is_server=*/false);
+  PacketSavingConnection* server_conn =
+      new PacketSavingConnection(/*is_server=*/true);
   client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(100000));
   server_conn->AdvanceTime(QuicTime::Delta::FromSeconds(100000));
 
   QuicConfig client_config;
-  client_config.SetDefaults();
   scoped_ptr<TestClientSession> client_session(
       new TestClientSession(client_conn, client_config));
   QuicCryptoClientConfig client_crypto_config;
-  client_crypto_config.SetDefaults();
 
   QuicServerId server_id(kServerHostname, kServerPort, false,
                          PRIVACY_MODE_DISABLED);
   scoped_ptr<QuicCryptoClientStream> client(new QuicCryptoClientStream(
-      server_id, client_session.get(), NULL, &client_crypto_config));
+      server_id, client_session.get(), nullptr, &client_crypto_config));
   client_session->SetCryptoStream(client.get());
 
   // Do a first handshake in order to prime the client config with the server's
   // information.
-  CHECK(client->CryptoConnect());
-  CHECK_EQ(1u, client_conn->packets_.size());
+  client->CryptoConnect();
+  CHECK_EQ(1u, client_conn->encrypted_packets_.size());
 
   scoped_ptr<TestSession> server_session(new TestSession(server_conn, config_));
   scoped_ptr<QuicCryptoServerStream> server(
@@ -170,8 +168,8 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
   // Now do another handshake, hopefully in 0-RTT.
   LOG(INFO) << "Resetting for 0-RTT handshake attempt";
 
-  client_conn = new PacketSavingConnection(false);
-  server_conn = new PacketSavingConnection(false);
+  client_conn = new PacketSavingConnection(/*is_server=*/false);
+  server_conn = new PacketSavingConnection(/*is_server=*/true);
   // We need to advance time past the strike-server window so that it's
   // authoritative in this time span.
   client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(102000));
@@ -182,15 +180,15 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
   reinterpret_cast<MockRandom*>(client_conn->random_generator())->ChangeValue();
   client_session.reset(new TestClientSession(client_conn, client_config));
   server_session.reset(new TestSession(server_conn, config_));
-  client.reset(new QuicCryptoClientStream(
-      server_id, client_session.get(), NULL, &client_crypto_config));
+  client.reset(new QuicCryptoClientStream(server_id, client_session.get(),
+                                          nullptr, &client_crypto_config));
   client_session->SetCryptoStream(client.get());
 
   server.reset(new QuicCryptoServerStream(crypto_config_,
                                           server_session.get()));
   server_session->SetCryptoStream(server.get());
 
-  CHECK(client->CryptoConnect());
+  client->CryptoConnect();
 
   if (AsyncStrikeRegisterVerification()) {
     EXPECT_FALSE(client->handshake_confirmed());
@@ -224,7 +222,6 @@ TEST_P(QuicCryptoServerStreamTest, ZeroRTT) {
   }
 
   EXPECT_EQ(1, client->num_sent_client_hellos());
-  EXPECT_EQ(1, server->num_server_config_update_messages_sent());
 }
 
 TEST_P(QuicCryptoServerStreamTest, MessageAfterHandshake) {
@@ -245,7 +242,7 @@ TEST_P(QuicCryptoServerStreamTest, BadMessageType) {
 }
 
 TEST_P(QuicCryptoServerStreamTest, WithoutCertificates) {
-  crypto_config_.SetProofSource(NULL);
+  crypto_config_.SetProofSource(nullptr);
   client_options_.dont_verify_certs = true;
 
   // Only 2 client hellos need to be sent in the no-certs case: one to get the
@@ -277,7 +274,7 @@ TEST_P(QuicCryptoServerStreamTest, ChannelIDAsync) {
 
 TEST_P(QuicCryptoServerStreamTest, OnlySendSCUPAfterHandshakeComplete) {
   // An attempt to send a SCUP before completing handshake should fail.
-  stream_.SendServerConfigUpdate(NULL);
+  stream_.SendServerConfigUpdate(nullptr);
   EXPECT_EQ(0, stream_.num_server_config_update_messages_sent());
 }
 

@@ -14,8 +14,11 @@
 
 namespace keyboard {
 
-VKMojoHandler::VKMojoHandler() {
+VKMojoHandler::VKMojoHandler(
+    mojo::InterfaceRequest<KeyboardUIHandlerMojo> request)
+    : binding_(this, request.Pass()) {
   GetInputMethod()->AddObserver(this);
+  OnTextInputStateChanged(GetInputMethod()->GetTextInputClient());
 }
 
 VKMojoHandler::~VKMojoHandler() {
@@ -26,8 +29,9 @@ ui::InputMethod* VKMojoHandler::GetInputMethod() {
   return KeyboardController::GetInstance()->proxy()->GetInputMethod();
 }
 
-void VKMojoHandler::OnConnectionEstablished() {
-  OnTextInputStateChanged(GetInputMethod()->GetTextInputClient());
+void VKMojoHandler::SetTextInputTypeObserver(
+    TextInputTypeObserverPtr observer) {
+  text_input_type_observer_ = observer.Pass();
 }
 
 void VKMojoHandler::SendKeyEvent(const mojo::String& event_type,
@@ -62,6 +66,9 @@ void VKMojoHandler::OnCaretBoundsChanged(const ui::TextInputClient* client) {
 
 void VKMojoHandler::OnTextInputStateChanged(
     const ui::TextInputClient* text_client) {
+  if (!text_input_type_observer_)
+    return;
+
   ui::TextInputType type =
       text_client ? text_client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
   std::string type_name = "none";
@@ -107,7 +114,7 @@ void VKMojoHandler::OnTextInputStateChanged(
       type_name = "text";
       break;
   }
-  client()->OnTextInputTypeChanged(type_name);
+  text_input_type_observer_->OnTextInputTypeChanged(type_name);
 }
 
 void VKMojoHandler::OnInputMethodDestroyed(

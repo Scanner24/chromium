@@ -19,8 +19,8 @@
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect_f.h"
 
 class GURL;
 
@@ -74,10 +74,10 @@ class CONTENT_EXPORT WebContentsDelegate {
   // in the current front-most tab), unless |disposition| indicates the url
   // should be opened in a new tab or window.
   //
-  // A NULL source indicates the current tab (callers should probably use
+  // A nullptr source indicates the current tab (callers should probably use
   // OpenURL() for these cases which does it for you).
 
-  // Returns the WebContents the URL is opened in, or NULL if the URL wasn't
+  // Returns the WebContents the URL is opened in, or nullptr if the URL wasn't
   // opened immediately.
   virtual WebContents* OpenURLFromTab(WebContents* source,
                                       const OpenURLParams& params);
@@ -85,7 +85,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Called to inform the delegate that the WebContents's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
   // that have been updated.
-  virtual void NavigationStateChanged(const WebContents* source,
+  virtual void NavigationStateChanged(WebContents* source,
                                       InvalidateTypes changed_flags) {}
 
   // Called to inform the delegate that the WebContent's visible SSL state (as
@@ -94,14 +94,14 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Creates a new tab with the already-created WebContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
-  // method returns.  If |disposition| is NEW_POPUP, |initial_pos| should hold
-  // the initial position. If |was_blocked| is non-NULL, then |*was_blocked|
-  // will be set to true if the popup gets blocked, and left unchanged
-  // otherwise.
+  // method returns.  If |disposition| is NEW_POPUP, |initial_rect| should hold
+  // the initial position and size. If |was_blocked| is non-nullptr, then
+  // |*was_blocked| will be set to true if the popup gets blocked, and left
+  // unchanged otherwise.
   virtual void AddNewContents(WebContents* source,
                               WebContents* new_contents,
                               WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
+                              const gfx::Rect& initial_rect,
                               bool user_gesture,
                               bool* was_blocked) {}
 
@@ -162,7 +162,7 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Callback that allows vertical overscroll activies to be communicated to the
   // delegate. |delta_y| is the total amount of overscroll.
-  virtual void OverscrollUpdate(int delta_y) {}
+  virtual void OverscrollUpdate(float delta_y) {}
 
   // Invoked when a vertical overscroll completes.
   virtual void OverscrollComplete() {}
@@ -176,7 +176,7 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Returns true if javascript dialogs and unload alerts are suppressed.
   // Default is false.
-  virtual bool ShouldSuppressDialogs();
+  virtual bool ShouldSuppressDialogs(WebContents* source);
 
   // Returns whether pending NavigationEntries for aborted browser-initiated
   // navigations should be preserved (and thus returned from GetVisibleURL).
@@ -309,6 +309,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool ShouldCreateWebContents(
       WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -341,12 +342,13 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void DidNavigateToPendingEntry(WebContents* source) {}
 
   // Returns a pointer to a service to manage JavaScript dialogs. May return
-  // NULL in which case dialogs aren't shown.
-  virtual JavaScriptDialogManager* GetJavaScriptDialogManager();
+  // nullptr in which case dialogs aren't shown.
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager(
+      WebContents* source);
 
   // Called when color chooser should open. Returns the opened color chooser.
-  // Returns NULL if we failed to open the color chooser (e.g. when there is a
-  // ColorChooserDialog already open on Windows). Ownership of the returned
+  // Returns nullptr if we failed to open the color chooser (e.g. when there is
+  // a ColorChooserDialog already open on Windows). Ownership of the returned
   // pointer is transferred to the caller.
   virtual ColorChooser* OpenColorChooser(
       WebContents* web_contents,
@@ -370,9 +372,16 @@ class CONTENT_EXPORT WebContentsDelegate {
   // WebContents will be responsible for showing the fullscreen widget.
   virtual bool EmbedsFullscreenWidget() const;
 
-  // Called when the renderer puts a tab into or out of fullscreen mode.
-  virtual void ToggleFullscreenModeForTab(WebContents* web_contents,
-                                          bool enter_fullscreen) {}
+  // Called when the renderer puts a tab into fullscreen mode.
+  // |origin| is the origin of the initiating frame inside the |web_contents|.
+  // |origin| can be empty in which case the |web_contents| last committed
+  // URL's origin should be used.
+  virtual void EnterFullscreenModeForTab(WebContents* web_contents,
+                                         const GURL& origin) {}
+
+  // Called when the renderer puts a tab out of fullscreen mode.
+  virtual void ExitFullscreenModeForTab(WebContents*) {}
+
   virtual bool IsFullscreenForTabOrPending(
       const WebContents* web_contents) const;
 
@@ -486,6 +495,10 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Returns true if the WebContents is never visible.
   virtual bool IsNeverVisible(WebContents* web_contents);
+
+  // Called in response to a request to save a frame. If this returns true, the
+  // default behavior is suppressed.
+  virtual bool SaveFrame(const GURL& url, const Referrer& referrer);
 
  protected:
   virtual ~WebContentsDelegate();

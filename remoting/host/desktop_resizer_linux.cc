@@ -66,7 +66,7 @@ namespace remoting {
 // Wrapper class for the XRRScreenResources struct.
 class ScreenResources {
  public:
-  ScreenResources() : resources_(NULL) {
+  ScreenResources() : resources_(nullptr) {
   }
 
   ~ScreenResources() {
@@ -76,13 +76,13 @@ class ScreenResources {
   bool Refresh(Display* display, Window window) {
     Release();
     resources_ = XRRGetScreenResources(display, window);
-    return resources_ != NULL;
+    return resources_ != nullptr;
   }
 
   void Release() {
     if (resources_) {
       XRRFreeScreenResources(resources_);
-      resources_ = NULL;
+      resources_ = nullptr;
     }
   }
 
@@ -124,14 +124,14 @@ class ScreenResources {
 class DesktopResizerLinux : public DesktopResizer {
  public:
   DesktopResizerLinux();
-  virtual ~DesktopResizerLinux();
+  ~DesktopResizerLinux() override;
 
   // DesktopResizer interface
-  virtual ScreenResolution GetCurrentResolution() OVERRIDE;
-  virtual std::list<ScreenResolution> GetSupportedResolutions(
-      const ScreenResolution& preferred) OVERRIDE;
-  virtual void SetResolution(const ScreenResolution& resolution) OVERRIDE;
-  virtual void RestoreResolution(const ScreenResolution& original) OVERRIDE;
+  ScreenResolution GetCurrentResolution() override;
+  std::list<ScreenResolution> GetSupportedResolutions(
+      const ScreenResolution& preferred) override;
+  void SetResolution(const ScreenResolution& resolution) override;
+  void RestoreResolution(const ScreenResolution& original) override;
 
  private:
   // Create a mode, and attach it to the primary output. If the mode already
@@ -142,7 +142,7 @@ class DesktopResizerLinux : public DesktopResizer {
   // mode is in use, it is not deleted.
   void DeleteMode(const char* name);
 
-  // Switch the primary output to the specified mode. If name is NULL, the
+  // Switch the primary output to the specified mode. If name is nullptr, the
   // primary output is disabled instead, which is required before changing
   // its resolution.
   void SwitchToMode(const char* name);
@@ -157,7 +157,7 @@ class DesktopResizerLinux : public DesktopResizer {
 };
 
 DesktopResizerLinux::DesktopResizerLinux()
-    : display_(XOpenDisplay(NULL)),
+    : display_(XOpenDisplay(nullptr)),
       screen_(DefaultScreen(display_)),
       root_(RootWindow(display_, screen_)),
       exact_resize_(base::CommandLine::ForCurrentProcess()->
@@ -263,7 +263,7 @@ void DesktopResizerLinux::SetResolution(const ScreenResolution& resolution) {
                                       kDefaultDPI);
   CreateMode(kTempModeName, resolution.dimensions().width(),
              resolution.dimensions().height());
-  SwitchToMode(NULL);
+  SwitchToMode(nullptr);
   XRRSetScreenSize(display_, root_, resolution.dimensions().width(),
                    resolution.dimensions().height(), width_mm, height_mm);
   SwitchToMode(kTempModeName);
@@ -311,7 +311,7 @@ void DesktopResizerLinux::DeleteMode(const char* name) {
 
 void DesktopResizerLinux::SwitchToMode(const char* name) {
   RRMode mode_id = None;
-  RROutput* outputs = NULL;
+  RROutput* outputs = nullptr;
   int number_of_outputs = 0;
   if (name) {
     mode_id = resources_.GetIdForMode(name);
@@ -324,7 +324,7 @@ void DesktopResizerLinux::SwitchToMode(const char* name) {
 }
 
 scoped_ptr<DesktopResizer> DesktopResizer::Create() {
-  return scoped_ptr<DesktopResizer>(new DesktopResizerLinux);
+  return make_scoped_ptr(new DesktopResizerLinux);
 }
 
 }  // namespace remoting

@@ -55,6 +55,45 @@ class GLRendererTest : public testing::Test {
     EXPECT_TRUE((program_binding)->initialized()); \
   } while (false)
 
+static inline SkXfermode::Mode BlendModeToSkXfermode(BlendMode blend_mode) {
+  switch (blend_mode) {
+    case BLEND_MODE_NONE:
+    case BLEND_MODE_NORMAL:
+      return SkXfermode::kSrcOver_Mode;
+    case BLEND_MODE_SCREEN:
+      return SkXfermode::kScreen_Mode;
+    case BLEND_MODE_OVERLAY:
+      return SkXfermode::kOverlay_Mode;
+    case BLEND_MODE_DARKEN:
+      return SkXfermode::kDarken_Mode;
+    case BLEND_MODE_LIGHTEN:
+      return SkXfermode::kLighten_Mode;
+    case BLEND_MODE_COLOR_DODGE:
+      return SkXfermode::kColorDodge_Mode;
+    case BLEND_MODE_COLOR_BURN:
+      return SkXfermode::kColorBurn_Mode;
+    case BLEND_MODE_HARD_LIGHT:
+      return SkXfermode::kHardLight_Mode;
+    case BLEND_MODE_SOFT_LIGHT:
+      return SkXfermode::kSoftLight_Mode;
+    case BLEND_MODE_DIFFERENCE:
+      return SkXfermode::kDifference_Mode;
+    case BLEND_MODE_EXCLUSION:
+      return SkXfermode::kExclusion_Mode;
+    case BLEND_MODE_MULTIPLY:
+      return SkXfermode::kMultiply_Mode;
+    case BLEND_MODE_HUE:
+      return SkXfermode::kHue_Mode;
+    case BLEND_MODE_SATURATION:
+      return SkXfermode::kSaturation_Mode;
+    case BLEND_MODE_COLOR:
+      return SkXfermode::kColor_Mode;
+    case BLEND_MODE_LUMINOSITY:
+      return SkXfermode::kLuminosity_Mode;
+  }
+  return SkXfermode::kSrcOver_Mode;
+}
+
 // Explicitly named to be a friend in GLRenderer for shader access.
 class GLRendererShaderPixelTest : public GLRendererPixelTest {
  public:
@@ -64,24 +103,19 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
     EXPECT_PROGRAM_VALID(renderer()->GetDebugBorderProgram());
     EXPECT_PROGRAM_VALID(renderer()->GetSolidColorProgram());
     EXPECT_PROGRAM_VALID(renderer()->GetSolidColorProgramAA());
-    TestShadersWithTexCoordPrecision(TexCoordPrecisionMedium);
-    TestShadersWithTexCoordPrecision(TexCoordPrecisionHigh);
+    TestShadersWithTexCoordPrecision(TEX_COORD_PRECISION_MEDIUM);
+    TestShadersWithTexCoordPrecision(TEX_COORD_PRECISION_HIGH);
     ASSERT_FALSE(renderer()->IsContextLost());
   }
 
   void TestShadersWithTexCoordPrecision(TexCoordPrecision precision) {
-    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassProgram(precision));
-    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassProgramAA(precision));
-    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskProgram(precision));
-    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskProgramAA(precision));
-    EXPECT_PROGRAM_VALID(
-        renderer()->GetRenderPassColorMatrixProgram(precision));
-    EXPECT_PROGRAM_VALID(
-        renderer()->GetRenderPassMaskColorMatrixProgramAA(precision));
-    EXPECT_PROGRAM_VALID(
-        renderer()->GetRenderPassColorMatrixProgramAA(precision));
-    EXPECT_PROGRAM_VALID(
-        renderer()->GetRenderPassMaskColorMatrixProgram(precision));
+    for (int i = 0; i <= LAST_BLEND_MODE; ++i) {
+      BlendMode blend_mode = static_cast<BlendMode>(i);
+      EXPECT_PROGRAM_VALID(
+          renderer()->GetRenderPassProgram(precision, blend_mode));
+      EXPECT_PROGRAM_VALID(
+          renderer()->GetRenderPassProgramAA(precision, blend_mode));
+    }
     EXPECT_PROGRAM_VALID(renderer()->GetTextureProgram(precision));
     EXPECT_PROGRAM_VALID(
         renderer()->GetNonPremultipliedTextureProgram(precision));
@@ -96,11 +130,11 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
       EXPECT_PROGRAM_VALID(renderer()->GetVideoStreamTextureProgram(precision));
     else
       EXPECT_FALSE(renderer()->GetVideoStreamTextureProgram(precision));
-    TestShadersWithSamplerType(precision, SamplerType2D);
-    TestShadersWithSamplerType(precision, SamplerType2DRect);
+    TestShadersWithSamplerType(precision, SAMPLER_TYPE_2D);
+    TestShadersWithSamplerType(precision, SAMPLER_TYPE_2D_RECT);
     // This is unlikely to be ever true in tests due to usage of osmesa.
     if (renderer()->Capabilities().using_egl_image)
-      TestShadersWithSamplerType(precision, SamplerTypeExternalOES);
+      TestShadersWithSamplerType(precision, SAMPLER_TYPE_EXTERNAL_OES);
   }
 
   void TestShadersWithSamplerType(TexCoordPrecision precision,
@@ -113,6 +147,17 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
         renderer()->GetTileProgramSwizzleOpaque(precision, sampler));
     EXPECT_PROGRAM_VALID(
         renderer()->GetTileProgramSwizzleAA(precision, sampler));
+    for (int i = 0; i <= LAST_BLEND_MODE; ++i) {
+      BlendMode blend_mode = static_cast<BlendMode>(i);
+      EXPECT_PROGRAM_VALID(
+          renderer()->GetRenderPassMaskProgram(precision, sampler, blend_mode));
+      EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskProgramAA(
+          precision, sampler, blend_mode));
+      EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskColorMatrixProgramAA(
+          precision, sampler, blend_mode));
+      EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskColorMatrixProgram(
+          precision, sampler, blend_mode));
+    }
   }
 };
 
@@ -125,7 +170,7 @@ TEST_F(GLRendererShaderPixelTest, AllShadersCompile) { TestShaders(); }
 class FakeRendererGL : public GLRenderer {
  public:
   FakeRendererGL(RendererClient* client,
-                 const LayerTreeSettings* settings,
+                 const RendererSettings* settings,
                  OutputSurface* output_surface,
                  ResourceProvider* resource_provider)
       : GLRenderer(client,
@@ -156,10 +201,10 @@ class GLRendererWithDefaultHarnessTest : public GLRendererTest {
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false).Pass();
+                                                  1).Pass();
     renderer_ = make_scoped_ptr(new FakeRendererGL(&renderer_client_,
                                                    &settings_,
                                                    output_surface_.get(),
@@ -168,7 +213,7 @@ class GLRendererWithDefaultHarnessTest : public GLRendererTest {
 
   void SwapBuffers() { renderer_->SwapBuffers(CompositorFrameMetadata()); }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
@@ -192,68 +237,94 @@ class GLRendererShaderTest : public GLRendererTest {
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false).Pass();
+                                                  1).Pass();
     renderer_.reset(new FakeRendererGL(&renderer_client_,
                                        &settings_,
                                        output_surface_.get(),
                                        resource_provider_.get()));
   }
 
-  void TestRenderPassProgram(TexCoordPrecision precision) {
-    EXPECT_PROGRAM_VALID(&renderer_->render_pass_program_[precision]);
-    EXPECT_EQ(renderer_->render_pass_program_[precision].program(),
-              renderer_->program_shadow_);
-  }
-
-  void TestRenderPassColorMatrixProgram(TexCoordPrecision precision) {
+  void TestRenderPassProgram(TexCoordPrecision precision,
+                             BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(
-        &renderer_->render_pass_color_matrix_program_[precision]);
-    EXPECT_EQ(renderer_->render_pass_color_matrix_program_[precision].program(),
+        &renderer_->render_pass_program_[precision][blend_mode]);
+    EXPECT_EQ(renderer_->render_pass_program_[precision][blend_mode].program(),
               renderer_->program_shadow_);
   }
 
-  void TestRenderPassMaskProgram(TexCoordPrecision precision) {
-    EXPECT_PROGRAM_VALID(&renderer_->render_pass_mask_program_[precision]);
-    EXPECT_EQ(renderer_->render_pass_mask_program_[precision].program(),
-              renderer_->program_shadow_);
-  }
-
-  void TestRenderPassMaskColorMatrixProgram(TexCoordPrecision precision) {
+  void TestRenderPassColorMatrixProgram(TexCoordPrecision precision,
+                                        BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(
-        &renderer_->render_pass_mask_color_matrix_program_[precision]);
+        &renderer_->render_pass_color_matrix_program_[precision][blend_mode]);
     EXPECT_EQ(
-        renderer_->render_pass_mask_color_matrix_program_[precision].program(),
+        renderer_->render_pass_color_matrix_program_[precision][blend_mode]
+            .program(),
         renderer_->program_shadow_);
   }
 
-  void TestRenderPassProgramAA(TexCoordPrecision precision) {
-    EXPECT_PROGRAM_VALID(&renderer_->render_pass_program_aa_[precision]);
-    EXPECT_EQ(renderer_->render_pass_program_aa_[precision].program(),
-              renderer_->program_shadow_);
-  }
-
-  void TestRenderPassColorMatrixProgramAA(TexCoordPrecision precision) {
+  void TestRenderPassMaskProgram(TexCoordPrecision precision,
+                                 SamplerType sampler,
+                                 BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(
-        &renderer_->render_pass_color_matrix_program_aa_[precision]);
+        &renderer_->render_pass_mask_program_[precision][sampler][blend_mode]);
     EXPECT_EQ(
-        renderer_->render_pass_color_matrix_program_aa_[precision].program(),
+        renderer_->render_pass_mask_program_[precision][sampler][blend_mode]
+            .program(),
         renderer_->program_shadow_);
   }
 
-  void TestRenderPassMaskProgramAA(TexCoordPrecision precision) {
-    EXPECT_PROGRAM_VALID(&renderer_->render_pass_mask_program_aa_[precision]);
-    EXPECT_EQ(renderer_->render_pass_mask_program_aa_[precision].program(),
+  void TestRenderPassMaskColorMatrixProgram(TexCoordPrecision precision,
+                                            SamplerType sampler,
+                                            BlendMode blend_mode) {
+    EXPECT_PROGRAM_VALID(&renderer_->render_pass_mask_color_matrix_program_
+                              [precision][sampler][blend_mode]);
+    EXPECT_EQ(renderer_->render_pass_mask_color_matrix_program_
+                  [precision][sampler][blend_mode].program(),
               renderer_->program_shadow_);
   }
 
-  void TestRenderPassMaskColorMatrixProgramAA(TexCoordPrecision precision) {
+  void TestRenderPassProgramAA(TexCoordPrecision precision,
+                               BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(
-        &renderer_->render_pass_mask_color_matrix_program_aa_[precision]);
-    EXPECT_EQ(renderer_->render_pass_mask_color_matrix_program_aa_[precision]
-                  .program(),
+        &renderer_->render_pass_program_aa_[precision][blend_mode]);
+    EXPECT_EQ(
+        renderer_->render_pass_program_aa_[precision][blend_mode].program(),
+        renderer_->program_shadow_);
+  }
+
+  void TestRenderPassColorMatrixProgramAA(TexCoordPrecision precision,
+                                          BlendMode blend_mode) {
+    EXPECT_PROGRAM_VALID(
+        &renderer_
+             ->render_pass_color_matrix_program_aa_[precision][blend_mode]);
+    EXPECT_EQ(
+        renderer_->render_pass_color_matrix_program_aa_[precision][blend_mode]
+            .program(),
+        renderer_->program_shadow_);
+  }
+
+  void TestRenderPassMaskProgramAA(TexCoordPrecision precision,
+                                   SamplerType sampler,
+                                   BlendMode blend_mode) {
+    EXPECT_PROGRAM_VALID(
+        &renderer_
+             ->render_pass_mask_program_aa_[precision][sampler][blend_mode]);
+    EXPECT_EQ(
+        renderer_->render_pass_mask_program_aa_[precision][sampler][blend_mode]
+            .program(),
+        renderer_->program_shadow_);
+  }
+
+  void TestRenderPassMaskColorMatrixProgramAA(TexCoordPrecision precision,
+                                              SamplerType sampler,
+                                              BlendMode blend_mode) {
+    EXPECT_PROGRAM_VALID(&renderer_->render_pass_mask_color_matrix_program_aa_
+                              [precision][sampler][blend_mode]);
+    EXPECT_EQ(renderer_->render_pass_mask_color_matrix_program_aa_
+                  [precision][sampler][blend_mode].program(),
               renderer_->program_shadow_);
   }
 
@@ -263,7 +334,7 @@ class GLRendererShaderTest : public GLRendererTest {
               renderer_->program_shadow_);
   }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
@@ -360,38 +431,34 @@ class ForbidSynchronousCallContext : public TestWebGraphicsContext3D {
  public:
   ForbidSynchronousCallContext() {}
 
-  virtual void getAttachedShaders(GLuint program,
-                                  GLsizei max_count,
-                                  GLsizei* count,
-                                  GLuint* shaders) OVERRIDE {
+  void getAttachedShaders(GLuint program,
+                          GLsizei max_count,
+                          GLsizei* count,
+                          GLuint* shaders) override {
     ADD_FAILURE();
   }
-  virtual GLint getAttribLocation(GLuint program, const GLchar* name) OVERRIDE {
+  GLint getAttribLocation(GLuint program, const GLchar* name) override {
     ADD_FAILURE();
     return 0;
   }
-  virtual void getBooleanv(GLenum pname, GLboolean* value) OVERRIDE {
+  void getBooleanv(GLenum pname, GLboolean* value) override { ADD_FAILURE(); }
+  void getBufferParameteriv(GLenum target,
+                            GLenum pname,
+                            GLint* value) override {
     ADD_FAILURE();
   }
-  virtual void getBufferParameteriv(GLenum target,
-                                    GLenum pname,
-                                    GLint* value) OVERRIDE {
-    ADD_FAILURE();
-  }
-  virtual GLenum getError() OVERRIDE {
+  GLenum getError() override {
     ADD_FAILURE();
     return GL_NO_ERROR;
   }
-  virtual void getFloatv(GLenum pname, GLfloat* value) OVERRIDE {
+  void getFloatv(GLenum pname, GLfloat* value) override { ADD_FAILURE(); }
+  void getFramebufferAttachmentParameteriv(GLenum target,
+                                           GLenum attachment,
+                                           GLenum pname,
+                                           GLint* value) override {
     ADD_FAILURE();
   }
-  virtual void getFramebufferAttachmentParameteriv(GLenum target,
-                                                   GLenum attachment,
-                                                   GLenum pname,
-                                                   GLint* value) OVERRIDE {
-    ADD_FAILURE();
-  }
-  virtual void getIntegerv(GLenum pname, GLint* value) OVERRIDE {
+  void getIntegerv(GLenum pname, GLint* value) override {
     if (pname == GL_MAX_TEXTURE_SIZE) {
       // MAX_TEXTURE_SIZE is cached client side, so it's OK to query.
       *value = 1024;
@@ -402,9 +469,7 @@ class ForbidSynchronousCallContext : public TestWebGraphicsContext3D {
 
   // We allow querying the shader compilation and program link status in debug
   // mode, but not release.
-  virtual void getProgramiv(GLuint program,
-                            GLenum pname,
-                            GLint* value) OVERRIDE {
+  void getProgramiv(GLuint program, GLenum pname, GLint* value) override {
 #ifndef NDEBUG
     *value = 1;
 #else
@@ -412,7 +477,7 @@ class ForbidSynchronousCallContext : public TestWebGraphicsContext3D {
 #endif
   }
 
-  virtual void getShaderiv(GLuint shader, GLenum pname, GLint* value) OVERRIDE {
+  void getShaderiv(GLuint shader, GLenum pname, GLint* value) override {
 #ifndef NDEBUG
     *value = 1;
 #else
@@ -420,55 +485,41 @@ class ForbidSynchronousCallContext : public TestWebGraphicsContext3D {
 #endif
   }
 
-  virtual void getRenderbufferParameteriv(GLenum target,
-                                          GLenum pname,
-                                          GLint* value) OVERRIDE {
+  void getRenderbufferParameteriv(GLenum target,
+                                  GLenum pname,
+                                  GLint* value) override {
     ADD_FAILURE();
   }
 
-  virtual void getShaderPrecisionFormat(GLenum shadertype,
-                                        GLenum precisiontype,
-                                        GLint* range,
-                                        GLint* precision) OVERRIDE {
+  void getShaderPrecisionFormat(GLenum shadertype,
+                                GLenum precisiontype,
+                                GLint* range,
+                                GLint* precision) override {
     ADD_FAILURE();
   }
-  virtual void getTexParameterfv(GLenum target,
-                                 GLenum pname,
-                                 GLfloat* value) OVERRIDE {
+  void getTexParameterfv(GLenum target, GLenum pname, GLfloat* value) override {
     ADD_FAILURE();
   }
-  virtual void getTexParameteriv(GLenum target,
-                                 GLenum pname,
-                                 GLint* value) OVERRIDE {
+  void getTexParameteriv(GLenum target, GLenum pname, GLint* value) override {
     ADD_FAILURE();
   }
-  virtual void getUniformfv(GLuint program,
-                            GLint location,
-                            GLfloat* value) OVERRIDE {
+  void getUniformfv(GLuint program, GLint location, GLfloat* value) override {
     ADD_FAILURE();
   }
-  virtual void getUniformiv(GLuint program,
-                            GLint location,
-                            GLint* value) OVERRIDE {
+  void getUniformiv(GLuint program, GLint location, GLint* value) override {
     ADD_FAILURE();
   }
-  virtual GLint getUniformLocation(GLuint program,
-                                   const GLchar* name) OVERRIDE {
+  GLint getUniformLocation(GLuint program, const GLchar* name) override {
     ADD_FAILURE();
     return 0;
   }
-  virtual void getVertexAttribfv(GLuint index,
-                                 GLenum pname,
-                                 GLfloat* value) OVERRIDE {
+  void getVertexAttribfv(GLuint index, GLenum pname, GLfloat* value) override {
     ADD_FAILURE();
   }
-  virtual void getVertexAttribiv(GLuint index,
-                                 GLenum pname,
-                                 GLint* value) OVERRIDE {
+  void getVertexAttribiv(GLuint index, GLenum pname, GLint* value) override {
     ADD_FAILURE();
   }
-  virtual GLsizeiptr getVertexAttribOffset(GLuint index,
-                                           GLenum pname) OVERRIDE {
+  GLsizeiptr getVertexAttribOffset(GLuint index, GLenum pname) override {
     ADD_FAILURE();
     return 0;
   }
@@ -485,12 +536,12 @@ TEST_F(GLRendererTest, InitializationDoesNotMakeSynchronousCalls) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -502,14 +553,12 @@ class LoseContextOnFirstGetContext : public TestWebGraphicsContext3D {
  public:
   LoseContextOnFirstGetContext() {}
 
-  virtual void getProgramiv(GLuint program,
-                            GLenum pname,
-                            GLint* value) OVERRIDE {
+  void getProgramiv(GLuint program, GLenum pname, GLint* value) override {
     context_lost_ = true;
     *value = 0;
   }
 
-  virtual void getShaderiv(GLuint shader, GLenum pname, GLint* value) OVERRIDE {
+  void getShaderiv(GLuint shader, GLenum pname, GLint* value) override {
     context_lost_ = true;
     *value = 0;
   }
@@ -527,12 +576,12 @@ TEST_F(GLRendererTest, InitializationWithQuicklyLostContextDoesNotAssert) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -556,8 +605,8 @@ TEST_F(GLRendererTest, OpaqueBackground) {
   ClearCountingContext* context = context_owned.get();
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
-      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -566,12 +615,12 @@ TEST_F(GLRendererTest, OpaqueBackground) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -608,8 +657,8 @@ TEST_F(GLRendererTest, TransparentBackground) {
   ClearCountingContext* context = context_owned.get();
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
-      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -618,12 +667,12 @@ TEST_F(GLRendererTest, TransparentBackground) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -653,8 +702,8 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
   ClearCountingContext* context = context_owned.get();
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::CreateOffscreen(
-      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::CreateOffscreen(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -663,12 +712,12 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -700,17 +749,15 @@ class VisibilityChangeIsLastCallTrackingContext
       : last_call_was_set_visibility_(false) {}
 
   // TestWebGraphicsContext3D methods.
-  virtual void flush() OVERRIDE { last_call_was_set_visibility_ = false; }
-  virtual void deleteTexture(GLuint) OVERRIDE {
+  void flush() override { last_call_was_set_visibility_ = false; }
+  void deleteTexture(GLuint) override { last_call_was_set_visibility_ = false; }
+  void deleteFramebuffer(GLuint) override {
     last_call_was_set_visibility_ = false;
   }
-  virtual void deleteFramebuffer(GLuint) OVERRIDE {
+  void deleteQueryEXT(GLuint) override {
     last_call_was_set_visibility_ = false;
   }
-  virtual void deleteQueryEXT(GLuint) OVERRIDE {
-    last_call_was_set_visibility_ = false;
-  }
-  virtual void deleteRenderbuffer(GLuint) OVERRIDE {
+  void deleteRenderbuffer(GLuint) override {
     last_call_was_set_visibility_ = false;
   }
 
@@ -732,8 +779,8 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
       new VisibilityChangeIsLastCallTrackingContext);
   VisibilityChangeIsLastCallTrackingContext* context = context_owned.get();
 
-  scoped_refptr<TestContextProvider> provider = TestContextProvider::Create(
-      context_owned.PassAs<TestWebGraphicsContext3D>());
+  scoped_refptr<TestContextProvider> provider =
+      TestContextProvider::Create(context_owned.Pass());
 
   provider->support()->SetSurfaceVisibleCallback(base::Bind(
       &VisibilityChangeIsLastCallTrackingContext::set_last_call_was_visibility,
@@ -750,12 +797,12 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -811,8 +858,8 @@ TEST_F(GLRendererTest, ActiveTextureState) {
   TextureStateTrackingContext* context = context_owned.get();
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
-      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -821,12 +868,12 @@ TEST_F(GLRendererTest, ActiveTextureState) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -902,8 +949,8 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
   NoClearRootRenderPassMockContext* mock_context = mock_context_owned.get();
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
-      mock_context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(mock_context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -912,12 +959,12 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   settings.should_clear_root_render_pass = false;
 
   FakeRendererClient renderer_client;
@@ -979,14 +1026,14 @@ class ScissorTestOnClearCheckingContext : public TestWebGraphicsContext3D {
  public:
   ScissorTestOnClearCheckingContext() : scissor_enabled_(false) {}
 
-  virtual void clear(GLbitfield) OVERRIDE { EXPECT_FALSE(scissor_enabled_); }
+  void clear(GLbitfield) override { EXPECT_FALSE(scissor_enabled_); }
 
-  virtual void enable(GLenum cap) OVERRIDE {
+  void enable(GLenum cap) override {
     if (cap == GL_SCISSOR_TEST)
       scissor_enabled_ = true;
   }
 
-  virtual void disable(GLenum cap) OVERRIDE {
+  void disable(GLenum cap) override {
     if (cap == GL_SCISSOR_TEST)
       scissor_enabled_ = false;
   }
@@ -1000,8 +1047,8 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
       new ScissorTestOnClearCheckingContext);
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
-      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -1010,12 +1057,12 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -1067,9 +1114,9 @@ class DiscardCheckingContext : public TestWebGraphicsContext3D {
     set_have_discard_framebuffer(true);
   }
 
-  virtual void discardFramebufferEXT(GLenum target,
-                                     GLsizei numAttachments,
-                                     const GLenum* attachments) OVERRIDE {
+  void discardFramebufferEXT(GLenum target,
+                             GLsizei numAttachments,
+                             const GLenum* attachments) override {
     ++discarded_;
   }
 
@@ -1088,7 +1135,7 @@ class NonReshapableOutputSurface : public FakeOutputSurface {
                           false) {
     surface_size_ = gfx::Size(500, 500);
   }
-  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE {}
+  void Reshape(const gfx::Size& size, float scale_factor) override {}
   void set_fixed_size(const gfx::Size& size) { surface_size_ = size; }
 };
 
@@ -1098,8 +1145,7 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
 
   FakeOutputSurfaceClient output_surface_client;
   scoped_ptr<NonReshapableOutputSurface> output_surface(
-      new NonReshapableOutputSurface(
-          context_owned.PassAs<TestWebGraphicsContext3D>()));
+      new NonReshapableOutputSurface(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
   output_surface->set_fixed_size(gfx::Size(100, 100));
 
@@ -1109,12 +1155,12 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   settings.partial_swap_enabled = true;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
@@ -1253,13 +1299,12 @@ class FlippedScissorAndViewportContext : public TestWebGraphicsContext3D {
  public:
   FlippedScissorAndViewportContext()
       : did_call_viewport_(false), did_call_scissor_(false) {}
-  virtual ~FlippedScissorAndViewportContext() {
+  ~FlippedScissorAndViewportContext() override {
     EXPECT_TRUE(did_call_viewport_);
     EXPECT_TRUE(did_call_scissor_);
   }
 
-  virtual void viewport(GLint x, GLint y, GLsizei width, GLsizei height)
-      OVERRIDE {
+  void viewport(GLint x, GLint y, GLsizei width, GLsizei height) override {
     EXPECT_EQ(10, x);
     EXPECT_EQ(390, y);
     EXPECT_EQ(100, width);
@@ -1267,8 +1312,7 @@ class FlippedScissorAndViewportContext : public TestWebGraphicsContext3D {
     did_call_viewport_ = true;
   }
 
-  virtual void scissor(GLint x, GLint y, GLsizei width, GLsizei height)
-      OVERRIDE {
+  void scissor(GLint x, GLint y, GLsizei width, GLsizei height) override {
     EXPECT_EQ(30, x);
     EXPECT_EQ(450, y);
     EXPECT_EQ(20, width);
@@ -1290,8 +1334,8 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
       new FlippedScissorAndViewportContext);
 
   FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(new NonReshapableOutputSurface(
-      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  scoped_ptr<OutputSurface> output_surface(
+      new NonReshapableOutputSurface(context_owned.Pass()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
@@ -1300,12 +1344,12 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
       ResourceProvider::Create(output_surface.get(),
                                shared_bitmap_manager.get(),
                                NULL,
+                               NULL,
                                0,
                                false,
-                               1,
-                               false));
+                               1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -1332,6 +1376,54 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
                      false);
 }
 
+TEST_F(GLRendererTest, DrawFramePreservesFramebuffer) {
+  // When using render-to-FBO to display the surface, all rendering is done
+  // to a non-zero FBO. Make sure that the framebuffer is always restored to
+  // the correct framebuffer during rendering, if changed.
+  // Note: there is one path that will set it to 0, but that is after the render
+  // has finished.
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<FakeOutputSurface> output_surface(
+      FakeOutputSurface::Create3d(TestWebGraphicsContext3D::Create().Pass()));
+  CHECK(output_surface->BindToClient(&output_surface_client));
+
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), NULL, NULL, 0, false,
+      1));
+
+  RendererSettings settings;
+  FakeRendererClient renderer_client;
+  FakeRendererGL renderer(&renderer_client, &settings, output_surface.get(),
+                          resource_provider.get());
+  EXPECT_FALSE(renderer.Capabilities().using_partial_swap);
+
+  gfx::Rect device_viewport_rect(0, 0, 100, 100);
+  gfx::Rect viewport_rect(device_viewport_rect.size());
+  gfx::Rect quad_rect = gfx::Rect(20, 20, 20, 20);
+
+  RenderPassId root_pass_id(1, 0);
+  TestRenderPass* root_pass =
+      AddRenderPass(&render_passes_in_draw_order_, root_pass_id, viewport_rect,
+                    gfx::Transform());
+  AddClippedQuad(root_pass, quad_rect, SK_ColorGREEN);
+
+  unsigned fbo;
+  gpu::gles2::GLES2Interface* gl =
+      output_surface->context_provider()->ContextGL();
+  gl->GenFramebuffers(1, &fbo);
+  output_surface->set_framebuffer(fbo);
+
+  renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
+  renderer.DrawFrame(&render_passes_in_draw_order_, 1.f, device_viewport_rect,
+                     device_viewport_rect, false);
+
+  int bound_fbo;
+  gl->GetIntegerv(GL_FRAMEBUFFER_BINDING, &bound_fbo);
+  EXPECT_EQ(static_cast<int>(fbo), bound_fbo);
+}
+
 TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
   gfx::Rect viewport_rect(1, 1);
 
@@ -1343,9 +1435,8 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
   TestRenderPass* root_pass;
 
   ResourceProvider::ResourceId mask = resource_provider_->CreateResource(
-      gfx::Size(20, 12),
-      GL_CLAMP_TO_EDGE,
-      ResourceProvider::TextureHintImmutable,
+      gfx::Size(20, 12), GL_CLAMP_TO_EDGE,
+      ResourceProvider::TEXTURE_HINT_IMMUTABLE,
       resource_provider_->best_texture_format());
   resource_provider_->AllocateForTesting(mask);
 
@@ -1375,191 +1466,229 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
   gfx::Transform transform_causing_aa;
   transform_causing_aa.Rotate(20.0);
 
-  // RenderPassProgram
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             gfx::Transform());
+  for (int i = 0; i <= LAST_BLEND_MODE; ++i) {
+    BlendMode blend_mode = static_cast<BlendMode>(i);
+    SkXfermode::Mode xfer_mode = BlendModeToSkXfermode(blend_mode);
+    settings_.force_blending_with_shaders = (blend_mode != BLEND_MODE_NONE);
+    // RenderPassProgram
+    render_passes_in_draw_order_.clear();
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               gfx::Transform());
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(
-      root_pass, child_pass, 0, FilterOperations(), gfx::Transform());
+    AddRenderPassQuad(root_pass,
+                      child_pass,
+                      0,
+                      FilterOperations(),
+                      gfx::Transform(),
+                      xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassProgram(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassProgram(TEX_COORD_PRECISION_MEDIUM, blend_mode);
 
-  // RenderPassColorMatrixProgram
-  render_passes_in_draw_order_.clear();
+    // RenderPassColorMatrixProgram
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             transform_causing_aa);
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               transform_causing_aa);
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(root_pass, child_pass, 0, filters, gfx::Transform());
+    AddRenderPassQuad(
+        root_pass, child_pass, 0, filters, gfx::Transform(), xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassColorMatrixProgram(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassColorMatrixProgram(TEX_COORD_PRECISION_MEDIUM, blend_mode);
 
-  // RenderPassMaskProgram
-  render_passes_in_draw_order_.clear();
+    // RenderPassMaskProgram
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             gfx::Transform());
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               gfx::Transform());
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(
-      root_pass, child_pass, mask, FilterOperations(), gfx::Transform());
+    AddRenderPassQuad(root_pass,
+                      child_pass,
+                      mask,
+                      FilterOperations(),
+                      gfx::Transform(),
+                      xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassMaskProgram(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassMaskProgram(TEX_COORD_PRECISION_MEDIUM, SAMPLER_TYPE_2D,
+                              blend_mode);
 
-  // RenderPassMaskColorMatrixProgram
-  render_passes_in_draw_order_.clear();
+    // RenderPassMaskColorMatrixProgram
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             gfx::Transform());
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               gfx::Transform());
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(root_pass, child_pass, mask, filters, gfx::Transform());
+    AddRenderPassQuad(
+        root_pass, child_pass, mask, filters, gfx::Transform(), xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassMaskColorMatrixProgram(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassMaskColorMatrixProgram(TEX_COORD_PRECISION_MEDIUM,
+                                         SAMPLER_TYPE_2D, blend_mode);
 
-  // RenderPassProgramAA
-  render_passes_in_draw_order_.clear();
+    // RenderPassProgramAA
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             transform_causing_aa);
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               transform_causing_aa);
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(
-      root_pass, child_pass, 0, FilterOperations(), transform_causing_aa);
+    AddRenderPassQuad(root_pass,
+                      child_pass,
+                      0,
+                      FilterOperations(),
+                      transform_causing_aa,
+                      xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassProgramAA(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassProgramAA(TEX_COORD_PRECISION_MEDIUM, blend_mode);
 
-  // RenderPassColorMatrixProgramAA
-  render_passes_in_draw_order_.clear();
+    // RenderPassColorMatrixProgramAA
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             transform_causing_aa);
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               transform_causing_aa);
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(root_pass, child_pass, 0, filters, transform_causing_aa);
+    AddRenderPassQuad(
+        root_pass, child_pass, 0, filters, transform_causing_aa, xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassColorMatrixProgramAA(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassColorMatrixProgramAA(TEX_COORD_PRECISION_MEDIUM, blend_mode);
 
-  // RenderPassMaskProgramAA
-  render_passes_in_draw_order_.clear();
+    // RenderPassMaskProgramAA
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             transform_causing_aa);
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               transform_causing_aa);
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            gfx::Transform());
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              gfx::Transform());
 
-  AddRenderPassQuad(
-      root_pass, child_pass, mask, FilterOperations(), transform_causing_aa);
+    AddRenderPassQuad(root_pass,
+                      child_pass,
+                      mask,
+                      FilterOperations(),
+                      transform_causing_aa,
+                      xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassMaskProgramAA(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassMaskProgramAA(TEX_COORD_PRECISION_MEDIUM, SAMPLER_TYPE_2D,
+                                blend_mode);
 
-  // RenderPassMaskColorMatrixProgramAA
-  render_passes_in_draw_order_.clear();
+    // RenderPassMaskColorMatrixProgramAA
+    render_passes_in_draw_order_.clear();
 
-  child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                             child_pass_id,
-                             child_rect,
-                             transform_causing_aa);
+    child_pass = AddRenderPass(&render_passes_in_draw_order_,
+                               child_pass_id,
+                               child_rect,
+                               transform_causing_aa);
 
-  root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                            root_pass_id,
-                            viewport_rect,
-                            transform_causing_aa);
+    root_pass = AddRenderPass(&render_passes_in_draw_order_,
+                              root_pass_id,
+                              viewport_rect,
+                              transform_causing_aa);
 
-  AddRenderPassQuad(root_pass, child_pass, mask, filters, transform_causing_aa);
+    AddRenderPassQuad(
+        root_pass, child_pass, mask, filters, transform_causing_aa, xfer_mode);
 
-  renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-  renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       1.f,
-                       viewport_rect,
-                       viewport_rect,
-                       false);
-  TestRenderPassMaskColorMatrixProgramAA(TexCoordPrecisionMedium);
+    renderer_->DecideRenderPassAllocationsForFrame(
+        render_passes_in_draw_order_);
+    renderer_->DrawFrame(&render_passes_in_draw_order_,
+                         1.f,
+                         viewport_rect,
+                         viewport_rect,
+                         false);
+    TestRenderPassMaskColorMatrixProgramAA(TEX_COORD_PRECISION_MEDIUM,
+                                           SAMPLER_TYPE_2D, blend_mode);
+  }
 }
 
 // At this time, the AA code path cannot be taken if the surface's rect would
@@ -1594,8 +1723,12 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadSkipsAAForClippingTransform) {
                             viewport_rect,
                             gfx::Transform());
 
-  AddRenderPassQuad(
-      root_pass, child_pass, 0, FilterOperations(), transform_preventing_aa);
+  AddRenderPassQuad(root_pass,
+                    child_pass,
+                    0,
+                    FilterOperations(),
+                    transform_preventing_aa,
+                    SkXfermode::kSrcOver_Mode);
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
@@ -1606,7 +1739,7 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadSkipsAAForClippingTransform) {
 
   // If use_aa incorrectly ignores clipping, it will use the
   // RenderPassProgramAA shader instead of the RenderPassProgram.
-  TestRenderPassProgram(TexCoordPrecisionMedium);
+  TestRenderPassProgram(TEX_COORD_PRECISION_MEDIUM, BLEND_MODE_NONE);
 }
 
 TEST_F(GLRendererShaderTest, DrawSolidColorShader) {
@@ -1679,10 +1812,10 @@ class MockOutputSurfaceTest : public GLRendererTest {
     resource_provider_ = ResourceProvider::Create(&output_surface_,
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false).Pass();
+                                                  1).Pass();
 
     renderer_.reset(new FakeRendererGL(&renderer_client_,
                                        &settings_,
@@ -1726,7 +1859,7 @@ class MockOutputSurfaceTest : public GLRendererTest {
             ->TestContext3d());
   }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   StrictMock<MockOutputSurface> output_surface_;
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;

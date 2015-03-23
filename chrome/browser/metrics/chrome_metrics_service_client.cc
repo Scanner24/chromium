@@ -36,6 +36,7 @@
 #include "components/metrics/net/network_metrics_provider.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
+#include "components/metrics/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
@@ -45,7 +46,7 @@
 #include "chrome/browser/metrics/android_metrics_provider.h"
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/service_process/service_process_control.h"
 #endif
 
@@ -59,17 +60,19 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/metrics/chromeos_metrics_provider.h"
+#include "chrome/browser/metrics/signin_status_metrics_provider_chromeos.h"
 #endif
 
 #if defined(OS_WIN)
 #include <windows.h>
 #include "base/win/registry.h"
 #include "chrome/browser/metrics/google_update_metrics_provider_win.h"
+#include "components/browser_watcher/watcher_metrics_provider_win.h"
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
 #include "chrome/browser/metrics/signin_status_metrics_provider.h"
-#endif
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
 
 namespace {
 
@@ -94,29 +97,6 @@ metrics::SystemProfileProto::Channel AsProtobufChannel(
   NOTREACHED();
   return metrics::SystemProfileProto::CHANNEL_UNKNOWN;
 }
-
-// Handles asynchronous fetching of memory details.
-// Will run the provided task after finished.
-class MetricsMemoryDetails : public MemoryDetails {
- public:
-  MetricsMemoryDetails(
-      const base::Closure& callback,
-      MemoryGrowthTracker* memory_growth_tracker)
-      : callback_(callback) {
-    SetMemoryGrowthTracker(memory_growth_tracker);
-  }
-
-  virtual void OnDetailsAvailable() OVERRIDE {
-    base::MessageLoop::current()->PostTask(FROM_HERE, callback_);
-  }
-
- private:
-  virtual ~MetricsMemoryDetails() {}
-
-  base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MetricsMemoryDetails);
-};
 
 }  // namespace
 
@@ -179,6 +159,10 @@ bool ChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
   return chrome::IsOffTheRecordSessionActive();
 }
 
+int32 ChromeMetricsServiceClient::GetProduct() {
+  return metrics::ChromeUserMetricsExtension::CHROME;
+}
+
 std::string ChromeMetricsServiceClient::GetApplicationLocale() {
   return g_browser_process->GetApplicationLocale();
 }
@@ -193,11 +177,6 @@ metrics::SystemProfileProto::Channel ChromeMetricsServiceClient::GetChannel() {
 
 std::string ChromeMetricsServiceClient::GetVersionString() {
   chrome::VersionInfo version_info;
-  if (!version_info.is_valid()) {
-    NOTREACHED();
-    return std::string();
-  }
-
   std::string version = version_info.Version();
 #if defined(ARCH_CPU_64_BITS)
   version += "-64";
@@ -246,7 +225,7 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
 
   scoped_refptr<MetricsMemoryDetails> details(
       new MetricsMemoryDetails(callback, &memory_growth_tracker_));
-  details->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
+  details->StartFetch(MemoryDetails::FROM_CHROME_ONLY);
 
   // Collect WebCore cache information to put into a histogram.
   for (content::RenderProcessHost::iterator i(
@@ -258,12 +237,12 @@ void ChromeMetricsServiceClient::CollectFinalMetrics(
 
 scoped_ptr<metrics::MetricsLogUploader>
 ChromeMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
     const base::Callback<void(int)>& on_upload_complete) {
   return scoped_ptr<metrics::MetricsLogUploader>(
       new metrics::NetMetricsLogUploader(
-          g_browser_process->system_request_context(), server_url, mime_type,
+          g_browser_process->system_request_context(),
+          metrics::kDefaultMetricsServerUrl,
+          metrics::kDefaultMetricsMimeType,
           on_upload_complete));
 }
 
@@ -295,7 +274,7 @@ void ChromeMetricsServiceClient::Initialize() {
           new ExtensionsMetricsProvider(metrics_state_manager_)));
 #endif
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new NetworkMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(new metrics::NetworkMetricsProvider(
           content::BrowserThread::GetBlockingPool())));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider));
@@ -317,6 +296,20 @@ void ChromeMetricsServiceClient::Initialize() {
   google_update_metrics_provider_ = new GoogleUpdateMetricsProviderWin;
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(google_update_metrics_provider_));
+
+  // Report exit funnels for canary and dev only.
+  bool report_exit_funnels = false;
+  switch (chrome::VersionInfo::GetChannel()) {
+    case chrome::VersionInfo::CHANNEL_CANARY:
+    case chrome::VersionInfo::CHANNEL_DEV:
+      report_exit_funnels = true;
+      break;
+  }
+
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(
+          new browser_watcher::WatcherMetricsProviderWin(
+              chrome::kBrowserExitCodesRegistryPath, report_exit_funnels)));
 #endif  // defined(OS_WIN)
 
 #if defined(ENABLE_PLUGINS)
@@ -332,13 +325,18 @@ void ChromeMetricsServiceClient::Initialize() {
   chromeos_metrics_provider_ = chromeos_metrics_provider;
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(chromeos_metrics_provider));
+
+  SigninStatusMetricsProviderChromeOS* signin_metrics_provider_cros =
+      new SigninStatusMetricsProviderChromeOS;
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(signin_metrics_provider_cros));
 #endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(
           SigninStatusMetricsProvider::CreateInstance()));
-#endif
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
 }
 
 void ChromeMetricsServiceClient::OnInitTaskGotHardwareClass() {
@@ -399,9 +397,9 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
 
   DCHECK_EQ(num_async_histogram_fetches_in_progress_, 0);
 
-#if !defined(ENABLE_FULL_PRINTING)
+#if !defined(ENABLE_PRINT_PREVIEW)
   num_async_histogram_fetches_in_progress_ = 1;
-#else  // !ENABLE_FULL_PRINTING
+#else   // !ENABLE_PRINT_PREVIEW
   num_async_histogram_fetches_in_progress_ = 2;
   // Run requests to service and content in parallel.
   if (!ServiceProcessControl::GetInstance()->GetHistograms(callback, timeout)) {
@@ -412,7 +410,7 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
     // here to make code work even if |GetHistograms()| fired |callback|.
     --num_async_histogram_fetches_in_progress_;
   }
-#endif  // !ENABLE_FULL_PRINTING
+#endif  // !ENABLE_PRINT_PREVIEW
 
   // Set up the callback to task to call after we receive histograms from all
   // child processes. |timeout| specifies how long to wait before absolutely
@@ -439,7 +437,7 @@ void ChromeMetricsServiceClient::OnHistogramSynchronizationDone() {
 
 void ChromeMetricsServiceClient::RecordCommandLineMetrics() {
   // Get stats on use of command line.
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
+  const base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
   size_t common_commands = 0;
   if (command_line->HasSwitch(switches::kUserDataDir)) {
     ++common_commands;

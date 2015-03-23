@@ -10,13 +10,14 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_combiner.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/history/core/browser/top_sites.h"
+#include "components/history/core/browser/visit_filter.h"
 
 
 namespace {
@@ -63,7 +64,7 @@ void SuggestionsSourceTopSites::FetchItems(Profile* profile) {
 
   history_tracker_.TryCancelAll();
   HistoryService* history = HistoryServiceFactory::GetForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
   // |history| may be null during unit tests.
   if (history) {
     history::VisitFilter time_filter;

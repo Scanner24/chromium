@@ -66,7 +66,7 @@ class ChromeDriver(object):
                chrome_extensions=None, chrome_log_path=None,
                debugger_address=None, browser_log_level=None,
                performance_log_level=None, mobile_emulation=None,
-               experimental_options=None):
+               experimental_options=None, download_dir=None):
     self._executor = command_executor.CommandExecutor(server_url)
 
     options = {}
@@ -114,6 +114,14 @@ class ChromeDriver(object):
     if performance_log_level:
       assert performance_log_level in log_levels
       logging_prefs['performance'] = performance_log_level
+
+    download_prefs = {}
+    if download_dir:
+      if 'prefs' not in options:
+        options['prefs'] = {}
+      if 'download' not in options['prefs']:
+        options['prefs']['download'] = {}
+      options['prefs']['download']['default_directory'] = download_dir
 
     params = {
       'desiredCapabilities': {
@@ -208,6 +216,9 @@ class ChromeDriver(object):
 
   def SwitchToParentFrame(self):
     self.ExecuteCommand(Command.SWITCH_TO_PARENT_FRAME)
+
+  def GetSessions(self):
+    return self.ExecuteCommand(Command.GET_SESSIONS)
 
   def GetTitle(self):
     return self.ExecuteCommand(Command.GET_TITLE)

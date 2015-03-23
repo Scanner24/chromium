@@ -4,42 +4,50 @@
 
 import unittest
 
-from telemetry import benchmark
+from telemetry import decorators
 from telemetry.core.platform import android_device
 from telemetry.core.platform import android_platform_backend
-from telemetry.unittest import system_stub
+from telemetry.unittest_util import system_stub
+from telemetry.unittest_util import options_for_unittests
 
 
 class AndroidPlatformBackendTest(unittest.TestCase):
   def setUp(self):
+    self._options = options_for_unittests.GetCopy()
     self._stubs = system_stub.Override(
         android_platform_backend,
-        ['perf_control', 'thermal_throttle', 'adb_commands'])
+        ['perf_control', 'thermal_throttle', 'adb_commands', 'certutils',
+         'adb_install_cert'])
+
+    # Skip _FixPossibleAdbInstability by setting psutil to None.
+    self._actual_ps_util = android_platform_backend.psutil
+    android_platform_backend.psutil = None
 
   def tearDown(self):
     self._stubs.Restore()
+    android_platform_backend.psutil = self._actual_ps_util
 
-  @benchmark.Disabled('chromeos')
+  @decorators.Disabled('chromeos')
   def testGetCpuStats(self):
-    proc_stat_content = [
+    proc_stat_content = (
         '7702 (.android.chrome) S 167 167 0 0 -1 1077936448 '
         '3247 0 0 0 4 1 0 0 20 0 9 0 5603962 337379328 5867 '
         '4294967295 1074458624 1074463824 3197495984 3197494152 '
         '1074767676 0 4612 0 38136 4294967295 0 0 17 0 0 0 0 0 0 '
-        '1074470376 1074470912 1102155776']
+        '1074470376 1074470912 1102155776\n')
     self._stubs.adb_commands.adb_device.mock_content = proc_stat_content
     old_interface = self._stubs.adb_commands.adb_device.old_interface
     old_interface.can_access_protected_file_contents = True
     backend = android_platform_backend.AndroidPlatformBackend(
-        android_device.AndroidDevice('12345'))
+        android_device.AndroidDevice('12345'), self._options)
     cpu_stats = backend.GetCpuStats('7702')
-    self.assertEquals(cpu_stats, {'CpuProcessTime': 5.0})
+    self.assertEquals(cpu_stats, {'CpuProcessTime': 0.05})
 
-  @benchmark.Disabled('chromeos')
+  @decorators.Disabled('chromeos')
   def testGetCpuStatsInvalidPID(self):
     # Mock an empty /proc/pid/stat.
     backend = android_platform_backend.AndroidPlatformBackend(
-        android_device.AndroidDevice('1234'))
+        android_device.AndroidDevice('1234'), self._options)
     cpu_stats = backend.GetCpuStats('7702')
     self.assertEquals(cpu_stats, {})
 
@@ -65,3 +73,15 @@ class AndroidPlatformBackendTest(unittest.TestCase):
     for cpu in result:
       for state in result[cpu]:
         self.assertAlmostEqual(result[cpu][state], expected_cstate[cpu][state])
+
+  def testInstallTestCaFailure(self):
+    backend = android_platform_backend.AndroidPlatformBackend(
+        android_device.AndroidDevice('failure'), self._options)
+    backend.InstallTestCa()
+    self.assertFalse(backend.is_test_ca_installed)
+
+  def testInstallTestCaSuccess(self):
+    backend = android_platform_backend.AndroidPlatformBackend(
+        android_device.AndroidDevice('success'), self._options)
+    backend.InstallTestCa()
+    self.assertTrue(backend.is_test_ca_installed)

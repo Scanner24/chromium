@@ -50,6 +50,28 @@ partial interface MyIFacePartial { };
 partial interface MyIFaceInherit : Foo {};
 
 /* TREE
+ *Interface(MyIFaceMissingArgument)
+ *  Operation(foo)
+ *    Arguments()
+ *      Argument(arg)
+ *        Type()
+ *          PrimitiveType(DOMString)
+ *      Error(Missing argument.)
+ *    Type()
+ *      PrimitiveType(void)
+ */
+interface MyIFaceMissingArgument {
+  void foo(DOMString arg, );
+};
+
+/* TREE
+ *Error(Unexpected keyword "double" after keyword "readonly".)
+ */
+interface MyIFaceMissingAttribute {
+  readonly double foo;
+};
+
+/* TREE
  *Interface(MyIFaceBig)
  *  Const(setString)
  *    PrimitiveType(DOMString)
@@ -57,6 +79,23 @@ partial interface MyIFaceInherit : Foo {};
  */
 interface MyIFaceBig {
   const DOMString? setString = null;
+};
+
+/* TREE
+ *Interface(MyIfaceEmptySequenceDefalutValue)
+ *  Operation(foo)
+ *    Arguments()
+ *      Argument(arg)
+ *        Type()
+ *          Sequence()
+ *            Type()
+ *              PrimitiveType(DOMString)
+ *        Default()
+ *    Type()
+ *      PrimitiveType(void)
+ */
+interface MyIfaceEmptySequenceDefalutValue {
+  void foo(optional sequence<DOMString> arg = []);
 };
 
 /* TREE
@@ -180,4 +219,90 @@ interface MyIFaceStringifiers {
  MyExtendedIdentListAttribute=(Foo, Bar, Baz)]
 interface MyExtendedAttributeInterface {
   [Attr, MethodIdentList=(Foo, Bar)] void method();
+};
+
+/* TREE
+ *Interface(MyIfacePromise)
+ *  Operation(method1)
+ *    Arguments()
+ *    Type()
+ *      Promise(Promise)
+ *        Type()
+ *          PrimitiveType(void)
+ *  Operation(method2)
+ *    Arguments()
+ *    Type()
+ *      Promise(Promise)
+ *        Type()
+ *          PrimitiveType(long)
+ *  Operation(method3)
+ *    Arguments()
+ *    Type()
+ *      Promise(Promise)
+ *        Type()
+ *          Any()
+ *  Operation(method4)
+ *    Arguments()
+ *    Type()
+ *      Promise(Promise)
+ *        Type()
+ *          Any()
+ */
+interface MyIfacePromise {
+  Promise<void> method1();
+  Promise<long> method2();
+  Promise<any> method3();
+  Promise method4();
+};
+
+/* TREE
+ *Interface(MyIfaceIterable)
+ *  Iterable()
+ *    Type()
+ *      PrimitiveType(long)
+ *  Iterable()
+ *    Type()
+ *      PrimitiveType(double)
+ *    Type()
+ *      PrimitiveType(DOMString)
+ *  LegacyIterable()
+ *    Type()
+ *      PrimitiveType(boolean)
+ */
+interface MyIfaceIterable {
+  iterable<long>;
+  iterable<double, DOMString>;
+  legacyiterable<boolean>;
+};
+
+/* TREE
+ *Interface(MyIfaceMaplike)
+ *  Maplike()
+ *    Type()
+ *      PrimitiveType(long)
+ *    Type()
+ *      PrimitiveType(DOMString)
+ *  Maplike()
+ *    Type()
+ *      PrimitiveType(double)
+ *    Type()
+ *      PrimitiveType(boolean)
+ */
+interface MyIfaceMaplike {
+  readonly maplike<long, DOMString>;
+  maplike<double, boolean>;
+};
+
+/* TREE
+ *Interface(MyIfaceSetlike)
+ *  Setlike()
+ *    Type()
+ *      PrimitiveType(long)
+ *  Setlike()
+ *    Type()
+ *      PrimitiveType(double)
+ */
+interface MyIfaceSetlike {
+  readonly setlike<long>;
+  setlike<double>;
 };

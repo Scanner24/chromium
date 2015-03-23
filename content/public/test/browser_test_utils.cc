@@ -7,20 +7,22 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
-#include "base/path_service.h"
 #include "base/process/kill.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/histogram_fetcher.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
@@ -31,13 +33,16 @@
 #include "content/public/test/test_utils.h"
 #include "net/base/filename_util.h"
 #include "net/cookies/cookie_store.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
 #include "net/test/python_utils.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/test/draw_waiter_for_test.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/resources/grit/webui_resources.h"
 
@@ -62,9 +67,9 @@ class DOMOperationObserver : public NotificationObserver,
     message_loop_runner_ = new MessageLoopRunner;
   }
 
-  virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const NotificationSource& source,
+               const NotificationDetails& details) override {
     DCHECK(type == NOTIFICATION_DOM_OPERATION_RESPONSE);
     Details<DomOperationNotificationDetails> dom_op_details(details);
     response_ = dom_op_details->json;
@@ -73,7 +78,7 @@ class DOMOperationObserver : public NotificationObserver,
   }
 
   // Overridden from WebContentsObserver:
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
+  void RenderProcessGone(base::TerminationStatus status) override {
     message_loop_runner_->Quit();
   }
 
@@ -90,6 +95,28 @@ class DOMOperationObserver : public NotificationObserver,
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(DOMOperationObserver);
+};
+
+class InterstitialObserver : public content::WebContentsObserver {
+ public:
+  InterstitialObserver(content::WebContents* web_contents,
+                       const base::Closure& attach_callback,
+                       const base::Closure& detach_callback)
+      : WebContentsObserver(web_contents),
+        attach_callback_(attach_callback),
+        detach_callback_(detach_callback) {
+  }
+  ~InterstitialObserver() override {}
+
+  // WebContentsObserver methods:
+  void DidAttachInterstitialPage() override { attach_callback_.Run(); }
+  void DidDetachInterstitialPage() override { detach_callback_.Run(); }
+
+ private:
+  base::Closure attach_callback_;
+  base::Closure detach_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
 };
 
 // Specifying a prototype so that we can add the WARN_UNUSED_RESULT attribute.
@@ -198,8 +225,60 @@ void SetCookieOnIOThread(const GURL& url,
       base::Bind(&SetCookieCallback, result, event));
 }
 
+scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
+    const GURL& server_base_url,
+    const net::test_server::HttpRequest& request) {
+  std::string prefix("/cross-site/");
+  if (!StartsWithASCII(request.relative_url, prefix, true))
+    return scoped_ptr<net::test_server::HttpResponse>();
+
+  std::string params = request.relative_url.substr(prefix.length());
+
+  // A hostname to redirect to must be included in the URL, therefore at least
+  // one '/' character is expected.
+  size_t slash = params.find('/');
+  if (slash == std::string::npos)
+    return scoped_ptr<net::test_server::HttpResponse>();
+
+  // Replace the host of the URL with the one passed in the URL.
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr(base::StringPiece(params).substr(0, slash));
+  GURL redirect_server = server_base_url.ReplaceComponents(replace_host);
+
+  // Append the real part of the path to the new URL.
+  std::string path = params.substr(slash + 1);
+  GURL redirect_target(redirect_server.Resolve(path));
+  DCHECK(redirect_target.is_valid());
+
+  scoped_ptr<net::test_server::BasicHttpResponse> http_response(
+      new net::test_server::BasicHttpResponse);
+  http_response->set_code(net::HTTP_MOVED_PERMANENTLY);
+  http_response->AddCustomHeader("Location", redirect_target.spec());
+  return http_response.Pass();
+}
+
 }  // namespace
 
+bool NavigateIframeToURL(WebContents* web_contents,
+                         std::string iframe_id,
+                         const GURL& url) {
+  // TODO(creis): This should wait for LOAD_STOP, but cross-site subframe
+  // navigations generate extra DidStartLoading and DidStopLoading messages.
+  // Until we replace swappedout:// with frame proxies, we need to listen for
+  // something else.  For now, we trigger NEW_SUBFRAME navigations and listen
+  // for commit.  See https://crbug.com/436250.
+  std::string script = base::StringPrintf(
+      "setTimeout(\""
+      "var iframes = document.getElementById('%s');iframes.src='%s';"
+      "\",0)",
+      iframe_id.c_str(), url.spec().c_str());
+  WindowedNotificationObserver load_observer(
+      NOTIFICATION_NAV_ENTRY_COMMITTED,
+      Source<NavigationController>(&web_contents->GetController()));
+  bool result = ExecuteScript(web_contents, script);
+  load_observer.Wait();
+  return result;
+}
 
 GURL GetFileUrlWithQuery(const base::FilePath& path,
                          const std::string& query_string) {
@@ -212,7 +291,7 @@ GURL GetFileUrlWithQuery(const base::FilePath& path,
   return url;
 }
 
-void WaitForLoadStop(WebContents* web_contents) {
+void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents) {
   // In many cases, the load may have finished before we get here.  Only wait if
   // the tab still has a pending navigation.
   if (web_contents->IsLoading()) {
@@ -223,11 +302,25 @@ void WaitForLoadStop(WebContents* web_contents) {
   }
 }
 
+bool WaitForLoadStop(WebContents* web_contents) {
+  WaitForLoadStopWithoutSuccessCheck(web_contents);
+  return IsLastCommittedEntryOfPageType(web_contents, PAGE_TYPE_NORMAL);
+}
+
+bool IsLastCommittedEntryOfPageType(WebContents* web_contents,
+                                    content::PageType page_type) {
+  NavigationEntry* last_entry =
+      web_contents->GetController().GetLastCommittedEntry();
+  if (!last_entry)
+    return false;
+  return last_entry->GetPageType() == page_type;
+}
+
 void CrashTab(WebContents* web_contents) {
   RenderProcessHost* rph = web_contents->GetRenderProcessHost();
   RenderProcessHostWatcher watcher(
       rph, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  base::KillProcess(rph->GetHandle(), 0, false);
+  rph->Shutdown(0, false);
   watcher.Wait();
 }
 
@@ -593,6 +686,65 @@ void FetchHistogramsFromChildProcesses() {
   runner->Run();
 }
 
+void SetupCrossSiteRedirector(
+    net::test_server::EmbeddedTestServer* embedded_test_server) {
+   embedded_test_server->RegisterRequestHandler(
+       base::Bind(&CrossSiteRedirectResponseHandler,
+                  embedded_test_server->base_url()));
+}
+
+void WaitForInterstitialAttach(content::WebContents* web_contents) {
+  if (web_contents->ShowingInterstitialPage())
+    return;
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  InterstitialObserver observer(web_contents,
+                                loop_runner->QuitClosure(),
+                                base::Closure());
+  loop_runner->Run();
+}
+
+void WaitForInterstitialDetach(content::WebContents* web_contents) {
+  RunTaskAndWaitForInterstitialDetach(web_contents, base::Closure());
+}
+
+void RunTaskAndWaitForInterstitialDetach(content::WebContents* web_contents,
+                                         const base::Closure& task) {
+  if (!web_contents || !web_contents->ShowingInterstitialPage())
+    return;
+  scoped_refptr<content::MessageLoopRunner> loop_runner(
+      new content::MessageLoopRunner);
+  InterstitialObserver observer(web_contents,
+                                base::Closure(),
+                                loop_runner->QuitClosure());
+  if (!task.is_null())
+    task.Run();
+  // At this point, web_contents may have been deleted.
+  loop_runner->Run();
+}
+
+bool WaitForRenderFrameReady(RenderFrameHost* rfh) {
+  if (!rfh)
+    return false;
+  std::string result;
+  EXPECT_TRUE(
+      content::ExecuteScriptAndExtractString(
+          rfh,
+          "(function() {"
+          "  var done = false;"
+          "  function checkState() {"
+          "    if (!done && document.readyState == 'complete') {"
+          "      done = true;"
+          "      window.domAutomationController.send('pageLoadComplete');"
+          "    }"
+          "  }"
+          "  checkState();"
+          "  document.addEventListener('readystatechange', checkState);"
+          "})();",
+          &result));
+  return result == "pageLoadComplete";
+}
+
 TitleWatcher::TitleWatcher(WebContents* web_contents,
                            const base::string16& expected_title)
     : WebContentsObserver(web_contents),
@@ -683,7 +835,6 @@ void RenderProcessHostWatcher::Wait() {
 
 void RenderProcessHostWatcher::RenderProcessExited(
     RenderProcessHost* host,
-    base::ProcessHandle handle,
     base::TerminationStatus status,
     int exit_code) {
   if (type_ == WATCH_FOR_PROCESS_EXIT)
@@ -730,6 +881,68 @@ bool DOMMessageQueue::WaitForMessage(std::string* message) {
   *message = message_queue_.front();
   message_queue_.pop();
   return true;
+}
+
+class WebContentsAddedObserver::RenderViewCreatedObserver
+    : public WebContentsObserver {
+ public:
+  explicit RenderViewCreatedObserver(WebContents* web_contents)
+      : WebContentsObserver(web_contents),
+        render_view_created_called_(false),
+        main_frame_created_called_(false) {}
+
+  // WebContentsObserver:
+  void RenderViewCreated(RenderViewHost* rvh) override {
+    render_view_created_called_ = true;
+  }
+
+  void RenderFrameCreated(RenderFrameHost* rfh) override {
+    if (rfh == web_contents()->GetMainFrame())
+      main_frame_created_called_ = true;
+  }
+
+  bool render_view_created_called_;
+  bool main_frame_created_called_;
+};
+
+WebContentsAddedObserver::WebContentsAddedObserver()
+    : web_contents_created_callback_(
+          base::Bind(&WebContentsAddedObserver::WebContentsCreated,
+                     base::Unretained(this))),
+      web_contents_(NULL) {
+  WebContentsImpl::FriendZone::AddCreatedCallbackForTesting(
+      web_contents_created_callback_);
+}
+
+WebContentsAddedObserver::~WebContentsAddedObserver() {
+  WebContentsImpl::FriendZone::RemoveCreatedCallbackForTesting(
+      web_contents_created_callback_);
+}
+
+void WebContentsAddedObserver::WebContentsCreated(WebContents* web_contents) {
+  DCHECK(!web_contents_);
+  web_contents_ = web_contents;
+  child_observer_.reset(new RenderViewCreatedObserver(web_contents));
+
+  if (runner_.get())
+    runner_->QuitClosure().Run();
+}
+
+WebContents* WebContentsAddedObserver::GetWebContents() {
+  if (web_contents_)
+    return web_contents_;
+
+  runner_ = new MessageLoopRunner();
+  runner_->Run();
+  return web_contents_;
+}
+
+bool WebContentsAddedObserver::RenderViewCreatedCalled() {
+  if (child_observer_) {
+    return child_observer_->render_view_created_called_ &&
+           child_observer_->main_frame_created_called_;
+  }
+  return false;
 }
 
 }  // namespace content

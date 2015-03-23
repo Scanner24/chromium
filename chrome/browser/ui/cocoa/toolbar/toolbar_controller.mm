@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/mac/bundle_locations.h"
+#include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
@@ -34,9 +36,9 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/back_forward_menu_controller.h"
-#import "chrome/browser/ui/cocoa/toolbar/reload_button.h"
-#import "chrome/browser/ui/cocoa/toolbar/toolbar_button.h"
-#import "chrome/browser/ui/cocoa/toolbar/toolbar_view.h"
+#import "chrome/browser/ui/cocoa/toolbar/reload_button_cocoa.h"
+#import "chrome/browser/ui/cocoa/toolbar/toolbar_button_cocoa.h"
+#import "chrome/browser/ui/cocoa/toolbar/toolbar_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/toolbar/wrench_toolbar_button_cell.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/wrench_menu/wrench_menu_controller.h"
@@ -56,8 +58,8 @@
 #import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
 
 using content::OpenURLParams;
 using content::Referrer;
@@ -68,11 +70,13 @@ namespace {
 // Height of the toolbar in pixels when the bookmark bar is closed.
 const CGFloat kBaseToolbarHeightNormal = 35.0;
 
+// The padding above the toolbar elements. This is calculated from the values
+// in Toolbar.xib: the height of the toolbar (35) minus the height of the child
+// elements (29) minus the y-origin of the elements (4).
+const CGFloat kToolbarElementTopPadding = 2.0;
+
 // The minimum width of the location bar in pixels.
 const CGFloat kMinimumLocationBarWidth = 100.0;
-
-// The duration of any animation that occurs within the toolbar in seconds.
-const CGFloat kAnimationDuration = 0.2;
 
 // The amount of left padding that the wrench menu should have.
 const CGFloat kWrenchMenuLeftPadding = 3.0;
@@ -89,9 +93,10 @@ const CGFloat kWrenchMenuLeftPadding = 3.0;
 - (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
 - (void)maintainMinimumLocationBarWidth;
 - (void)adjustBrowserActionsContainerForNewWindow:(NSNotification*)notification;
+- (void)browserActionsContainerWillDrag:(NSNotification*)notification;
 - (void)browserActionsContainerDragged:(NSNotification*)notification;
-- (void)browserActionsContainerDragFinished:(NSNotification*)notification;
 - (void)browserActionsVisibilityChanged:(NSNotification*)notification;
+- (void)browserActionsContainerWillAnimate:(NSNotification*)notification;
 - (void)adjustLocationSizeBy:(CGFloat)dX animate:(BOOL)animate;
 - (void)updateWrenchButtonSeverity:(WrenchIconPainter::Severity)severity
                            animate:(BOOL)animate;
@@ -108,16 +113,15 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
       : controller_(controller),
         badge_controller_([controller browser]->profile(), this) {
   }
-  virtual ~NotificationBridge() {
-  }
+  ~NotificationBridge() override {}
 
   void UpdateBadgeSeverity() {
     badge_controller_.UpdateDelegate();
   }
 
-  virtual void UpdateBadgeSeverity(WrenchMenuBadgeController::BadgeType type,
-                                   WrenchIconPainter::Severity severity,
-                                   bool animate) OVERRIDE {
+  void UpdateBadgeSeverity(WrenchMenuBadgeController::BadgeType type,
+                           WrenchIconPainter::Severity severity,
+                           bool animate) override {
     [controller_ updateWrenchButtonSeverity:severity animate:animate];
   }
 
@@ -258,6 +262,7 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   [homeButton_ setHandleMiddleClick:YES];
 
   [self initCommandStatus:commands_];
+  [reloadButton_ setCommandUpdater:commands_];
 
   locationBarView_.reset(new LocationBarViewMac(locationBar_, commands_,
                                                 profile_, browser_));
@@ -273,6 +278,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
           base::Unretained(notificationBridge_.get())));
   [self showOptionalHomeButton];
   [self installWrenchMenu];
+
+  [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
 
   // Create the controllers for the back/forward menus.
   backMenuController_.reset([[BackForwardMenuController alloc]
@@ -391,16 +398,7 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 
 - (void)focusLocationBar:(BOOL)selectAll {
   if (locationBarView_.get()) {
-    if (selectAll &&
-        locationBarView_->GetToolbarModel()->WouldOmitURLDueToOriginChip()) {
-      // select_all is true when it's expected that the user may want to copy
-      // the URL to the clipboard. If the origin chip is being displayed (and
-      // thus the URL is not being shown in the Omnibox) show it now to support
-      // the same functionality.
-      locationBarView_->GetOmniboxView()->ShowURL();
-    } else {
-      locationBarView_->FocusLocation(selectAll ? true : false);
-    }
+    locationBarView_->FocusLocation(selectAll ? true : false);
   }
 }
 
@@ -440,6 +438,13 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   if (browserActionsController_.get()) {
     [browserActionsController_ update];
   }
+
+  BOOL needReloadMenu = chrome::IsDebuggerAttachedToCurrentTab(browser_);
+  [reloadButton_ setMenuEnabled:needReloadMenu];
+}
+
+- (void)resetTabState:(WebContents*)tab {
+  locationBarView_->ResetTabState(tab);
 }
 
 - (void)setStarredState:(BOOL)isStarred {
@@ -448,6 +453,12 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 
 - (void)setTranslateIconLit:(BOOL)on {
   locationBarView_->SetTranslateIconLit(on);
+}
+
+- (void)setOverflowedToolbarActionWantsToRun:(BOOL)overflowedActionWantsToRun {
+  WrenchToolbarButtonCell* cell =
+      base::mac::ObjCCastStrict<WrenchToolbarButtonCell>([wrenchButton_ cell]);
+  [cell setOverflowedToolbarActionWantsToRun:overflowedActionWantsToRun];
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
@@ -563,10 +574,6 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   [wrenchButton_ setAttachedMenu:[wrenchMenuController_ menu]];
 }
 
-- (WrenchMenuController*)wrenchMenuController {
-  return wrenchMenuController_;
-}
-
 - (void)updateWrenchButtonSeverity:(WrenchIconPainter::Severity)severity
                            animate:(BOOL)animate {
   WrenchToolbarButtonCell* cell =
@@ -584,22 +591,28 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   if (!browserActionsController_.get()) {
     browserActionsController_.reset([[BrowserActionsController alloc]
             initWithBrowser:browser_
-              containerView:browserActionsContainerView_]);
+              containerView:browserActionsContainerView_
+             mainController:nil]);
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(browserActionsContainerWillDrag:)
+               name:kBrowserActionGrippyWillDragNotification
+             object:browserActionsContainerView_];
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(browserActionsContainerDragged:)
                name:kBrowserActionGrippyDraggingNotification
-             object:browserActionsController_];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(browserActionsContainerDragFinished:)
-               name:kBrowserActionGrippyDragFinishedNotification
-             object:browserActionsController_];
+             object:browserActionsContainerView_];
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(browserActionsVisibilityChanged:)
                name:kBrowserActionVisibilityChangedNotification
              object:browserActionsController_];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(browserActionsContainerWillAnimate:)
+               name:kBrowserActionsContainerWillAnimate
+             object:browserActionsContainerView_];
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(adjustBrowserActionsContainerForNewWindow:)
@@ -630,13 +643,24 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
       [browserActionsContainerView_ resizeDeltaX] animate:NO];
 }
 
-- (void)browserActionsContainerDragFinished:(NSNotification*)notification {
-  [browserActionsController_ resizeContainerAndAnimate:YES];
-  [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:YES];
+- (void)browserActionsContainerWillDrag:(NSNotification*)notification {
+  CGFloat deltaX = [[notification.userInfo objectForKey:kTranslationWithDelta]
+      floatValue];
+  CGFloat locationBarWidth = NSWidth([locationBar_ frame]);
+  BOOL locationBarWillBeAtMinSize =
+      (locationBarWidth + deltaX) <= kMinimumLocationBarWidth;
+
+  // Prevent the |browserActionsContainerView_| from dragging if the width of
+  // location bar will reach the minimum.
+  [browserActionsContainerView_ setCanDragLeft:!locationBarWillBeAtMinSize];
 }
 
 - (void)browserActionsVisibilityChanged:(NSNotification*)notification {
   [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
+}
+
+- (void)browserActionsContainerWillAnimate:(NSNotification*)notification {
+  [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:YES];
 }
 
 - (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate {
@@ -647,14 +671,13 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     CGFloat edgeXPos = [wrenchButton_ frame].origin.x;
     leftDistance = edgeXPos - locationBarXPos - kWrenchMenuLeftPadding;
   } else {
-    NSRect containerFrame = animate ?
-        [browserActionsContainerView_ animationEndFrame] :
-        [browserActionsContainerView_ frame];
-
-    leftDistance = containerFrame.origin.x - locationBarXPos;
+    leftDistance = NSMinX([browserActionsContainerView_ animationEndFrame]) -
+        locationBarXPos;
   }
   if (leftDistance != 0.0)
     [self adjustLocationSizeBy:leftDistance animate:animate];
+  else
+    [locationBar_ stopAnimation];
 }
 
 - (void)maintainMinimumLocationBarWidth {
@@ -671,6 +694,21 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   // present.
   if (!browserActionsController_.get())
     return;
+
+  if ([browserActionsContainerView_ isAnimating]) {
+    // If the browser actions container is animating, we need to stop it first,
+    // because the frame it's animating for could be incorrect with the new
+    // bounds (if, for instance, the bookmark bar was added).
+    // This will advance to the end of the animation, so we also need to adjust
+    // it afterwards.
+    [browserActionsContainerView_ stopAnimation];
+    NSRect containerFrame = [browserActionsContainerView_ frame];
+    containerFrame.origin.y =
+        NSHeight([[self view] frame]) - NSHeight(containerFrame) -
+        kToolbarElementTopPadding;
+    [browserActionsContainerView_ setFrame:containerFrame];
+    [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
+  }
 
   [self maintainMinimumLocationBarWidth];
 
@@ -694,7 +732,8 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
     NSRect containerFrame = [browserActionsContainerView_ frame];
     containerFrame = NSOffsetRect(containerFrame, -dX, 0);
     containerFrame.size.width += dX;
-    CGFloat savedContainerWidth = [browserActionsController_ savedWidth];
+    CGFloat savedContainerWidth =
+        [browserActionsController_ preferredSize].width();
     if (NSWidth(containerFrame) >= savedContainerWidth) {
       containerFrame = NSOffsetRect(containerFrame,
           NSWidth(containerFrame) - savedContainerWidth, 0);
@@ -711,15 +750,12 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
   NSRect locationFrame = [locationBar_ frame];
   locationFrame.size.width += dX;
 
-  if (!animate) {
-    [locationBar_ setFrame:locationFrame];
-    return;
-  }
+  [locationBar_ stopAnimation];
 
-  [NSAnimationContext beginGrouping];
-  [[NSAnimationContext currentContext] setDuration:kAnimationDuration];
-  [[locationBar_ animator] setFrame:locationFrame];
-  [NSAnimationContext endGrouping];
+  if (animate)
+    [locationBar_ animateToFrame:locationFrame];
+  else
+    [locationBar_ setFrame:locationFrame];
 }
 
 - (NSPoint)bookmarkBubblePoint {
@@ -770,6 +806,10 @@ class NotificationBridge : public WrenchMenuBadgeController::Delegate {
 
 - (NSView*)wrenchButton {
   return wrenchButton_;
+}
+
+- (WrenchMenuController*)wrenchMenuController {
+  return wrenchMenuController_.get();
 }
 
 // (URLDropTargetController protocol)

@@ -142,10 +142,6 @@ bool MultiProfileUserController::IsUserAllowedInSession(
   if (primary_user_email.empty() || primary_user_email == user_email)
     return SetUserAllowedReason(reason, ALLOWED);
 
-  // Owner is not allowed to be secondary user.
-  if (user_manager->GetOwnerEmail() == user_email)
-    return SetUserAllowedReason(reason, NOT_ALLOWED_OWNER_AS_SECONDARY);
-
   // Don't allow profiles potentially tainted by data fetched with policy-pushed
   // certificates to join a multiprofile session.
   if (policy::PolicyCertServiceFactory::UsedPolicyCertificates(user_email))
@@ -164,7 +160,7 @@ bool MultiProfileUserController::IsUserAllowedInSession(
 
 void MultiProfileUserController::StartObserving(Profile* user_profile) {
   // Profile name could be empty during tests.
-  if (user_profile->GetProfileName().empty())
+  if (user_profile->GetProfileUserName().empty())
     return;
 
   scoped_ptr<PrefChangeRegistrar> registrar(new PrefChangeRegistrar);
@@ -222,7 +218,7 @@ void MultiProfileUserController::CheckSessionUsers() {
 
 void MultiProfileUserController::OnUserPrefChanged(
     Profile* user_profile) {
-  std::string user_email = user_profile->GetProfileName();
+  std::string user_email = user_profile->GetProfileUserName();
   CHECK(!user_email.empty());
   user_email = gaia::CanonicalizeEmail(user_email);
 

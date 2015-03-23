@@ -222,7 +222,6 @@ static const char kDispatchChromeIdentityCheckResult[] =
     "  true;"
     "}";
 
-
 static const char kDispatchFocusChangedScript[] =
     "if (window.chrome &&"
     "    window.chrome.embeddedSearch &&"
@@ -231,6 +230,17 @@ static const char kDispatchFocusChangedScript[] =
     "    typeof window.chrome.embeddedSearch.searchBox.onfocuschange =="
     "         'function') {"
     "  window.chrome.embeddedSearch.searchBox.onfocuschange();"
+    "  true;"
+    "}";
+
+static const char kDispatchHistorySyncCheckResult[] =
+    "if (window.chrome &&"
+    "    window.chrome.embeddedSearch &&"
+    "    window.chrome.embeddedSearch.newTabPage &&"
+    "    window.chrome.embeddedSearch.newTabPage.onhistorysynccheckdone &&"
+    "    typeof window.chrome.embeddedSearch.newTabPage"
+    "        .onhistorysynccheckdone === 'function') {"
+    "  window.chrome.embeddedSearch.newTabPage.onhistorysynccheckdone(%s);"
     "  true;"
     "}";
 
@@ -341,15 +351,19 @@ class SearchBoxExtensionWrapper : public v8::Extension {
 
   // Allows v8's javascript code to call the native functions defined
   // in this class for window.chrome.
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
+  v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate*,
-      v8::Handle<v8::String> name) OVERRIDE;
+      v8::Handle<v8::String> name) override;
 
   // Helper function to find the RenderView. May return NULL.
   static content::RenderView* GetRenderView();
 
   // Sends a Chrome identity check to the browser.
   static void CheckIsUserSignedInToChromeAs(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  // Checks whether the user sync his history.
+  static void CheckIsUserSyncingHistory(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Deletes a Most Visited item.
@@ -382,6 +396,10 @@ class SearchBoxExtensionWrapper : public v8::Extension {
 
   // Returns true if the Searchbox itself is oriented right-to-left.
   static void GetRightToLeft(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  // Gets the Embedded Search request params. Used for logging purposes.
+  static void GetSearchRequestParams(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Gets the start-edge margin to use with extended Instant.
   static void GetStartMargin(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -487,6 +505,16 @@ void SearchBoxExtension::DispatchFocusChange(blink::WebFrame* frame) {
 }
 
 // static
+void SearchBoxExtension::DispatchHistorySyncCheckResult(
+    blink::WebFrame* frame,
+    bool sync_history) {
+  blink::WebString script(base::UTF8ToUTF16(base::StringPrintf(
+      kDispatchHistorySyncCheckResult,
+      sync_history ? "true" : "false")));
+  Dispatch(frame, script);
+}
+
+// static
 void SearchBoxExtension::DispatchInputCancel(blink::WebFrame* frame) {
   Dispatch(frame, kDispatchInputCancelScript);
 }
@@ -545,6 +573,9 @@ SearchBoxExtensionWrapper::GetNativeFunctionTemplate(
   if (name->Equals(
           v8::String::NewFromUtf8(isolate, "CheckIsUserSignedInToChromeAs")))
     return v8::FunctionTemplate::New(isolate, CheckIsUserSignedInToChromeAs);
+  if (name->Equals(
+          v8::String::NewFromUtf8(isolate, "CheckIsUserSyncingHistory")))
+    return v8::FunctionTemplate::New(isolate, CheckIsUserSyncingHistory);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "DeleteMostVisitedItem")))
     return v8::FunctionTemplate::New(isolate, DeleteMostVisitedItem);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "Focus")))
@@ -561,6 +592,8 @@ SearchBoxExtensionWrapper::GetNativeFunctionTemplate(
     return v8::FunctionTemplate::New(isolate, GetQuery);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "GetRightToLeft")))
     return v8::FunctionTemplate::New(isolate, GetRightToLeft);
+  if (name->Equals(v8::String::NewFromUtf8(isolate, "GetSearchRequestParams")))
+    return v8::FunctionTemplate::New(isolate, GetSearchRequestParams);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "GetStartMargin")))
     return v8::FunctionTemplate::New(isolate, GetStartMargin);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "GetSuggestionToPrefetch")))
@@ -627,6 +660,16 @@ void SearchBoxExtensionWrapper::CheckIsUserSignedInToChromeAs(
 
   SearchBox::Get(render_view)->CheckIsUserSignedInToChromeAs(
       V8ValueToUTF16(args[0]));
+}
+
+// static
+void SearchBoxExtensionWrapper::CheckIsUserSyncingHistory(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  content::RenderView* render_view = GetRenderView();
+  if (!render_view) return;
+
+  DVLOG(1) << render_view << " CheckIsUserSyncingHistory";
+  SearchBox::Get(render_view)->CheckIsUserSyncingHistory();
 }
 
 // static
@@ -743,6 +786,39 @@ void SearchBoxExtensionWrapper::GetQuery(
 void SearchBoxExtensionWrapper::GetRightToLeft(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   args.GetReturnValue().Set(base::i18n::IsRTL());
+}
+
+// static
+void SearchBoxExtensionWrapper::GetSearchRequestParams(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  content::RenderView* render_view = GetRenderView();
+  if (!render_view) return;
+
+  const EmbeddedSearchRequestParams& params =
+      SearchBox::Get(render_view)->GetEmbeddedSearchRequestParams();
+  v8::Isolate* isolate = args.GetIsolate();
+  v8::Handle<v8::Object> data = v8::Object::New(isolate);
+  if (!params.search_query.empty()) {
+    data->Set(v8::String::NewFromUtf8(isolate, kSearchQueryKey),
+              UTF16ToV8String(isolate, params.search_query));
+  }
+  if (!params.original_query.empty()) {
+    data->Set(v8::String::NewFromUtf8(isolate, kOriginalQueryKey),
+              UTF16ToV8String(isolate, params.original_query));
+  }
+  if (!params.rlz_parameter_value.empty()) {
+    data->Set(v8::String::NewFromUtf8(isolate, kRLZParameterKey),
+              UTF16ToV8String(isolate, params.rlz_parameter_value));
+  }
+  if (!params.input_encoding.empty()) {
+    data->Set(v8::String::NewFromUtf8(isolate, kInputEncodingKey),
+              UTF16ToV8String(isolate, params.input_encoding));
+  }
+  if (!params.assisted_query_stats.empty()) {
+    data->Set(v8::String::NewFromUtf8(isolate, kAssistedQueryStatsKey),
+              UTF16ToV8String(isolate, params.assisted_query_stats));
+  }
+  args.GetReturnValue().Set(data);
 }
 
 // static
@@ -971,7 +1047,7 @@ void SearchBoxExtensionWrapper::LogEvent(
 
   DVLOG(1) << render_view << " LogEvent";
 
-  if (args[0]->Uint32Value() < NTP_NUM_EVENT_TYPES) {
+  if (args[0]->Uint32Value() <= NTP_EVENT_TYPE_LAST) {
     NTPLoggingEventType event =
         static_cast<NTPLoggingEventType>(args[0]->Uint32Value());
     SearchBox::Get(render_view)->LogEvent(event);

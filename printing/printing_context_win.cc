@@ -17,11 +17,8 @@
 #include "printing/printing_utils.h"
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
-
-#if defined(USE_AURA)
 #include "ui/aura/remote_window_tree_host_win.h"
 #include "ui/aura/window.h"
-#endif
 
 namespace printing {
 
@@ -35,12 +32,12 @@ void AssingResult(PrintingContext::Result* out, PrintingContext::Result in) {
 
 // static
 scoped_ptr<PrintingContext> PrintingContext::Create(Delegate* delegate) {
-#if defined(DISABLE_BASIC_PRINTING)
-  return make_scoped_ptr<PrintingContext>(new PrintingContextWin(delegate));
-#else   // DISABLE_BASIC_PRINTING
+#if defined(ENABLE_BASIC_PRINTING)
   return make_scoped_ptr<PrintingContext>(
       new PrintingContextSytemDialogWin(delegate));
-#endif  // DISABLE_BASIC_PRINTING
+#else   // ENABLE_BASIC_PRINTING
+  return make_scoped_ptr<PrintingContext>(new PrintingContextWin(delegate));
+#endif  // EENABLE_BASIC_PRINTING
 }
 
 PrintingContextWin::PrintingContextWin(Delegate* delegate)
@@ -54,6 +51,7 @@ PrintingContextWin::~PrintingContextWin() {
 void PrintingContextWin::AskUserForSettings(
     int max_pages,
     bool has_selection,
+    bool is_scripted,
     const PrintSettingsCallback& callback) {
   NOTIMPLEMENTED();
 }
@@ -208,7 +206,7 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
   // Update data using DocumentProperties.
   if (show_system_dialog) {
     PrintingContext::Result result = PrintingContext::FAILED;
-    AskUserForSettings(0, false, base::Bind(&AssingResult, &result));
+    AskUserForSettings(0, false, false, base::Bind(&AssingResult, &result));
     return result;
   } else {
     scoped_dev_mode = CreateDevMode(printer.Get(), scoped_dev_mode.get());
@@ -361,14 +359,8 @@ PrintingContext::Result PrintingContextWin::InitializeSettings(
 
 HWND PrintingContextWin::GetRootWindow(gfx::NativeView view) {
   HWND window = NULL;
-#if defined(USE_AURA)
   if (view)
     window = view->GetHost()->GetAcceleratedWidget();
-#else
-  if (view && IsWindow(view)) {
-    window = GetAncestor(view, GA_ROOTOWNER);
-  }
-#endif
   if (!window) {
     // TODO(maruel):  crbug.com/1214347 Get the right browser window instead.
     return GetDesktopWindow();

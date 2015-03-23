@@ -17,19 +17,36 @@ class ExtensionInputMethodEventRouter;
 
 namespace extensions {
 
+// Implements the inputMethodPrivate.getInputMethodConfig  method.
+class GetInputMethodConfigFunction : public UIThreadExtensionFunction {
+ public:
+  GetInputMethodConfigFunction() {}
+
+ protected:
+  ~GetInputMethodConfigFunction() override {}
+
+  ResponseAction Run() override;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.getInputMethodConfig",
+                             INPUTMETHODPRIVATE_GETINPUTMETHODCONFIG)
+  DISALLOW_COPY_AND_ASSIGN(GetInputMethodConfigFunction);
+};
+
 // Implements the inputMethodPrivate.getCurrentInputMethod method.
 class GetCurrentInputMethodFunction : public UIThreadExtensionFunction {
  public:
   GetCurrentInputMethodFunction() {}
 
  protected:
-  virtual ~GetCurrentInputMethodFunction() {}
+  ~GetCurrentInputMethodFunction() override {}
 
-  virtual ResponseAction Run() OVERRIDE;
+  ResponseAction Run() override;
 
  private:
   DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.getCurrentInputMethod",
                              INPUTMETHODPRIVATE_GETCURRENTINPUTMETHOD)
+  DISALLOW_COPY_AND_ASSIGN(GetCurrentInputMethodFunction);
 };
 
 // Implements the inputMethodPrivate.setCurrentInputMethod method.
@@ -38,13 +55,14 @@ class SetCurrentInputMethodFunction : public UIThreadExtensionFunction {
   SetCurrentInputMethodFunction() {}
 
  protected:
-  virtual ~SetCurrentInputMethodFunction() {}
+  ~SetCurrentInputMethodFunction() override {}
 
-  virtual ResponseAction Run() OVERRIDE;
+  ResponseAction Run() override;
 
  private:
   DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.setCurrentInputMethod",
                              INPUTMETHODPRIVATE_SETCURRENTINPUTMETHOD)
+  DISALLOW_COPY_AND_ASSIGN(SetCurrentInputMethodFunction);
 };
 
 // Implements the inputMethodPrivate.getInputMethods method.
@@ -53,13 +71,14 @@ class GetInputMethodsFunction : public UIThreadExtensionFunction {
   GetInputMethodsFunction() {}
 
  protected:
-  virtual ~GetInputMethodsFunction() {}
+  ~GetInputMethodsFunction() override {}
 
-  virtual ResponseAction Run() OVERRIDE;
+  ResponseAction Run() override;
 
  private:
   DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.getInputMethods",
                              INPUTMETHODPRIVATE_GETINPUTMETHODS)
+  DISALLOW_COPY_AND_ASSIGN(GetInputMethodsFunction);
 };
 
 class InputMethodAPI : public BrowserContextKeyedAPI,
@@ -68,7 +87,7 @@ class InputMethodAPI : public BrowserContextKeyedAPI,
   static const char kOnInputMethodChanged[];
 
   explicit InputMethodAPI(content::BrowserContext* context);
-  virtual ~InputMethodAPI();
+  ~InputMethodAPI() override;
 
   // Returns input method name for the given XKB (X keyboard extensions in X
   // Window System) id.
@@ -78,11 +97,10 @@ class InputMethodAPI : public BrowserContextKeyedAPI,
   static BrowserContextKeyedAPIFactory<InputMethodAPI>* GetFactoryInstance();
 
   // BrowserContextKeyedAPI implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // EventRouter::Observer implementation.
-  virtual void OnListenerAdded(const extensions::EventListenerInfo& details)
-      OVERRIDE;
+  void OnListenerAdded(const extensions::EventListenerInfo& details) override;
 
  private:
   friend class BrowserContextKeyedAPIFactory<InputMethodAPI>;

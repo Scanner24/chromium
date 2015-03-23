@@ -5,11 +5,13 @@
 #ifndef CHROME_RENDERER_PLUGINS_CHROME_PLUGIN_PLACEHOLDER_H_
 #define CHROME_RENDERER_PLUGINS_CHROME_PLUGIN_PLACEHOLDER_H_
 
-#include "components/plugins/renderer/plugin_placeholder.h"
+#include "components/plugins/renderer/loadable_plugin_placeholder.h"
+#include "content/public/renderer/context_menu_client.h"
+#include "content/public/renderer/render_process_observer.h"
 
 struct ChromeViewHostMsg_GetPluginInfo_Status;
 
-class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
+class ChromePluginPlaceholder : public plugins::LoadablePluginPlaceholder,
                                 public content::RenderProcessObserver,
                                 public content::ContextMenuClient {
  public:
@@ -23,7 +25,8 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
       const std::string& identifier,
       const base::string16& name,
       int resource_id,
-      const base::string16& message);
+      const base::string16& message,
+      const GURL& poster_url);
 
   // Creates a new WebViewPlugin with a MissingPlugin as a delegate.
   static ChromePluginPlaceholder* CreateMissingPlugin(
@@ -47,33 +50,31 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
                           const blink::WebPluginParams& params,
                           const std::string& html_data,
                           const base::string16& title);
-  virtual ~ChromePluginPlaceholder();
+  ~ChromePluginPlaceholder() override;
 
   // WebViewPlugin::Delegate (via PluginPlaceholder) method
-  virtual void BindWebFrame(blink::WebFrame* frame) OVERRIDE;
+  void BindWebFrame(blink::WebFrame* frame) override;
 
   // gin::Wrappable (via PluginPlaceholder) method
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   // content::RenderViewObserver (via PluginPlaceholder) override:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // WebViewPlugin::Delegate (via PluginPlaceholder) methods:
-  virtual void ShowContextMenu(const blink::WebMouseEvent&) OVERRIDE;
+  void ShowContextMenu(const blink::WebMouseEvent&) override;
 
   // content::RenderProcessObserver methods:
-  virtual void PluginListChanged() OVERRIDE;
+  void PluginListChanged() override;
 
   // content::ContextMenuClient methods:
-  virtual void OnMenuAction(int request_id, unsigned action) OVERRIDE;
-  virtual void OnMenuClosed(int request_id) OVERRIDE;
+  void OnMenuAction(int request_id, unsigned action) override;
+  void OnMenuClosed(int request_id) override;
 
   // Javascript callback opens chrome://plugins in a new tab.
   void OpenAboutPluginsCallback();
 
-  void OnLoadBlockedPlugins(const std::string& identifier);
-  void OnSetIsPrerendering(bool is_prerendering);
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   void OnDidNotFindMissingPlugin();
   void OnFoundMissingPlugin(const base::string16& plugin_name);

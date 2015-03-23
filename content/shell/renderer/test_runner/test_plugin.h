@@ -21,7 +21,13 @@
 
 namespace blink {
 class WebFrame;
+class WebGraphicsContext3D;
 class WebLayer;
+struct WebPluginParams;
+}
+
+namespace cc {
+class SharedBitmap;
 }
 
 namespace content {
@@ -45,7 +51,7 @@ class TestPlugin : public blink::WebPlugin, public cc::TextureLayerClient {
   static TestPlugin* create(blink::WebFrame* frame,
                             const blink::WebPluginParams& params,
                             WebTestDelegate* delegate);
-  virtual ~TestPlugin();
+  ~TestPlugin() override;
 
   static const blink::WebString& MimeType();
   static const blink::WebString& CanCreateWithoutRendererMimeType();
@@ -85,10 +91,10 @@ class TestPlugin : public blink::WebPlugin, public cc::TextureLayerClient {
   virtual bool isPlaceholder();
 
   // cc::TextureLayerClient methods:
-  virtual bool PrepareTextureMailbox(
+  bool PrepareTextureMailbox(
       cc::TextureMailbox* mailbox,
       scoped_ptr<cc::SingleReleaseCallback>* release_callback,
-      bool use_shared_memory) OVERRIDE;
+      bool use_shared_memory) override;
 
  private:
   TestPlugin(blink::WebFrame* frame,
@@ -139,7 +145,7 @@ class TestPlugin : public blink::WebPlugin, public cc::TextureLayerClient {
                        const std::string& fragment_source);
 
   // Functions for drawing scene in Software.
-  void DrawSceneSoftware(void* memory, size_t bytes);
+  void DrawSceneSoftware(void* memory);
 
   blink::WebFrame* frame_;
   WebTestDelegate* delegate_;
@@ -149,7 +155,7 @@ class TestPlugin : public blink::WebPlugin, public cc::TextureLayerClient {
   blink::WebGraphicsContext3D* context_;
   unsigned color_texture_;
   cc::TextureMailbox texture_mailbox_;
-  scoped_ptr<base::SharedMemory> shared_bitmap_;
+  scoped_ptr<cc::SharedBitmap> shared_bitmap_;
   bool mailbox_changed_;
   unsigned framebuffer_;
   Scene scene_;

@@ -11,6 +11,7 @@
 #include "base/values.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/proxy_delegate.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_proxy_client_socket.h"
 #include "net/socket/client_socket_factory.h"
@@ -85,7 +86,6 @@ HttpProxyConnectJob::HttpProxyConnectJob(
     const base::TimeDelta& timeout_duration,
     TransportClientSocketPool* transport_pool,
     SSLClientSocketPool* ssl_pool,
-    HostResolver* host_resolver,
     Delegate* delegate,
     NetLog* net_log)
     : ConnectJob(group_name, timeout_duration, priority, delegate,
@@ -93,7 +93,6 @@ HttpProxyConnectJob::HttpProxyConnectJob(
       params_(params),
       transport_pool_(transport_pool),
       ssl_pool_(ssl_pool),
-      resolver_(host_resolver),
       using_spdy_(false),
       protocol_negotiated_(kProtoUnknown),
       weak_ptr_factory_(this) {
@@ -129,9 +128,15 @@ void HttpProxyConnectJob::GetAdditionalErrorState(ClientSocketHandle * handle) {
 }
 
 void HttpProxyConnectJob::OnIOComplete(int result) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455884 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "455884 HttpProxyConnectJob::OnIOComplete"));
   int rv = DoLoop(result);
-  if (rv != ERR_IO_PENDING)
+  if (rv != ERR_IO_PENDING) {
+    NotifyProxyDelegateOfCompletion(rv);
     NotifyDelegateOfCompletion(rv);  // Deletes |this|
+  }
 }
 
 int HttpProxyConnectJob::DoLoop(int result) {
@@ -302,8 +307,11 @@ int HttpProxyConnectJob::DoHttpProxyConnect() {
 int HttpProxyConnectJob::DoHttpProxyConnectComplete(int result) {
   if (result == OK || result == ERR_PROXY_AUTH_REQUESTED ||
       result == ERR_HTTPS_PROXY_TUNNEL_RESPONSE) {
-    SetSocket(transport_socket_.PassAs<StreamSocket>());
+    SetSocket(transport_socket_.Pass());
   }
+
+  if (result == ERR_HTTP_1_1_REQUIRED)
+    return ERR_PROXY_HTTP_1_1_REQUIRED;
 
   return result;
 }
@@ -362,26 +370,38 @@ int HttpProxyConnectJob::DoSpdyProxyCreateStreamComplete(int result) {
   return transport_socket_->Connect(callback_);
 }
 
+void HttpProxyConnectJob::NotifyProxyDelegateOfCompletion(int result) {
+  if (!params_->proxy_delegate())
+    return;
+
+  const HostPortPair& proxy_server = params_->destination().host_port_pair();
+  params_->proxy_delegate()->OnTunnelConnectCompleted(params_->endpoint(),
+                                                      proxy_server,
+                                                      result);
+}
+
 int HttpProxyConnectJob::ConnectInternal() {
   if (params_->transport_params().get()) {
     next_state_ = STATE_TCP_CONNECT;
   } else {
     next_state_ = STATE_SSL_CONNECT;
   }
-  return DoLoop(OK);
+
+  int rv = DoLoop(OK);
+  if (rv != ERR_IO_PENDING) {
+    NotifyProxyDelegateOfCompletion(rv);
+  }
+
+  return rv;
 }
 
 HttpProxyClientSocketPool::
 HttpProxyConnectJobFactory::HttpProxyConnectJobFactory(
     TransportClientSocketPool* transport_pool,
     SSLClientSocketPool* ssl_pool,
-    HostResolver* host_resolver,
-    const ProxyDelegate* proxy_delegate,
     NetLog* net_log)
     : transport_pool_(transport_pool),
       ssl_pool_(ssl_pool),
-      host_resolver_(host_resolver),
-      proxy_delegate_(proxy_delegate),
       net_log_(net_log) {
   base::TimeDelta max_pool_timeout = base::TimeDelta();
 
@@ -411,7 +431,6 @@ HttpProxyClientSocketPool::HttpProxyConnectJobFactory::NewConnectJob(
                                                         ConnectionTimeout(),
                                                         transport_pool_,
                                                         ssl_pool_,
-                                                        host_resolver_,
                                                         delegate,
                                                         net_log_));
 }
@@ -426,10 +445,8 @@ HttpProxyClientSocketPool::HttpProxyClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
     ClientSocketPoolHistograms* histograms,
-    HostResolver* host_resolver,
     TransportClientSocketPool* transport_pool,
     SSLClientSocketPool* ssl_pool,
-    const ProxyDelegate* proxy_delegate,
     NetLog* net_log)
     : transport_pool_(transport_pool),
       ssl_pool_(ssl_pool),
@@ -438,8 +455,6 @@ HttpProxyClientSocketPool::HttpProxyClientSocketPool(
             ClientSocketPool::used_idle_socket_timeout(),
             new HttpProxyConnectJobFactory(transport_pool,
                                            ssl_pool,
-                                           host_resolver,
-                                           proxy_delegate,
                                            net_log)) {
   // We should always have a |transport_pool_| except in unit tests.
   if (transport_pool_)

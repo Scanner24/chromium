@@ -4,8 +4,8 @@
 
 #include "media/audio/android/opensles_output.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "media/audio/android/audio_manager_android.h"
 
 #define LOG_ON_FAILURE_AND_RETURN(op, ...)      \
@@ -326,7 +326,7 @@ void OpenSLESOutputStream::FillBufferQueueNoLock() {
   // delay estimation.
   const uint32 hardware_delay = buffer_size_bytes_;
   int frames_filled = callback_->OnMoreData(
-      audio_bus_.get(), AudioBuffersState(0, hardware_delay));
+      audio_bus_.get(), hardware_delay);
   if (frames_filled <= 0) {
     // Audio source is shutting down, or halted on error.
     return;

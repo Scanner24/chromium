@@ -25,11 +25,19 @@ const char kDisableSigninScopedDeviceId[] = "disable-signin-scoped-device-id";
 // Enables consistent identity features.
 const char kEnableAccountConsistency[] = "enable-account-consistency";
 
+// Enables the old iframe-based flow for sign in.  When not enabled, uses the
+// webview-based flow.
+const char kEnableIframeBasedSignin[] = "enable-iframe-based-signin";
+
 // Enable the new avatar menu and the User Manager.
 const char kEnableNewAvatarMenu[] = "enable-new-avatar-menu";
 
 // Enables new profile management system, including lock mode.
 const char kEnableNewProfileManagement[] = "new-profile-management";
+
+// Enable sending EnableRefreshTokenAnnotationRequest.
+extern const char kEnableRefreshTokenAnnotationRequest[] =
+    "enable-refresh-token-annotation-request";
 
 // Enables the pure web-based flow for sign in on first run/NTP/wrench menu/
 // settings page.

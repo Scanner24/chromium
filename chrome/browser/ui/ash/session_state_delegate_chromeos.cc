@@ -86,7 +86,7 @@ int SessionStateDelegateChromeos::NumberOfLoggedInUsers() const {
 bool SessionStateDelegateChromeos::CanAddUserToMultiProfile(
     AddUserError* error) const {
   if (user_manager::UserManager::Get()
-          ->GetUsersAdmittedForMultiProfile()
+          ->GetUsersAllowedForMultiProfile()
           .size() == 0) {
     if (error)
       *error = ADD_USER_ERROR_OUT_OF_USERS;
@@ -140,8 +140,8 @@ void SessionStateDelegateChromeos::UnlockScreen() {
 }
 
 bool SessionStateDelegateChromeos::IsUserSessionBlocked() const {
-  bool has_login_manager = CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kLoginManager);
+  bool has_login_manager = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kLoginManager);
   return (has_login_manager && !IsActiveUserSessionStarted()) ||
          IsScreenLocked() ||
          chromeos::UserAddingScreen::Get()->IsRunning();

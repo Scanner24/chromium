@@ -12,8 +12,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/views/controls/webview/web_dialog_view.h"
 
 namespace {
@@ -42,8 +42,7 @@ CertificateManagerDialog::CertificateManagerDialog(
                      delegate,
                      window,
                      base::string16(),
-                     GURL(chrome::kChromeUICertificateManagerDialogURL),
-                     LoginWebDialog::STYLE_BUBBLE) {
+                     GURL(chrome::kChromeUICertificateManagerDialogURL)) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));

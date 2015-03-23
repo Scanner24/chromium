@@ -5,7 +5,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -13,7 +12,6 @@
 #include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/ui/browser.h"
@@ -26,12 +24,14 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -78,11 +78,11 @@ class ProvisionalLoadWaiter : public content::WebContentsObserver {
     content::RunMessageLoop();
   }
 
-  virtual void DidFailProvisionalLoad(
+  void DidFailProvisionalLoad(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description) OVERRIDE {
+      const base::string16& error_description) override {
     seen_ = true;
     if (waiting_)
       base::MessageLoopForUI::current()->Quit();
@@ -187,7 +187,7 @@ class SSLUITest : public InProcessBrowserTest {
                             SSLOptions(SSLOptions::CERT_EXPIRED),
                             net::GetWebSocketTestDataDirectory()) {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Browser will both run and display insecure content.
     command_line->AppendSwitch(switches::kAllowRunningInsecureContent);
     // Use process-per-site so that navigating to a same-site page in a
@@ -365,7 +365,7 @@ class SSLUITestBlock : public SSLUITest {
   SSLUITestBlock() : SSLUITest() {}
 
   // Browser will neither run nor display insecure content.
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kNoDisplayingInsecureContent);
   }
 };
@@ -374,9 +374,19 @@ class SSLUITestIgnoreCertErrors : public SSLUITest {
  public:
   SSLUITestIgnoreCertErrors() : SSLUITest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Browser will ignore certificate errors.
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+  }
+};
+
+class SSLUITestIgnoreLocalhostCertErrors : public SSLUITest {
+ public:
+  SSLUITestIgnoreLocalhostCertErrors() : SSLUITest() {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Browser will ignore certificate errors on localhost.
+    command_line->AppendSwitch(switches::kAllowInsecureLocalhost);
   }
 };
 
@@ -508,8 +518,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestHTTPSExpiredCertAndDontProceed) {
   // cross-site navigation so we can test http://crbug.com/5800 is gone.
   ASSERT_EQ("127.0.0.1", cross_site_url.host());
   GURL::Replacements replacements;
-  std::string new_host("localhost");
-  replacements.SetHostStr(new_host);
+  replacements.SetHostStr("localhost");
   cross_site_url = cross_site_url.ReplaceComponents(replacements);
 
   // Now go to a bad HTTPS page.
@@ -532,6 +541,35 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestHTTPSExpiredCertAndDontProceed) {
   ui_test_utils::NavigateToURL(browser(),
                                test_server()->GetURL("files/ssl/google.html"));
   CheckUnauthenticatedState(tab, AuthState::NONE);
+}
+
+// Test that localhost pages don't show an interstitial.
+IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreLocalhostCertErrors,
+                       TestNoInterstitialOnLocalhost) {
+  ASSERT_TRUE(https_server_.Start());
+
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Navigate to a localhost page.
+  GURL url = https_server_.GetURL("files/ssl/page_with_subresource.html");
+  GURL::Replacements replacements;
+  std::string new_host("localhost");
+  replacements.SetHostStr(new_host);
+  url = url.ReplaceComponents(replacements);
+
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // We should see no interstitial, but we should have an error
+  // (red-crossed-out-https) in the URL bar.
+  CheckAuthenticationBrokenState(tab, net::CERT_STATUS_COMMON_NAME_INVALID,
+                                 AuthState::NONE);
+
+  // We should see that the script tag in the page loaded and ran (and
+  // wasn't blocked by the certificate error).
+  base::string16 title;
+  base::string16 expected_title = base::ASCIIToUTF16("This script has loaded");
+  ui_test_utils::GetCurrentTabTitle(browser(), &title);
+  EXPECT_EQ(title, expected_title);
 }
 
 // Visits a page with https error and then goes back using Browser::GoBack.
@@ -560,9 +598,11 @@ IN_PROC_BROWSER_TEST_F(SSLUITest,
 
   // Wait until we hear the load failure, and make sure we haven't swapped out
   // the previous page.  Prevents regression of http://crbug.com/82667.
+  // TODO(creis/nick): Move the swapped-out part of this test into content
+  // and remove IsRenderViewHostSwappedOut from the public API.
   load_failed_observer.Wait();
-  EXPECT_FALSE(content::RenderViewHostTester::IsRenderViewHostSwappedOut(
-      tab->GetRenderViewHost()));
+  EXPECT_FALSE(content::RenderFrameHostTester::IsRenderFrameHostSwappedOut(
+      tab->GetMainFrame()));
 
   // We should be back at the original good page.
   EXPECT_FALSE(browser()->tab_strip_model()->GetActiveWebContents()->
@@ -712,9 +752,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndGoForward) {
   watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
 
   // Visit bad HTTPS page.
-  std::string scheme("https");
   GURL::Replacements replacements;
-  replacements.SetSchemeStr(scheme);
+  replacements.SetSchemeStr("https");
   ui_test_utils::NavigateToURL(
       browser(),
       wss_server_expired_.GetURL(
@@ -736,7 +775,7 @@ class SSLUITestWithClientCert : public SSLUITest {
   public:
    SSLUITestWithClientCert() : cert_db_(NULL) {}
 
-   virtual void SetUpOnMainThread() OVERRIDE {
+   void SetUpOnMainThread() override {
      SSLUITest::SetUpOnMainThread();
 
      base::RunLoop loop;
@@ -785,9 +824,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITestWithClientCert, TestWSSClientCert) {
                              options,
                              net::GetWebSocketTestDataDirectory());
   ASSERT_TRUE(wss_server.Start());
-  std::string scheme("https");
   GURL::Replacements replacements;
-  replacements.SetSchemeStr(scheme);
+  replacements.SetSchemeStr("https");
   GURL url = wss_server.GetURL("connect_check.html").ReplaceComponents(
       replacements);
 
@@ -1762,9 +1800,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreCertErrors, TestWSS) {
   watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
 
   // Visit bad HTTPS page.
-  std::string scheme("https");
   GURL::Replacements replacements;
-  replacements.SetSchemeStr(scheme);
+  replacements.SetSchemeStr("https");
   ui_test_utils::NavigateToURL(
       browser(),
       wss_server_expired_.GetURL(
@@ -1804,7 +1841,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestInterstitialJavaScriptProceeds) {
       content::Source<NavigationController>(&tab->GetController()));
   InterstitialPage* interstitial_page = tab->GetInterstitialPage();
   content::RenderViewHost* interstitial_rvh =
-      interstitial_page->GetRenderViewHostForTesting();
+      interstitial_page->GetMainFrame()->GetRenderViewHost();
   int result = -1;
   std::string javascript = base::StringPrintf(
       "window.domAutomationController.send(%d);",
@@ -1836,7 +1873,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestInterstitialJavaScriptGoesBack) {
       content::NotificationService::AllSources());
   InterstitialPage* interstitial_page = tab->GetInterstitialPage();
   content::RenderViewHost* interstitial_rvh =
-      interstitial_page->GetRenderViewHostForTesting();
+      interstitial_page->GetMainFrame()->GetRenderViewHost();
   int result = -1;
   std::string javascript = base::StringPrintf(
       "window.domAutomationController.send(%d);",

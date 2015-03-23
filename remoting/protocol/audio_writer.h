@@ -32,19 +32,14 @@ class AudioWriter : public ChannelDispatcherBase,
   // should be used to initialize it for the session.
   static scoped_ptr<AudioWriter> Create(const SessionConfig& config);
 
-  virtual ~AudioWriter();
+  ~AudioWriter() override;
 
   // AudioStub interface.
-  virtual void ProcessAudioPacket(scoped_ptr<AudioPacket> packet,
-                                  const base::Closure& done) OVERRIDE;
-
- protected:
-  virtual void OnInitialized() OVERRIDE;
+  void ProcessAudioPacket(scoped_ptr<AudioPacket> packet,
+                          const base::Closure& done) override;
 
  private:
   AudioWriter();
-
-  BufferedSocketWriter buffered_writer_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioWriter);
 };

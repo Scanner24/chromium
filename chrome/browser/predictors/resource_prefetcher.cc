@@ -6,9 +6,11 @@
 
 #include <iterator>
 
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
+#include "net/base/load_flags.h"
 #include "net/base/request_priority.h"
 #include "net/url_request/url_request_context.h"
 
@@ -133,6 +135,7 @@ void ResourcePrefetcher::SendRequest(Request* request) {
   url_request->set_method("GET");
   url_request->set_first_party_for_cookies(navigation_id_.main_frame_url);
   url_request->SetReferrer(navigation_id_.main_frame_url.spec());
+  url_request->SetLoadFlags(url_request->load_flags() | net::LOAD_PREFETCH);
   StartURLRequest(url_request);
 }
 
@@ -217,6 +220,11 @@ void ResourcePrefetcher::OnSSLCertificateError(net::URLRequest* request,
 }
 
 void ResourcePrefetcher::OnResponseStarted(net::URLRequest* request) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 ResourcePrefetcher::OnResponseStarted"));
+
   if (request->status().error()) {
     FinishRequest(request, Request::PREFETCH_STATUS_FAILED);
     return;
@@ -228,6 +236,11 @@ void ResourcePrefetcher::OnResponseStarted(net::URLRequest* request) {
 
 void ResourcePrefetcher::OnReadCompleted(net::URLRequest* request,
                                          int bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 ResourcePrefetcher::OnReadCompleted"));
+
   if (request->status().error()) {
     FinishRequest(request, Request::PREFETCH_STATUS_FAILED);
     return;

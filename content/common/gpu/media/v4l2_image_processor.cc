@@ -19,14 +19,14 @@
 
 #define NOTIFY_ERROR()                      \
   do {                                      \
-    DLOG(ERROR) << "calling NotifyError()"; \
+    LOG(ERROR) << "calling NotifyError()";  \
     NotifyError();                          \
   } while (0)
 
 #define IOCTL_OR_ERROR_RETURN_VALUE(type, arg, value)              \
   do {                                                             \
     if (device_->Ioctl(type, arg) != 0) {                          \
-      DPLOG(ERROR) << __func__ << "(): ioctl() failed: " << #type; \
+      PLOG(ERROR) << __func__ << "(): ioctl() failed: " << #type;  \
       return value;                                                \
     }                                                              \
   } while (0)
@@ -40,7 +40,7 @@
 #define IOCTL_OR_LOG_ERROR(type, arg)                              \
   do {                                                             \
     if (device_->Ioctl(type, arg) != 0)                            \
-      DPLOG(ERROR) << __func__ << "(): ioctl() failed: " << #type; \
+      PLOG(ERROR) << __func__ << "(): ioctl() failed: " << #type;  \
   } while (0)
 
 namespace content {
@@ -48,14 +48,23 @@ namespace content {
 V4L2ImageProcessor::InputRecord::InputRecord() : at_device(false) {
 }
 
+V4L2ImageProcessor::InputRecord::~InputRecord() {
+}
+
 V4L2ImageProcessor::OutputRecord::OutputRecord()
     : at_device(false), at_client(false) {
+}
+
+V4L2ImageProcessor::OutputRecord::~OutputRecord() {
 }
 
 V4L2ImageProcessor::JobRecord::JobRecord() {
 }
 
-V4L2ImageProcessor::V4L2ImageProcessor(scoped_ptr<V4L2Device> device)
+V4L2ImageProcessor::JobRecord::~JobRecord() {
+}
+
+V4L2ImageProcessor::V4L2ImageProcessor(const scoped_refptr<V4L2Device>& device)
     : input_format_(media::VideoFrame::UNKNOWN),
       output_format_(media::VideoFrame::UNKNOWN),
       input_format_fourcc_(0),
@@ -63,7 +72,7 @@ V4L2ImageProcessor::V4L2ImageProcessor(scoped_ptr<V4L2Device> device)
       input_planes_count_(0),
       output_planes_count_(0),
       child_message_loop_proxy_(base::MessageLoopProxy::current()),
-      device_(device.Pass()),
+      device_(device),
       device_thread_("V4L2ImageProcessorThread"),
       device_poll_thread_("V4L2ImageProcessorDevicePollThread"),
       input_streamon_(false),
@@ -110,7 +119,7 @@ bool V4L2ImageProcessor::Initialize(media::VideoFrame::Format input_format,
       V4L2Device::VideoFrameFormatToV4L2PixFmt(output_format);
 
   if (!input_format_fourcc_ || !output_format_fourcc_) {
-    DLOG(ERROR) << "Unrecognized format(s)";
+    LOG(ERROR) << "Unrecognized format(s)";
     return false;
   }
 
@@ -130,8 +139,8 @@ bool V4L2ImageProcessor::Initialize(media::VideoFrame::Format input_format,
                               V4L2_CAP_VIDEO_OUTPUT_MPLANE | V4L2_CAP_STREAMING;
   IOCTL_OR_ERROR_RETURN_FALSE(VIDIOC_QUERYCAP, &caps);
   if ((caps.capabilities & kCapsRequired) != kCapsRequired) {
-    DLOG(ERROR) << "Initialize(): ioctl() failed: VIDIOC_QUERYCAP: "
-                   "caps check failed: 0x" << std::hex << caps.capabilities;
+    LOG(ERROR) << "Initialize(): ioctl() failed: VIDIOC_QUERYCAP: "
+                  "caps check failed: 0x" << std::hex << caps.capabilities;
     return false;
   }
 
@@ -139,7 +148,7 @@ bool V4L2ImageProcessor::Initialize(media::VideoFrame::Format input_format,
     return false;
 
   if (!device_thread_.Start()) {
-    DLOG(ERROR) << "Initialize(): encoder thread failed to start";
+    LOG(ERROR) << "Initialize(): encoder thread failed to start";
     return false;
   }
 
@@ -503,7 +512,7 @@ void V4L2ImageProcessor::Dequeue() {
         // EAGAIN if we're just out of buffers to dequeue.
         break;
       }
-      DPLOG(ERROR) << "ioctl() failed: VIDIOC_DQBUF";
+      PLOG(ERROR) << "ioctl() failed: VIDIOC_DQBUF";
       NOTIFY_ERROR();
       return;
     }
@@ -522,7 +531,7 @@ void V4L2ImageProcessor::Dequeue() {
     memset(&dqbuf, 0, sizeof(dqbuf));
     memset(&planes, 0, sizeof(planes));
     dqbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-    dqbuf.memory = V4L2_MEMORY_DMABUF;
+    dqbuf.memory = V4L2_MEMORY_MMAP;
     dqbuf.m.planes = planes;
     dqbuf.length = output_planes_count_;
     if (device_->Ioctl(VIDIOC_DQBUF, &dqbuf) != 0) {
@@ -530,7 +539,7 @@ void V4L2ImageProcessor::Dequeue() {
         // EAGAIN if we're just out of buffers to dequeue.
         break;
       }
-      DPLOG(ERROR) << "ioctl() failed: VIDIOC_DQBUF";
+      PLOG(ERROR) << "ioctl() failed: VIDIOC_DQBUF";
       NOTIFY_ERROR();
       return;
     }
@@ -648,7 +657,7 @@ bool V4L2ImageProcessor::StartDevicePoll() {
 
   // Start up the device poll thread and schedule its first DevicePollTask().
   if (!device_poll_thread_.Start()) {
-    DLOG(ERROR) << "StartDevicePoll(): Device thread failed to start";
+    LOG(ERROR) << "StartDevicePoll(): Device thread failed to start";
     NOTIFY_ERROR();
     return false;
   }

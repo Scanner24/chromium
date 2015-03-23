@@ -15,6 +15,7 @@
 #include "base/synchronization/lock.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/crypto_handshake_message.h"
 #include "net/quic/crypto/crypto_protocol.h"
@@ -36,7 +37,30 @@ class QuicServerConfigProtobuf;
 class StrikeRegister;
 class StrikeRegisterClient;
 
-struct ClientHelloInfo;
+// ClientHelloInfo contains information about a client hello message that is
+// only kept for as long as it's being processed.
+struct ClientHelloInfo {
+  ClientHelloInfo(const IPEndPoint& in_client_ip, QuicWallTime in_now);
+  ~ClientHelloInfo();
+
+  // Inputs to EvaluateClientHello.
+  const IPEndPoint client_ip;
+  const QuicWallTime now;
+
+  // Outputs from EvaluateClientHello.
+  bool valid_source_address_token;
+  bool client_nonce_well_formed;
+  bool unique;
+  base::StringPiece sni;
+  base::StringPiece client_nonce;
+  base::StringPiece server_nonce;
+  base::StringPiece user_agent_id;
+  SourceAddressTokens source_address_tokens;
+
+  // Errors from EvaluateClientHello.
+  std::vector<uint32> reject_reasons;
+  static_assert(sizeof(QuicTag) == sizeof(uint32), "header out of sync");
+};
 
 namespace test {
 class QuicCryptoServerConfigPeer;
@@ -58,7 +82,20 @@ class NET_EXPORT_PRIVATE ValidateClientHelloResultCallback {
  public:
   // Opaque token that holds information about the client_hello and
   // its validity.  Can be interpreted by calling ProcessClientHello.
-  struct Result;
+  struct Result {
+    Result(const CryptoHandshakeMessage& in_client_hello,
+           IPEndPoint in_client_ip,
+           QuicWallTime in_now);
+    ~Result();
+
+    CryptoHandshakeMessage client_hello;
+    ClientHelloInfo info;
+    QuicErrorCode error_code;
+    std::string error_details;
+
+    // Populated if the CHLO STK contained a CachedNetworkParameters proto.
+    CachedNetworkParameters cached_network_params;
+  };
 
   ValidateClientHelloResultCallback();
   virtual ~ValidateClientHelloResultCallback();
@@ -186,6 +223,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   //     information about it.
   // connection_id: the ConnectionId for the connection, which is used in key
   //     derivation.
+  // server_ip: the IP address and port of the server. The IP address may be
+  //     used for certificate selection.
   // client_address: the IP address and port of the client. The IP address is
   //     used to generate and validate source-address tokens.
   // version: version of the QUIC protocol in use for this connection
@@ -203,7 +242,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   QuicErrorCode ProcessClientHello(
       const ValidateClientHelloResultCallback::Result& validate_chlo_result,
       QuicConnectionId connection_id,
-      IPEndPoint client_address,
+      const IPEndPoint& server_ip,
+      const IPEndPoint& client_address,
       QuicVersion version,
       const QuicVersionVector& supported_versions,
       const QuicClock* clock,
@@ -217,8 +257,10 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   // chain and proof in the case of secure QUIC. Returns true if successfully
   // filled |out|.
   //
-  // |cached_network_params| is optional, and can be NULL.
+  // |cached_network_params| is optional, and can be nullptr.
   bool BuildServerConfigUpdateMessage(
+      const SourceAddressTokens& previous_source_address_tokens,
+      const IPEndPoint& server_ip,
       const IPEndPoint& client_ip,
       const QuicClock* clock,
       QuicRandom* rand,
@@ -290,6 +332,9 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
 
   // Set and take ownership of the callback to invoke on primary config changes.
   void AcquirePrimaryConfigChangedCb(PrimaryConfigChangedCallback* cb);
+
+  // Returns true if this config has a |proof_source_|.
+  bool HasProofSource() const;
 
  private:
   friend class test::QuicCryptoServerConfigPeer;
@@ -382,35 +427,79 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       ValidateClientHelloResultCallback* done_cb) const;
 
   // BuildRejection sets |out| to be a REJ message in reply to |client_hello|.
-  void BuildRejection(
-      const Config& config,
-      const CryptoHandshakeMessage& client_hello,
-      const ClientHelloInfo& info,
-      QuicRandom* rand,
-      QuicCryptoNegotiatedParameters *params,
-      CryptoHandshakeMessage* out) const;
+  void BuildRejection(const IPEndPoint& server_ip,
+                      const Config& config,
+                      const CryptoHandshakeMessage& client_hello,
+                      const ClientHelloInfo& info,
+                      const CachedNetworkParameters& cached_network_params,
+                      QuicRandom* rand,
+                      QuicCryptoNegotiatedParameters* params,
+                      CryptoHandshakeMessage* out) const;
 
   // ParseConfigProtobuf parses the given config protobuf and returns a
   // scoped_refptr<Config> if successful. The caller adopts the reference to the
-  // Config. On error, ParseConfigProtobuf returns NULL.
+  // Config. On error, ParseConfigProtobuf returns nullptr.
   scoped_refptr<Config> ParseConfigProtobuf(QuicServerConfigProtobuf* protobuf);
 
   // NewSourceAddressToken returns a fresh source address token for the given
-  // IP address. |cached_network_params| is optional, and can be NULL.
+  // IP address. |cached_network_params| is optional, and can be nullptr.
   std::string NewSourceAddressToken(
       const Config& config,
+      const SourceAddressTokens& previous_tokens,
       const IPEndPoint& ip,
       QuicRandom* rand,
       QuicWallTime now,
       const CachedNetworkParameters* cached_network_params) const;
 
-  // ValidateSourceAddressToken returns HANDSHAKE_OK if the source address token
-  // in |token| is a valid and timely token for the IP address |ip| given that
-  // the current time is |now|. Otherwise it returns the reason for failure.
-  HandshakeFailureReason ValidateSourceAddressToken(const Config& config,
-                                                    base::StringPiece token,
-                                                    const IPEndPoint& ip,
-                                                    QuicWallTime now) const;
+  // ParseSourceAddressToken parses the source address tokens contained in
+  // the encrypted |token|, and populates |tokens| with the parsed tokens.
+  // Returns HANDSHAKE_OK if |token| could be parsed, or the reason for the
+  // failure.
+  HandshakeFailureReason ParseSourceAddressToken(
+      const Config& config,
+      base::StringPiece token,
+      SourceAddressTokens* tokens) const;
+
+  // ValidateSourceAddressToken returns HANDSHAKE_OK if the source address
+  // tokens in |tokens| contain a valid and timely token for the IP address
+  // |ip| given that the current time is |now|. Otherwise it returns the
+  // reason for failure. |cached_network_params| is populated if the valid
+  // token contains a CachedNetworkParameters proto.
+  // TODO(rch): remove this method when we remove:
+  // FLAGS_quic_use_multiple_address_in_source_tokens.
+  HandshakeFailureReason ValidateSourceAddressToken(
+      const Config& config,
+      base::StringPiece token,
+      const IPEndPoint& ip,
+      QuicWallTime now,
+      CachedNetworkParameters* cached_network_params) const;
+
+  // ValidateSourceAddressTokens returns HANDSHAKE_OK if the source address
+  // tokens in |tokens| contain a valid and timely token for the IP address
+  // |ip| given that the current time is |now|. Otherwise it returns the
+  // reason for failure. |cached_network_params| is populated if the valid
+  // token contains a CachedNetworkParameters proto.
+  HandshakeFailureReason ValidateSourceAddressTokens(
+      const SourceAddressTokens& tokens,
+      const IPEndPoint& ip,
+      QuicWallTime now,
+      CachedNetworkParameters* cached_network_params) const;
+
+  // ValidateSingleSourceAddressToken returns HANDSHAKE_OK if the source
+  // address token in |token| is a timely token for the IP address |ip|
+  // given that the current time is |now|. Otherwise it returns the reason
+  // for failure.
+  HandshakeFailureReason ValidateSingleSourceAddressToken(
+      const SourceAddressToken& token,
+      const IPEndPoint& ip,
+      QuicWallTime now) const;
+
+  // Returns HANDSHAKE_OK if the source address token in |token| is a timely
+  // token given that the current time is |now|. Otherwise it returns the
+  // reason for failure.
+  HandshakeFailureReason ValidateSourceAddressTokenTimestamp(
+      const SourceAddressToken& token,
+      QuicWallTime now) const;
 
   // NewServerNonce generates and encrypts a random nonce.
   std::string NewServerNonce(QuicRandom* rand, QuicWallTime now) const;
@@ -429,8 +518,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
   bool replay_protection_;
 
   // configs_ satisfies the following invariants:
-  //   1) configs_.empty() <-> primary_config_ == NULL
-  //   2) primary_config_ != NULL -> primary_config_->is_primary
+  //   1) configs_.empty() <-> primary_config_ == nullptr
+  //   2) primary_config_ != nullptr -> primary_config_->is_primary
   //   3) ∀ c∈configs_, c->is_primary <-> c == primary_config_
   mutable base::Lock configs_lock_;
   // configs_ contains all active server configs. It's expected that there are

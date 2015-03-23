@@ -28,11 +28,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/nacl/common/nacl_switches.h"
-#include "components/omaha_query_params/omaha_query_params.h"
+#include "components/update_client/update_query_params.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
-using omaha_query_params::OmahaQueryParams;
+using update_client::CrxComponent;
+using update_client::UpdateQueryParams;
 
 namespace component_updater {
 
@@ -65,7 +66,7 @@ void SetPnaclHash(CrxComponent* component) {
 
 // If we don't have Pnacl installed, this is the version we claim.
 const char kNullVersion[] = "0.0.0.0";
-const char kMinPnaclVersion[] = "0.1.0.13367";
+const char kMinPnaclVersion[] = "0.2.0.86";
 
 // Initially say that we do not need OnDemand updates. This should be
 // updated by CheckVersionCompatiblity(), before doing any URLRequests
@@ -82,7 +83,7 @@ void CheckVersionCompatiblity(const base::Version& current_version) {
 // PNaCl is packaged as a multi-CRX.  This returns the platform-specific
 // subdirectory that is part of that multi-CRX.
 base::FilePath GetPlatformDir(const base::FilePath& base_path) {
-  std::string arch = SanitizeForPath(OmahaQueryParams::GetNaclArch());
+  std::string arch = SanitizeForPath(UpdateQueryParams::GetNaclArch());
   return base_path.AppendASCII("_platform_specific").AppendASCII(arch);
 }
 
@@ -91,7 +92,7 @@ void OverrideDirPnaclComponent(const base::FilePath& base_path) {
   PathService::Override(chrome::DIR_PNACL_COMPONENT, GetPlatformDir(base_path));
 }
 
-bool GetLatestPnaclDirectory(PnaclComponentInstaller* pci,
+bool GetLatestPnaclDirectory(const scoped_refptr<PnaclComponentInstaller>& pci,
                              base::FilePath* latest_dir,
                              Version* latest_version,
                              std::vector<base::FilePath>* older_dirs) {
@@ -191,9 +192,9 @@ bool CheckPnaclComponentManifest(const base::DictionaryValue& manifest,
     LOG(WARNING) << "'pnacl-arch' field is missing from pnacl-manifest!";
     return false;
   }
-  if (arch.compare(OmahaQueryParams::GetNaclArch()) != 0) {
+  if (arch.compare(UpdateQueryParams::GetNaclArch()) != 0) {
     LOG(WARNING) << "'pnacl-arch' field in manifest is invalid (" << arch
-                 << " vs " << OmahaQueryParams::GetNaclArch() << ")";
+                 << " vs " << UpdateQueryParams::GetNaclArch() << ")";
     return false;
   }
 
@@ -279,6 +280,10 @@ bool PnaclComponentInstaller::GetInstalledFile(const std::string& file,
   return true;
 }
 
+bool PnaclComponentInstaller::Uninstall() {
+  return false;
+}
+
 CrxComponent PnaclComponentInstaller::GetCrxComponent() {
   CrxComponent pnacl_component;
   pnacl_component.version = current_version();
@@ -292,9 +297,10 @@ CrxComponent PnaclComponentInstaller::GetCrxComponent() {
 
 namespace {
 
-void FinishPnaclUpdateRegistration(const Version& current_version,
-                                   const std::string& current_fingerprint,
-                                   PnaclComponentInstaller* pci) {
+void FinishPnaclUpdateRegistration(
+    const Version& current_version,
+    const std::string& current_fingerprint,
+    const scoped_refptr<PnaclComponentInstaller>& pci) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   pci->set_current_version(current_version);
   CheckVersionCompatiblity(current_version);
@@ -311,7 +317,8 @@ void FinishPnaclUpdateRegistration(const Version& current_version,
 
 // Check if there is an existing version on disk first to know when
 // a hosted version is actually newer.
-void StartPnaclUpdateRegistration(PnaclComponentInstaller* pci) {
+void StartPnaclUpdateRegistration(
+    const scoped_refptr<PnaclComponentInstaller>& pci) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   base::FilePath path = pci->GetPnaclBaseDirectory();
   if (!base::PathExists(path)) {
@@ -364,9 +371,9 @@ void StartPnaclUpdateRegistration(PnaclComponentInstaller* pci) {
 void PnaclComponentInstaller::RegisterPnaclComponent(
     ComponentUpdateService* cus) {
   cus_ = cus;
-  BrowserThread::PostTask(BrowserThread::FILE,
-                          FROM_HERE,
-                          base::Bind(&StartPnaclUpdateRegistration, this));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&StartPnaclUpdateRegistration, make_scoped_refptr(this)));
 }
 
 }  // namespace component_updater

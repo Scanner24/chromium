@@ -6,6 +6,7 @@
 #define CONTENT_SHELL_RENDERER_TEST_RUNNER_WEB_FRAME_TEST_PROXY_H_
 
 #include "base/basictypes.h"
+#include "content/shell/renderer/test_runner/mock_presentation_client.h"
 #include "content/shell/renderer/test_runner/mock_screen_orientation_client.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
 #include "content/shell/renderer/test_runner/test_runner.h"
@@ -40,6 +41,14 @@ class WebFrameTestProxy : public Base {
     return base_proxy_->GetScreenOrientationClientMock();
   }
 
+  virtual blink::WebPresentationClient* presentationClient() {
+    if (!mock_presentation_client_.get()) {
+      mock_presentation_client_.reset(new MockPresentationClient(
+          base_proxy_->GetPresentationServiceMock()));
+    }
+    return mock_presentation_client_.get();
+  }
+
   virtual void didAddMessageToConsole(const blink::WebConsoleMessage& message,
                                       const blink::WebString& source_name,
                                       unsigned source_line,
@@ -67,9 +76,11 @@ class WebFrameTestProxy : public Base {
   }
 
   virtual void didStartProvisionalLoad(blink::WebLocalFrame* frame,
-                                       bool isTransitionNavigation) {
+                                       bool isTransitionNavigation,
+                                       double triggeringEventTime) {
     base_proxy_->DidStartProvisionalLoad(frame);
-    Base::didStartProvisionalLoad(frame, isTransitionNavigation);
+    Base::didStartProvisionalLoad(
+        frame, isTransitionNavigation, triggeringEventTime);
   }
 
   virtual void didReceiveServerRedirectForProvisionalLoad(
@@ -127,10 +138,6 @@ class WebFrameTestProxy : public Base {
   virtual void didFinishLoad(blink::WebLocalFrame* frame) {
     Base::didFinishLoad(frame);
     base_proxy_->DidFinishLoad(frame);
-  }
-
-  virtual blink::WebNotificationPresenter* notificationPresenter() {
-    return base_proxy_->GetNotificationPresenter();
   }
 
   virtual void didChangeSelection(bool is_selection_empty) {
@@ -289,13 +296,15 @@ class WebFrameTestProxy : public Base {
  private:
 #if defined(ENABLE_WEBRTC)
   virtual scoped_ptr<MediaStreamRendererFactory> CreateRendererFactory()
-      OVERRIDE {
+      override {
     return scoped_ptr<MediaStreamRendererFactory>(
         new TestMediaStreamRendererFactory());
   }
 #endif
 
   WebTestProxyBase* base_proxy_;
+
+  scoped_ptr<MockPresentationClient> mock_presentation_client_;
 
   DISALLOW_COPY_AND_ASSIGN(WebFrameTestProxy);
 };

@@ -14,6 +14,7 @@
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_clock.h"
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_framer.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_utils.h"
@@ -21,17 +22,12 @@
 #include "net/tools/quic/quic_server_session.h"
 
 using base::StringPiece;
-using std::make_pair;
 
 namespace net {
 namespace tools {
 
-namespace {
-
-// Time period for which the connection_id should live in time wait state..
-const int kTimeWaitSeconds = 5;
-
-}  // namespace
+// TODO(rtenneti): Remove the duplicated code in this file. Share code with
+// "net/quic/quic_time_wait_list_manager.cc"
 
 // A very simple alarm that just informs the QuicTimeWaitListManager to clean
 // up old connection_ids. This alarm should be unregistered and deleted before
@@ -43,7 +39,7 @@ class ConnectionIdCleanUpAlarm : public EpollAlarm {
       : time_wait_list_manager_(time_wait_list_manager) {
   }
 
-  virtual int64 OnAlarm() OVERRIDE {
+  int64 OnAlarm() override {
     EpollAlarm::OnAlarm();
     time_wait_list_manager_->CleanUpOldConnectionIds();
     // Let the time wait manager register the alarm at appropriate time.
@@ -90,7 +86,8 @@ QuicTimeWaitListManager::QuicTimeWaitListManager(
     EpollServer* epoll_server,
     const QuicVersionVector& supported_versions)
     : epoll_server_(epoll_server),
-      kTimeWaitPeriod_(QuicTime::Delta::FromSeconds(kTimeWaitSeconds)),
+      kTimeWaitPeriod_(
+          QuicTime::Delta::FromSeconds(FLAGS_quic_time_wait_list_seconds)),
       connection_id_clean_up_alarm_(new ConnectionIdCleanUpAlarm(this)),
       clock_(epoll_server_),
       writer_(writer),
@@ -112,17 +109,27 @@ void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
     QuicConnectionId connection_id,
     QuicVersion version,
     QuicEncryptedPacket* close_packet) {
-  DVLOG(1) << "Adding " << connection_id << " to the time wait list.";
   int num_packets = 0;
   ConnectionIdMap::iterator it = connection_id_map_.find(connection_id);
-  if (it != connection_id_map_.end()) {  // Replace record if it is reinserted.
+  const bool new_connection_id = it == connection_id_map_.end();
+  if (!new_connection_id) {  // Replace record if it is reinserted.
     num_packets = it->second.num_packets;
     delete it->second.close_packet;
     connection_id_map_.erase(it);
   }
-  ConnectionIdData data(num_packets, version, clock_.ApproximateNow(),
+  TrimTimeWaitListIfNeeded();
+  if (FLAGS_quic_limit_time_wait_list_size) {
+    DCHECK_LT(num_connections(),
+              static_cast<size_t>(FLAGS_quic_time_wait_list_max_connections));
+  }
+  ConnectionIdData data(num_packets,
+                        version,
+                        clock_.ApproximateNow(),
                         close_packet);
-  connection_id_map_.insert(make_pair(connection_id, data));
+  connection_id_map_.insert(std::make_pair(connection_id, data));
+  if (new_connection_id) {
+    visitor_->OnConnectionAddedToTimeWaitList(connection_id);
+  }
 }
 
 bool QuicTimeWaitListManager::IsConnectionIdInTimeWait(
@@ -166,12 +173,12 @@ void QuicTimeWaitListManager::ProcessPacket(
     return;
   }
   if (it->second.close_packet) {
-     QueuedPacket* queued_packet =
-         new QueuedPacket(server_address,
-                          client_address,
-                          it->second.close_packet->Clone());
-     // Takes ownership of the packet.
-     SendOrQueuePacket(queued_packet);
+    QueuedPacket* queued_packet =
+        new QueuedPacket(server_address,
+                         client_address,
+                         it->second.close_packet->Clone());
+    // Takes ownership of the packet.
+    SendOrQueuePacket(queued_packet);
   } else {
     SendPublicReset(server_address,
                     client_address,
@@ -271,19 +278,59 @@ void QuicTimeWaitListManager::SetConnectionIdCleanUpAlarm() {
       next_alarm_interval, connection_id_clean_up_alarm_.get());
 }
 
+bool QuicTimeWaitListManager::MaybeExpireOldestConnection(
+    QuicTime expiration_time) {
+  if (connection_id_map_.empty()) {
+    return false;
+  }
+  ConnectionIdMap::iterator it = connection_id_map_.begin();
+  QuicTime oldest_connection_id_time = it->second.time_added;
+  if (oldest_connection_id_time > expiration_time) {
+    // Too recent, don't retire.
+    return false;
+  }
+  // This connection_id has lived its age, retire it now.
+  const QuicConnectionId connection_id = it->first;
+  delete it->second.close_packet;
+  connection_id_map_.erase(it);
+  visitor_->OnConnectionRemovedFromTimeWaitList(connection_id);
+  return true;
+}
+
 void QuicTimeWaitListManager::CleanUpOldConnectionIds() {
   QuicTime now = clock_.ApproximateNow();
-  while (!connection_id_map_.empty()) {
-    ConnectionIdMap::iterator it = connection_id_map_.begin();
-    QuicTime oldest_connection_id = it->second.time_added;
-    if (now.Subtract(oldest_connection_id) < kTimeWaitPeriod_) {
-      break;
+  QuicTime expiration = now.Subtract(kTimeWaitPeriod_);
+  if (FLAGS_quic_limit_time_wait_list_size) {
+    while (MaybeExpireOldestConnection(expiration)) {
     }
-    // This connection_id has lived its age, retire it now.
-    delete it->second.close_packet;
-    connection_id_map_.erase(it);
+  } else {
+    while (!connection_id_map_.empty()) {
+      ConnectionIdMap::iterator it = connection_id_map_.begin();
+      QuicTime oldest_connection_id = it->second.time_added;
+      if (now.Subtract(oldest_connection_id) < kTimeWaitPeriod_) {
+        break;
+      }
+      const QuicConnectionId connection_id = it->first;
+      // This connection_id has lived its age, retire it now.
+      delete it->second.close_packet;
+      connection_id_map_.erase(it);
+      visitor_->OnConnectionRemovedFromTimeWaitList(connection_id);
+    }
   }
+
   SetConnectionIdCleanUpAlarm();
+}
+
+void QuicTimeWaitListManager::TrimTimeWaitListIfNeeded() {
+  if (FLAGS_quic_limit_time_wait_list_size) {
+    if (FLAGS_quic_time_wait_list_max_connections < 0) {
+      return;
+    }
+    while (num_connections() >=
+           static_cast<size_t>(FLAGS_quic_time_wait_list_max_connections)) {
+      MaybeExpireOldestConnection(QuicTime::Infinite());
+    }
+  }
 }
 
 }  // namespace tools

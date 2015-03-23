@@ -30,9 +30,9 @@ namespace chromeos {
 class OobeTest : public InProcessBrowserTest {
  public:
   OobeTest() {}
-  virtual ~OobeTest() {}
+  ~OobeTest() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
@@ -41,17 +41,17 @@ class OobeTest : public InProcessBrowserTest {
     fake_gaia_.Initialize();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     CHECK(embedded_test_server()->InitializeAndWaitUntilReady());
     embedded_test_server()->RegisterRequestHandler(
         base::Bind(&FakeGaia::HandleRequest, base::Unretained(&fake_gaia_)));
     LOG(INFO) << "Set up http server at " << embedded_test_server()->base_url();
 
-    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         ::switches::kGaiaUrl, embedded_test_server()->base_url().spec());
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // If the login display is still showing, exit gracefully.
     if (LoginDisplayHostImpl::default_host()) {
       base::MessageLoop::current()->PostTask(FROM_HERE,

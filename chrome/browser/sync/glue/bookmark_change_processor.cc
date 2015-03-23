@@ -36,6 +36,8 @@
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_util.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 using syncer::ChangeRecord;
 using syncer::ChangeRecordList;
@@ -409,6 +411,23 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
 void BookmarkChangeProcessor::BookmarkNodeFaviconChanged(
     BookmarkModel* model,
     const BookmarkNode* node) {
+  if (!CanSyncNode(node)) {
+    return;
+  }
+
+  // We shouldn't see changes to the top-level nodes.
+  if (model->is_permanent_node(node)) {
+    NOTREACHED() << "Saw Favicon update to permanent node!";
+    return;
+  }
+
+  // Ignore changes with empty images. This can happen if the favicon is
+  // still being loaded.
+  const gfx::Image& favicon = model->GetFavicon(node);
+  if (favicon.IsEmpty()) {
+    return;
+  }
+
   BookmarkNodeChanged(model, node);
 }
 
@@ -826,6 +845,9 @@ BookmarkChangeProcessor::GetBookmarkMetaInfo(
     (*meta_info_map)[specifics.meta_info(i).key()] =
         specifics.meta_info(i).value();
   }
+  // Verifies that all entries had unique keys.
+  DCHECK_EQ(static_cast<size_t>(specifics.meta_info_size()),
+            meta_info_map->size());
   return meta_info_map.Pass();
 }
 
@@ -834,8 +856,34 @@ void BookmarkChangeProcessor::SetSyncNodeMetaInfo(
     const BookmarkNode* node,
     syncer::WriteNode* sync_node) {
   sync_pb::BookmarkSpecifics specifics = sync_node->GetBookmarkSpecifics();
-  specifics.clear_meta_info();
   const BookmarkNode::MetaInfoMap* meta_info_map = node->GetMetaInfoMap();
+
+  // Compare specifics meta info to node meta info before making the change.
+  // Please note that the original specifics meta info is unordered while
+  //  meta_info_map is ordered by key. Setting the meta info blindly into
+  // the specifics might cause an unnecessary change.
+  size_t size = meta_info_map ? meta_info_map->size() : 0;
+  if (static_cast<size_t>(specifics.meta_info_size()) == size) {
+    size_t index = 0;
+    for (; index < size; index++) {
+      const sync_pb::MetaInfo& meta_info = specifics.meta_info(index);
+      BookmarkNode::MetaInfoMap::const_iterator it =
+          meta_info_map->find(meta_info.key());
+      if (it == meta_info_map->end() || it->second != meta_info.value()) {
+        // One of original meta info entries is missing in |meta_info_map| or
+        // different.
+        break;
+      }
+    }
+    if (index == size) {
+      // The original meta info from the sync model is already equivalent to
+      // |meta_info_map|.
+      return;
+    }
+  }
+
+  // Clear and reset meta info in bookmark specifics.
+  specifics.clear_meta_info();
   if (meta_info_map) {
     for (BookmarkNode::MetaInfoMap::const_iterator it = meta_info_map->begin();
         it != meta_info_map->end(); ++it) {
@@ -844,6 +892,7 @@ void BookmarkChangeProcessor::SetSyncNodeMetaInfo(
       meta_info->set_value(it->second);
     }
   }
+
   sync_node->SetBookmarkSpecifics(specifics);
 }
 
@@ -853,10 +902,10 @@ void BookmarkChangeProcessor::ApplyBookmarkFavicon(
     Profile* profile,
     const GURL& icon_url,
     const scoped_refptr<base::RefCountedMemory>& bitmap_data) {
-  HistoryService* history =
-      HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
-  FaviconService* favicon_service =
-      FaviconServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+  HistoryService* history = HistoryServiceFactory::GetForProfile(
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
+  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
 
   history->AddPageNoVisitForBookmark(bookmark_node->url(),
                                      bookmark_node->GetTitle());

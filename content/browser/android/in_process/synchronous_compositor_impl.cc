@@ -4,10 +4,14 @@
 
 #include "content/browser/android/in_process/synchronous_compositor_impl.h"
 
+#include "base/auto_reset.h"
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "cc/input/input_handler.h"
+#include "content/browser/android/in_process/synchronous_compositor_external_begin_frame_source.h"
 #include "content/browser/android/in_process/synchronous_compositor_factory_impl.h"
+#include "content/browser/android/in_process/synchronous_compositor_registry.h"
 #include "content/browser/android/in_process/synchronous_input_event_filter.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/common/input/did_overscroll_params.h"
@@ -65,16 +69,25 @@ SynchronousCompositorImpl* SynchronousCompositorImpl::FromRoutingID(
 SynchronousCompositorImpl::SynchronousCompositorImpl(WebContents* contents)
     : compositor_client_(NULL),
       output_surface_(NULL),
+      begin_frame_source_(nullptr),
       contents_(contents),
+      routing_id_(contents->GetRoutingID()),
       input_handler_(NULL),
+      invoking_composite_(false),
       weak_ptr_factory_(this) {
   DCHECK(contents);
+  DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
+  SynchronousCompositorRegistry::GetInstance()->RegisterCompositor(routing_id_,
+                                                                   this);
 }
 
 SynchronousCompositorImpl::~SynchronousCompositorImpl() {
-  if (compositor_client_)
-    compositor_client_->DidDestroyCompositor(this);
+  SynchronousCompositorRegistry::GetInstance()->UnregisterCompositor(
+      routing_id_, this);
   SetInputHandler(NULL);
+
+  DCHECK(!output_surface_);
+  DCHECK(!begin_frame_source_);
 }
 
 void SynchronousCompositorImpl::SetClient(
@@ -94,14 +107,58 @@ void SynchronousCompositor::SetRecordFullDocument(bool record_full_document) {
   g_factory.Get().SetRecordFullDocument(record_full_document);
 }
 
+void SynchronousCompositorImpl::DidInitializeRendererObjects(
+    SynchronousCompositorOutputSurface* output_surface,
+    SynchronousCompositorExternalBeginFrameSource* begin_frame_source) {
+  DCHECK(!output_surface_);
+  DCHECK(!begin_frame_source_);
+  DCHECK(output_surface);
+  DCHECK(begin_frame_source);
+  DCHECK(compositor_client_);
+
+  output_surface_ = output_surface;
+  begin_frame_source_ = begin_frame_source;
+
+  begin_frame_source_->SetCompositor(this);
+  output_surface_->SetBeginFrameSource(begin_frame_source_);
+  output_surface_->SetTreeActivationCallback(
+      base::Bind(&SynchronousCompositorImpl::DidActivatePendingTree,
+                 weak_ptr_factory_.GetWeakPtr()));
+  NeedsBeginFramesChanged();
+  compositor_client_->DidInitializeCompositor(this);
+}
+
+void SynchronousCompositorImpl::DidDestroyRendererObjects() {
+  DCHECK(output_surface_);
+  DCHECK(begin_frame_source_);
+
+  begin_frame_source_->SetCompositor(nullptr);
+  output_surface_->SetBeginFrameSource(nullptr);
+  if (compositor_client_)
+    compositor_client_->DidDestroyCompositor(this);
+  compositor_client_ = nullptr;
+  output_surface_ = nullptr;
+  begin_frame_source_ = nullptr;
+}
+
+void SynchronousCompositorImpl::NotifyDidDestroyCompositorToClient() {
+  if (compositor_client_)
+    compositor_client_->DidDestroyCompositor(this);
+  compositor_client_ = nullptr;
+}
+
 bool SynchronousCompositorImpl::InitializeHwDraw() {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
 
   scoped_refptr<cc::ContextProvider> onscreen_context =
-      g_factory.Get().CreateOnscreenContextProviderForCompositorThread();
+      g_factory.Get().CreateContextProviderForCompositor();
 
-  bool success = output_surface_->InitializeHwDraw(onscreen_context);
+  scoped_refptr<cc::ContextProvider> worker_context =
+      g_factory.Get().CreateContextProviderForCompositor();
+
+  bool success =
+      output_surface_->InitializeHwDraw(onscreen_context, worker_context);
 
   if (success)
     g_factory.Get().CompositorInitializedHardwareDraw();
@@ -124,7 +181,12 @@ scoped_ptr<cc::CompositorFrame> SynchronousCompositorImpl::DemandDrawHw(
     const gfx::Transform& transform_for_tile_priority) {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
+  DCHECK(!invoking_composite_);
+  DCHECK(compositor_client_);
+  DCHECK(begin_frame_source_);
 
+  base::AutoReset<bool> invoking_composite_resetter(&invoking_composite_,
+                                                    true);
   scoped_ptr<cc::CompositorFrame> frame =
       output_surface_->DemandDrawHw(surface_size,
                                     transform,
@@ -134,6 +196,9 @@ scoped_ptr<cc::CompositorFrame> SynchronousCompositorImpl::DemandDrawHw(
                                     transform_for_tile_priority);
   if (frame.get())
     UpdateFrameMetaData(frame->metadata);
+
+  compositor_client_->SetContinuousInvalidate(
+      begin_frame_source_->NeedsBeginFrames());
 
   return frame.Pass();
 }
@@ -147,10 +212,20 @@ void SynchronousCompositorImpl::ReturnResources(
 bool SynchronousCompositorImpl::DemandDrawSw(SkCanvas* canvas) {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
+  DCHECK(!invoking_composite_);
+  DCHECK(compositor_client_);
+  DCHECK(begin_frame_source_);
 
-  scoped_ptr<cc::CompositorFrame> frame = output_surface_->DemandDrawSw(canvas);
+  base::AutoReset<bool> invoking_composite_resetter(&invoking_composite_,
+                                                    true);
+  scoped_ptr<cc::CompositorFrame> frame =
+      output_surface_->DemandDrawSw(canvas);
   if (frame.get())
     UpdateFrameMetaData(frame->metadata);
+
+  compositor_client_->SetContinuousInvalidate(
+      begin_frame_source_->NeedsBeginFrames());
+
   return !!frame.get();
 }
 
@@ -163,39 +238,16 @@ void SynchronousCompositorImpl::UpdateFrameMetaData(
   DeliverMessages();
 }
 
-void SynchronousCompositorImpl::SetMemoryPolicy(
-    const SynchronousCompositorMemoryPolicy& policy) {
+void SynchronousCompositorImpl::SetMemoryPolicy(size_t bytes_limit) {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
 
-  output_surface_->SetMemoryPolicy(policy);
+  output_surface_->SetMemoryPolicy(bytes_limit);
 }
 
 void SynchronousCompositorImpl::DidChangeRootLayerScrollOffset() {
   if (input_handler_)
     input_handler_->OnRootLayerDelegatedScrollOffsetChanged();
-}
-
-void SynchronousCompositorImpl::DidBindOutputSurface(
-      SynchronousCompositorOutputSurface* output_surface) {
-  DCHECK(CalledOnValidThread());
-  output_surface_ = output_surface;
-  if (compositor_client_)
-    compositor_client_->DidInitializeCompositor(this);
-}
-
-void SynchronousCompositorImpl::DidDestroySynchronousOutputSurface(
-       SynchronousCompositorOutputSurface* output_surface) {
-  DCHECK(CalledOnValidThread());
-
-  // Allow for transient hand-over when two output surfaces may refer to
-  // a single delegate.
-  if (output_surface_ == output_surface) {
-    output_surface_ = NULL;
-    if (compositor_client_)
-      compositor_client_->DidDestroyCompositor(this);
-    compositor_client_ = NULL;
-  }
 }
 
 void SynchronousCompositorImpl::SetInputHandler(
@@ -227,10 +279,16 @@ void SynchronousCompositorImpl::DidStopFlinging() {
     rwhv->DidStopFlinging();
 }
 
-void SynchronousCompositorImpl::SetContinuousInvalidate(bool enable) {
+void SynchronousCompositorImpl::NeedsBeginFramesChanged() const {
   DCHECK(CalledOnValidThread());
-  if (compositor_client_)
-    compositor_client_->SetContinuousInvalidate(enable);
+  DCHECK(begin_frame_source_);
+  if (invoking_composite_)
+    return;
+
+  if (compositor_client_) {
+    compositor_client_->SetContinuousInvalidate(
+        begin_frame_source_->NeedsBeginFrames());
+  }
 }
 
 InputEventAckState SynchronousCompositorImpl::HandleInputEvent(
@@ -256,11 +314,15 @@ void SynchronousCompositorImpl::DidActivatePendingTree() {
     compositor_client_->DidUpdateContent();
 }
 
-gfx::Vector2dF SynchronousCompositorImpl::GetTotalScrollOffset() {
+gfx::ScrollOffset SynchronousCompositorImpl::GetTotalScrollOffset() {
   DCHECK(CalledOnValidThread());
-  if (compositor_client_)
-    return compositor_client_->GetTotalRootLayerScrollOffset();
-  return gfx::Vector2dF();
+  if (compositor_client_) {
+    // TODO(miletus): Make GetTotalRootLayerScrollOffset return
+    // ScrollOffset. crbug.com/414283.
+    return gfx::ScrollOffset(
+        compositor_client_->GetTotalRootLayerScrollOffset());
+  }
+  return gfx::ScrollOffset();
 }
 
 bool SynchronousCompositorImpl::IsExternalFlingActive() const {
@@ -271,8 +333,8 @@ bool SynchronousCompositorImpl::IsExternalFlingActive() const {
 }
 
 void SynchronousCompositorImpl::UpdateRootLayerState(
-    const gfx::Vector2dF& total_scroll_offset,
-    const gfx::Vector2dF& max_scroll_offset,
+    const gfx::ScrollOffset& total_scroll_offset,
+    const gfx::ScrollOffset& max_scroll_offset,
     const gfx::SizeF& scrollable_size,
     float page_scale_factor,
     float min_page_scale_factor,
@@ -281,12 +343,14 @@ void SynchronousCompositorImpl::UpdateRootLayerState(
   if (!compositor_client_)
     return;
 
-  compositor_client_->UpdateRootLayerState(total_scroll_offset,
-                                           max_scroll_offset,
-                                           scrollable_size,
-                                           page_scale_factor,
-                                           min_page_scale_factor,
-                                           max_page_scale_factor);
+  // TODO(miletus): Pass in ScrollOffset. crbug.com/414283.
+  compositor_client_->UpdateRootLayerState(
+      gfx::ScrollOffsetToVector2dF(total_scroll_offset),
+      gfx::ScrollOffsetToVector2dF(max_scroll_offset),
+      scrollable_size,
+      page_scale_factor,
+      min_page_scale_factor,
+      max_page_scale_factor);
 }
 
 // Not using base::NonThreadSafe as we want to enforce a more exacting threading
@@ -304,10 +368,10 @@ void SynchronousCompositor::SetClientForWebContents(
     g_factory.Get();  // Ensure it's initialized.
     SynchronousCompositorImpl::CreateForWebContents(contents);
   }
-  if (SynchronousCompositorImpl* instance =
-      SynchronousCompositorImpl::FromWebContents(contents)) {
-    instance->SetClient(client);
-  }
+  SynchronousCompositorImpl* instance =
+      SynchronousCompositorImpl::FromWebContents(contents);
+  DCHECK(instance);
+  instance->SetClient(client);
 }
 
 }  // namespace content

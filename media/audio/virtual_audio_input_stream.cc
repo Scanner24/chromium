@@ -25,7 +25,7 @@ class LoopbackAudioConverter : public AudioConverter::InputCallback {
                          const AudioParameters& output_params)
       : audio_converter_(input_params, output_params, false) {}
 
-  virtual ~LoopbackAudioConverter() {}
+  ~LoopbackAudioConverter() override {}
 
   void AddInput(AudioConverter::InputCallback* input) {
     audio_converter_.AddInput(input);
@@ -36,9 +36,9 @@ class LoopbackAudioConverter : public AudioConverter::InputCallback {
   }
 
  private:
-  virtual double ProvideInput(AudioBus* audio_bus,
-                              base::TimeDelta buffer_delay) OVERRIDE {
-    audio_converter_.Convert(audio_bus);
+  double ProvideInput(AudioBus* audio_bus,
+                      base::TimeDelta buffer_delay) override {
+    audio_converter_.ConvertWithDelay(buffer_delay, audio_bus);
     return 1.0;
   }
 
@@ -137,9 +137,13 @@ void VirtualAudioInputStream::PumpAudio(AudioBus* audio_bus) {
 
   {
     base::AutoLock scoped_lock(converter_network_lock_);
-    mixer_.Convert(audio_bus);
+    // Because the audio is being looped-back, the delay until it will be played
+    // out is zero.
+    mixer_.ConvertWithDelay(base::TimeDelta(), audio_bus);
   }
-  callback_->OnData(this, audio_bus, params_.GetBytesPerBuffer(), 1.0);
+  // Because the audio is being looped-back, the delay since since it was
+  // recorded is zero.
+  callback_->OnData(this, audio_bus, 0, 1.0);
 }
 
 void VirtualAudioInputStream::Close() {
@@ -167,7 +171,9 @@ double VirtualAudioInputStream::GetVolume() {
   return 1.0;
 }
 
-void VirtualAudioInputStream::SetAutomaticGainControl(bool enabled) {}
+bool VirtualAudioInputStream::SetAutomaticGainControl(bool enabled) {
+  return false;
+}
 
 bool VirtualAudioInputStream::GetAutomaticGainControl() {
   return false;

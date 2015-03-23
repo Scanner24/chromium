@@ -14,8 +14,8 @@
    'conditions': [
      ['OS=="linux"', {
        'bootstrap_sources_native': [
-         'native/egl_native_aura.cc',
          'native/egl_native.cc',
+         'native/egl_native_aura.cc',
          'native/egl_native_x11.cc',
        ],
      }],
@@ -35,7 +35,7 @@
       'dependencies': [
         '../../base/base.gyp:base',
         '../../gpu/gpu.gyp:command_buffer_service',
-        '../../gpu/gpu.gyp:gles2_implementation_client_side_arrays_no_check',
+        '../../gpu/gpu.gyp:gles2_implementation_no_check',
         '../../gpu/gpu.gyp:gpu',
         '../../third_party/khronos/khronos.gyp:khronos_headers',
         '../../ui/base/ui_base.gyp:ui_base',
@@ -84,9 +84,9 @@
         '../../third_party/khronos/khronos.gyp:khronos_headers',
       ],
       'sources': [
-        'native/main.cc',
         'native/egl_native.cc',
         'native/egl_native_windowless.cc',
+        'native/main.cc',
         '<@(bootstrap_sources_native)',
       ],
       'defines': [

@@ -8,7 +8,6 @@
 #include <set>
 #include <vector>
 
-#include "chrome/browser/history/history_notifications.h"
 #include "components/history/core/browser/history_types.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_data.h"
@@ -38,22 +37,21 @@ extern const char kTypedUrlTag[];
 class TypedUrlSyncableService : public syncer::SyncableService {
  public:
   explicit TypedUrlSyncableService(HistoryBackend* history_backend);
-  virtual ~TypedUrlSyncableService();
+  ~TypedUrlSyncableService() override;
 
   static syncer::ModelType model_type() { return syncer::TYPED_URLS; }
 
   // syncer::SyncableService implementation.
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
   // Called directly by HistoryBackend when local url data changes.
   void OnUrlsModified(URLRows* changed_urls);

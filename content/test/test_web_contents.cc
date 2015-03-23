@@ -6,10 +6,12 @@
 
 #include <utility>
 
+#include "base/command_line.h"
 #include "content/browser/browser_url_handler_impl.h"
 #include "content/browser/frame_host/cross_process_frame_connector.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/frame_host/navigator.h"
+#include "content/browser/frame_host/navigator_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/frame_messages.h"
@@ -17,6 +19,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/page_state.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/test/test_render_view_host.h"
@@ -27,10 +30,8 @@ namespace content {
 TestWebContents::TestWebContents(BrowserContext* browser_context)
     : WebContentsImpl(browser_context, NULL),
       delegate_view_override_(NULL),
-      expect_set_history_length_and_prune_(false),
-      expect_set_history_length_and_prune_site_instance_(NULL),
-      expect_set_history_length_and_prune_history_length_(0),
-      expect_set_history_length_and_prune_min_page_id_(-1) {
+      expect_set_history_offset_and_length_(false),
+      expect_set_history_offset_and_length_history_length_(0) {
 }
 
 TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
@@ -41,7 +42,7 @@ TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
 }
 
 TestWebContents::~TestWebContents() {
-  EXPECT_FALSE(expect_set_history_length_and_prune_);
+  EXPECT_FALSE(expect_set_history_offset_and_length_);
 }
 
 TestRenderFrameHost* TestWebContents::GetMainFrame() {
@@ -54,6 +55,11 @@ TestRenderViewHost* TestWebContents::GetRenderViewHost() const {
 }
 
 TestRenderFrameHost* TestWebContents::GetPendingMainFrame() const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    return static_cast<TestRenderFrameHost*>(
+        GetRenderManager()->speculative_render_frame_host_.get());
+  }
   return static_cast<TestRenderFrameHost*>(
       GetRenderManager()->pending_frame_host());
 }
@@ -96,10 +102,6 @@ void TestWebContents::TestDidNavigateWithReferrer(
   rfhi->frame_tree_node()->navigator()->DidNavigate(rfhi, params);
 }
 
-WebPreferences TestWebContents::TestComputeWebkitPrefs() {
-  return ComputeWebkitPrefs();
-}
-
 bool TestWebContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host,
     int opener_route_id,
@@ -140,17 +142,28 @@ void TestWebContents::TestSetIsLoading(bool value) {
 }
 
 void TestWebContents::CommitPendingNavigation() {
-  // If we are doing a cross-site navigation, this simulates the current RVH
-  // notifying that it has unloaded so the pending RVH is resumed and can
+  const NavigationEntry* entry = GetController().GetPendingEntry();
+  DCHECK(entry);
+
+  // If we are doing a cross-site navigation, this simulates the current RFH
+  // notifying that it has unloaded so the pending RFH is resumed and can
   // navigate.
-  ProceedWithCrossSiteNavigation();
+  // PlzNavigate: the pending RFH is not created before the navigation commit,
+  // so it is necessary to simulate the IO thread response here to commit in the
+  // proper renderer. It is necessary to call PrepareForCommit before getting
+  // the main and the pending frame because when we are trying to navigate to a
+  // webui from a new tab, a RenderFrameHost is created to display it that is
+  // committed immediately (since it is a new tab). Therefore the main frame is
+  // replaced without a pending frame being created, and we don't get the right
+  // values for the RFH to navigate: we try to use the old one that has been
+  // deleted in the meantime.
+  GetMainFrame()->PrepareForCommit(entry->GetURL());
+
   TestRenderFrameHost* old_rfh = GetMainFrame();
   TestRenderFrameHost* rfh = GetPendingMainFrame();
   if (!rfh)
     rfh = old_rfh;
 
-  const NavigationEntry* entry = GetController().GetPendingEntry();
-  DCHECK(entry);
   int page_id = entry->GetPageID();
   if (page_id == -1) {
     // It's a new navigation, assign a never-seen page id to it.
@@ -158,16 +171,16 @@ void TestWebContents::CommitPendingNavigation() {
   }
 
   rfh->SendNavigate(page_id, entry->GetURL());
-  // Simulate the SwapOut_ACK. This is needed when cross-site navigation happens
-  // (old_rfh != rfh).
+  // Simulate the SwapOut_ACK. This is needed when cross-site navigation
+  // happens.
   if (old_rfh != rfh)
-    old_rfh->OnSwappedOut(false);
+    old_rfh->OnSwappedOut();
 }
 
 void TestWebContents::ProceedWithCrossSiteNavigation() {
   if (!GetPendingMainFrame())
     return;
-  GetMainFrame()->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  GetMainFrame()->SendBeforeUnloadACK(true);
 }
 
 RenderViewHostDelegateView* TestWebContents::GetDelegateView() {
@@ -189,27 +202,21 @@ void TestWebContents::AddPendingContents(TestWebContents* contents) {
   AddDestructionObserver(contents);
 }
 
-void TestWebContents::ExpectSetHistoryLengthAndPrune(
-    const SiteInstance* site_instance,
-    int history_length,
-    int32 min_page_id) {
-  expect_set_history_length_and_prune_ = true;
-  expect_set_history_length_and_prune_site_instance_ =
-      static_cast<const SiteInstanceImpl*>(site_instance);
-  expect_set_history_length_and_prune_history_length_ = history_length;
-  expect_set_history_length_and_prune_min_page_id_ = min_page_id;
+void TestWebContents::ExpectSetHistoryOffsetAndLength(int history_offset,
+                                                      int history_length) {
+  expect_set_history_offset_and_length_ = true;
+  expect_set_history_offset_and_length_history_offset_ = history_offset;
+  expect_set_history_offset_and_length_history_length_ = history_length;
 }
 
-void TestWebContents::SetHistoryLengthAndPrune(
-    const SiteInstance* site_instance, int history_length,
-    int32 min_page_id) {
-  EXPECT_TRUE(expect_set_history_length_and_prune_);
-  expect_set_history_length_and_prune_ = false;
-  EXPECT_EQ(expect_set_history_length_and_prune_site_instance_.get(),
-            site_instance);
-  EXPECT_EQ(expect_set_history_length_and_prune_history_length_,
+void TestWebContents::SetHistoryOffsetAndLength(int history_offset,
+                                                int history_length) {
+  EXPECT_TRUE(expect_set_history_offset_and_length_);
+  expect_set_history_offset_and_length_ = false;
+  EXPECT_EQ(expect_set_history_offset_and_length_history_offset_,
+            history_offset);
+  EXPECT_EQ(expect_set_history_offset_and_length_history_length_,
             history_length);
-  EXPECT_EQ(expect_set_history_length_and_prune_min_page_id_, min_page_id);
 }
 
 void TestWebContents::TestDidFinishLoad(const GURL& url) {
@@ -245,12 +252,12 @@ void TestWebContents::CreateNewFullscreenWidget(int render_process_id,
 
 void TestWebContents::ShowCreatedWindow(int route_id,
                                         WindowOpenDisposition disposition,
-                                        const gfx::Rect& initial_pos,
+                                        const gfx::Rect& initial_rect,
                                         bool user_gesture) {
 }
 
 void TestWebContents::ShowCreatedWidget(int route_id,
-                                        const gfx::Rect& initial_pos) {
+                                        const gfx::Rect& initial_rect) {
 }
 
 void TestWebContents::ShowCreatedFullscreenWidget(int route_id) {

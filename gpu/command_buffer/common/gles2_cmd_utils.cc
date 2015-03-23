@@ -9,7 +9,9 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
+#include <GLES3/gl3.h>
 
+#include "base/numerics/safe_math.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 
@@ -23,7 +25,8 @@ enum GLErrorBit {
   kInvalidValue = (1 << 1),
   kInvalidOperation = (1 << 2),
   kOutOfMemory = (1 << 3),
-  kInvalidFrameBufferOperation = (1 << 4)
+  kInvalidFrameBufferOperation = (1 << 4),
+  kContextLost = (1 << 5)
 };
 }
 
@@ -232,6 +235,10 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     //    GL_EXT_multisampled_render_to_texture
     case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_SAMPLES_EXT:
       return 1;
+    // -- glGetFramebufferAttachmentParameteriv with
+    //    GL_EXT_sRGB
+    case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
+      return 1;
 
     // -- glGetProgramiv
     case GL_DELETE_STATUS:
@@ -345,6 +352,10 @@ int ElementsPerGroup(int format, int type) {
     case GL_UNSIGNED_SHORT_4_4_4_4:
     case GL_UNSIGNED_SHORT_5_5_5_1:
     case GL_UNSIGNED_INT_24_8_OES:
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_10F_11F_11F_REV:
+    case GL_UNSIGNED_INT_5_9_9_9_REV:
+    case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
        return 1;
     default:
        break;
@@ -352,11 +363,17 @@ int ElementsPerGroup(int format, int type) {
 
     switch (format) {
     case GL_RGB:
+    case GL_RGB_INTEGER:
+    case GL_SRGB_EXT:
        return 3;
     case GL_LUMINANCE_ALPHA:
+    case GL_RG_EXT:
+    case GL_RG_INTEGER:
        return 2;
     case GL_RGBA:
+    case GL_RGBA_INTEGER:
     case GL_BGRA_EXT:
+    case GL_SRGB_ALPHA_EXT:
        return 4;
     case GL_ALPHA:
     case GL_LUMINANCE:
@@ -366,6 +383,8 @@ int ElementsPerGroup(int format, int type) {
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH24_STENCIL8_OES:
     case GL_DEPTH_STENCIL_OES:
+    case GL_RED_EXT:
+    case GL_RED_INTEGER:
        return 1;
     default:
        return 0;
@@ -378,6 +397,10 @@ int BytesPerElement(int type) {
     case GL_FLOAT:
     case GL_UNSIGNED_INT_24_8_OES:
     case GL_UNSIGNED_INT:
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_10F_11F_11F_REV:
+    case GL_UNSIGNED_INT_5_9_9_9_REV:
+    case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
       return 4;
     case GL_HALF_FLOAT_OES:
     case GL_UNSIGNED_SHORT:
@@ -416,23 +439,28 @@ bool GLES2Util::ComputeImagePaddedRowSize(
   return true;
 }
 
-// Returns the amount of data glTexImage2D or glTexSubImage2D will access.
+// Returns the amount of data glTexImage*D or glTexSubImage*D will access.
 bool GLES2Util::ComputeImageDataSizes(
-    int width, int height, int format, int type, int unpack_alignment,
-    uint32* size, uint32* ret_unpadded_row_size, uint32* ret_padded_row_size) {
+    int width, int height, int depth, int format, int type,
+    int unpack_alignment, uint32* size, uint32* ret_unpadded_row_size,
+    uint32* ret_padded_row_size) {
   uint32 bytes_per_group = ComputeImageGroupSize(format, type);
   uint32 row_size;
   if (!SafeMultiplyUint32(width, bytes_per_group, &row_size)) {
     return false;
   }
-  if (height > 1) {
+  uint32 num_of_rows;
+  if (!SafeMultiplyUint32(height, depth, &num_of_rows)) {
+    return false;
+  }
+  if (num_of_rows > 1) {
     uint32 temp;
     if (!SafeAddUint32(row_size, unpack_alignment - 1, &temp)) {
       return false;
     }
     uint32 padded_row_size = (temp / unpack_alignment) * unpack_alignment;
     uint32 size_of_all_but_last_row;
-    if (!SafeMultiplyUint32((height - 1), padded_row_size,
+    if (!SafeMultiplyUint32((num_of_rows - 1), padded_row_size,
                             &size_of_all_but_last_row)) {
       return false;
     }
@@ -443,9 +471,7 @@ bool GLES2Util::ComputeImageDataSizes(
       *ret_padded_row_size = padded_row_size;
     }
   } else {
-    if (!SafeMultiplyUint32(height, row_size, size)) {
-      return false;
-    }
+    *size = row_size;
     if (ret_padded_row_size) {
       *ret_padded_row_size = row_size;
     }
@@ -558,6 +584,8 @@ uint32 GLES2Util::GLErrorToErrorBit(uint32 error) {
       return gl_error_bit::kOutOfMemory;
     case GL_INVALID_FRAMEBUFFER_OPERATION:
       return gl_error_bit::kInvalidFrameBufferOperation;
+    case GL_CONTEXT_LOST_KHR:
+      return gl_error_bit::kContextLost;
     default:
       NOTREACHED();
       return gl_error_bit::kNoError;
@@ -576,6 +604,8 @@ uint32 GLES2Util::GLErrorBitToGLError(uint32 error_bit) {
       return GL_OUT_OF_MEMORY;
     case gl_error_bit::kInvalidFrameBufferOperation:
       return GL_INVALID_FRAMEBUFFER_OPERATION;
+    case gl_error_bit::kContextLost:
+      return GL_CONTEXT_LOST_KHR;
     default:
       NOTREACHED();
       return GL_NO_ERROR;
@@ -670,6 +700,7 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGB565:
     case GL_RGB16F_EXT:
     case GL_RGB32F_EXT:
+    case GL_SRGB_EXT:
       return kRGB;
     case GL_BGRA_EXT:
     case GL_BGRA8_EXT:
@@ -679,6 +710,8 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGBA8_OES:
     case GL_RGBA4:
     case GL_RGB5_A1:
+    case GL_SRGB_ALPHA_EXT:
+    case GL_SRGB8_ALPHA8_EXT:
       return kRGBA;
     case GL_DEPTH_COMPONENT32_OES:
     case GL_DEPTH_COMPONENT24_OES:
@@ -690,6 +723,10 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_DEPTH_STENCIL_OES:
     case GL_DEPTH24_STENCIL8_OES:
       return kDepth | kStencil;
+    case GL_RED_EXT:
+      return kRed;
+    case GL_RG_EXT:
+      return kRed | kGreen;
     default:
       return 0x0000;
   }
@@ -754,9 +791,11 @@ bool GLES2Util::ParseUniformName(
     size_t* array_pos,
     int* element_index,
     bool* getting_array) {
+  if (name.empty())
+    return false;
   bool getting_array_location = false;
   size_t open_pos = std::string::npos;
-  int index = 0;
+  base::CheckedNumeric<int> index = 0;
   if (name[name.size() - 1] == ']') {
     if (name.size() < 3) {
       return false;
@@ -774,12 +813,51 @@ bool GLES2Util::ParseUniformName(
       }
       index = index * 10 + digit;
     }
+    if (!index.IsValid()) {
+      return false;
+    }
     getting_array_location = true;
   }
   *getting_array = getting_array_location;
-  *element_index = index;
+  *element_index = index.ValueOrDie();
   *array_pos = open_pos;
   return true;
+}
+
+size_t GLES2Util::CalcClearBufferivDataCount(int buffer) {
+  switch (buffer) {
+    case GL_COLOR:
+      return 4;
+    case GL_STENCIL:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+size_t GLES2Util::CalcClearBufferfvDataCount(int buffer) {
+  switch (buffer) {
+    case GL_COLOR:
+      return 4;
+    case GL_DEPTH:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+// static
+void GLES2Util::MapUint64ToTwoUint32(
+    uint64_t v64, uint32_t* v32_0, uint32_t* v32_1) {
+  DCHECK(v32_0 && v32_1);
+  *v32_0 = static_cast<uint32_t>(v64 & 0xFFFFFFFF);
+  *v32_1 = static_cast<uint32_t>((v64 & 0xFFFFFFFF00000000) >> 32);
+}
+
+// static
+uint64_t GLES2Util::MapTwoUint32ToUint64(uint32_t v32_0, uint32_t v32_1) {
+  uint64_t v64 = v32_1;
+  return (v64 << 32) | v32_0;
 }
 
 namespace {

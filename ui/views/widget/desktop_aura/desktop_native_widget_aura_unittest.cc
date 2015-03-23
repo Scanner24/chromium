@@ -12,6 +12,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget.h"
@@ -249,9 +250,10 @@ class DesktopAuraTopLevelWindowTest
       : top_level_widget_(NULL),
         owned_window_(NULL),
         owner_destroyed_(false),
-        owned_window_destroyed_(false) {}
+        owned_window_destroyed_(false),
+        use_async_mode_(true) {}
 
-  virtual ~DesktopAuraTopLevelWindowTest() {
+  ~DesktopAuraTopLevelWindowTest() override {
     EXPECT_TRUE(owner_destroyed_);
     EXPECT_TRUE(owned_window_destroyed_);
     top_level_widget_ = NULL;
@@ -259,9 +261,8 @@ class DesktopAuraTopLevelWindowTest
   }
 
   // views::TestViewsDelegate overrides.
-  virtual void OnBeforeWidgetInit(
-      Widget::InitParams* params,
-      internal::NativeWidgetDelegate* delegate) OVERRIDE {
+  void OnBeforeWidgetInit(Widget::InitParams* params,
+                          internal::NativeWidgetDelegate* delegate) override {
     if (!params->native_widget)
       params->native_widget = new views::DesktopNativeWidgetAura(delegate);
   }
@@ -303,6 +304,13 @@ class DesktopAuraTopLevelWindowTest
 
   void DestroyOwnedWindow() {
     ASSERT_TRUE(owned_window_ != NULL);
+    // If async mode is off then clean up state here.
+    if (!use_async_mode_) {
+      owned_window_->RemoveObserver(this);
+      owned_window_->parent()->RemoveObserver(this);
+      owner_destroyed_ = true;
+      owned_window_destroyed_ = true;
+    }
     delete owned_window_;
   }
 
@@ -311,7 +319,7 @@ class DesktopAuraTopLevelWindowTest
     top_level_widget_->CloseNow();
   }
 
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+  void OnWindowDestroying(aura::Window* window) override {
     window->RemoveObserver(this);
     if (window == owned_window_) {
       owned_window_destroyed_ = true;
@@ -330,6 +338,10 @@ class DesktopAuraTopLevelWindowTest
     return top_level_widget_;
   }
 
+  void set_use_async_mode(bool async_mode) {
+    use_async_mode_ = async_mode;
+  }
+
  private:
   views::Widget widget_;
   views::Widget* top_level_widget_;
@@ -337,6 +349,9 @@ class DesktopAuraTopLevelWindowTest
   bool owner_destroyed_;
   bool owned_window_destroyed_;
   aura::test::TestWindowDelegate child_window_delegate_;
+  // This flag controls whether we need to wait for the destruction to complete
+  // before finishing the test. Defaults to true.
+  bool use_async_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopAuraTopLevelWindowTest);
 };
@@ -382,6 +397,9 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupTest) {
 TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupResizeTest) {
   ViewsDelegate::views_delegate = NULL;
   DesktopAuraTopLevelWindowTest popup_window;
+
+  popup_window.set_use_async_mode(false);
+
   ASSERT_NO_FATAL_FAILURE(popup_window.CreateTopLevelWindow(
       gfx::Rect(0, 0, 200, 200), false));
 
@@ -390,9 +408,31 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupResizeTest) {
 
   EXPECT_EQ(popup_window.top_level_widget()->GetNativeView()->bounds().size(),
             new_size.size());
-  RunPendingMessages();
+
   ASSERT_NO_FATAL_FAILURE(popup_window.DestroyOwnedWindow());
-  RunPendingMessages();
+}
+
+// This test validates that when a top level owned popup Aura window is
+// repositioned, the widget is repositioned as well.
+TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupRepositionTest) {
+  ViewsDelegate::views_delegate = NULL;
+  DesktopAuraTopLevelWindowTest popup_window;
+
+  popup_window.set_use_async_mode(false);
+
+  ASSERT_NO_FATAL_FAILURE(popup_window.CreateTopLevelWindow(
+      gfx::Rect(0, 0, 200, 200), false));
+
+  gfx::Rect new_pos(10, 10, 400, 400);
+  popup_window.owned_window()->SetBoundsInScreen(
+      new_pos,
+      gfx::Screen::GetScreenFor(
+          popup_window.owned_window())->GetDisplayNearestPoint(gfx::Point()));
+
+  EXPECT_EQ(new_pos,
+            popup_window.top_level_widget()->GetWindowBoundsInScreen());
+
+  ASSERT_NO_FATAL_FAILURE(popup_window.DestroyOwnedWindow());
 }
 
 }  // namespace test

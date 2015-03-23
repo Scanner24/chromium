@@ -6,6 +6,7 @@ import("//build/config/allocator.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//build/module_args/v8.gni")
 
 declare_args() {
   # When set, turns off the (normally-on) iterator debugging and related stuff
@@ -18,6 +19,9 @@ declare_args() {
   # TODO(sebmarchand): Update this comment once this flag guarantee that
   #     there's no build metadata in the build artifacts.
   dont_embed_build_metadata = false
+
+  # Set to true to enable dcheck in Release builds.
+  dcheck_always_on = false
 }
 
 # TODO(brettw) Most of these should be removed. Instead of global feature
@@ -30,10 +34,8 @@ declare_args() {
 config("feature_flags") {
   # TODO(brettw) most of these need to be parameterized.
   defines = [
-      "CHROMIUM_BUILD",
-      "ENABLE_EGLIMAGE=1",
-      "ENABLE_BACKGROUND=1",
-      "V8_DEPRECATION_WARNINGS",  # Don't use deprecated V8 APIs anywhere.
+    "CHROMIUM_BUILD",
+    "V8_DEPRECATION_WARNINGS",  # Don't use deprecated V8 APIs anywhere.
   ]
 
   if (cld_version > 0) {
@@ -56,10 +58,17 @@ config("feature_flags") {
   if (enable_plugins) {
     defines += [ "ENABLE_PLUGINS=1" ]
   }
-  if (printing_mode > 0) {
+  if (enable_basic_printing || enable_print_preview) {
+    # Convenience define for ENABLE_BASIC_PRINTING || ENABLE_PRINT_PREVIEW.
     defines += [ "ENABLE_PRINTING=1" ]
-    if (printing_mode < 2) {
-      defines += [ "ENABLE_FULL_PRINTING=1" ]
+    if (enable_basic_printing) {
+      # Enable basic printing support and UI.
+      defines += [ "ENABLE_BASIC_PRINTING=1" ]
+    }
+    if (enable_print_preview) {
+      # Enable printing with print preview.
+      # Can be defined without ENABLE_BASIC_PRINTING.
+      defines += [ "ENABLE_PRINT_PREVIEW=1" ]
     }
   }
   if (enable_spellcheck) {
@@ -67,6 +76,9 @@ config("feature_flags") {
   }
   if (dont_embed_build_metadata) {
     defines += [ "DONT_EMBED_BUILD_METADATA" ]
+  }
+  if (dcheck_always_on) {
+    defines += [ "DCHECK_ALWAYS_ON=1" ]
   }
   if (use_udev) {
     # TODO(brettw) should probably be "=1".
@@ -84,6 +96,9 @@ config("feature_flags") {
   }
   if (use_aura) {
     defines += [ "USE_AURA=1" ]
+  }
+  if (use_pango) {
+    defines += [ "USE_PANGO=1" ]
   }
   if (use_cairo) {
     defines += [ "USE_CAIRO=1" ]
@@ -113,12 +128,16 @@ config("feature_flags") {
   }
   if (use_x11) {
     defines += [ "USE_X11=1" ]
-    if (use_xi2_mt > 0) {
-      defines += [ "USE_XI2_MT=$use_xi2_mt" ]
-    }
   }
   if (use_allocator != "tcmalloc") {
     defines += [ "NO_TCMALLOC" ]
+  }
+  if (is_asan) {
+    defines += [
+      "ADDRESS_SANITIZER",
+      "MEMORY_TOOL_REPLACES_ALLOCATOR",
+      "MEMORY_SANITIZER_INITIAL_SIZE",
+    ]
   }
   if (enable_webrtc) {
     defines += [ "ENABLE_WEBRTC=1" ]
@@ -159,8 +178,8 @@ config("feature_flags") {
   if (enable_settings_app) {
     defines += [ "ENABLE_SETTINGS_APP=1" ]
   }
-  if (enable_managed_users) {
-    defines += [ "ENABLE_MANAGED_USERS=1" ]
+  if (enable_supervised_users) {
+    defines += [ "ENABLE_SUPERVISED_USERS=1" ]
   }
   if (enable_service_discovery) {
     defines += [ "ENABLE_SERVICE_DISCOVERY=1" ]
@@ -183,11 +202,17 @@ config("feature_flags") {
   if (enable_one_click_signin) {
     defines += [ "ENABLE_ONE_CLICK_SIGNIN" ]
   }
-  if (use_athena) {
-    defines += [ "USE_ATHENA=1" ]
-  }
   if (enable_hidpi) {
     defines += [ "ENABLE_HIDPI=1" ]
+  }
+  if (proprietary_codecs) {
+    defines += [ "USE_PROPRIETARY_CODECS" ]
+  }
+  if (enable_hangout_services_extension) {
+    defines += [ "ENABLE_HANGOUT_SERVICES_EXTENSION=1" ]
+  }
+  if (v8_use_external_startup_data) {
+    defines += [ "V8_USE_EXTERNAL_STARTUP_DATA" ]
   }
 }
 
@@ -206,7 +231,7 @@ config("debug") {
       # have to tell it to turn it off.
       defines += [ "_HAS_ITERATOR_DEBUGGING=0" ]
     }
-  } else if (is_linux && !is_android && cpu_arch == "x64" &&
+  } else if (is_linux && !is_android && current_cpu == "x64" &&
              !disable_iterator_debugging) {
     # Enable libstdc++ debugging facilities to help catch problems early, see
     # http://crbug.com/65151 .
@@ -216,9 +241,7 @@ config("debug") {
 }
 
 config("release") {
-  defines = [
-    "NDEBUG",
-  ]
+  defines = [ "NDEBUG" ]
 }
 
 # Default libraries ------------------------------------------------------------
@@ -253,6 +276,7 @@ config("default_libs") {
       "winmm.lib",
       "winspool.lib",
       "ws2_32.lib",
+
       # Please don't add more stuff here. We should actually be making this
       # list smaller, since all common things should be covered. If you need
       # some extra libraries, please just add a libs = [ "foo.lib" ] to your
@@ -269,7 +293,7 @@ config("default_libs") {
       #   '<!(<(android_toolchain)/*-gcc -print-libgcc-file-name)',
       "c",
       "dl",
-      "m"
+      "m",
     ]
   } else if (is_mac) {
     libs = [
@@ -290,8 +314,6 @@ config("default_libs") {
       "UIKit.framework",
     ]
   } else if (is_linux) {
-    libs = [
-      "dl",
-    ]
+    libs = [ "dl" ]
   }
 }

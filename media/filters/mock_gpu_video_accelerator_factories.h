@@ -11,7 +11,6 @@
 #include "media/video/video_decode_accelerator.h"
 #include "media/video/video_encode_accelerator.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 
 template <class T>
 class scoped_refptr;
@@ -39,20 +38,17 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
                     uint32 texture_target));
   MOCK_METHOD1(DeleteTexture, void(uint32 texture_id));
   MOCK_METHOD1(WaitSyncPoint, void(uint32 sync_point));
-  MOCK_METHOD3(ReadPixels,
-               void(uint32 texture_id,
-                    const gfx::Rect& visible_rect,
-                    const SkBitmap& pixels));
-  MOCK_METHOD1(CreateSharedMemory, base::SharedMemory*(size_t size));
   MOCK_METHOD0(GetTaskRunner, scoped_refptr<base::SingleThreadTaskRunner>());
   MOCK_METHOD0(GetVideoEncodeAcceleratorSupportedProfiles,
                std::vector<VideoEncodeAccelerator::SupportedProfile>());
 
+  scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
+
   virtual scoped_ptr<VideoDecodeAccelerator> CreateVideoDecodeAccelerator()
-      OVERRIDE;
+      override;
 
   virtual scoped_ptr<VideoEncodeAccelerator> CreateVideoEncodeAccelerator()
-      OVERRIDE;
+      override;
 
  private:
   virtual ~MockGpuVideoAcceleratorFactories();

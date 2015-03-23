@@ -6,6 +6,8 @@
   'variables': {
     'chromium_code': 1,
     'keyboard_mojom_gen_js': '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard/webui/keyboard.mojom.js',
+    'input_tools_root_dir': '../../third_party/google_input_tools/src/chrome/os',
+    'inputview_gen_js': '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard/resources/inputview.js',
   },
   'targets': [
     {
@@ -14,12 +16,15 @@
       'sources': [
         'webui/keyboard.mojom',
       ],
-      'includes': [ '../../mojo/public/tools/bindings/mojom_bindings_generator.gypi' ],
+      'includes': [ '../../third_party/mojo/mojom_bindings_generator.gypi' ],
     },
     {
       # GN version: //ui/keyboard:resources
       'target_name': 'keyboard_resources',
-      'dependencies': [ 'keyboard_mojom_bindings', ],
+      'dependencies': [
+        'keyboard_mojom_bindings',
+        '../../third_party/google_input_tools/inputview.gyp:inputview',
+       ],
       'type': 'none',
       'variables': {
         'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard',
@@ -31,6 +36,8 @@
             'grit_grd_file': 'keyboard_resources.grd',
             'grit_additional_defines': [
               '-E', 'keyboard_mojom_gen_js=<(keyboard_mojom_gen_js)',
+              '-E', 'input_tools_root_dir=<(input_tools_root_dir)',
+              '-E', 'inputview_gen_js=<(inputview_gen_js)',
             ],
           },
           'includes': [ '../../build/grit_action.gypi' ],
@@ -55,15 +62,17 @@
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../../content/content.gyp:content_browser',
         '../../ipc/ipc.gyp:ipc',
-        '../../mojo/mojo_base.gyp:mojo_cpp_bindings',
         '../../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../../mojo/mojo_base.gyp:mojo_js_bindings',
-        '../../mojo/mojo_base.gyp:mojo_system_impl',
         '../../skia/skia.gyp:skia',
+        '../../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
+        '../../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
+        '../../third_party/mojo/mojo_public.gyp:mojo_js_bindings',
         '../../url/url.gyp:url_lib',
         '../aura/aura.gyp:aura',
+        '../base/ime/ui_base_ime.gyp:ui_base_ime',
         '../base/ui_base.gyp:ui_base',
         '../compositor/compositor.gyp:compositor',
+        '../events/events.gyp:dom4_keycode_converter',
         '../events/events.gyp:events',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
@@ -75,6 +84,7 @@
         'KEYBOARD_IMPLEMENTATION',
       ],
       'sources': [
+        '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard/webui/keyboard.mojom.cc',
         'keyboard.cc',
         'keyboard.h',
         'keyboard_constants.cc',
@@ -84,9 +94,9 @@
         'keyboard_controller_observer.h',
         'keyboard_controller_proxy.cc',
         'keyboard_controller_proxy.h',
-        'keyboard_layout_manager.h',
-        'keyboard_layout_manager.cc',
         'keyboard_export.h',
+        'keyboard_layout_manager.cc',
+        'keyboard_layout_manager.h',
         'keyboard_switches.cc',
         'keyboard_switches.h',
         'keyboard_util.cc',
@@ -95,7 +105,6 @@
         'webui/vk_mojo_handler.h',
         'webui/vk_webui_controller.cc',
         'webui/vk_webui_controller.h',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard/webui/keyboard.mojom.cc',
       ]
     },
     {
@@ -110,6 +119,7 @@
         '../../url/url.gyp:url_lib',
         '../aura/aura.gyp:aura',
         '../aura/aura.gyp:aura_test_support',
+        '../base/ime/ui_base_ime.gyp:ui_base_ime',
         '../base/ui_base.gyp:ui_base',
         '../compositor/compositor.gyp:compositor',
         '../compositor/compositor.gyp:compositor_test_support',
@@ -120,8 +130,8 @@
         'keyboard',
       ],
       'sources': [
-        'test/run_all_unittests.cc',
         'keyboard_controller_unittest.cc',
+        'test/run_all_unittests.cc',
       ],
       'conditions': [
         ['OS=="linux" and use_allocator!="none"', {

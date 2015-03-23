@@ -9,10 +9,17 @@
 
 #include <vector>
 
+#include "base/callback.h"
+#include "base/files/file.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_vector.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/overlay_transform.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/ozone/ozone_export.h"
+#include "ui/ozone/platform/dri/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/dri/scoped_drm_types.h"
 
 typedef struct _drmEventContext drmEventContext;
@@ -20,18 +27,32 @@ typedef struct _drmModeModeInfo drmModeModeInfo;
 
 struct SkImageInfo;
 
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
+
 namespace ui {
+
+class HardwareDisplayPlaneManager;
 
 // Wraps DRM calls into a nice interface. Used to provide different
 // implementations of the DRM calls. For the actual implementation the DRM API
 // would be called. In unit tests this interface would be stubbed.
-class DriWrapper {
+class OZONE_EXPORT DriWrapper : public base::RefCountedThreadSafe<DriWrapper> {
  public:
-  DriWrapper(const char* device_path);
-  virtual ~DriWrapper();
+  typedef base::Callback<void(unsigned int /* frame */,
+                              unsigned int /* seconds */,
+                              unsigned int /* useconds */)> PageFlipCallback;
+
+  DriWrapper(const base::FilePath& device_path);
+  DriWrapper(const base::FilePath& device_path, base::File file);
 
   // Open device.
-  virtual void Initialize();
+  virtual bool Initialize();
+
+  // |task_runner| will be used to asynchronously page flip.
+  virtual void InitializeTaskRunner(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
 
   // Get the CRTC state. This is generally used to save state before using the
   // CRTC. When the user finishes using the CRTC, the user should restore the
@@ -76,9 +97,10 @@ class DriWrapper {
   // Schedules a pageflip for CRTC |crtc_id|. This function will return
   // immediately. Upon completion of the pageflip event, the CRTC will be
   // displaying the buffer with ID |framebuffer| and will have a DRM event
-  // queued on |fd_|. |data| is a generic pointer to some information the user
-  // will receive when processing the pageflip event.
-  virtual bool PageFlip(uint32_t crtc_id, uint32_t framebuffer, void* data);
+  // queued on |fd_|.
+  virtual bool PageFlip(uint32_t crtc_id,
+                        uint32_t framebuffer,
+                        const PageFlipCallback& callback);
 
   // Schedule an overlay to be show during the page flip for CRTC |crtc_id|.
   // |source| location from |framebuffer| will be shown on overlay
@@ -86,7 +108,7 @@ class DriWrapper {
   virtual bool PageFlipOverlay(uint32_t crtc_id,
                                uint32_t framebuffer,
                                const gfx::Rect& location,
-                               const gfx::RectF& source,
+                               const gfx::Rect& source,
                                int overlay_plane);
 
   // Returns the property with name |name| associated with |connector|. Returns
@@ -100,6 +122,10 @@ class DriWrapper {
   virtual bool SetProperty(uint32_t connector_id,
                            uint32_t property_id,
                            uint64_t value);
+
+  // Can be used to query device/driver |capability|. Sets the value of
+  // |capability to |value|. Returns true in case of a succesful query.
+  virtual bool GetCapability(uint64_t capability, uint64_t* value);
 
   // Return a binary blob associated with |connector|. The binary blob is
   // associated with the property with name |name|. Return NULL if the property
@@ -118,8 +144,6 @@ class DriWrapper {
   // Move the cursor on CRTC |crtc_id| to (x, y);
   virtual bool MoveCursor(uint32_t crtc_id, const gfx::Point& point);
 
-  virtual void HandleEvent(drmEventContext& event);
-
   virtual bool CreateDumbBuffer(const SkImageInfo& info,
                                 uint32_t* handle,
                                 uint32_t* stride,
@@ -130,16 +154,37 @@ class DriWrapper {
                                  uint32_t stride,
                                  void* pixels);
 
-  int get_fd() const { return fd_; }
+  // Drm master related
+  virtual bool SetMaster();
+  virtual bool DropMaster();
+
+  int get_fd() const { return file_.GetPlatformFile(); }
+
+  base::FilePath device_path() const { return device_path_; }
+
+  HardwareDisplayPlaneManager* plane_manager() { return plane_manager_.get(); }
 
  protected:
-  // The file descriptor associated with this wrapper. All DRM operations will
-  // be performed using this FD.
-  int fd_;
+  friend class base::RefCountedThreadSafe<DriWrapper>;
+
+  virtual ~DriWrapper();
+
+  scoped_ptr<HardwareDisplayPlaneManager> plane_manager_;
 
  private:
+  class IOWatcher;
+
   // Path to DRM device.
-  const char* device_path_;
+  const base::FilePath device_path_;
+
+  // DRM device.
+  base::File file_;
+
+  // Helper thread to perform IO listener operations.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  // Watcher for |fd_| listening for page flip events.
+  scoped_refptr<IOWatcher> watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(DriWrapper);
 };

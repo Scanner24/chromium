@@ -11,17 +11,18 @@ namespace webview {
 
 // Attributes.
 extern const char kAttributeAllowTransparency[];
-extern const char kAttributeAutoSize[];
-extern const char kAttributeMaxHeight[];
-extern const char kAttributeMaxWidth[];
-extern const char kAttributeMinHeight[];
-extern const char kAttributeMinWidth[];
+extern const char kAttributeAllowScaling[];
 extern const char kAttributeName[];
 extern const char kAttributeSrc[];
 
 // API namespace.
 // TODO(kalman): Consolidate this with the other API constants.
 extern const char kAPINamespace[];
+
+// API error messages.
+extern const char kAPILoadDataInvalidDataURL[];
+extern const char kAPILoadDataInvalidBaseURL[];
+extern const char kAPILoadDataInvalidVirtualURL[];
 
 // Events.
 extern const char kEventClose[];
@@ -41,7 +42,6 @@ extern const char kEventLoadStop[];
 extern const char kEventMessage[];
 extern const char kEventNewWindow[];
 extern const char kEventPermissionRequest[];
-extern const char kEventPluginDestroyed[];
 extern const char kEventResponsive[];
 extern const char kEventSizeChanged[];
 extern const char kEventUnresponsive[];

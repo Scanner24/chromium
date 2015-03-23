@@ -78,8 +78,7 @@ TEST(AnalysisCanvasTest, ComplexActions) {
   canvas.drawPaint(paint);
 
   SkColor outputColor;
-  //TODO(vmpstr): This should return true. (crbug.com/180597)
-  EXPECT_FALSE(canvas.GetColorIfSolid(&outputColor));
+  EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
 
   // Draw points test.
   SkPoint points[4] = {
@@ -200,7 +199,7 @@ TEST(AnalysisCanvasTest, ClipPath) {
   // this optimization and truly test clipPath's behavior.
   SkPath path;
   path.moveTo(0, 0);
-  path.lineTo(128, 50); 
+  path.lineTo(128, 50);
   path.lineTo(255, 0);
   path.lineTo(255, 255);
   path.lineTo(0, 255);
@@ -223,13 +222,56 @@ TEST(AnalysisCanvasTest, ClipPath) {
   EXPECT_FALSE(canvas.GetColorIfSolid(&outputColor));
 }
 
+TEST(AnalysisCanvasTest, SaveLayerWithXfermode) {
+  skia::AnalysisCanvas canvas(255, 255);
+  SkRect bounds = SkRect::MakeWH(255, 255);
+  SkColor outputColor;
+
+  EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
+  EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT), outputColor);
+  SkPaint paint;
+
+  // Note: nothing is draw to the the save layer, but solid color
+  // and transparency are handled conservatively in case the layer's
+  // SkPaint draws something. For example, there could be an
+  // SkPictureImageFilter. If someday analysis_canvas starts doing
+  // a deeper analysis of the SkPaint, this test may need to be
+  // redesigned.
+  TransparentFill(canvas);
+  EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
+  EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT), outputColor);
+  paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+  canvas.saveLayer(&bounds, &paint);
+  canvas.restore();
+  EXPECT_FALSE(canvas.GetColorIfSolid(&outputColor));
+
+  TransparentFill(canvas);
+  EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
+  EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT), outputColor);
+  paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
+  canvas.saveLayer(&bounds, &paint);
+  canvas.restore();
+  EXPECT_FALSE(canvas.GetColorIfSolid(&outputColor));
+
+  // Layer with dst xfermode is a no-op, so this is the only case
+  // where solid color is unaffected by the layer.
+  TransparentFill(canvas);
+  EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
+  EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT), outputColor);
+  paint.setXfermodeMode(SkXfermode::kDst_Mode);
+  canvas.saveLayer(&bounds, &paint);
+  canvas.restore();
+  EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
+  EXPECT_EQ(static_cast<SkColor>(SK_ColorTRANSPARENT), outputColor);
+}
+
 TEST(AnalysisCanvasTest, SaveLayerRestore) {
   skia::AnalysisCanvas canvas(255, 255);
 
   SkColor outputColor;
   SolidColorFill(canvas);
   EXPECT_TRUE(canvas.GetColorIfSolid(&outputColor));
-  
+
   SkRect bounds = SkRect::MakeWH(255, 255);
   SkPaint paint;
   paint.setColor(SkColorSetARGB(255, 255, 255, 255));
@@ -258,7 +300,7 @@ TEST(AnalysisCanvasTest, SaveLayerRestore) {
 
   SolidColorFill(canvas);
   EXPECT_FALSE(canvas.GetColorIfSolid(&outputColor));
-  
+
   canvas.restore();
   EXPECT_FALSE(canvas.GetColorIfSolid(&outputColor));
 
@@ -283,11 +325,7 @@ TEST(AnalysisCanvasTest, SaveLayerRestore) {
 }
 
 TEST(AnalysisCanvasTest, EarlyOutNotSolid) {
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval.set(256, 256);
-  tile_grid_info.fOffset.setZero();
-  tile_grid_info.fMargin.setEmpty();
-  SkTileGridFactory factory(tile_grid_info);
+  SkRTreeFactory factory;
   SkPictureRecorder recorder;
 
   // Create a picture with 3 commands, last of which is non-solid.
@@ -311,7 +349,7 @@ TEST(AnalysisCanvasTest, EarlyOutNotSolid) {
   // Draw the picture into the analysis canvas, using the canvas as a callback
   // as well.
   skia::AnalysisCanvas canvas(256, 256);
-  picture->draw(&canvas, &canvas);
+  picture->playback(&canvas, &canvas);
 
   // Ensure that canvas is not solid.
   SkColor output_color;

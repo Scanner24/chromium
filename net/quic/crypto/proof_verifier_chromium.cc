@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "crypto/signature_verifier.h"
@@ -120,6 +121,11 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyProof(
     std::string* error_details,
     scoped_ptr<ProofVerifyDetails>* verify_details,
     ProofVerifierCallback* callback) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 ProofVerifierChromium::Job::VerifyProof"));
+
   DCHECK(error_details);
   DCHECK(verify_details);
   DCHECK(callback);
@@ -234,6 +240,11 @@ int ProofVerifierChromium::Job::DoVerifyCert(int result) {
 }
 
 int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 ProofVerifierChromium::Job::DoVerifyCertComplete"));
+
   verifier_.reset();
 
   const CertVerifyResult& cert_verify_result =
@@ -248,6 +259,19 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
           cert_verify_result.public_key_hashes,
           &verify_details_->pinning_failure_log)) {
     result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
+  }
+
+  scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
+      SSLConfigService::GetEVCertsWhitelist();
+  if ((cert_status & CERT_STATUS_IS_EV) && ev_whitelist.get() &&
+      ev_whitelist->IsValid()) {
+    const SHA256HashValue fingerprint(
+        X509Certificate::CalculateFingerprint256(cert_->os_cert_handle()));
+
+    UMA_HISTOGRAM_BOOLEAN(
+        "Net.SSL_EVCertificateInWhitelist",
+        ev_whitelist->ContainsCertificateHash(
+            std::string(reinterpret_cast<const char*>(fingerprint.data), 8)));
   }
 
   if (result != OK) {
@@ -265,6 +289,11 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
 bool ProofVerifierChromium::Job::VerifySignature(const string& signed_data,
                                                  const string& signature,
                                                  const string& cert) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 ProofVerifierChromium::Job::VerifySignature"));
+
   StringPiece spki;
   if (!asn1::ExtractSPKIFromDERCert(cert, &spki)) {
     DLOG(WARNING) << "ExtractSPKIFromDERCert failed";
@@ -358,6 +387,11 @@ QuicAsyncStatus ProofVerifierChromium::VerifyProof(
     std::string* error_details,
     scoped_ptr<ProofVerifyDetails>* verify_details,
     ProofVerifierCallback* callback) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422516 ProofVerifierChromium::VerifyProof"));
+
   if (!verify_context) {
     *error_details = "Missing context";
     return QUIC_FAILURE;

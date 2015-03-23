@@ -32,11 +32,13 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager_impl.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/multiprofiles_session_aborted_dialog.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/session_length_limiter.h"
+#include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
@@ -49,6 +51,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/user_names.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "chromeos/timezone/timezone_resolver.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user_image/user_image.h"
@@ -193,7 +196,7 @@ SupervisedUserManager* ChromeUserManagerImpl::GetSupervisedUserManager() {
   return supervised_user_manager_.get();
 }
 
-user_manager::UserList ChromeUserManagerImpl::GetUsersAdmittedForMultiProfile()
+user_manager::UserList ChromeUserManagerImpl::GetUsersAllowedForMultiProfile()
     const {
   // Supervised users are not allowed to use multi-profiles.
   if (GetLoggedInUsers().size() == 1 &&
@@ -224,6 +227,20 @@ user_manager::UserList ChromeUserManagerImpl::GetUsersAdmittedForMultiProfile()
   }
 
   return result;
+}
+
+user_manager::UserList
+ChromeUserManagerImpl::GetUsersAllowedForSupervisedUsersCreation() const {
+  CrosSettings* cros_settings = CrosSettings::Get();
+  bool allow_new_user = true;
+  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
+  bool supervised_users_allowed = AreSupervisedUsersAllowed();
+
+  // Restricted either by policy or by owner.
+  if (!allow_new_user || !supervised_users_allowed)
+    return user_manager::UserList();
+
+  return GetUsersAllowedAsSupervisedUserManagers(GetUsers());
 }
 
 user_manager::UserList ChromeUserManagerImpl::GetUnlockUsers() const {
@@ -351,7 +368,7 @@ void ChromeUserManagerImpl::Observe(
       if (IsUserLoggedIn() && !IsLoggedInAsGuest() && !IsLoggedInAsKioskApp()) {
         if (IsLoggedInAsSupervisedUser())
           SupervisedUserPasswordServiceFactory::GetForProfile(profile);
-        if (IsLoggedInAsRegularUser())
+        if (IsLoggedInAsUserWithGaiaAccount())
           ManagerPasswordServiceFactory::GetForProfile(profile);
 
         if (!profile->IsOffTheRecord()) {
@@ -361,14 +378,21 @@ void ChromeUserManagerImpl::Observe(
           multi_profile_user_controller_->StartObserving(profile);
         }
       }
+      UpdateUserTimeZoneRefresher(profile);
       break;
     }
     case chrome::NOTIFICATION_PROFILE_CREATED: {
       Profile* profile = content::Source<Profile>(source).ptr();
       user_manager::User* user =
           ProfileHelper::Get()->GetUserByProfile(profile);
-      if (user != NULL)
+      if (user != NULL) {
         user->set_profile_is_created();
+
+        if (user->HasGaiaAccount()) {
+          UserImageManager* image_manager = GetUserImageManager(user->email());
+          image_manager->UserProfileCreated();
+        }
+      }
 
       // If there is pending user switch, do it now.
       if (!GetPendingUserSwitchID().empty()) {
@@ -573,8 +597,7 @@ void ChromeUserManagerImpl::RetrieveTrustedDevicePolicies() {
     for (user_manager::UserList::iterator it = users_.begin();
          it != users_.end();) {
       const std::string user_email = (*it)->email();
-      if ((*it)->GetType() == user_manager::USER_TYPE_REGULAR &&
-          user_email != GetOwnerEmail()) {
+      if ((*it)->HasGaiaAccount() && user_email != GetOwnerEmail()) {
         RemoveNonCryptohomeData(user_email);
         DeleteUser(*it);
         it = users_.erase(it);
@@ -723,7 +746,7 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(const std::string& app_id) {
     NOTREACHED();
   }
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(::switches::kForceAppMode);
   command_line->AppendSwitchASCII(::switches::kAppId, kiosk_app_id);
 
@@ -744,25 +767,15 @@ void ChromeUserManagerImpl::DemoAccountLoggedIn() {
       false);
   WallpaperManager::Get()->SetUserWallpaperNow(DemoAppLauncher::kDemoUserName);
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(::switches::kForceAppMode);
   command_line->AppendSwitchASCII(::switches::kAppId,
                                   DemoAppLauncher::kDemoAppId);
 
   // Disable window animation since the demo app runs in a single full screen
   // window and window animation causes start-up janks.
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       wm::switches::kWindowAnimationsDisabled);
-}
-
-void ChromeUserManagerImpl::RetailModeUserLoggedIn() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SetIsCurrentUserNew(true);
-  active_user_ = user_manager::User::CreateRetailModeUser();
-  GetUserImageManager(chromeos::login::kRetailModeUserName)
-      ->UserLoggedIn(IsCurrentUserNew(), true);
-  WallpaperManager::Get()->SetUserWallpaperNow(
-      chromeos::login::kRetailModeUserName);
 }
 
 void ChromeUserManagerImpl::NotifyOnLogin() {
@@ -1031,13 +1044,47 @@ void ChromeUserManagerImpl::UpdateNumberOfUsers() {
   size_t users = GetLoggedInUsers().size();
   if (users) {
     // Write the user number as UMA stat when a multi user session is possible.
-    if ((users + GetUsersAdmittedForMultiProfile().size()) > 1)
+    if ((users + GetUsersAllowedForMultiProfile().size()) > 1)
       ash::MultiProfileUMA::RecordUserCount(users);
   }
 
   base::debug::SetCrashKeyValue(
       crash_keys::kNumberOfUsers,
       base::StringPrintf("%" PRIuS, GetLoggedInUsers().size()));
+}
+
+void ChromeUserManagerImpl::UpdateUserTimeZoneRefresher(Profile* profile) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableTimeZoneTrackingOption)) {
+    return;
+  }
+
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
+  if (user == NULL)
+    return;
+
+  // In Multi-Profile mode only primary user settings are in effect.
+  if (user != user_manager::UserManager::Get()->GetPrimaryUser())
+    return;
+
+  if (!IsUserLoggedIn())
+    return;
+
+  // Timezone auto refresh is disabled for Guest, Supervized and OffTheRecord
+  // users, but enabled for Kiosk mode.
+  if (IsLoggedInAsGuest() || IsLoggedInAsSupervisedUser() ||
+      profile->IsOffTheRecord()) {
+    g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+    return;
+  }
+
+  if (profile->GetPrefs()->GetBoolean(prefs::kResolveTimezoneByGeolocation) &&
+      !system::HasSystemTimezonePolicy()) {
+    g_browser_process->platform_part()->GetTimezoneResolver()->Start();
+  } else {
+    g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+  }
 }
 
 }  // namespace chromeos

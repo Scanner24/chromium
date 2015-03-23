@@ -34,7 +34,7 @@ const int kAnotherStreamId = 6;
 class MockWebContentsDelegate : public WebContentsDelegate {
  public:
   MOCK_METHOD2(NavigationStateChanged,
-               void(const WebContents* source, InvalidateTypes changed_flags));
+               void(WebContents* source, InvalidateTypes changed_flags));
 };
 
 }  // namespace
@@ -46,7 +46,7 @@ class AudioStreamMonitorTest : public RenderViewHostTestHarness {
     clock_.Advance(base::TimeDelta::FromSeconds(1000000));
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     RenderViewHostTestHarness::SetUp();
 
     WebContentsImpl* web_contents = reinterpret_cast<WebContentsImpl*>(

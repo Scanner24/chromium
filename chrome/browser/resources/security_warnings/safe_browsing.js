@@ -18,7 +18,7 @@ var SB_DISPLAY_CHECK_BOX = 'displaycheckbox';
 
 // This sets up the Extended Safe Browsing Reporting opt-in.
 function setupCheckbox() {
-  if (loadTimeData.getBoolean('ssl') || loadTimeData.getBoolean('phishing') ||
+  if (loadTimeData.getString('type') != 'SAFEBROWSING' ||
       !loadTimeData.getBoolean(SB_DISPLAY_CHECK_BOX)) {
     return;
   }
@@ -26,6 +26,7 @@ function setupCheckbox() {
   $('opt-in-label').innerHTML = loadTimeData.getString('optInLink');
   $('opt-in-checkbox').checked = loadTimeData.getBoolean(SB_BOX_CHECKED);
   $('malware-opt-in').classList.remove('hidden');
+  $('body').classList.add('safe-browsing-has-checkbox');
 
   $('opt-in-checkbox').addEventListener('click', function() {
     sendCommand(

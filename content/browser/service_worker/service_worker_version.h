@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_VERSION_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -23,9 +24,23 @@
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "third_party/WebKit/public/platform/WebGeofencingEventType.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerEventResult.h"
 
+// Windows headers will redefine SendMessage.
+#ifdef SendMessage
+#undef SendMessage
+#endif
+
 class GURL;
+
+namespace blink {
+struct WebCircularGeofencingRegion;
+}
+
+namespace net {
+class HttpResponseInfo;
+}
 
 namespace content {
 
@@ -33,7 +48,11 @@ class EmbeddedWorkerRegistry;
 class ServiceWorkerContextCore;
 class ServiceWorkerProviderHost;
 class ServiceWorkerRegistration;
+class ServiceWorkerURLRequestJob;
 class ServiceWorkerVersionInfo;
+struct NavigatorConnectClient;
+struct PlatformNotificationData;
+struct ServiceWorkerClientInfo;
 
 // This class corresponds to a specific version of a ServiceWorker
 // script for a given pattern. When a script is upgraded, there may be
@@ -50,6 +69,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
   typedef base::Callback<void(ServiceWorkerStatusCode,
                               ServiceWorkerFetchEventResult,
                               const ServiceWorkerResponse&)> FetchCallback;
+  typedef base::Callback<void(ServiceWorkerStatusCode, bool)>
+      CrossOriginConnectCallback;
 
   enum RunningStatus {
     STOPPED = EmbeddedWorkerInstance::STOPPED,
@@ -150,8 +171,13 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // message is successfully sent or not.
   void SendMessage(const IPC::Message& message, const StatusCallback& callback);
 
+  // Sends a message event to the associated embedded worker.
+  void DispatchMessageEvent(const base::string16& message,
+                            const std::vector<int>& sent_message_port_ids,
+                            const StatusCallback& callback);
+
   // Sends install event to the associated embedded worker and asynchronously
-  // calls |callback| when it errors out or it gets response from the worker
+  // calls |callback| when it errors out or it gets a response from the worker
   // to notify install completion.
   // |active_version_id| must be a valid positive ID
   // if there's an activated (previous) version running.
@@ -164,7 +190,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
                             const StatusCallback& callback);
 
   // Sends activate event to the associated embedded worker and asynchronously
-  // calls |callback| when it errors out or it gets response from the worker
+  // calls |callback| when it errors out or it gets a response from the worker
   // to notify activation completion.
   //
   // This must be called when the status() is INSTALLED. Calling this changes
@@ -183,19 +209,62 @@ class CONTENT_EXPORT ServiceWorkerVersion
                           const FetchCallback& fetch_callback);
 
   // Sends sync event to the associated embedded worker and asynchronously calls
-  // |callback| when it errors out or it gets response from the worker to notify
-  // completion.
+  // |callback| when it errors out or it gets a response from the worker to
+  // notify completion.
   //
   // This must be called when the status() is ACTIVATED.
   void DispatchSyncEvent(const StatusCallback& callback);
 
+  // Sends notificationclick event to the associated embedded worker and
+  // asynchronously calls |callback| when it errors out or it gets a response
+  // from the worker to notify completion.
+  //
+  // This must be called when the status() is ACTIVATED.
+  void DispatchNotificationClickEvent(
+      const StatusCallback& callback,
+      const std::string& notification_id,
+      const PlatformNotificationData& notification_data);
+
   // Sends push event to the associated embedded worker and asynchronously calls
-  // |callback| when it errors out or it gets response from the worker to notify
-  // completion.
+  // |callback| when it errors out or it gets a response from the worker to
+  // notify completion.
   //
   // This must be called when the status() is ACTIVATED.
   void DispatchPushEvent(const StatusCallback& callback,
                          const std::string& data);
+
+  // Sends geofencing event to the associated embedded worker and asynchronously
+  // calls |callback| when it errors out or it gets a response from the worker
+  // to notify completion.
+  //
+  // This must be called when the status() is ACTIVATED.
+  void DispatchGeofencingEvent(
+      const StatusCallback& callback,
+      blink::WebGeofencingEventType event_type,
+      const std::string& region_id,
+      const blink::WebCircularGeofencingRegion& region);
+
+  // Sends a cross origin connect event to the associated embedded worker and
+  // asynchronously calls |callback| with the response from the worker.
+  //
+  // This must be called when the status() is ACTIVATED.
+  void DispatchCrossOriginConnectEvent(
+      const CrossOriginConnectCallback& callback,
+      const NavigatorConnectClient& client);
+
+  // Sends a cross origin message event to the associated embedded worker and
+  // asynchronously calls |callback| when the message was sent (or failed to
+  // sent).
+  // It is the responsibility of the code calling this method to make sure that
+  // any transferred message ports are put on hold while potentially a process
+  // for the service worker is spun up.
+  //
+  // This must be called when the status() is ACTIVATED.
+  void DispatchCrossOriginMessageEvent(
+      const NavigatorConnectClient& client,
+      const base::string16& message,
+      const std::vector<int>& sent_message_port_ids,
+      const StatusCallback& callback);
 
   // Adds and removes |provider_host| as a controllee of this ServiceWorker.
   // A potential controllee is a host having the version as its .installing
@@ -205,6 +274,13 @@ class CONTENT_EXPORT ServiceWorkerVersion
 
   // Returns if it has controllee.
   bool HasControllee() const { return !controllee_map_.empty(); }
+
+  // Adds and removes |request_job| as a dependent job not to stop the
+  // ServiceWorker while |request_job| is reading the stream of the fetch event
+  // response from the ServiceWorker.
+  void AddStreamingURLRequestJob(const ServiceWorkerURLRequestJob* request_job);
+  void RemoveStreamingURLRequestJob(
+      const ServiceWorkerURLRequestJob* request_job);
 
   // Adds and removes Listeners.
   void AddListener(Listener* listener);
@@ -219,36 +295,57 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void Doom();
   bool is_doomed() const { return is_doomed_; }
 
+  bool skip_waiting() const { return skip_waiting_; }
+
+  void SetDevToolsAttached(bool attached);
+
+  // Sets the HttpResponseInfo used to load the main script.
+  // This HttpResponseInfo will be used for all responses sent back from the
+  // service worker, as the effective security of these responses is equivalent
+  // to that of the ServiceWorker.
+  void SetMainScriptHttpResponseInfo(const net::HttpResponseInfo& http_info);
+  const net::HttpResponseInfo* GetMainScriptHttpResponseInfo();
+
  private:
+  class GetClientDocumentsCallback;
+
   friend class base::RefCounted<ServiceWorkerVersion>;
+  friend class ServiceWorkerURLRequestJobTest;
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerControlleeRequestHandlerTest,
                            ActivateWaitingVersion);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, ScheduleStopWorker);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, KeepAlive);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, ListenerAvailability);
   typedef ServiceWorkerVersion self;
   typedef std::map<ServiceWorkerProviderHost*, int> ControlleeMap;
   typedef IDMap<ServiceWorkerProviderHost> ControlleeByIDMap;
-  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, ScheduleStopWorker);
 
-  virtual ~ServiceWorkerVersion();
+  ~ServiceWorkerVersion() override;
 
   // EmbeddedWorkerInstance::Listener overrides:
-  virtual void OnStarted() OVERRIDE;
-  virtual void OnStopped() OVERRIDE;
-  virtual void OnReportException(const base::string16& error_message,
-                                 int line_number,
-                                 int column_number,
-                                 const GURL& source_url) OVERRIDE;
-  virtual void OnReportConsoleMessage(int source_identifier,
-                                      int message_level,
-                                      const base::string16& message,
-                                      int line_number,
-                                      const GURL& source_url) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnStarted() override;
+  void OnStopped(EmbeddedWorkerInstance::Status old_status) override;
+  void OnReportException(const base::string16& error_message,
+                         int line_number,
+                         int column_number,
+                         const GURL& source_url) override;
+  void OnReportConsoleMessage(int source_identifier,
+                              int message_level,
+                              const base::string16& message,
+                              int line_number,
+                              const GURL& source_url) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
-  void RunStartWorkerCallbacksOnError(ServiceWorkerStatusCode status);
+  void OnStartMessageSent(ServiceWorkerStatusCode status);
 
   void DispatchInstallEventAfterStartWorker(int active_version_id,
                                             const StatusCallback& callback);
   void DispatchActivateEventAfterStartWorker(const StatusCallback& callback);
+
+  void DispatchMessageEventInternal(
+      const base::string16& message,
+      const std::vector<int>& sent_message_port_ids,
+      const StatusCallback& callback);
 
   // Message handlers.
   void OnGetClientDocuments(int request_id);
@@ -260,13 +357,48 @@ class CONTENT_EXPORT ServiceWorkerVersion
                             ServiceWorkerFetchEventResult result,
                             const ServiceWorkerResponse& response);
   void OnSyncEventFinished(int request_id);
-  void OnPushEventFinished(int request_id);
+  void OnNotificationClickEventFinished(int request_id);
+  void OnPushEventFinished(int request_id,
+                           blink::WebServiceWorkerEventResult result);
+  void OnGeofencingEventFinished(int request_id);
+  void OnCrossOriginConnectEventFinished(int request_id,
+                                         bool accept_connection);
+  void OnOpenWindow(int request_id, const GURL& url);
+  void DidOpenWindow(int request_id,
+                     int render_process_id,
+                     int render_frame_id);
+  void OnOpenWindowFinished(int request_id,
+                            int client_id,
+                            const ServiceWorkerClientInfo& client_info);
+
+  void OnSetCachedMetadata(const GURL& url, const std::vector<char>& data);
+  void OnClearCachedMetadata(const GURL& url);
+
   void OnPostMessageToDocument(int client_id,
                                const base::string16& message,
                                const std::vector<int>& sent_message_port_ids);
+  void OnFocusClient(int request_id, int client_id);
+  void OnSkipWaiting(int request_id);
+  void OnClaimClients(int request_id);
+
+  void OnFocusClientFinished(int request_id,
+                             int client_id,
+                             const ServiceWorkerClientInfo& client);
+
+  void DidSkipWaiting(int request_id);
+  void DidClaimClients(int request_id, ServiceWorkerStatusCode status);
+  void DidGetClientInfo(int client_id,
+                        scoped_refptr<GetClientDocumentsCallback> callback,
+                        const ServiceWorkerClientInfo& info);
 
   void ScheduleStopWorker();
+  void StopWorkerIfIdle();
+  bool HasInflightRequests() const;
+
   void DoomInternal();
+
+  template <typename IDMAP>
+  void RemoveCallbackAndStopIfDoomed(IDMAP* callbacks, int request_id);
 
   const int64 version_id_;
   int64 registration_id_;
@@ -279,21 +411,32 @@ class CONTENT_EXPORT ServiceWorkerVersion
   std::vector<StatusCallback> stop_callbacks_;
   std::vector<base::Closure> status_change_callbacks_;
 
-  // Message callbacks.
+  // Message callbacks. (Update HasInflightRequests() too when you update this
+  // list.)
   IDMap<StatusCallback, IDMapOwnPointer> activate_callbacks_;
   IDMap<StatusCallback, IDMapOwnPointer> install_callbacks_;
   IDMap<FetchCallback, IDMapOwnPointer> fetch_callbacks_;
   IDMap<StatusCallback, IDMapOwnPointer> sync_callbacks_;
+  IDMap<StatusCallback, IDMapOwnPointer> notification_click_callbacks_;
   IDMap<StatusCallback, IDMapOwnPointer> push_callbacks_;
+  IDMap<StatusCallback, IDMapOwnPointer> geofencing_callbacks_;
+  IDMap<CrossOriginConnectCallback, IDMapOwnPointer>
+      cross_origin_connect_callbacks_;
+
+  std::set<const ServiceWorkerURLRequestJob*> streaming_url_request_jobs_;
 
   ControlleeMap controllee_map_;
   ControlleeByIDMap controllee_by_id_;
+  // Will be null while shutting down.
   base::WeakPtr<ServiceWorkerContextCore> context_;
   ObserverList<Listener> listeners_;
   ServiceWorkerScriptCacheMap script_cache_map_;
   base::OneShotTimer<ServiceWorkerVersion> stop_worker_timer_;
   base::OneShotTimer<ServiceWorkerVersion> update_timer_;
   bool is_doomed_;
+  std::vector<int> pending_skip_waiting_requests_;
+  bool skip_waiting_;
+  scoped_ptr<net::HttpResponseInfo> main_script_http_info_;
 
   base::WeakPtrFactory<ServiceWorkerVersion> weak_factory_;
 

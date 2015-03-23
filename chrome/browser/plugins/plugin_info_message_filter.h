@@ -30,6 +30,10 @@ class ResourceContext;
 struct WebPluginInfo;
 }
 
+namespace extensions {
+class ExtensionRegistry;
+}
+
 // This class filters out incoming IPC messages requesting plug-in information.
 class PluginInfoMessageFilter : public content::BrowserMessageFilter {
  public:
@@ -69,6 +73,9 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
    private:
     int render_process_id_;
     content::ResourceContext* resource_context_;
+#if defined(ENABLE_EXTENSIONS)
+    extensions::ExtensionRegistry* extension_registry_;
+#endif
     const HostContentSettingsMap* host_content_settings_map_;
     scoped_refptr<PluginPrefs> plugin_prefs_;
 
@@ -79,15 +86,15 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
   PluginInfoMessageFilter(int render_process_id, Profile* profile);
 
   // content::BrowserMessageFilter methods:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnDestruct() const OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OnDestruct() const override;
 
  private:
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<PluginInfoMessageFilter>;
 
-  virtual ~PluginInfoMessageFilter();
+  ~PluginInfoMessageFilter() override;
 
   void OnGetPluginInfo(int render_frame_id,
                        const GURL& url,
@@ -118,8 +125,8 @@ class PluginInfoMessageFilter : public content::BrowserMessageFilter {
 
   Context context_;
 
-  base::WeakPtrFactory<PluginInfoMessageFilter> weak_ptr_factory_;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
+  base::WeakPtrFactory<PluginInfoMessageFilter> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginInfoMessageFilter);
 };

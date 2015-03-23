@@ -31,6 +31,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/scoped_native_library.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
@@ -217,7 +218,7 @@ class Wow64Functions {
     return is_wow_64_process_ &&
         wow_64_disable_wow_64_fs_redirection_ &&
         wow_64_revert_wow_64_fs_redirection_;
- }
+  }
 
   bool IsWow64() {
     BOOL result = 0;
@@ -291,12 +292,12 @@ class WinGPOListProvider : public AppliedGPOListProvider {
                                   LPCTSTR machine_name,
                                   PSID sid_user,
                                   GUID* extension_guid,
-                                  PGROUP_POLICY_OBJECT* gpo_list) OVERRIDE {
+                                  PGROUP_POLICY_OBJECT* gpo_list) override {
     return ::GetAppliedGPOList(flags, machine_name, sid_user, extension_guid,
                                gpo_list);
   }
 
-  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) OVERRIDE {
+  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) override {
     return ::FreeGPOList(gpo_list);
   }
 };
@@ -460,9 +461,10 @@ scoped_ptr<PolicyBundle> PolicyLoaderWin::Load() {
     // timeout on it more aggressively. For now, there's no justification for
     // the additional effort this would introduce.
 
-    if (is_enterprise || !ReadPolicyFromGPO(scope, &gpo_dict, &status)) {
-      VLOG_IF(1, !is_enterprise) << "Failed to read GPO files for " << scope
-                                 << " falling back to registry.";
+    bool is_registry_forced = is_enterprise || gpo_provider_ == nullptr;
+    if (is_registry_forced || !ReadPolicyFromGPO(scope, &gpo_dict, &status)) {
+      VLOG_IF(1, !is_registry_forced) << "Failed to read GPO files for "
+                                      << scope << " falling back to registry.";
       gpo_dict.ReadRegistry(kScopes[i].hive, chrome_policy_key_);
     }
 
@@ -680,6 +682,11 @@ void PolicyLoaderWin::SetupWatches() {
 }
 
 void PolicyLoaderWin::OnObjectSignaled(HANDLE object) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 PolicyLoaderWin::OnObjectSignaled"));
+
   DCHECK(object == user_policy_changed_event_.handle() ||
          object == machine_policy_changed_event_.handle())
       << "unexpected object signaled policy reload, obj = "

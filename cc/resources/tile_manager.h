@@ -16,19 +16,17 @@
 #include "base/values.h"
 #include "cc/base/ref_counted_managed.h"
 #include "cc/base/unique_notifier.h"
-#include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/resources/eviction_tile_priority_queue.h"
-#include "cc/resources/managed_tile_state.h"
 #include "cc/resources/memory_history.h"
-#include "cc/resources/picture_pile_impl.h"
-#include "cc/resources/prioritized_tile_set.h"
+#include "cc/resources/raster_source.h"
 #include "cc/resources/raster_tile_priority_queue.h"
-#include "cc/resources/rasterizer.h"
 #include "cc/resources/resource_pool.h"
 #include "cc/resources/tile.h"
+#include "cc/resources/tile_draw_info.h"
+#include "cc/resources/tile_task_runner.h"
 
 namespace base {
-namespace debug {
+namespace trace_event {
 class ConvertableToTraceFormat;
 class TracedValue;
 }
@@ -36,17 +34,16 @@ class TracedValue;
 
 namespace cc {
 class PictureLayerImpl;
+class Rasterizer;
 class ResourceProvider;
 
 class CC_EXPORT TileManagerClient {
  public:
-  // Returns the set of layers that the tile manager should consider for raster.
-  // TODO(vmpstr): Change the way we determine if we are ready to activate, so
-  // that this can be removed.
-  virtual const std::vector<PictureLayerImpl*>& GetPictureLayers() const = 0;
-
   // Called when all tiles marked as required for activation are ready to draw.
   virtual void NotifyReadyToActivate() = 0;
+
+  // Called when all tiles marked as required for draw are ready to draw.
+  virtual void NotifyReadyToDraw() = 0;
 
   // Called when the visible representation of a tile might have changed. Some
   // examples are:
@@ -58,14 +55,20 @@ class CC_EXPORT TileManagerClient {
   // Given an empty raster tile priority queue, this will build a priority queue
   // that will return tiles in order in which they should be rasterized.
   // Note if the queue was previous built, Reset must be called on it.
-  virtual void BuildRasterQueue(RasterTilePriorityQueue* queue,
-                                TreePriority tree_priority) = 0;
+  virtual scoped_ptr<RasterTilePriorityQueue> BuildRasterQueue(
+      TreePriority tree_priority,
+      RasterTilePriorityQueue::Type type) = 0;
 
   // Given an empty eviction tile priority queue, this will build a priority
   // queue that will return tiles in order in which they should be evicted.
   // Note if the queue was previous built, Reset must be called on it.
-  virtual void BuildEvictionQueue(EvictionTilePriorityQueue* queue,
-                                  TreePriority tree_priority) = 0;
+  virtual scoped_ptr<EvictionTilePriorityQueue> BuildEvictionQueue(
+      TreePriority tree_priority) = 0;
+
+  // Informs the client that due to the currently rasterizing (or scheduled to
+  // be rasterized) tiles, we will be in a position that will likely require a
+  // draw. This can be used to preemptively start a frame.
+  virtual void SetIsLikelyToRequireADraw(bool is_likely_to_require_a_draw) = 0;
 
  protected:
   virtual ~TileManagerClient() {}
@@ -77,88 +80,85 @@ struct RasterTaskCompletionStats {
   size_t completed_count;
   size_t canceled_count;
 };
-scoped_refptr<base::debug::ConvertableToTraceFormat>
-    RasterTaskCompletionStatsAsValue(const RasterTaskCompletionStats& stats);
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+RasterTaskCompletionStatsAsValue(const RasterTaskCompletionStats& stats);
 
 // This class manages tiles, deciding which should get rasterized and which
 // should no longer have any memory assigned to them. Tile objects are "owned"
 // by layers; they automatically register with the manager when they are
 // created, and unregister from the manager when they are deleted.
-class CC_EXPORT TileManager : public RasterizerClient,
+class CC_EXPORT TileManager : public TileTaskRunnerClient,
                               public RefCountedManager<Tile> {
  public:
   enum NamedTaskSet {
-    REQUIRED_FOR_ACTIVATION = 0,
-    ALL = 1,
+    REQUIRED_FOR_ACTIVATION,
+    REQUIRED_FOR_DRAW,
+    // PixelBufferTileTaskWorkerPool depends on ALL being last.
+    ALL
     // Adding additional values requires increasing kNumberOfTaskSets in
     // rasterizer.h
   };
 
-  static scoped_ptr<TileManager> Create(
-      TileManagerClient* client,
-      base::SequencedTaskRunner* task_runner,
-      ResourcePool* resource_pool,
-      Rasterizer* rasterizer,
-      RenderingStatsInstrumentation* rendering_stats_instrumentation);
-  virtual ~TileManager();
+  static_assert(NamedTaskSet::ALL == (kNumberOfTaskSets - 1),
+                "NamedTaskSet::ALL should be equal to kNumberOfTaskSets"
+                "minus 1");
 
-  void ManageTiles(const GlobalStateThatImpactsTilePriority& state);
+  static scoped_ptr<TileManager> Create(TileManagerClient* client,
+                                        base::SequencedTaskRunner* task_runner,
+                                        ResourcePool* resource_pool,
+                                        TileTaskRunner* tile_task_runner,
+                                        Rasterizer* rasterizer,
+                                        size_t scheduled_raster_task_limit);
+  ~TileManager() override;
 
-  // Returns true when visible tiles have been initialized.
-  bool UpdateVisibleTiles();
+  // Assigns tile memory and schedules work to prepare tiles for drawing.
+  // - Runs client_->NotifyReadyToActivate() when all tiles required for
+  // activation are prepared, or failed to prepare due to OOM.
+  // - Runs client_->NotifyReadyToDraw() when all tiles required draw are
+  // prepared, or failed to prepare due to OOM.
+  void PrepareTiles(const GlobalStateThatImpactsTilePriority& state);
 
-  scoped_refptr<Tile> CreateTile(PicturePileImpl* picture_pile,
-                                 const gfx::Size& tile_size,
+  void UpdateVisibleTiles(const GlobalStateThatImpactsTilePriority& state);
+
+  scoped_refptr<Tile> CreateTile(RasterSource* raster_source,
+                                 const gfx::Size& desired_texture_size,
                                  const gfx::Rect& content_rect,
                                  float contents_scale,
                                  int layer_id,
                                  int source_frame_number,
                                  int flags);
 
-  scoped_refptr<base::debug::ConvertableToTraceFormat> BasicStateAsValue()
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> BasicStateAsValue()
       const;
-  void BasicStateAsValueInto(base::debug::TracedValue* dict) const;
+  void BasicStateAsValueInto(base::trace_event::TracedValue* dict) const;
   const MemoryHistory::Entry& memory_stats_from_last_assign() const {
     return memory_stats_from_last_assign_;
   }
 
   void InitializeTilesWithResourcesForTesting(const std::vector<Tile*>& tiles) {
     for (size_t i = 0; i < tiles.size(); ++i) {
-      ManagedTileState& mts = tiles[i]->managed_state();
-      ManagedTileState::TileVersion& tile_version =
-          mts.tile_versions[HIGH_QUALITY_RASTER_MODE];
-
-      tile_version.resource_ =
-          resource_pool_->AcquireResource(tiles[i]->size());
-
-      bytes_releasable_ += BytesConsumedIfAllocated(tiles[i]);
-      ++resources_releasable_;
+      TileDrawInfo& draw_info = tiles[i]->draw_info();
+      draw_info.resource_ = resource_pool_->AcquireResource(
+          tiles[i]->desired_texture_size(),
+          tile_task_runner_->GetResourceFormat());
     }
   }
 
   void ReleaseTileResourcesForTesting(const std::vector<Tile*>& tiles) {
     for (size_t i = 0; i < tiles.size(); ++i) {
       Tile* tile = tiles[i];
-      for (int mode = 0; mode < NUM_RASTER_MODES; ++mode) {
-        FreeResourceForTile(tile, static_cast<RasterMode>(mode));
-      }
+      FreeResourcesForTile(tile);
     }
   }
 
   void SetGlobalStateForTesting(
       const GlobalStateThatImpactsTilePriority& state) {
-    // Soft limit is used for resource pool such that
-    // memory returns to soft limit after going over.
-    if (state != global_state_) {
-      global_state_ = state;
-      prioritized_tiles_dirty_ = true;
-    }
+    global_state_ = state;
   }
 
-  void SetRasterizerForTesting(Rasterizer* rasterizer);
+  void SetTileTaskRunnerForTesting(TileTaskRunner* tile_task_runner);
 
   void FreeResourcesAndCleanUpReleasedTilesForTesting() {
-    prioritized_tiles_.Clear();
     FreeResourcesForReleasedTiles();
     CleanUpReleasedTiles();
   }
@@ -172,26 +172,31 @@ class CC_EXPORT TileManager : public RasterizerClient,
     return tiles;
   }
 
+  void SetScheduledRasterTaskLimitForTesting(size_t limit) {
+    scheduled_raster_task_limit_ = limit;
+  }
+
+  bool IsReadyToActivate() const;
+  bool IsReadyToDraw() const;
+
  protected:
   TileManager(TileManagerClient* client,
               const scoped_refptr<base::SequencedTaskRunner>& task_runner,
               ResourcePool* resource_pool,
+              TileTaskRunner* tile_task_runner,
               Rasterizer* rasterizer,
-              RenderingStatsInstrumentation* rendering_stats_instrumentation);
-
-  // Methods called by Tile
-  friend class Tile;
-  void DidChangeTilePriority(Tile* tile);
+              size_t scheduled_raster_task_limit);
 
   void FreeResourcesForReleasedTiles();
   void CleanUpReleasedTiles();
 
   // Overriden from RefCountedManager<Tile>:
-  virtual void Release(Tile* tile) OVERRIDE;
+  friend class Tile;
+  void Release(Tile* tile) override;
 
-  // Overriden from RasterizerClient:
-  virtual void DidFinishRunningTasks(TaskSet task_set) OVERRIDE;
-  virtual TaskSetCollection TasksThatShouldBeForcedToComplete() const OVERRIDE;
+  // Overriden from TileTaskRunnerClient:
+  void DidFinishRunningTileTasks(TaskSet task_set) override;
+  TaskSetCollection TasksThatShouldBeForcedToComplete() const override;
 
   typedef std::vector<Tile*> TileVector;
   typedef std::set<Tile*> TileSet;
@@ -200,65 +205,88 @@ class CC_EXPORT TileManager : public RasterizerClient,
   virtual void ScheduleTasks(
       const TileVector& tiles_that_need_to_be_rasterized);
 
-  void AssignGpuMemoryToTiles(PrioritizedTileSet* tiles,
+  void AssignGpuMemoryToTiles(RasterTilePriorityQueue* raster_priority_queue,
+                              size_t scheduled_raser_task_limit,
                               TileVector* tiles_that_need_to_be_rasterized);
-  void GetTilesWithAssignedBins(PrioritizedTileSet* tiles);
+
+  void SynchronouslyRasterizeTiles(
+      const GlobalStateThatImpactsTilePriority& state);
 
  private:
+  class MemoryUsage {
+   public:
+    MemoryUsage();
+    MemoryUsage(int64 memory_bytes, int resource_count);
+
+    static MemoryUsage FromConfig(const gfx::Size& size, ResourceFormat format);
+    static MemoryUsage FromTile(const Tile* tile);
+
+    MemoryUsage& operator+=(const MemoryUsage& other);
+    MemoryUsage& operator-=(const MemoryUsage& other);
+    MemoryUsage operator-(const MemoryUsage& other);
+
+    bool Exceeds(const MemoryUsage& limit) const;
+    int64 memory_bytes() const { return memory_bytes_; }
+
+   private:
+    int64 memory_bytes_;
+    int resource_count_;
+  };
+
   void OnImageDecodeTaskCompleted(int layer_id,
                                   SkPixelRef* pixel_ref,
                                   bool was_canceled);
   void OnRasterTaskCompleted(Tile::Id tile,
                              scoped_ptr<ScopedResource> resource,
-                             RasterMode raster_mode,
-                             const PicturePileImpl::Analysis& analysis,
+                             const RasterSource::SolidColorAnalysis& analysis,
                              bool was_canceled);
+  void UpdateTileDrawInfo(Tile* tile,
+                          scoped_ptr<ScopedResource> resource,
+                          const RasterSource::SolidColorAnalysis& analysis);
 
-  inline size_t BytesConsumedIfAllocated(const Tile* tile) const {
-    return Resource::MemorySizeBytes(tile->size(),
-                                     resource_pool_->resource_format());
-  }
-
-  void FreeResourceForTile(Tile* tile, RasterMode mode);
   void FreeResourcesForTile(Tile* tile);
-  void FreeUnusedResourcesForTile(Tile* tile);
   void FreeResourcesForTileAndNotifyClientIfTileWasReadyToDraw(Tile* tile);
   scoped_refptr<ImageDecodeTask> CreateImageDecodeTask(Tile* tile,
                                                        SkPixelRef* pixel_ref);
   scoped_refptr<RasterTask> CreateRasterTask(Tile* tile);
-  void UpdatePrioritizedTileSetIfNeeded();
 
-  bool IsReadyToActivate() const;
+  scoped_ptr<EvictionTilePriorityQueue>
+  FreeTileResourcesUntilUsageIsWithinLimit(
+      scoped_ptr<EvictionTilePriorityQueue> eviction_priority_queue,
+      const MemoryUsage& limit,
+      MemoryUsage* usage);
+  scoped_ptr<EvictionTilePriorityQueue>
+  FreeTileResourcesWithLowerPriorityUntilUsageIsWithinLimit(
+      scoped_ptr<EvictionTilePriorityQueue> eviction_priority_queue,
+      const MemoryUsage& limit,
+      const TilePriority& oother_priority,
+      MemoryUsage* usage);
+  bool TilePriorityViolatesMemoryPolicy(const TilePriority& priority);
+  bool AreRequiredTilesReadyToDraw(RasterTilePriorityQueue::Type type) const;
+  void NotifyReadyToActivate();
+  void NotifyReadyToDraw();
   void CheckIfReadyToActivate();
+  void CheckIfReadyToDraw();
+  void CheckIfMoreTilesNeedToBePrepared();
 
   TileManagerClient* client_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   ResourcePool* resource_pool_;
+  TileTaskRunner* tile_task_runner_;
   Rasterizer* rasterizer_;
   GlobalStateThatImpactsTilePriority global_state_;
+  size_t scheduled_raster_task_limit_;
 
   typedef base::hash_map<Tile::Id, Tile*> TileMap;
   TileMap tiles_;
 
-  PrioritizedTileSet prioritized_tiles_;
-  bool prioritized_tiles_dirty_;
-
-  bool all_tiles_that_need_to_be_rasterized_have_memory_;
-  bool all_tiles_required_for_activation_have_memory_;
-
-  size_t bytes_releasable_;
-  size_t resources_releasable_;
-
-  bool ever_exceeded_memory_budget_;
+  bool all_tiles_that_need_to_be_rasterized_are_scheduled_;
   MemoryHistory::Entry memory_stats_from_last_assign_;
 
-  RenderingStatsInstrumentation* rendering_stats_instrumentation_;
-
-  bool did_initialize_visible_tile_;
   bool did_check_for_completed_tasks_since_last_schedule_tasks_;
   bool did_oom_on_last_assign_;
 
-  typedef base::hash_map<uint32_t, scoped_refptr<ImageDecodeTask> >
+  typedef base::hash_map<uint32_t, scoped_refptr<ImageDecodeTask>>
       PixelRefTaskMap;
   typedef base::hash_map<int, PixelRefTaskMap> LayerPixelRefTaskMap;
   LayerPixelRefTaskMap image_decode_tasks_;
@@ -270,14 +298,19 @@ class CC_EXPORT TileManager : public RasterizerClient,
 
   std::vector<Tile*> released_tiles_;
 
-  ResourceFormat resource_format_;
-
   // Queue used when scheduling raster tasks.
-  RasterTaskQueue raster_queue_;
+  TileTaskQueue raster_queue_;
 
-  std::vector<scoped_refptr<RasterTask> > orphan_raster_tasks_;
+  std::vector<scoped_refptr<RasterTask>> orphan_raster_tasks_;
 
+  UniqueNotifier ready_to_activate_notifier_;
+  UniqueNotifier ready_to_draw_notifier_;
   UniqueNotifier ready_to_activate_check_notifier_;
+  UniqueNotifier ready_to_draw_check_notifier_;
+  UniqueNotifier more_tiles_need_prepare_check_notifier_;
+
+  bool did_notify_ready_to_activate_;
+  bool did_notify_ready_to_draw_;
 
   DISALLOW_COPY_AND_ASSIGN(TileManager);
 };

@@ -12,7 +12,8 @@
     'libjingle_peerconnection_additional_deps%': [],
     'libjingle_source%': "source",
     'libpeer_target_type%': 'static_library',
-    'libpeer_allocator_shim%': 0,
+    'webrtc_p2p': "../webrtc/p2p",
+    'webrtc_xmpp': "../webrtc/libjingle/xmpp",
   },
   # Most of these settings have been split according to their scope into
   # :jingle_unexported_configs, :jingle_direct_dependent_configs,
@@ -272,11 +273,11 @@
       'includes': [ 'libjingle_common.gypi' ],
       'sources!' : [
         # Compiled as part of libjingle_p2p_constants.
-        '<(libjingle_source)/talk/p2p/base/constants.cc',
-        '<(libjingle_source)/talk/p2p/base/constants.h',
+        '<(webrtc_p2p)/base/constants.cc',
+        '<(webrtc_p2p)/base/constants.h',
       ],
       'dependencies': [
-        '<(DEPTH)/third_party/webrtc/base/base.gyp:webrtc_base',
+        '<(DEPTH)/third_party/webrtc/base/base.gyp:rtc_base',
         '<(DEPTH)/third_party/webrtc/libjingle/xmllite/xmllite.gyp:rtc_xmllite',
         'libjingle_p2p_constants',
         '<@(libjingle_additional_deps)',
@@ -295,8 +296,8 @@
       'target_name': 'libjingle_p2p_constants',
       'type': 'static_library',
       'sources': [
-        '<(libjingle_source)/talk/p2p/base/constants.cc',
-        '<(libjingle_source)/talk/p2p/base/constants.h',
+        '<(webrtc_p2p)/base/constants.cc',
+        '<(webrtc_p2p)/base/constants.h',
       ],
     },  # target libjingle_p2p_constants
     # GN version: //third_party/libjingle:peerconnection_server
@@ -383,6 +384,7 @@
             '<(libjingle_source)/talk/app/webrtc/sctputils.h',
             '<(libjingle_source)/talk/app/webrtc/statscollector.cc',
             '<(libjingle_source)/talk/app/webrtc/statscollector.h',
+            '<(libjingle_source)/talk/app/webrtc/statstypes.cc',
             '<(libjingle_source)/talk/app/webrtc/statstypes.h',
             '<(libjingle_source)/talk/app/webrtc/streamcollection.h',
             '<(libjingle_source)/talk/app/webrtc/umametrics.h',
@@ -432,6 +434,8 @@
             '<(libjingle_source)/talk/media/base/videocommon.h',
             '<(libjingle_source)/talk/media/base/videoframe.cc',
             '<(libjingle_source)/talk/media/base/videoframe.h',
+            '<(libjingle_source)/talk/media/base/videoframefactory.cc',
+            '<(libjingle_source)/talk/media/base/videoframefactory.h',
             '<(libjingle_source)/talk/media/devices/dummydevicemanager.cc',
             '<(libjingle_source)/talk/media/devices/dummydevicemanager.h',
             '<(libjingle_source)/talk/media/devices/filevideocapturer.cc',
@@ -453,8 +457,6 @@
             '<(libjingle_source)/talk/session/media/audiomonitor.h',
             '<(libjingle_source)/talk/session/media/bundlefilter.cc',
             '<(libjingle_source)/talk/session/media/bundlefilter.h',
-            '<(libjingle_source)/talk/session/media/call.cc',
-            '<(libjingle_source)/talk/session/media/call.h',
             '<(libjingle_source)/talk/session/media/channel.cc',
             '<(libjingle_source)/talk/session/media/channel.h',
             '<(libjingle_source)/talk/session/media/channelmanager.cc',
@@ -463,14 +465,10 @@
             '<(libjingle_source)/talk/session/media/currentspeakermonitor.h',
             '<(libjingle_source)/talk/session/media/externalhmac.cc',
             '<(libjingle_source)/talk/session/media/externalhmac.h',
-            '<(libjingle_source)/talk/session/media/mediamessages.cc',
-            '<(libjingle_source)/talk/session/media/mediamessages.h',
             '<(libjingle_source)/talk/session/media/mediamonitor.cc',
             '<(libjingle_source)/talk/session/media/mediamonitor.h',
             '<(libjingle_source)/talk/session/media/mediasession.cc',
             '<(libjingle_source)/talk/session/media/mediasession.h',
-            '<(libjingle_source)/talk/session/media/mediasessionclient.cc',
-            '<(libjingle_source)/talk/session/media/mediasessionclient.h',
             '<(libjingle_source)/talk/session/media/mediasink.h',
             '<(libjingle_source)/talk/session/media/rtcpmuxfilter.cc',
             '<(libjingle_source)/talk/session/media/rtcpmuxfilter.h',
@@ -481,19 +479,8 @@
             '<(libjingle_source)/talk/session/media/typingmonitor.cc',
             '<(libjingle_source)/talk/session/media/typingmonitor.h',
             '<(libjingle_source)/talk/session/media/voicechannel.h',
-            '<(libjingle_source)/talk/session/tunnel/pseudotcpchannel.cc',
-            '<(libjingle_source)/talk/session/tunnel/pseudotcpchannel.h',
-            '<(libjingle_source)/talk/session/tunnel/tunnelsessionclient.cc',
-            '<(libjingle_source)/talk/session/tunnel/tunnelsessionclient.h',
           ],
           'conditions': [
-            ['libpeer_allocator_shim==1 and '
-             'libpeer_target_type!="static_library" and OS!="mac"', {
-              'sources': [
-                'overrides/allocator_shim/allocator_stub.cc',
-                'overrides/allocator_shim/allocator_stub.h',
-              ],
-            }],
             # TODO(mallinath) - Enable SCTP for iOS.
             ['OS!="ios"', {
               'defines': [
@@ -556,8 +543,8 @@
           'dependencies': [
             '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
             '<(DEPTH)/third_party/webrtc/modules/modules.gyp:media_file',
-            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_capture_module_impl',
-            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_render_module_impl',
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_capture',
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_render',
             'libjingle',
           ],
         },  # target libjingle_webrtc_common
@@ -572,6 +559,13 @@
           'dependencies': [
             'libjingle_webrtc_common',
           ],
+          'conditions': [
+            ['libpeer_target_type=="static_library"', {
+              'dependencies': [
+                '<(DEPTH)/third_party/webrtc/modules/modules.gyp:audio_processing',
+              ],
+            }],
+          ],
         },
         {
           # GN version: //third_party/libjingle:libpeerconnection
@@ -579,6 +573,8 @@
           'type': '<(libpeer_target_type)',
           'sources': [
             # Note: sources list duplicated in GN build.
+            '<(libjingle_source)/talk/media/webrtc/simulcast.cc',
+            '<(libjingle_source)/talk/media/webrtc/simulcast.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcmediaengine.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcmediaengine.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoengine.cc',
@@ -589,7 +585,6 @@
             '<(libjingle_source)/talk/media/webrtc/webrtcvoiceengine.h',
           ],
           'dependencies': [
-            '<(DEPTH)/third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
             '<(DEPTH)/third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine',
             '<(DEPTH)/third_party/webrtc/webrtc.gyp:webrtc',
             '<@(libjingle_peerconnection_additional_deps)',
@@ -644,6 +639,35 @@
             }],
           ],
         },  # target libpeerconnection
+      ],
+    }],
+    ['enable_webrtc==1 and OS=="android" and "<(libpeer_target_type)"=="static_library"', {
+      'targets': [
+        {
+          # GN version: //third_party/libjingle:libjingle_peerconnection_so
+          'target_name': 'libjingle_peerconnection_so',
+          'type': 'shared_library',
+          'dependencies': [
+            '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
+            'libjingle_webrtc',
+            'libpeerconnection',
+          ],
+          'sources': [
+            '<(libjingle_source)/talk/app/webrtc/java/jni/peerconnection_jni.cc',
+          ],
+        },
+        {
+          # GN version: //third_party/libjingle:libjingle_peerconnection_java
+          'target_name': 'libjingle_peerconnection_javalib',
+          'type': 'none',
+          'variables': {
+            'java_in_dir': '<(libjingle_source)/talk/app/webrtc/java',
+          },
+          'dependencies': [
+            'libjingle_peerconnection_so',
+          ],
+          'includes': [ '../../build/java.gypi' ],
+        },
       ],
     }],
   ],

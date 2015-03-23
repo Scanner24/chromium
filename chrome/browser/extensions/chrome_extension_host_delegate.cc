@@ -4,14 +4,16 @@
 
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
 
+#include "base/lazy_instance.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
+#include "components/app_modal/javascript_dialog_manager.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/serial_extension_host_queue.h"
 
 namespace extensions {
 
@@ -35,16 +37,16 @@ void ChromeExtensionHostDelegate::OnRenderViewCreatedForBackgroundPage(
 
 content::JavaScriptDialogManager*
 ChromeExtensionHostDelegate::GetJavaScriptDialogManager() {
-  return GetJavaScriptDialogManagerInstance();
+  return app_modal::JavaScriptDialogManager::GetInstance();
 }
 
 void ChromeExtensionHostDelegate::CreateTab(content::WebContents* web_contents,
                                             const std::string& extension_id,
                                             WindowOpenDisposition disposition,
-                                            const gfx::Rect& initial_pos,
+                                            const gfx::Rect& initial_rect,
                                             bool user_gesture) {
   ExtensionTabUtil::CreateTab(
-      web_contents, extension_id, disposition, initial_pos, user_gesture);
+      web_contents, extension_id, disposition, initial_rect, user_gesture);
 }
 
 void ChromeExtensionHostDelegate::ProcessMediaAccessRequest(
@@ -64,6 +66,13 @@ bool ChromeExtensionHostDelegate::CheckMediaAccessPermission(
   return MediaCaptureDevicesDispatcher::GetInstance()
       ->CheckMediaAccessPermission(
           web_contents, security_origin, type, extension);
+}
+
+static base::LazyInstance<SerialExtensionHostQueue> g_queue =
+    LAZY_INSTANCE_INITIALIZER;
+
+ExtensionHostQueue* ChromeExtensionHostDelegate::GetExtensionHostQueue() const {
+  return g_queue.Pointer();
 }
 
 }  // namespace extensions

@@ -17,12 +17,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/media/media_device_id_salt.h"
 #include "chrome/browser/net/predictor.h"
@@ -44,6 +44,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/domain_reliability/service.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/pnacl_host.h"
@@ -100,6 +101,24 @@ using base::UserMetricsAction;
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DOMStorageContext;
+
+namespace {
+
+using CallbackList =
+    base::CallbackList<void(const BrowsingDataRemover::NotificationDetails&)>;
+
+// Contains all registered callbacks for browsing data removed notifications.
+CallbackList* g_on_browsing_data_removed_callbacks = nullptr;
+
+// Accessor for |*g_on_browsing_data_removed_callbacks|. Creates a new object
+// the first time so that it always returns a valid object.
+CallbackList* GetOnBrowsingDataRemovedCallbacks() {
+  if (!g_on_browsing_data_removed_callbacks)
+    g_on_browsing_data_removed_callbacks = new CallbackList();
+  return g_on_browsing_data_removed_callbacks;
+}
+
+}  // namespace
 
 bool BrowsingDataRemover::is_removing_ = false;
 
@@ -273,15 +292,15 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   }
   // If this fires, we added a new BrowsingDataHelper::OriginSetMask without
   // updating the user metrics above.
-  COMPILE_ASSERT(
+  static_assert(
       BrowsingDataHelper::ALL == (BrowsingDataHelper::UNPROTECTED_WEB |
                                   BrowsingDataHelper::PROTECTED_WEB |
                                   BrowsingDataHelper::EXTENSION),
-      forgotten_to_add_origin_mask_type);
+      "OriginSetMask has been updated without updating user metrics");
 
   if ((remove_mask & REMOVE_HISTORY) && may_delete_history) {
     HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS);
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
     if (history_service) {
       std::set<GURL> restrict_urls;
       if (!remove_origin_.is_empty())
@@ -290,6 +309,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
       waiting_for_clear_history_ = true;
 
       history_service->ExpireLocalAndRemoteHistoryBetween(
+          WebHistoryServiceFactory::GetForProfile(profile_),
           restrict_urls, delete_begin_, delete_end_,
           base::Bind(&BrowsingDataRemover::OnHistoryDeletionDone,
                      base::Unretained(this)),
@@ -383,7 +403,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     // history, so clear them as well.
     scoped_refptr<autofill::AutofillWebDataService> web_data_service =
         WebDataServiceFactory::GetAutofillWebDataForProfile(
-            profile_, Profile::EXPLICIT_ACCESS);
+            profile_, ServiceAccessType::EXPLICIT_ACCESS);
     if (web_data_service.get()) {
       waiting_for_clear_autofill_origin_urls_ = true;
       web_data_service->RemoveOriginURLsModifiedBetween(
@@ -469,6 +489,9 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     }
 #endif
     MediaDeviceIDSalt::Reset(profile_->GetPrefs());
+
+    // TODO(mkwst): If we're not removing passwords, then clear the 'zero-click'
+    // flag for all credentials in the password store.
   }
 
   // Channel IDs are not separated for protected and unprotected web
@@ -535,7 +558,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
 #endif
 
 #if defined(OS_ANDROID)
-  if (remove_mask & REMOVE_APP_BANNER_DATA) {
+  if (remove_mask & REMOVE_APP_BANNER_DATA || remove_mask & REMOVE_HISTORY) {
     profile_->GetHostContentSettingsMap()->ClearSettingsForOneType(
         CONTENT_SETTINGS_TYPE_APP_BANNER);
   }
@@ -544,8 +567,8 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
   if (remove_mask & REMOVE_PASSWORDS) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Passwords"));
     password_manager::PasswordStore* password_store =
-        PasswordStoreFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS)
-            .get();
+        PasswordStoreFactory::GetForProfile(
+            profile_, ServiceAccessType::EXPLICIT_ACCESS).get();
 
     if (password_store)
       password_store->RemoveLoginsCreatedBetween(delete_begin_, delete_end_);
@@ -555,7 +578,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Autofill"));
     scoped_refptr<autofill::AutofillWebDataService> web_data_service =
         WebDataServiceFactory::GetAutofillWebDataForProfile(
-            profile_, Profile::EXPLICIT_ACCESS);
+            profile_, ServiceAccessType::EXPLICIT_ACCESS);
 
     if (web_data_service.get()) {
       waiting_for_clear_form_ = true;
@@ -624,8 +647,12 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         content::StoragePartition::REMOVE_DATA_MASK_WEBRTC_IDENTITY;
 
 #if defined(ENABLE_EXTENSIONS)
-    // Clear the ephemeral apps cache.
-    EphemeralAppService::Get(profile_)->ClearCachedApps();
+    // Clear the ephemeral apps cache. This is NULL while testing. OTR Profile
+    // has neither apps nor an ExtensionService, so ClearCachedApps fails.
+    EphemeralAppService* ephemeral_app_service =
+        EphemeralAppService::Get(profile_);
+    if (ephemeral_app_service && !profile_->IsOffTheRecord())
+      ephemeral_app_service->ClearCachedApps();
 #endif
   }
 
@@ -675,7 +702,7 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         pepper_flash_settings_manager_->DeauthorizeContentLicenses(prefs);
 #if defined(OS_CHROMEOS)
     // On Chrome OS, also delete any content protection platform keys.
-    user_manager::User* user =
+    const user_manager::User* user =
         chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
     if (!user) {
       LOG(WARNING) << "Failed to find user for current profile.";
@@ -808,13 +835,11 @@ void BrowsingDataRemover::OnKeywordsLoaded() {
 void BrowsingDataRemover::NotifyAndDelete() {
   set_removing(false);
 
-  // Send global notification, then notify any explicit observers.
+  // Notify observers.
   BrowsingDataRemover::NotificationDetails details(delete_begin_, remove_mask_,
       origin_set_mask_);
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_BROWSING_DATA_REMOVED,
-      content::Source<Profile>(profile_),
-      content::Details<BrowsingDataRemover::NotificationDetails>(&details));
+
+  GetOnBrowsingDataRemovedCallbacks()->Notify(details);
 
   FOR_EACH_OBSERVER(Observer, observer_list_, OnBrowsingDataRemoverDone());
 
@@ -1198,4 +1223,11 @@ void BrowsingDataRemover::OnClearedDomainReliabilityMonitor() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   waiting_for_clear_domain_reliability_monitor_ = false;
   NotifyAndDeleteIfDone();
+}
+
+// static
+BrowsingDataRemover::CallbackSubscription
+    BrowsingDataRemover::RegisterOnBrowsingDataRemovedCallback(
+        const BrowsingDataRemover::Callback& callback) {
+  return GetOnBrowsingDataRemovedCallbacks()->Add(callback);
 }

@@ -8,13 +8,13 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/client/gl_helper_readback_support.h"
 #include "content/common/gpu/client/gl_helper_scaling.h"
 #include "gpu/GLES2/gl2extchromium.h"
@@ -24,8 +24,8 @@
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "third_party/skia/include/core/SkRegion.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 using gpu::gles2::GLES2Interface;
 
@@ -249,13 +249,12 @@ class GLHelper::CopyTextureToImpl
                     bool flip_vertically,
                     ReadbackSwizzle swizzle);
 
-    virtual void ReadbackYUV(const gpu::Mailbox& mailbox,
-                             uint32 sync_point,
-                             const scoped_refptr<media::VideoFrame>& target,
-                             const base::Callback<void(bool)>& callback)
-        OVERRIDE;
+    void ReadbackYUV(const gpu::Mailbox& mailbox,
+                     uint32 sync_point,
+                     const scoped_refptr<media::VideoFrame>& target,
+                     const base::Callback<void(bool)>& callback) override;
 
-    virtual ScalerInterface* scaler() OVERRIDE { return scaler_.scaler(); }
+    ScalerInterface* scaler() override { return scaler_.scaler(); }
 
    private:
     GLES2Interface* gl_;
@@ -287,13 +286,12 @@ class GLHelper::CopyTextureToImpl
                     bool flip_vertically,
                     ReadbackSwizzle swizzle);
 
-    virtual void ReadbackYUV(const gpu::Mailbox& mailbox,
-                             uint32 sync_point,
-                             const scoped_refptr<media::VideoFrame>& target,
-                             const base::Callback<void(bool)>& callback)
-        OVERRIDE;
+    void ReadbackYUV(const gpu::Mailbox& mailbox,
+                     uint32 sync_point,
+                     const scoped_refptr<media::VideoFrame>& target,
+                     const base::Callback<void(bool)>& callback) override;
 
-    virtual ScalerInterface* scaler() OVERRIDE { return scaler_.scaler(); }
+    ScalerInterface* scaler() override { return scaler_.scaler(); }
 
    private:
     GLES2Interface* gl_;

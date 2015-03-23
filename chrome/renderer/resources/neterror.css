@@ -20,7 +20,7 @@ html:not([subframe]) #sub-frame-error {
 }
 
 h1 {
-  -webkit-margin-before: 0;
+  margin-top: 0;
 }
 
 h2 {
@@ -37,6 +37,7 @@ a {
 
 .icon {
   -webkit-user-select: none;
+  content: '';
 }
 
 .icon-generic {
@@ -45,30 +46,24 @@ a {
    * renderer process, so embed the resource manually.
    */
   content: -webkit-image-set(
-      url('default_100_percent/common/error_network_generic.png') 1x,
-      url('default_200_percent/common/error_network_generic.png') 2x);
-  height: 50px;
+      url(default_100_percent/common/error_network_generic.png) 1x,
+      url(default_200_percent/common/error_network_generic.png) 2x);
   padding-top: 20px;
-  width: 41px;
 }
 
 .icon-offline {
   content: -webkit-image-set(
-      url('default_100_percent/offline/100-error-offline.png') 1x,
-      url('default_200_percent/offline/200-error-offline.png') 2x);
-  height: 47px;
-  margin: 0 0 40px;
+      url(default_100_percent/offline/100-error-offline.png) 1x,
+      url(default_200_percent/offline/200-error-offline.png) 2x);
   position: relative;
-  width: 44px;
+}
+
+.error-code {
+  display: block;
 }
 
 #content-top {
   margin: 20px;
-}
-
-#help-box-outer {
-  -webkit-transition: height ease-in 218ms;
-  overflow: hidden;
 }
 
 #help-box-inner {
@@ -134,9 +129,15 @@ a {
 #search-image {
   content:
       -webkit-image-set(
-          url('../../app/theme/default_100_percent/common/omnibox_search_button_loupe.png') 1x,
-          url('../../app/theme/default_200_percent/common/omnibox_search_button_loupe.png') 2x);
+          url(../../app/theme/default_100_percent/common/omnibox_search_button_loupe.png) 1x,
+          url(../../app/theme/default_200_percent/common/omnibox_search_button_loupe.png) 2x);
   margin: auto;
+}
+
+.secondary-button {
+  -webkit-margin-end: 16px;
+  background: #d9d9d9;
+  color: #696969;
 }
 
 .hidden {
@@ -156,11 +157,6 @@ a {
   color: #777;
 }
 
-.error-code {
-  color: #A0A0A0;
-  margin-top: 15px;
-}
-
 /* Increase line height at higher resolutions. */
 @media (min-width: 641px) and (min-height: 641px) {
   #help-box-inner {
@@ -170,11 +166,8 @@ a {
 
 /* Decrease padding at low sizes. */
 @media (max-width: 640px), (max-height: 640px) {
-  body {
-    margin: 15px;
-  }
   h1 {
-    margin: 10px 0 15px;
+    margin: 0 0 15px;
   }
   #content-top {
     margin: 15px;
@@ -208,6 +201,7 @@ html[subframe] body {
   left: 0;
   position: absolute;
   top: 0;
+  transition: background-color .2s ease-in-out;
   width: 100%;
 }
 
@@ -215,8 +209,13 @@ html[subframe] body {
   background-color: #EEE;
 }
 
+#sub-frame-error .icon-generic {
+  margin: 0 0 16px;
+}
+
 #sub-frame-error-details {
   margin: 0 10px;
+  text-align: center;
   visibility: hidden;
 }
 
@@ -233,26 +232,38 @@ html[subframe] body {
   }
 }
 
+/* Adjust icon for small embedded frames in apps. */
+@media (max-height: 100px) {
+  #sub-frame-error .icon-generic {
+    height: auto;
+    margin: 0;
+    padding-top: 0;
+    width: 25px;
+  }
+}
+
 /* details-button is special; it's a <button> element that looks like a link. */
 #details-button {
-  background-color: inherit;
-  background-image: none;
-  border: none;
   box-shadow: none;
   min-width: 0;
-  padding: 0;
-  text-decoration: underline;
 }
 
 /* Styles for platform dependent separation of controls and details button. */
 .suggested-left > #control-buttons,
-.suggested-right > #details-button  {
+.suggested-left #stale-load-button,
+.suggested-right > #details-button {
   float: left;
 }
 
 .suggested-right > #control-buttons,
-.suggested-left > #details-button  {
+.suggested-right #stale-load-button,
+.suggested-left > #details-button {
   float: right;
+}
+
+.suggested-left .secondary-button {
+  -webkit-margin-end: 0px;
+  -webkit-margin-start: 16px;
 }
 
 #details-button.singular {
@@ -271,8 +282,9 @@ html[subframe] body {
   color: #2b2b2b;
   font-size: 1em;
   line-height: 1.55;
-  margin: 100px auto 0;
+  margin: 0 auto;
   max-width: 600px;
+  padding-top: 100px;
   width: 100%;
 }
 
@@ -281,9 +293,8 @@ html[subframe] body {
   max-width: 600px;
   overflow: hidden;
   position: absolute;
-  top: 10px;
+  top: 35px;
   width: 44px;
-  z-index: 2;
 }
 
 .offline .runner-canvas {
@@ -293,6 +304,7 @@ html[subframe] body {
   overflow: hidden;
   position: absolute;
   top: 0;
+  z-index: 2;
 }
 
 .offline .controller {
@@ -309,11 +321,10 @@ html[subframe] body {
   display: none;
 }
 
-@media (max-width: 400px) {
+@media (max-width: 420px) {
   .suggested-left > #control-buttons,
   .suggested-right > #control-buttons {
     float: none;
-    margin: 50px 0 20px;
   }
 }
 
@@ -332,5 +343,50 @@ html[subframe] body {
 
   .nav-wrapper {
     margin-top: 30px;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 736px) and (orientation: landscape) {
+  .offline .interstitial-wrapper {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+@media (min-height: 240px) and (orientation: landscape) {
+  .offline .interstitial-wrapper {
+    margin-bottom: 90px;
+  }
+
+  .icon-offline {
+    margin-bottom: 20px;
+  }
+}
+
+@media (max-height: 320px) and (orientation: landscape) {
+  .icon-offline {
+    margin-bottom: 0;
+  }
+
+  .offline .runner-container {
+    top: 10px;
+  }
+}
+
+@media (max-width: 240px) {
+  button {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .interstitial-wrapper {
+    overflow: inherit;
+    padding: 0 8px;
+  }
+}
+
+@media (max-width: 120px) {
+  button {
+    width: auto;
   }
 }

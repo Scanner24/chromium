@@ -9,7 +9,7 @@
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
-#include "components/password_manager/core/browser/password_form_data.h"
+#include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "components/password_manager/core/browser/password_store_default.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -27,8 +27,13 @@ namespace {
 
 class MockPasswordStoreConsumer : public PasswordStoreConsumer {
  public:
-  MOCK_METHOD1(OnGetPasswordStoreResults,
+  MOCK_METHOD1(OnGetPasswordStoreResultsConstRef,
                void(const std::vector<PasswordForm*>&));
+
+  // GMock cannot mock methods with move-only args.
+  void OnGetPasswordStoreResults(ScopedVector<PasswordForm> results) override {
+    OnGetPasswordStoreResultsConstRef(results.get());
+  }
 };
 
 class StartSyncFlareMock {
@@ -43,19 +48,17 @@ class StartSyncFlareMock {
 
 class PasswordStoreTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    login_db_.reset(new LoginDatabase());
-    ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append(
-        FILE_PATH_LITERAL("login_test"))));
   }
 
-  virtual void TearDown() OVERRIDE {
-    ASSERT_TRUE(temp_dir_.Delete());
+  void TearDown() override { ASSERT_TRUE(temp_dir_.Delete()); }
+
+  base::FilePath test_login_db_file_path() const {
+    return temp_dir_.path().Append(FILE_PATH_LITERAL("login_test"));
   }
 
   base::MessageLoopForUI message_loop_;
-  scoped_ptr<LoginDatabase> login_db_;
   base::ScopedTempDir temp_dir_;
 };
 
@@ -65,10 +68,9 @@ ACTION(STLDeleteElements0) {
 
 TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
-      base::MessageLoopProxy::current(),
-      base::MessageLoopProxy::current(),
-      login_db_.release()));
-  store->Init(syncer::SyncableService::StartSyncFlare(), "");
+      base::MessageLoopProxy::current(), base::MessageLoopProxy::current(),
+      make_scoped_ptr(new LoginDatabase(test_login_db_file_path()))));
+  store->Init(syncer::SyncableService::StartSyncFlare());
 
   const time_t cutoff = 1325376000;  // 00:00 Jan 1 2012 UTC
   // The passwords are all empty because PasswordStoreDefault doesn't store the
@@ -133,11 +135,11 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
   };
 
   // Build the forms vector and add the forms to the store.
-  std::vector<PasswordForm*> all_forms;
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(form_data); ++i) {
-    PasswordForm* form = CreatePasswordFormFromData(form_data[i]);
-    all_forms.push_back(form);
-    store->AddLogin(*form);
+  ScopedVector<PasswordForm> all_forms;
+  for (size_t i = 0; i < arraysize(form_data); ++i) {
+    all_forms.push_back(
+        CreatePasswordFormFromDataForTesting(form_data[i]).release());
+    store->AddLogin(*all_forms.back());
   }
   base::MessageLoop::current()->RunUntilIdle();
 
@@ -167,20 +169,16 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
   bar_example_expected.push_back(all_forms[4]);
 
   MockPasswordStoreConsumer consumer;
-
-  // Expect the appropriate replies, as above, in reverse order than we will
-  // issue the queries. Each retires on saturation to avoid matcher spew.
+  testing::InSequence s;
+  EXPECT_CALL(consumer, OnGetPasswordStoreResultsConstRef(
+                            ContainsSamePasswordForms(www_google_expected)))
+      .RetiresOnSaturation();
   EXPECT_CALL(consumer,
-      OnGetPasswordStoreResults(ContainsAllPasswordForms(bar_example_expected)))
-      .WillOnce(WithArg<0>(STLDeleteElements0())).RetiresOnSaturation();
-  EXPECT_CALL(consumer,
-      OnGetPasswordStoreResults(
-          ContainsAllPasswordForms(accounts_google_expected)))
-      .WillOnce(WithArg<0>(STLDeleteElements0())).RetiresOnSaturation();
-  EXPECT_CALL(consumer,
-      OnGetPasswordStoreResults(
-          ContainsAllPasswordForms(www_google_expected)))
-      .WillOnce(WithArg<0>(STLDeleteElements0())).RetiresOnSaturation();
+              OnGetPasswordStoreResultsConstRef(ContainsSamePasswordForms(
+                  accounts_google_expected))).RetiresOnSaturation();
+  EXPECT_CALL(consumer, OnGetPasswordStoreResultsConstRef(
+                            ContainsSamePasswordForms(bar_example_expected)))
+      .RetiresOnSaturation();
 
   store->GetLogins(www_google, PasswordStore::ALLOW_PROMPT, &consumer);
   store->GetLogins(accounts_google, PasswordStore::ALLOW_PROMPT, &consumer);
@@ -188,22 +186,21 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
 
   base::MessageLoop::current()->RunUntilIdle();
 
-  STLDeleteElements(&all_forms);
   store->Shutdown();
   base::MessageLoop::current()->RunUntilIdle();
 }
 
 TEST_F(PasswordStoreTest, StartSyncFlare) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
-      base::MessageLoopProxy::current(),
-      base::MessageLoopProxy::current(),
-      login_db_.release()));
+      base::MessageLoopProxy::current(), base::MessageLoopProxy::current(),
+      make_scoped_ptr(new LoginDatabase(test_login_db_file_path()))));
   StartSyncFlareMock mock;
-  store->Init(base::Bind(&StartSyncFlareMock::StartSyncFlare,
-                         base::Unretained(&mock)),
-              "");
+  store->Init(
+      base::Bind(&StartSyncFlareMock::StartSyncFlare, base::Unretained(&mock)));
   {
     PasswordForm form;
+    form.origin = GURL("http://accounts.google.com/LoginAuth");
+    form.signon_realm = "http://accounts.google.com/";
     EXPECT_CALL(mock, StartSyncFlare(syncer::PASSWORDS));
     store->AddLogin(form);
     base::MessageLoop::current()->RunUntilIdle();

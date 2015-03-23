@@ -16,16 +16,19 @@ namespace wm {
 class ASH_EXPORT AshFocusRules : public ::wm::BaseFocusRules {
  public:
   AshFocusRules();
-  virtual ~AshFocusRules();
+  ~AshFocusRules() override;
+
+  // Tests if the given |window| can be activated, ignoring the system modal
+  // dialog state.
+  bool IsWindowConsideredActivatable(aura::Window* window) const;
 
  private:
   // Overridden from ::wm::BaseFocusRules:
-  virtual bool SupportsChildActivation(aura::Window* window) const OVERRIDE;
-  virtual bool IsWindowConsideredVisibleForActivation(
-      aura::Window* window) const OVERRIDE;
-  virtual bool CanActivateWindow(aura::Window* window) const OVERRIDE;
-  virtual aura::Window* GetNextActivatableWindow(
-      aura::Window* ignore) const OVERRIDE;
+  bool SupportsChildActivation(aura::Window* window) const override;
+  bool IsWindowConsideredVisibleForActivation(
+      aura::Window* window) const override;
+  bool CanActivateWindow(aura::Window* window) const override;
+  aura::Window* GetNextActivatableWindow(aura::Window* ignore) const override;
 
   aura::Window* GetTopmostWindowToActivateForContainerIndex(
       int index,

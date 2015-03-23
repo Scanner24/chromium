@@ -74,19 +74,10 @@ class PeripheralBatteryNotificationDelegate : public NotificationDelegate {
       : id_(id) {}
 
   // Overridden from NotificationDelegate:
-  virtual void Display() OVERRIDE {}
-  virtual void Error() OVERRIDE {}
-  virtual void Close(bool by_user) OVERRIDE {}
-  virtual void Click() OVERRIDE {}
-  virtual std::string id() const OVERRIDE { return id_; }
-  // A NULL return value prevents loading image from URL. It is OK since our
-  // implementation loads image from system resource bundle.
-  virtual content::WebContents* GetWebContents() const OVERRIDE {
-    return NULL;
-  }
+  std::string id() const override { return id_; }
 
  private:
-  virtual ~PeripheralBatteryNotificationDelegate() {}
+  ~PeripheralBatteryNotificationDelegate() override {}
 
   const std::string id_;
 
@@ -97,6 +88,7 @@ class PeripheralBatteryNotificationDelegate : public NotificationDelegate {
 
 PeripheralBatteryObserver::PeripheralBatteryObserver()
     : testing_clock_(NULL),
+      notification_profile_(NULL),
       weakptr_factory_(
           new base::WeakPtrFactory<PeripheralBatteryObserver>(this)) {
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
@@ -222,7 +214,6 @@ bool PeripheralBatteryObserver::PostNotification(const std::string& address,
       string_text,
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_NOTIFICATION_PERIPHERAL_BATTERY_LOW),
-      blink::WebTextDirectionDefault,
       message_center::NotifierId(GURL(kNotificationOriginUrl)),
       base::string16(),
       base::UTF8ToUTF16(address),
@@ -231,15 +222,18 @@ bool PeripheralBatteryObserver::PostNotification(const std::string& address,
 
   notification.set_priority(message_center::SYSTEM_PRIORITY);
 
-  notification_manager->Add(
-      notification,
-      ProfileManager::GetPrimaryUserProfile());
+  notification_profile_ = ProfileManager::GetPrimaryUserProfile();
+  notification_manager->Add(notification, notification_profile_);
 
   return true;
 }
 
 void PeripheralBatteryObserver::CancelNotification(const std::string& address) {
-  g_browser_process->notification_ui_manager()->CancelById(address);
+  // If last_used_profile_ is NULL then no notification has been posted yet.
+  if (notification_profile_) {
+    g_browser_process->notification_ui_manager()->CancelById(
+        address, NotificationUIManager::GetProfileID(notification_profile_));
+  }
 }
 
 }  // namespace chromeos

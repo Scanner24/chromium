@@ -51,7 +51,14 @@
               },
             }],
             ['OS == "ios"', {
-              'type': 'none',
+              'type': 'static_library',
+              'sources': [
+                'chromium/libxml_utils.h',
+                'chromium/libxml_utils.cc',
+              ],
+              'include_dirs': [
+                '$(SDKROOT)/usr/include/libxml2',
+              ],
               'all_dependent_settings': {
                 'defines': [
                   'USE_SYSTEM_LIBXML',
@@ -230,6 +237,7 @@
                 'libraries': [
                   # We need dl for dlopen() and friends.
                   '-ldl',
+                  '-lm',
                 ],
               },
             }],
@@ -249,6 +257,9 @@
               'product_name': 'xml2',
             }],
           ],
+        }],
+        ['OS == "ios"', {
+          'toolsets': ['host', 'target'],
         }],
       ],
     },

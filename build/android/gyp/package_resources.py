@@ -37,6 +37,11 @@ def ParseArgs():
   parser.add_option('--android-manifest', help='AndroidManifest.xml path')
   parser.add_option('--version-code', help='Version code for apk.')
   parser.add_option('--version-name', help='Version name for apk.')
+  parser.add_option(
+      '--shared-resources',
+      action='store_true',
+      help='Make a resource package that can be loaded by a different'
+      'application at runtime to access the package\'s resources.')
   parser.add_option('--resource-zips',
                     help='zip files containing resources to be packaged')
   parser.add_option('--asset-dir',
@@ -126,11 +131,14 @@ def main():
 
                        '-I', android_jar,
                        '-F', options.apk_path,
+                       '--ignore-assets', build_utils.AAPT_IGNORE_PATTERN,
                        ]
 
     if options.no_compress:
       for ext in options.no_compress.split(','):
         package_command += ['-0', ext]
+    if options.shared_resources:
+      package_command.append('--shared-lib')
 
     if os.path.exists(options.asset_dir):
       package_command += ['-A', options.asset_dir]

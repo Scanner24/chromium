@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/callback.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class ListValue;
@@ -31,10 +31,10 @@ class DevToolsEmbedderMessageDispatcher {
 
     virtual void ActivateWindow() = 0;
     virtual void CloseWindow() = 0;
+    virtual void LoadCompleted() = 0;
     virtual void SetInspectedPageBounds(const gfx::Rect& rect) = 0;
     virtual void InspectElementCompleted() = 0;
     virtual void InspectedURLChanged(const std::string& url) = 0;
-    virtual void MoveWindow(int x, int y) = 0;
     virtual void SetIsDocked(bool is_docked) = 0;
     virtual void OpenInNewTab(const std::string& url) = 0;
     virtual void SaveToFile(const std::string& url,
@@ -63,6 +63,7 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void SetDeviceCountUpdatesEnabled(bool enabled) = 0;
     virtual void SetDevicesUpdatesEnabled(bool enabled) = 0;
     virtual void SendMessageToBrowser(const std::string& message) = 0;
+    virtual void RecordActionUMA(const std::string& name, int action) = 0;
   };
 
   virtual ~DevToolsEmbedderMessageDispatcher() {}

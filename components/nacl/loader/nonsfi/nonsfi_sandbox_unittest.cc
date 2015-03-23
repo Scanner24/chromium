@@ -39,7 +39,7 @@
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 #include "third_party/lss/linux_syscall_support.h"  // for MAKE_PROCESS_CPUCLOCK
 
 namespace {
@@ -59,9 +59,9 @@ void DoSocketpair(base::ScopedFD* fds) {
 }
 
 TEST(NaClNonSfiSandboxTest, BPFIsSupported) {
-  bool seccomp_bpf_supported = (
-      sandbox::SandboxBPF::SupportsSeccompSandbox(-1) ==
-      sandbox::SandboxBPF::STATUS_AVAILABLE);
+  bool seccomp_bpf_supported = sandbox::SandboxBPF::SupportsSeccompSandbox(
+      sandbox::SandboxBPF::SeccompLevel::SINGLE_THREADED);
+
   if (!seccomp_bpf_supported) {
     LOG(ERROR) << "Seccomp BPF is not supported, these tests "
                << "will pass without running";

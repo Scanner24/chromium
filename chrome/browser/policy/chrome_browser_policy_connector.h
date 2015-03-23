@@ -31,20 +31,19 @@ class ChromeBrowserPolicyConnector : public BrowserPolicyConnector {
   // Init() should be called to create and start the policy machinery.
   ChromeBrowserPolicyConnector();
 
-  virtual ~ChromeBrowserPolicyConnector();
+  ~ChromeBrowserPolicyConnector() override;
 
-  virtual void Init(
+  void Init(
       PrefService* local_state,
-      scoped_refptr<net::URLRequestContextGetter> request_context) OVERRIDE;
+      scoped_refptr<net::URLRequestContextGetter> request_context) override;
 
  private:
   ConfigurationPolicyProvider* CreatePlatformProvider();
 
-  // Appends the --enable-web-based-signin flag if the
-  // enable-web-based-signin policy is enabled.
+  // Appends any required flags if certain policies are set.
   // TODO(guohui): Needs to move this to a more proper place and also to handle
   // dynamic refresh.
- void AppendExtraFlagPerPolicy();
+  void AppendExtraFlagsPerPolicy();
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserPolicyConnector);
 };

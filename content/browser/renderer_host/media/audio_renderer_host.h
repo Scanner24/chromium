@@ -48,7 +48,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_logging.h"
 #include "media/audio/audio_output_controller.h"
@@ -77,17 +77,21 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
 
   // Calls |callback| with the list of AudioOutputControllers for this object.
   void GetOutputControllers(
-      int render_view_id,
-      const RenderViewHost::GetAudioOutputControllersCallback& callback) const;
+      const RenderProcessHost::GetAudioOutputControllersCallback&
+          callback) const;
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing() OVERRIDE;
-  virtual void OnDestruct() const OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnChannelClosing() override;
+  void OnDestruct() const override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // Returns true if any streams managed by this host are actively playing.  Can
   // be called from any thread.
   bool HasActiveAudio();
+
+  // Returns true if any streams managed by the RenderView identified by
+  // |render_view_id| are actively playing. Can be called from any thread.
+  bool RenderViewHasActiveAudio(int render_view_id) const;
 
  private:
   friend class AudioRendererHostTest;
@@ -101,7 +105,7 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   class AudioEntry;
   typedef std::map<int, AudioEntry*> AudioEntryMap;
 
-  virtual ~AudioRendererHost();
+  ~AudioRendererHost() override;
 
   // Methods called on IO thread ----------------------------------------------
 
@@ -140,8 +144,7 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // Send playing/paused status to the renderer.
   void DoNotifyStreamStateChanged(int stream_id, bool is_playing);
 
-  RenderViewHost::AudioOutputControllerList DoGetOutputControllers(
-      int render_view_id) const;
+  RenderProcessHost::AudioOutputControllerList DoGetOutputControllers() const;
 
   // Send an error message to the renderer.
   void SendErrorMessage(int stream_id);
@@ -156,6 +159,10 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // A helper method to look up a AudioEntry identified by |stream_id|.
   // Returns NULL if not found.
   AudioEntry* LookupById(int stream_id);
+
+  // A helper method to update the number of playing streams and alert the
+  // ResourceScheduler when the renderer starts or stops playing an audiostream.
+  void UpdateNumPlayingStreams(AudioEntry* entry, bool is_playing);
 
   // ID of the RenderProcessHost that owns this instance.
   const int render_process_id_;

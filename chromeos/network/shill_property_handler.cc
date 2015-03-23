@@ -73,7 +73,7 @@ class ShillPropertyObserver : public ShillPropertyChangedObserver {
     }
   }
 
-  virtual ~ShillPropertyObserver() {
+  ~ShillPropertyObserver() override {
     if (type_ == ManagedState::MANAGED_TYPE_NETWORK) {
       DBusThreadManager::Get()->GetShillServiceClient()->
           RemovePropertyChangedObserver(dbus::ObjectPath(path_), this);
@@ -86,8 +86,8 @@ class ShillPropertyObserver : public ShillPropertyChangedObserver {
   }
 
   // ShillPropertyChangedObserver overrides.
-  virtual void OnPropertyChanged(const std::string& key,
-                                 const base::Value& value) OVERRIDE {
+  void OnPropertyChanged(const std::string& key,
+                         const base::Value& value) override {
     handler_.Run(type_, path_, key, value);
   }
 
@@ -182,7 +182,20 @@ void ShillPropertyHandler::SetCheckPortalList(
       base::Bind(&base::DoNothing),
       base::Bind(&network_handler::ShillErrorCallbackFunction,
                  "SetCheckPortalList Failed",
-                 "", network_handler::ErrorCallback()));
+                 "Manager",
+                 network_handler::ErrorCallback()));
+}
+
+void ShillPropertyHandler::SetWakeOnLanEnabled(bool enabled) {
+  base::FundamentalValue value(enabled);
+  shill_manager_->SetProperty(
+      shill::kWakeOnLanEnabledProperty,
+      value,
+      base::Bind(&base::DoNothing),
+      base::Bind(&network_handler::ShillErrorCallbackFunction,
+                 "SetWakeOnLanEnabled Failed",
+                 "Manager",
+                 network_handler::ErrorCallback()));
 }
 
 void ShillPropertyHandler::RequestScan() const {
@@ -191,15 +204,6 @@ void ShillPropertyHandler::RequestScan() const {
       base::Bind(&base::DoNothing),
       base::Bind(&network_handler::ShillErrorCallbackFunction,
                  "RequestScan Failed",
-                 "", network_handler::ErrorCallback()));
-}
-
-void ShillPropertyHandler::ConnectToBestServices() const {
-  NET_LOG_EVENT("ConnectToBestServices", "");
-  shill_manager_->ConnectToBestServices(
-      base::Bind(&base::DoNothing),
-      base::Bind(&network_handler::ShillErrorCallbackFunction,
-                 "ConnectToBestServices Failed",
                  "", network_handler::ErrorCallback()));
 }
 
@@ -340,20 +344,25 @@ void ShillPropertyHandler::UpdateObserved(ManagedState::ManagedType type,
       (type == ManagedState::MANAGED_TYPE_NETWORK)
       ? observed_networks_ : observed_devices_;
   ShillPropertyObserverMap new_observed;
-  for (base::ListValue::const_iterator iter1 = entries.begin();
-       iter1 != entries.end(); ++iter1) {
+  for (auto* entry: entries) {
     std::string path;
-    (*iter1)->GetAsString(&path);
+    entry->GetAsString(&path);
     if (path.empty())
       continue;
-    ShillPropertyObserverMap::iterator iter2 = observer_map.find(path);
-    if (iter2 != observer_map.end()) {
-      new_observed[path] = iter2->second;
+    auto iter = observer_map.find(path);
+    ShillPropertyObserver* observer;
+    if (iter != observer_map.end()) {
+      observer = iter->second;
     } else {
       // Create an observer for future updates.
-      new_observed[path] = new ShillPropertyObserver(
+      observer = new ShillPropertyObserver(
           type, path, base::Bind(
               &ShillPropertyHandler::PropertyChangedCallback, AsWeakPtr()));
+    }
+    auto result = new_observed.insert(std::make_pair(path, observer));
+    if (!result.second) {
+      LOG(ERROR) << path << " is duplicated in the list.";
+      delete observer;
     }
     observer_map.erase(path);
     // Limit the number of observed services.
@@ -361,9 +370,8 @@ void ShillPropertyHandler::UpdateObserved(ManagedState::ManagedType type,
       break;
   }
   // Delete network service observers still in observer_map.
-  for (ShillPropertyObserverMap::iterator iter =  observer_map.begin();
-       iter != observer_map.end(); ++iter) {
-    delete iter->second;
+  for (auto& observer: observer_map) {
+    delete observer.second;
   }
   observer_map.swap(new_observed);
 }

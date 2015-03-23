@@ -15,14 +15,15 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/input_ime.h"
 #include "chrome/common/extensions/api/input_ime/input_components_handler.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 
 namespace input_ime = extensions::api::input_ime;
 namespace KeyEventHandled = extensions::api::input_ime::KeyEventHandled;
@@ -46,6 +47,8 @@ namespace {
 const char kErrorEngineNotAvailable[] = "Engine is not available";
 const char kErrorSetMenuItemsFail[] = "Could not create menu Items";
 const char kErrorUpdateMenuItemsFail[] = "Could not update menu Items";
+const char kOnCompositionBoundsChangedEventName[] =
+    "inputMethodPrivate.onCompositionBoundsChanged";
 
 void SetMenuItemToMenu(const input_ime::MenuItem& input,
                        InputMethodEngineInterface::MenuItem* out) {
@@ -79,6 +82,27 @@ static void DispatchEventToExtension(const std::string& extension_id,
                                      const std::string& event_name,
                                      scoped_ptr<base::ListValue> args) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (event_name != input_ime::OnActivate::kEventName) {
+    // For suspended IME extension (e.g. XKB extension), don't awake it by IME
+    // events except onActivate. The IME extension should be awake by other
+    // events (e.g. runtime.onMessage) from its other pages.
+    // This is to save memory for steady state Chrome OS on which the users
+    // don't want any IME features.
+    extensions::ExtensionSystem* extension_system =
+        extensions::ExtensionSystem::Get(profile);
+    if (extension_system) {
+      const extensions::Extension* extension =
+          extension_system->extension_service()->GetExtensionById(
+              extension_id, false /* include_disabled */);
+      extensions::ProcessManager* process_manager =
+          extensions::ProcessManager::Get(profile);
+      if (extensions::BackgroundInfo::HasBackgroundPage(extension) &&
+          !process_manager->GetBackgroundHostForExtension(extension_id)) {
+        return;
+      }
+    }
+  }
+
   scoped_ptr<extensions::Event> event(new extensions::Event(
       event_name, args.Pass()));
   event->restrict_to_browser_context = profile;
@@ -102,10 +126,11 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
   explicit ImeObserver(const std::string& extension_id)
       : extension_id_(extension_id) {}
 
-  virtual ~ImeObserver() {}
+  ~ImeObserver() override {}
 
-  virtual void OnActivate(const std::string& component_id) OVERRIDE {
-    if (extension_id_.empty())
+  void OnActivate(const std::string& component_id) override {
+    if (extension_id_.empty() ||
+        !HasListener(input_ime::OnActivate::kEventName))
       return;
 
     scoped_ptr<base::ListValue> args(input_ime::OnActivate::Create(
@@ -116,8 +141,9 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnActivate::kEventName, args.Pass());
   }
 
-  virtual void OnDeactivated(const std::string& component_id) OVERRIDE {
-    if (extension_id_.empty())
+  void OnDeactivated(const std::string& component_id) override {
+    if (extension_id_.empty() ||
+        !HasListener(input_ime::OnDeactivated::kEventName))
       return;
 
     scoped_ptr<base::ListValue> args(
@@ -127,14 +153,17 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnDeactivated::kEventName, args.Pass());
   }
 
-  virtual void OnFocus(
-      const InputMethodEngineInterface::InputContext& context) OVERRIDE {
-    if (extension_id_.empty())
+  void OnFocus(
+      const InputMethodEngineInterface::InputContext& context) override {
+    if (extension_id_.empty() || !HasListener(input_ime::OnFocus::kEventName))
       return;
 
     input_ime::InputContext context_value;
     context_value.context_id = context.id;
     context_value.type = input_ime::InputContext::ParseType(context.type);
+    context_value.auto_correct = context.auto_correct;
+    context_value.auto_complete = context.auto_complete;
+    context_value.spell_check = context.spell_check;
 
     scoped_ptr<base::ListValue> args(input_ime::OnFocus::Create(context_value));
 
@@ -142,8 +171,8 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnFocus::kEventName, args.Pass());
   }
 
-  virtual void OnBlur(int context_id) OVERRIDE {
-    if (extension_id_.empty())
+  void OnBlur(int context_id) override {
+    if (extension_id_.empty() || !HasListener(input_ime::OnBlur::kEventName))
       return;
 
     scoped_ptr<base::ListValue> args(input_ime::OnBlur::Create(context_id));
@@ -152,9 +181,10 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnBlur::kEventName, args.Pass());
   }
 
-  virtual void OnInputContextUpdate(
-      const InputMethodEngineInterface::InputContext& context) OVERRIDE {
-    if (extension_id_.empty())
+  void OnInputContextUpdate(
+      const InputMethodEngineInterface::InputContext& context) override {
+    if (extension_id_.empty() ||
+        !HasListener(input_ime::OnInputContextUpdate::kEventName))
       return;
 
     input_ime::InputContext context_value;
@@ -169,10 +199,9 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
                              args.Pass());
   }
 
-  virtual void OnKeyEvent(
-      const std::string& component_id,
-      const InputMethodEngineInterface::KeyboardEvent& event,
-      chromeos::input_method::KeyEventHandle* key_data) OVERRIDE {
+  void OnKeyEvent(const std::string& component_id,
+                  const InputMethodEngineInterface::KeyboardEvent& event,
+                  chromeos::input_method::KeyEventHandle* key_data) override {
     if (extension_id_.empty())
       return;
 
@@ -210,11 +239,12 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnKeyEvent::kEventName, args.Pass());
   }
 
-  virtual void OnCandidateClicked(
+  void OnCandidateClicked(
       const std::string& component_id,
       int candidate_id,
-      InputMethodEngineInterface::MouseButtonEvent button) OVERRIDE {
-    if (extension_id_.empty())
+      InputMethodEngineInterface::MouseButtonEvent button) override {
+    if (extension_id_.empty() ||
+        !HasListener(input_ime::OnCandidateClicked::kEventName))
       return;
 
     input_ime::OnCandidateClicked::Button button_enum =
@@ -242,9 +272,10 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnCandidateClicked::kEventName, args.Pass());
   }
 
-  virtual void OnMenuItemActivated(const std::string& component_id,
-                                   const std::string& menu_id) OVERRIDE {
-    if (extension_id_.empty())
+  void OnMenuItemActivated(const std::string& component_id,
+                           const std::string& menu_id) override {
+    if (extension_id_.empty() ||
+        !HasListener(input_ime::OnMenuItemActivated::kEventName))
       return;
 
     scoped_ptr<base::ListValue> args(
@@ -254,11 +285,12 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         extension_id_, input_ime::OnMenuItemActivated::kEventName, args.Pass());
   }
 
-  virtual void OnSurroundingTextChanged(const std::string& component_id,
-                                        const std::string& text,
-                                        int cursor_pos,
-                                        int anchor_pos) OVERRIDE {
-    if (extension_id_.empty())
+  void OnSurroundingTextChanged(const std::string& component_id,
+                                const std::string& text,
+                                int cursor_pos,
+                                int anchor_pos) override {
+    if (extension_id_.empty() ||
+        !HasListener(input_ime::OnSurroundingTextChanged::kEventName))
       return;
 
     input_ime::OnSurroundingTextChanged::SurroundingInfo info;
@@ -273,8 +305,41 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
                              args.Pass());
   }
 
-  virtual void OnReset(const std::string& component_id) OVERRIDE {
-    if (extension_id_.empty())
+  void OnCompositionBoundsChanged(
+      const std::vector<gfx::Rect>& bounds) override {
+    if (extension_id_.empty() ||
+        !HasListener(kOnCompositionBoundsChangedEventName))
+      return;
+
+    // Note: this is a private API event.
+    base::ListValue* bounds_list = new base::ListValue();
+    for (size_t i = 0; i < bounds.size(); ++i) {
+      base::DictionaryValue* bounds_value = new base::DictionaryValue();
+      bounds_value->SetInteger("x", bounds[i].x());
+      bounds_value->SetInteger("y", bounds[i].y());
+      bounds_value->SetInteger("w", bounds[i].width());
+      bounds_value->SetInteger("h", bounds[i].height());
+      bounds_list->Append(bounds_value);
+    }
+
+    if (bounds_list->GetSize() <= 0)
+      return;
+    scoped_ptr<base::ListValue> args(new base::ListValue());
+
+    // The old extension code uses the first parameter to get the bounds of the
+    // first composition character, so for backward compatibility, add it here.
+    base::Value* first_value = NULL;
+    if (bounds_list->Get(0, &first_value))
+      args->Append(first_value->DeepCopy());
+    args->Append(bounds_list);
+
+    DispatchEventToExtension(extension_id_,
+                             kOnCompositionBoundsChangedEventName,
+                             args.Pass());
+  }
+
+  void OnReset(const std::string& component_id) override {
+    if (extension_id_.empty() || !HasListener(input_ime::OnReset::kEventName))
       return;
 
     scoped_ptr<base::ListValue> args(input_ime::OnReset::Create(component_id));
@@ -304,6 +369,11 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
         return true;
     }
     return false;
+  }
+
+  bool HasListener(const std::string& event_name) const {
+    return extensions::EventRouter::Get(
+        ProfileManager::GetActiveUserProfile())->HasEventListener(event_name);
   }
 
   // The component IME extensions need to know the current screen type (e.g.
@@ -489,9 +559,14 @@ bool InputImeSetCompositionFunction::RunSync() {
           SetComposition::Params::Parameters::SegmentsType::STYLE_UNDERLINE) {
         segments.back().style =
             InputMethodEngineInterface::SEGMENT_STYLE_UNDERLINE;
-      } else {
+      } else if (segments_args[i]->style ==
+                 SetComposition::Params::Parameters::SegmentsType::
+                     STYLE_DOUBLEUNDERLINE) {
         segments.back().style =
             InputMethodEngineInterface::SEGMENT_STYLE_DOUBLE_UNDERLINE;
+      } else {
+        segments.back().style =
+            InputMethodEngineInterface::SEGMENT_STYLE_NO_UNDERLINE;
       }
     }
   }

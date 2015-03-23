@@ -7,20 +7,24 @@ var input_focused_event;
 
 if (!chrome.virtualKeyboardPrivate) {
   define('main', [
-      'mojo/public/js/bindings/connection',
+      'mojo/public/js/connection',
       'ui/keyboard/webui/keyboard.mojom',
       'content/public/renderer/service_provider',
   ], function(connector, keyboard, serviceProvider) {
     'use strict';
-    function KeyboardImpl(kbd) {
-      console.log('Creating KeyboardImpl');
+    function TextInputTypeObserverImpl(kbd) {
+      console.log('Creating TextInputTypeObserverImpl');
       this.keyboard_ = kbd;
       mojo_api = this;
+      mojo_api.setTextInputTypeObserver(
+          connection.bindImpl(this, keyboard.TextInputTypeObserver));
     }
 
-    KeyboardImpl.prototype = Object.create(keyboard.KeyboardAPIStub.prototype);
+    TextInputTypeObserverImpl.prototype = Object.create(
+        keyboard.KeyboardAPI.stubClass.prototype);
 
-    KeyboardImpl.prototype.onTextInputTypeChanged = function(input_type) {
+    TextInputTypeObserverImpl.prototype.onTextInputTypeChanged =
+        function(input_type) {
       console.log('Text input changed: ' + input_type);
       input_focused_event.forEach(function(listener) {
         listener({type: input_type});
@@ -28,11 +32,10 @@ if (!chrome.virtualKeyboardPrivate) {
     };
 
     return function() {
-      connection = new connector.Connection(
-          serviceProvider.connectToService(
-              keyboard.KeyboardUIHandlerMojoProxy.NAME_),
-          KeyboardImpl,
-          keyboard.KeyboardUIHandlerMojoProxy);
+      const KBDApi = keyboard.KeyboardUIHandlerMojo;
+      new TextInputObserverImpl(connection.bindHandleToProxy(
+            serviceProvider.connectToService(KBDApi.name),
+            KBDApi));
     };
   });
 
@@ -55,7 +58,14 @@ if (!chrome.virtualKeyboardPrivate) {
   chrome.virtualKeyboardPrivate.moveCursor = function() {};
   chrome.virtualKeyboardPrivate.lockKeyboard = function() {};
   chrome.virtualKeyboardPrivate.keyboardLoaded = function() {};
-  chrome.virtualKeyboardPrivate.getKeyboardConfig = function() {};
+  chrome.virtualKeyboardPrivate.getKeyboardConfig = function(callback) {
+    callback({
+      layout: 'qwerty',
+      a11ymode: false,
+      experimental: false,
+      features: []
+    });
+  };
 
   function BrowserEvent() {
     this.listeners_ = [];

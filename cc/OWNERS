@@ -25,7 +25,12 @@ ccameron@chromium.org
 aelias@chromium.org
 jamesr@chromium.org
 
-# scheduling and texture uploading
+# scheduling / begin frames
+brianderson@chromium.org
+skyostil@chromium.org
+mithro@mithis.com
+
+# texture uploading
 brianderson@chromium.org
 reveman@chromium.org
 skyostil@chromium.org
@@ -35,7 +40,6 @@ reveman@chromium.org
 vmpstr@chromium.org
 
 # math / geometry / layer_tree_host_common
-shawnsingh@chromium.org
 enne@chromium.org
 vollick@chromium.org
 

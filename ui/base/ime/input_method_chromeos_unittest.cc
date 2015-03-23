@@ -15,16 +15,18 @@
 #include "base/i18n/char_iterator.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chromeos/ime/composition_text.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/ime/chromeos/composition_text.h"
 #include "ui/base/ime/chromeos/ime_bridge.h"
 #include "ui/base/ime/chromeos/mock_ime_candidate_window_handler.h"
 #include "ui/base/ime/chromeos/mock_ime_engine_handler.h"
+#include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/text_input_focus_manager.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/events/event.h"
+#include "ui/events/keycodes/dom3/dom_code.h"
 #include "ui/events/test/events_test_utils_x11.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -79,8 +81,8 @@ class TestableInputMethodChromeOS : public InputMethodChromeOS {
   };
 
   // Overridden from InputMethodChromeOS:
-  virtual void ProcessKeyEventPostIME(const ui::KeyEvent& key_event,
-                                      bool handled) OVERRIDE {
+  void ProcessKeyEventPostIME(const ui::KeyEvent& key_event,
+                              bool handled) override {
     process_key_event_post_ime_args_.event = &key_event;
     process_key_event_post_ime_args_.handled = handled;
     ++process_key_event_post_ime_call_count_;
@@ -200,17 +202,16 @@ class SetSurroundingTextVerifier {
 
 class InputMethodChromeOSTest : public internal::InputMethodDelegate,
                                 public testing::Test,
-                                public TextInputClient {
+                                public DummyTextInputClient {
  public:
   InputMethodChromeOSTest()
       : dispatched_key_event_(ui::ET_UNKNOWN, ui::VKEY_UNKNOWN, ui::EF_NONE) {
     ResetFlags();
   }
 
-  virtual ~InputMethodChromeOSTest() {
-  }
+  ~InputMethodChromeOSTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     chromeos::IMEBridge::Initialize();
 
     mock_ime_engine_handler_.reset(
@@ -230,7 +231,7 @@ class InputMethodChromeOSTest : public internal::InputMethodDelegate,
       ime_->SetFocusedTextInputClient(this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (ime_.get()) {
       if (switches::IsTextInputFocusManagerEnabled())
         TextInputFocusManager::GetInstance()->BlurTextInputClient(this);
@@ -246,89 +247,51 @@ class InputMethodChromeOSTest : public internal::InputMethodDelegate,
   }
 
   // Overridden from ui::internal::InputMethodDelegate:
-  virtual bool DispatchKeyEventPostIME(const ui::KeyEvent& event) OVERRIDE {
+  bool DispatchKeyEventPostIME(const ui::KeyEvent& event) override {
     dispatched_key_event_ = event;
     return false;
   }
 
   // Overridden from ui::TextInputClient:
-  virtual void SetCompositionText(
-      const CompositionText& composition) OVERRIDE {
+  void SetCompositionText(const CompositionText& composition) override {
     composition_text_ = composition;
   }
-  virtual void ConfirmCompositionText() OVERRIDE {
+  void ConfirmCompositionText() override {
     confirmed_text_ = composition_text_;
     composition_text_.Clear();
   }
-  virtual void ClearCompositionText() OVERRIDE {
-    composition_text_.Clear();
-  }
-  virtual void InsertText(const base::string16& text) OVERRIDE {
+  void ClearCompositionText() override { composition_text_.Clear(); }
+  void InsertText(const base::string16& text) override {
     inserted_text_ = text;
   }
-  virtual void InsertChar(base::char16 ch, int flags) OVERRIDE {
+  void InsertChar(base::char16 ch, int flags) override {
     inserted_char_ = ch;
     inserted_char_flags_ = flags;
   }
-  virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE {
-    return static_cast<gfx::NativeWindow>(NULL);
-  }
-  virtual TextInputType GetTextInputType() const OVERRIDE {
-    return input_type_;
-  }
-  virtual TextInputMode GetTextInputMode() const OVERRIDE {
-    return input_mode_;
-  }
-  virtual bool CanComposeInline() const OVERRIDE {
-    return can_compose_inline_;
-  }
-  virtual gfx::Rect GetCaretBounds() const OVERRIDE {
-    return caret_bounds_;
-  }
-  virtual bool GetCompositionCharacterBounds(uint32 index,
-                                             gfx::Rect* rect) const OVERRIDE {
-    return false;
-  }
-  virtual bool HasCompositionText() const OVERRIDE {
+  TextInputType GetTextInputType() const override { return input_type_; }
+  TextInputMode GetTextInputMode() const override { return input_mode_; }
+  bool CanComposeInline() const override { return can_compose_inline_; }
+  gfx::Rect GetCaretBounds() const override { return caret_bounds_; }
+  bool HasCompositionText() const override {
     CompositionText empty;
     return composition_text_ != empty;
   }
-  virtual bool GetTextRange(gfx::Range* range) const OVERRIDE {
+  bool GetTextRange(gfx::Range* range) const override {
     *range = text_range_;
     return true;
   }
-  virtual bool GetCompositionTextRange(gfx::Range* range) const OVERRIDE {
-    return false;
-  }
-  virtual bool GetSelectionRange(gfx::Range* range) const OVERRIDE {
+  bool GetSelectionRange(gfx::Range* range) const override {
     *range = selection_range_;
     return true;
   }
-
-  virtual bool SetSelectionRange(const gfx::Range& range) OVERRIDE {
-    return false;
-  }
-  virtual bool DeleteRange(const gfx::Range& range) OVERRIDE { return false; }
-  virtual bool GetTextFromRange(const gfx::Range& range,
-                                base::string16* text) const OVERRIDE {
+  bool GetTextFromRange(const gfx::Range& range,
+                        base::string16* text) const override {
     *text = surrounding_text_.substr(range.GetMin(), range.length());
     return true;
   }
-  virtual void OnInputMethodChanged() OVERRIDE {
+  void OnInputMethodChanged() override {
     ++on_input_method_changed_call_count_;
   }
-  virtual bool ChangeTextDirectionAndLayoutAlignment(
-      base::i18n::TextDirection direction) OVERRIDE { return false; }
-  virtual void ExtendSelectionAndDelete(size_t before,
-                                        size_t after) OVERRIDE {}
-  virtual void EnsureCaretInRect(const gfx::Rect& rect) OVERRIDE {}
-  virtual void OnCandidateWindowShown() OVERRIDE {}
-  virtual void OnCandidateWindowUpdated() OVERRIDE {}
-  virtual void OnCandidateWindowHidden() OVERRIDE {}
-  virtual bool IsEditingCommandEnabled(int command_id) OVERRIDE {
-    return false;
-  }
-  virtual void ExecuteEditingCommand(int command_id) OVERRIDE {}
 
   bool HasNativeEvent() const {
     return dispatched_key_event_.HasNativeEvent();
@@ -943,9 +906,9 @@ TEST_F(InputMethodChromeOSTest, SurroundingText_BecomeEmptyText) {
 class InputMethodChromeOSKeyEventTest : public InputMethodChromeOSTest {
  public:
   InputMethodChromeOSKeyEventTest() {}
-  virtual ~InputMethodChromeOSKeyEventTest() {}
+  ~InputMethodChromeOSKeyEventTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     InputMethodChromeOSTest::SetUp();
     ime_->Init(true);
   }
@@ -969,7 +932,7 @@ TEST_F(InputMethodChromeOSKeyEventTest, KeyEventDelayResponseTest) {
       mock_ime_engine_handler_->last_processed_key_event();
   EXPECT_EQ(1, mock_ime_engine_handler_->process_key_event_call_count());
   EXPECT_EQ(ui::VKEY_A, key_event->key_code());
-  EXPECT_EQ("KeyA", key_event->code());
+  EXPECT_EQ(ui::DomCode::KEY_A, key_event->code());
   EXPECT_EQ(kFlags, key_event->flags());
   EXPECT_EQ(0, ime_->process_key_event_post_ime_call_count());
 
@@ -1000,7 +963,7 @@ TEST_F(InputMethodChromeOSKeyEventTest, MultiKeyEventDelayResponseTest) {
   const ui::KeyEvent* key_event =
       mock_ime_engine_handler_->last_processed_key_event();
   EXPECT_EQ(ui::VKEY_B, key_event->key_code());
-  EXPECT_EQ("KeyB", key_event->code());
+  EXPECT_EQ(ui::DomCode::KEY_B, key_event->code());
   EXPECT_EQ(kFlags, key_event->flags());
 
   KeyEventCallback first_callback =
@@ -1015,7 +978,7 @@ TEST_F(InputMethodChromeOSKeyEventTest, MultiKeyEventDelayResponseTest) {
   const ui::KeyEvent* key_event2 =
       mock_ime_engine_handler_->last_processed_key_event();
   EXPECT_EQ(ui::VKEY_C, key_event2->key_code());
-  EXPECT_EQ("KeyC", key_event2->code());
+  EXPECT_EQ(ui::DomCode::KEY_C, key_event2->code());
   EXPECT_EQ(kFlags, key_event2->flags());
 
   // Check before state.

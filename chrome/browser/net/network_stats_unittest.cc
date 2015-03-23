@@ -14,6 +14,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+using std::string;
+
 namespace chrome_browser_net {
 
 class NetworkStatsTest : public PlatformTest {
@@ -21,15 +23,14 @@ class NetworkStatsTest : public PlatformTest {
   NetworkStatsTest() {}
 
  protected:
-
-  virtual void SetUp() {
+  void SetUp() override {
     net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
     base::MessageLoop::current()->RunUntilIdle();
     mock_writes_.clear();
     mock_reads_.clear();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
     // Empty the current queue.
     base::MessageLoop::current()->RunUntilIdle();

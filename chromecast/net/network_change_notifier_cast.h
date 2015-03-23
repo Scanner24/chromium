@@ -17,11 +17,11 @@ namespace chromecast {
 class NetworkChangeNotifierCast : public net::NetworkChangeNotifier {
  public:
   NetworkChangeNotifierCast();
-  virtual ~NetworkChangeNotifierCast();
+  ~NetworkChangeNotifierCast() override;
 
   // net::NetworkChangeNotifier implementation:
-  virtual net::NetworkChangeNotifier::ConnectionType
-      GetCurrentConnectionType() const OVERRIDE;
+  net::NetworkChangeNotifier::ConnectionType
+      GetCurrentConnectionType() const override;
 
  private:
   friend class NetworkChangeNotifierCastTest;

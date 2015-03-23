@@ -38,21 +38,10 @@ void GLContext::ScopedReleaseCurrent::Cancel() {
   canceled_ = true;
 }
 
-GLContext::FlushEvent::FlushEvent() {
-}
-
-GLContext::FlushEvent::~FlushEvent() {
-}
-
-void GLContext::FlushEvent::Signal() {
-  flag_.Set();
-}
-
-bool GLContext::FlushEvent::IsSignaled() {
-  return flag_.IsSet();
-}
-
-GLContext::GLContext(GLShareGroup* share_group) : share_group_(share_group) {
+GLContext::GLContext(GLShareGroup* share_group) :
+    share_group_(share_group),
+    swap_interval_(1),
+    force_swap_interval_zero_(false) {
   if (!share_group_.get())
     share_group_ = new GLShareGroup;
 
@@ -66,13 +55,6 @@ GLContext::~GLContext() {
   }
 }
 
-scoped_refptr<GLContext::FlushEvent> GLContext::SignalFlush() {
-  DCHECK(IsCurrent(NULL));
-  scoped_refptr<FlushEvent> flush_event = new FlushEvent();
-  flush_events_.push_back(flush_event);
-  return flush_event;
-}
-
 bool GLContext::GetTotalGpuMemory(size_t* bytes) {
   DCHECK(bytes);
   *bytes = 0;
@@ -80,6 +62,10 @@ bool GLContext::GetTotalGpuMemory(size_t* bytes) {
 }
 
 void GLContext::SetSafeToForceGpuSwitch() {
+}
+
+bool GLContext::ForceGpuSwitchIfNeeded() {
+  return true;
 }
 
 void GLContext::SetUnbindFboOnMakeCurrent() {
@@ -120,8 +106,8 @@ const GLVersionInfo* GLContext::GetVersionInfo() {
   if(!version_info_) {
     std::string version = GetGLVersion();
     std::string renderer = GetGLRenderer();
-    version_info_ = scoped_ptr<GLVersionInfo>(
-        new GLVersionInfo(version.c_str(), renderer.c_str()));
+    version_info_ =
+        make_scoped_ptr(new GLVersionInfo(version.c_str(), renderer.c_str()));
   }
   return version_info_.get();
 }
@@ -174,6 +160,16 @@ void GLContext::SetGLStateRestorer(GLStateRestorer* state_restorer) {
   state_restorer_ = make_scoped_ptr(state_restorer);
 }
 
+void GLContext::SetSwapInterval(int interval) {
+  swap_interval_ = interval;
+  OnSetSwapInterval(force_swap_interval_zero_ ? 0 : swap_interval_);
+}
+
+void GLContext::ForceSwapIntervalZero(bool force) {
+  force_swap_interval_zero_ = force;
+  OnSetSwapInterval(force_swap_interval_zero_ ? 0 : swap_interval_);
+}
+
 bool GLContext::WasAllocatedUsingRobustnessExtension() {
   return false;
 }
@@ -199,6 +195,8 @@ void GLContext::SetupForVirtualization() {
 bool GLContext::MakeVirtuallyCurrent(
     GLContext* virtual_context, GLSurface* surface) {
   DCHECK(virtual_gl_api_);
+  if (!ForceGpuSwitchIfNeeded())
+    return false;
   return virtual_gl_api_->MakeCurrent(virtual_context, surface);
 }
 
@@ -209,12 +207,6 @@ void GLContext::OnReleaseVirtuallyCurrent(GLContext* virtual_context) {
 
 void GLContext::SetRealGLApi() {
   SetGLToRealGLApi();
-}
-
-void GLContext::OnFlush() {
-  for (size_t n = 0; n < flush_events_.size(); n++)
-    flush_events_[n]->Signal();
-  flush_events_.clear();
 }
 
 GLContextReal::GLContextReal(GLShareGroup* share_group)

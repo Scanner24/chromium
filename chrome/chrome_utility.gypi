@@ -13,6 +13,8 @@
       'utility/cloud_print/bitmap_image.h',
       'utility/cloud_print/pwg_encoder.cc',
       'utility/cloud_print/pwg_encoder.h',
+      'utility/font_cache_handler_win.cc',
+      'utility/font_cache_handler_win.h',
       'utility/local_discovery/service_discovery_message_handler.cc',
       'utility/local_discovery/service_discovery_message_handler.h',
       'utility/printing_handler.cc',
@@ -20,14 +22,10 @@
       'utility/shell_handler_win.cc',
       'utility/shell_handler_win.h',
       'utility/utility_message_handler.h',
-      'utility/web_resource_unpacker.cc',
-      'utility/web_resource_unpacker.h',
     ],
     'chrome_utility_extensions_sources': [
       'utility/extensions/extensions_handler.cc',
       'utility/extensions/extensions_handler.h',
-      'utility/extensions/unpacker.cc',
-      'utility/extensions/unpacker.h',
       'utility/image_writer/disk_unmounter_mac.cc',
       'utility/image_writer/disk_unmounter_mac.h',
       'utility/image_writer/error_messages.cc',
@@ -103,6 +101,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../components/components_strings.gyp:components_strings',
+        '../components/components.gyp:search_engines',
         '../components/components.gyp:url_fixer',
         '../content/content.gyp:content_common',
         '../content/content.gyp:content_utility',
@@ -142,6 +141,7 @@
         }],
         ['enable_extensions==1', {
           'dependencies': [
+            '../extensions/extensions.gyp:extensions_utility',
             '../third_party/libexif/libexif.gyp:libexif',
             'common/extensions/api/api.gyp:chrome_api',
           ],
@@ -172,7 +172,7 @@
             }],
           ],
         }],
-        ['enable_printing!=1 and OS!="win"', {
+        ['enable_print_preview==0 and OS!="win"', {
           'sources!': [
             'utility/printing_handler.cc',
             'utility/printing_handler.h',

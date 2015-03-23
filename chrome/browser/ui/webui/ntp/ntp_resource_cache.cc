@@ -21,6 +21,7 @@
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -32,7 +33,6 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
-#include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -41,6 +41,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -81,7 +82,11 @@ const char kLearnMoreIncognitoUrl[] =
 
 // The URL for the Learn More page shown on guest session new tab.
 const char kLearnMoreGuestSessionUrl[] =
+#if defined(OS_CHROMEOS)
     "https://www.google.com/support/chromeos/bin/answer.py?answer=1057090";
+#else
+    "https://support.google.com/chrome/?p=ui_guest";
+#endif
 
 std::string SkColorToRGBAString(SkColor color) {
   // We convert the alpha using DoubleToString because StringPrintf will use
@@ -319,7 +324,8 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
       profile_->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar);
   localized_strings.SetBoolean("bookmarkbarattached", bookmark_bar_attached);
 
-  webui::SetFontAndTextDirection(&localized_strings);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, &localized_strings);
 
   static const base::StringPiece incognito_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
@@ -343,7 +349,6 @@ void NTPResourceCache::CreateNewTabGuestHTML() {
 
 #if defined(OS_CHROMEOS)
   guest_tab_ids = IDR_GUEST_SESSION_TAB_HTML;
-  guest_tab_link = kLearnMoreGuestSessionUrl;
 
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
@@ -373,7 +378,8 @@ void NTPResourceCache::CreateNewTabGuestHTML() {
       l10n_util::GetStringUTF16(guest_tab_link_ids));
   localized_strings.SetString("learnMoreLink", guest_tab_link);
 
-  webui::SetFontAndTextDirection(&localized_strings);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, &localized_strings);
 
   static const base::StringPiece guest_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(guest_tab_ids));
@@ -459,10 +465,10 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_LEARN_MORE_URL));
   load_time_data.SetString("learnMore",
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
   load_time_data.SetString("webStoreLink",
       google_util::AppendGoogleLocaleParam(
-          GURL(extension_urls::GetWebstoreLaunchURL()),
-          g_browser_process->GetApplicationLocale()).spec());
+          GURL(extension_urls::GetWebstoreLaunchURL()), app_locale).spec());
   load_time_data.SetString("appInstallHintText",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
   load_time_data.SetBoolean("isDiscoveryInNTPEnabled",
@@ -493,16 +499,8 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("showWebStoreIcon",
                             !prefs->GetBoolean(prefs::kHideWebStoreIcon));
 
-  bool streamlined_hosted_apps =
-      extensions::util::IsStreamlinedHostedAppsEnabled();
-  load_time_data.SetBoolean("enableStreamlinedHostedApps",
-                            streamlined_hosted_apps);
-  // Use a different string for launching as a regular tab for streamlined
-  // hosted apps.
-  if (streamlined_hosted_apps) {
-    load_time_data.SetString("applaunchtypetab",
-        l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_TAB));
-  }
+  bool bookmark_apps_enabled = extensions::util::IsNewBookmarkAppsEnabled();
+  load_time_data.SetBoolean("enableNewBookmarkApps", bookmark_apps_enabled);
 
 #if defined(OS_CHROMEOS)
   load_time_data.SetString("expandMenu",
@@ -512,7 +510,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   NewTabPageHandler::GetLocalizedValues(profile_, &load_time_data);
   NTPLoginHandler::GetLocalizedValues(profile_, &load_time_data);
 
-  webui::SetFontAndTextDirection(&load_time_data);
+  webui::SetLoadTimeDataDefaults(app_locale, &load_time_data);
 
   // Control fade and resize animations.
   load_time_data.SetBoolean("anim",
@@ -547,17 +545,18 @@ void NTPResourceCache::CreateNewTabHTML() {
   }
 
   // Determine whether to show the menu for accessing tabs on other devices.
-  bool show_other_sessions_menu = should_show_other_devices_menu_ &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
+  bool show_other_sessions_menu =
+      should_show_other_devices_menu_ &&
+     !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableNTPOtherSessionsMenu);
   load_time_data.SetBoolean("showOtherSessionsMenu", show_other_sessions_menu);
-  load_time_data.SetBoolean("isUserSignedIn",
-      !prefs->GetString(prefs::kGoogleServicesUsername).empty());
+  load_time_data.SetBoolean(
+      "isUserSignedIn",
+      SigninManagerFactory::GetForProfile(profile_)->IsAuthenticated());
 
   // Load the new tab page appropriate for this build.
   base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
       GetRawDataResource(IDR_NEW_TAB_4_HTML));
-  webui::UseVersion2 version2;
   std::string full_html =
       webui::GetI18nTemplateHtml(new_tab_html, &load_time_data);
   new_tab_html_ = base::RefCountedString::TakeString(&full_html);
@@ -620,7 +619,7 @@ void NTPResourceCache::CreateNewTabGuestCSS() {
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_NEW_GUEST_TAB_THEME_CSS));
+          IDR_NEW_INCOGNITO_TAB_THEME_CSS));
 
   // Create the string from our template and the replacements.
   std::string full_css = ReplaceStringPlaceholders(

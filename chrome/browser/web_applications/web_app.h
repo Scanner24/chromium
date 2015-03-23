@@ -135,7 +135,8 @@ void GetShortcutInfoForApp(const extensions::Extension* extension,
                            const ShortcutInfoCallback& callback);
 
 // Whether to create a shortcut for this type of extension.
-bool ShouldCreateShortcutFor(Profile* profile,
+bool ShouldCreateShortcutFor(web_app::ShortcutCreationReason reason,
+                             Profile* profile,
                              const extensions::Extension* extension);
 
 // Gets the user data directory for given web app. The path for the directory is
@@ -173,6 +174,11 @@ void CreateShortcutsWithInfo(
     const ShortcutLocations& locations,
     const ShortcutInfo& shortcut_info,
     const extensions::FileHandlersInfo& file_handlers_info);
+
+// Currently only called by app_list_service_mac to create a shim for the
+// app launcher.
+void CreateNonAppShortcut(const ShortcutLocations& locations,
+                          const ShortcutInfo& shortcut_info);
 
 // Creates shortcuts for an app. This loads the app's icon from disk, and calls
 // CreateShortcutsWithInfo(). If you already have a ShortcutInfo with the app's

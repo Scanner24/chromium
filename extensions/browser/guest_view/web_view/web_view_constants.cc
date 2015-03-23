@@ -8,16 +8,17 @@ namespace webview {
 
 // Attributes.
 const char kAttributeAllowTransparency[] = "allowtransparency";
-const char kAttributeAutoSize[] = "autosize";
-const char kAttributeMaxHeight[] = "maxheight";
-const char kAttributeMaxWidth[] = "maxwidth";
-const char kAttributeMinHeight[] = "minheight";
-const char kAttributeMinWidth[] = "minwidth";
+const char kAttributeAllowScaling[] = "allowscaling";
 const char kAttributeName[] = "name";
 const char kAttributeSrc[] = "src";
 
 // API namespace.
 const char kAPINamespace[] = "webViewInternal";
+
+// API error messages.
+const char kAPILoadDataInvalidDataURL[] = "Invalid data URL \"%s\".";
+const char kAPILoadDataInvalidBaseURL[] = "Invalid base URL \"%s\".";
+const char kAPILoadDataInvalidVirtualURL[] = "Invalid virtual URL \"%s\".";
 
 // Events.
 const char kEventClose[] = "webViewInternal.onClose";
@@ -37,7 +38,6 @@ const char kEventLoadStop[] = "webViewInternal.onLoadStop";
 const char kEventMessage[] = "webViewInternal.onMessage";
 const char kEventNewWindow[] = "webViewInternal.onNewWindow";
 const char kEventPermissionRequest[] = "webViewInternal.onPermissionRequest";
-const char kEventPluginDestroyed[] = "webViewInternal.onPluginDestroyed";
 const char kEventResponsive[] = "webViewInternal.onResponsive";
 const char kEventSizeChanged[] = "webViewInternal.onSizeChanged";
 const char kEventUnresponsive[] = "webViewInternal.onUnresponsive";
@@ -109,7 +109,7 @@ const char kParameterUserAgentOverride[] = "userAgentOverride";
 const char kMenuItemCommandId[] = "commandId";
 const char kMenuItemLabel[] = "label";
 const char kPersistPrefix[] = "persist:";
-const char kStoragePartitionId[] = "storagePartitionId";
+const char kStoragePartitionId[] = "partition";
 const unsigned int kMaxOutstandingPermissionRequests = 1024;
 const int kInvalidPermissionRequestID = 0;
 

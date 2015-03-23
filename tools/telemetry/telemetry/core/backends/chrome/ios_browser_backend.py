@@ -15,11 +15,12 @@ from telemetry.core.backends.chrome import system_info_backend
 
 class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   _DEBUGGER_URL_BUILDER = 'ws://localhost:%i/devtools/page/%i'
-  _DEBUGGER_URL_REGEX = 'ws://localhost:(\d+)/devtools/page/(\d+)'
+  _DEBUGGER_URL_REGEX = r'ws://localhost:(\d+)/devtools/page/(\d+)'
   _DEVICE_LIST_URL = 'http://localhost:9221/json'
 
-  def __init__(self, browser_options):
+  def __init__(self, ios_platform_backend, browser_options):
     super(IosBrowserBackend, self).__init__(
+        ios_platform_backend,
         supports_tab_control=False,
         supports_extensions=False,
         browser_options=browser_options,
@@ -28,6 +29,7 @@ class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     self._webviews = []
     self._port = None
     self._page = None
+    self._system_info_backend = None
     self.UpdateRunningBrowsersInfo()
 
   def UpdateRunningBrowsersInfo(self):
@@ -75,6 +77,7 @@ class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       def GetData():
         try:
           with contextlib.closing(
+              # pylint: disable=cell-var-from-loop
               urllib2.urlopen('http://%s/json' % d['url'])) as f:
             json_result = f.read()
             data = json.loads(json_result)
@@ -106,7 +109,7 @@ class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     return self._system_info_backend.GetSystemInfo()
 
   def ListInspectableContexts(self):
-    response = json.loads(self.Request(''))
+    response = super(IosBrowserBackend, self).ListInspectableContexts()
     if len(response) != len(self._webviews):
       self.UpdateRunningBrowsersInfo()
     for i in range(len(response)):
@@ -130,10 +133,6 @@ class IosBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   def Start(self):
     logging.warn('Not implemented')
-
-  def AddReplayServerOptions(self, extra_wpr_args):
-    logging.warn('Not implemented')
-    return None
 
   def extension_backend(self):
     logging.warn('Not implemented')

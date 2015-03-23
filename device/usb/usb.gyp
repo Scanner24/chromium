@@ -11,6 +11,7 @@
       'target_name': 'device_usb',
       'type': 'static_library',
       'dependencies': [
+        '../../net/net.gyp:net',
         '../../third_party/libusb/libusb.gyp:libusb',
       ],
       'include_dirs': [
@@ -33,8 +34,10 @@
         'usb_error.h',
         'usb_ids.cc',
         'usb_ids.h',
+        'usb_service.cc',
         'usb_service.h',
         'usb_service_impl.cc',
+        'usb_service_impl.h',
       ],
       'actions': [
         {
@@ -62,7 +65,7 @@
       'conditions': [
         ['use_udev == 1', {
           'dependencies': [
-            '../../build/linux/system.gyp:udev',
+            '../udev_linux/udev.gyp:udev_linux',
           ],
         }],
         ['chromeos==1', {

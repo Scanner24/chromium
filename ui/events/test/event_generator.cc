@@ -14,7 +14,7 @@
 #include "ui/events/event_source.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
-#include "ui/gfx/vector2d_conversions.h"
+#include "ui/gfx/geometry/vector2d_conversions.h"
 
 #if defined(USE_X11)
 #include <X11/Xlib.h>
@@ -66,6 +66,7 @@ EventGenerator::EventGenerator(gfx::NativeWindow root_window)
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(root_window, NULL);
 }
@@ -77,6 +78,7 @@ EventGenerator::EventGenerator(gfx::NativeWindow root_window,
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(root_window, NULL);
 }
@@ -87,6 +89,7 @@ EventGenerator::EventGenerator(gfx::NativeWindow root_window,
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(root_window, window);
 }
@@ -97,6 +100,7 @@ EventGenerator::EventGenerator(EventGeneratorDelegate* delegate)
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(NULL, NULL);
 }
@@ -123,10 +127,11 @@ void EventGenerator::ClickLeftButton() {
 }
 
 void EventGenerator::DoubleClickLeftButton() {
+  flags_ &= ~ui::EF_IS_DOUBLE_CLICK;
+  ClickLeftButton();
   flags_ |= ui::EF_IS_DOUBLE_CLICK;
-  PressLeftButton();
-  flags_ ^= ui::EF_IS_DOUBLE_CLICK;
-  ReleaseLeftButton();
+  ClickLeftButton();
+  flags_ &= ~ui::EF_IS_DOUBLE_CLICK;
 }
 
 void EventGenerator::PressRightButton() {
@@ -139,7 +144,8 @@ void EventGenerator::ReleaseRightButton() {
 
 void EventGenerator::MoveMouseWheel(int delta_x, int delta_y) {
   gfx::Point location = GetLocationInCurrentRoot();
-  ui::MouseEvent mouseev(ui::ET_MOUSEWHEEL, location, location, flags_, 0);
+  ui::MouseEvent mouseev(ui::ET_MOUSEWHEEL, location, location,
+                         ui::EventTimeForNow(), flags_, 0);
   ui::MouseWheelEvent wheelev(mouseev, delta_x, delta_y);
   Dispatch(&wheelev);
 }
@@ -148,14 +154,15 @@ void EventGenerator::SendMouseExit() {
   gfx::Point exit_location(current_location_);
   delegate()->ConvertPointToTarget(current_target_, &exit_location);
   ui::MouseEvent mouseev(ui::ET_MOUSE_EXITED, exit_location, exit_location,
-                         flags_, 0);
+                         ui::EventTimeForNow(), flags_, 0);
   Dispatch(&mouseev);
 }
 
 void EventGenerator::MoveMouseToInHost(const gfx::Point& point_in_host) {
   const ui::EventType event_type = (flags_ & ui::EF_LEFT_MOUSE_BUTTON) ?
       ui::ET_MOUSE_DRAGGED : ui::ET_MOUSE_MOVED;
-  ui::MouseEvent mouseev(event_type, point_in_host, point_in_host, flags_, 0);
+  ui::MouseEvent mouseev(event_type, point_in_host, point_in_host,
+                         ui::EventTimeForNow(), flags_, 0);
   Dispatch(&mouseev);
 
   current_location_ = point_in_host;
@@ -176,7 +183,8 @@ void EventGenerator::MoveMouseTo(const gfx::Point& point_in_screen,
     if (!grab_)
       UpdateCurrentDispatcher(move_point);
     delegate()->ConvertPointToTarget(current_target_, &move_point);
-    ui::MouseEvent mouseev(event_type, move_point, move_point, flags_, 0);
+    ui::MouseEvent mouseev(event_type, move_point, move_point,
+                           ui::EventTimeForNow(), flags_, 0);
     Dispatch(&mouseev);
   }
   current_location_ = point_in_screen;
@@ -280,6 +288,16 @@ void EventGenerator::GestureTapDownAndUp(const gfx::Point& location) {
   Dispatch(&release);
 }
 
+base::TimeDelta EventGenerator::CalculateScrollDurationForFlingVelocity(
+    const gfx::Point& start,
+    const gfx::Point& end,
+    float velocity,
+    int steps) {
+  const float kGestureDistance = (start - end).Length();
+  const float kFlingStepDelay = (kGestureDistance / velocity) / steps * 1000000;
+  return base::TimeDelta::FromMicroseconds(kFlingStepDelay);
+}
+
 void EventGenerator::GestureScrollSequence(const gfx::Point& start,
                                            const gfx::Point& end,
                                            const base::TimeDelta& step_delay,
@@ -301,9 +319,9 @@ void EventGenerator::GestureScrollSequenceWithCallback(
 
   callback.Run(ui::ET_GESTURE_SCROLL_BEGIN, gfx::Vector2dF());
 
-  int dx = (end.x() - start.x()) / steps;
-  int dy = (end.y() - start.y()) / steps;
-  gfx::Point location = start;
+  float dx = static_cast<float>(end.x() - start.x()) / steps;
+  float dy = static_cast<float>(end.y() - start.y()) / steps;
+  gfx::PointF location = start;
   for (int i = 0; i < steps; ++i) {
     location.Offset(dx, dy);
     timestamp += step_delay;
@@ -436,7 +454,7 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
 
 void EventGenerator::ScrollSequence(const gfx::Point& start,
                                     const base::TimeDelta& step_delay,
-                                    const std::vector<gfx::Point>& offsets,
+                                    const std::vector<gfx::PointF>& offsets,
                                     int num_fingers) {
   size_t steps = offsets.size();
   base::TimeDelta timestamp = Now();
@@ -542,8 +560,8 @@ void EventGenerator::PressButton(int flag) {
     flags_ |= flag;
     grab_ = (flags_ & kAllButtonMask) != 0;
     gfx::Point location = GetLocationInCurrentRoot();
-    ui::MouseEvent mouseev(ui::ET_MOUSE_PRESSED, location, location, flags_,
-                           flag);
+    ui::MouseEvent mouseev(ui::ET_MOUSE_PRESSED, location, location,
+                           ui::EventTimeForNow(), flags_, flag);
     Dispatch(&mouseev);
   }
 }
@@ -551,8 +569,8 @@ void EventGenerator::PressButton(int flag) {
 void EventGenerator::ReleaseButton(int flag) {
   if (flags_ & flag) {
     gfx::Point location = GetLocationInCurrentRoot();
-    ui::MouseEvent mouseev(ui::ET_MOUSE_RELEASED, location,
-                           location, flags_, flag);
+    ui::MouseEvent mouseev(ui::ET_MOUSE_RELEASED, location, location,
+                           ui::EventTimeForNow(), flags_, flag);
     Dispatch(&mouseev);
     flags_ ^= flag;
   }

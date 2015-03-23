@@ -10,11 +10,8 @@
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/skia_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/skia/include/core/SkBBHFactory.h"
-#include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkGraphics.h"
-#include "third_party/skia/include/core/SkPixelRef.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/skia_util.h"
 
 namespace cc {
@@ -25,10 +22,7 @@ TEST(PictureTest, AsBase64String) {
 
   gfx::Rect layer_rect(100, 100);
 
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval = SkISize::Make(100, 100);
-  tile_grid_info.fMargin.setEmpty();
-  tile_grid_info.fOffset.setZero();
+  gfx::Size tile_grid_size(100, 100);
 
   FakeContentLayerClient content_layer_client;
 
@@ -45,74 +39,56 @@ TEST(PictureTest, AsBase64String) {
       Picture::CreateFromValue(tmp.get());
   EXPECT_FALSE(invalid_picture.get());
 
-  Picture::RecordingMode kRecordingModes[] = {Picture::RECORD_NORMALLY,
-                                              Picture::RECORD_WITH_SKRECORD};
-
   // Single full-size rect picture.
   content_layer_client.add_draw_rect(layer_rect, red_paint);
 
-  for (size_t i = 0; i < arraysize(kRecordingModes); ++i) {
-    scoped_refptr<Picture> one_rect_picture =
-        Picture::Create(layer_rect,
-                        &content_layer_client,
-                        tile_grid_info,
-                        false,
-                        kRecordingModes[i]);
-    scoped_ptr<base::Value> serialized_one_rect(one_rect_picture->AsValue());
+  scoped_refptr<Picture> one_rect_picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, false,
+                      RecordingSource::RECORD_NORMALLY);
+  scoped_ptr<base::Value> serialized_one_rect(one_rect_picture->AsValue());
 
-    // Reconstruct the picture.
-    scoped_refptr<Picture> one_rect_picture_check =
-        Picture::CreateFromValue(serialized_one_rect.get());
-    EXPECT_TRUE(!!one_rect_picture_check.get());
+  // Reconstruct the picture.
+  scoped_refptr<Picture> one_rect_picture_check =
+      Picture::CreateFromValue(serialized_one_rect.get());
+  EXPECT_TRUE(!!one_rect_picture_check.get());
 
-    // Check for equivalence.
-    unsigned char one_rect_buffer[4 * 100 * 100] = {0};
-    DrawPicture(one_rect_buffer, layer_rect, one_rect_picture);
-    unsigned char one_rect_buffer_check[4 * 100 * 100] = {0};
-    DrawPicture(one_rect_buffer_check, layer_rect, one_rect_picture_check);
+  // Check for equivalence.
+  unsigned char one_rect_buffer[4 * 100 * 100] = {0};
+  DrawPicture(one_rect_buffer, layer_rect, one_rect_picture);
+  unsigned char one_rect_buffer_check[4 * 100 * 100] = {0};
+  DrawPicture(one_rect_buffer_check, layer_rect, one_rect_picture_check);
 
-    EXPECT_EQ(one_rect_picture->LayerRect(),
-              one_rect_picture_check->LayerRect());
-    EXPECT_EQ(0, memcmp(one_rect_buffer, one_rect_buffer_check, 4 * 100 * 100));
-  }
+  EXPECT_EQ(one_rect_picture->LayerRect(), one_rect_picture_check->LayerRect());
+  EXPECT_EQ(0, memcmp(one_rect_buffer, one_rect_buffer_check, 4 * 100 * 100));
 
   // Two rect picture.
   content_layer_client.add_draw_rect(gfx::Rect(25, 25, 50, 50), green_paint);
 
-  for (size_t i = 0; i < arraysize(kRecordingModes); ++i) {
-    scoped_refptr<Picture> two_rect_picture =
-        Picture::Create(layer_rect,
-                        &content_layer_client,
-                        tile_grid_info,
-                        false,
-                        Picture::RECORD_NORMALLY);
+  scoped_refptr<Picture> two_rect_picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, false,
+                      RecordingSource::RECORD_NORMALLY);
 
-    scoped_ptr<base::Value> serialized_two_rect(two_rect_picture->AsValue());
+  scoped_ptr<base::Value> serialized_two_rect(two_rect_picture->AsValue());
 
-    // Reconstruct the picture.
-    scoped_refptr<Picture> two_rect_picture_check =
-        Picture::CreateFromValue(serialized_two_rect.get());
-    EXPECT_TRUE(!!two_rect_picture_check.get());
+  // Reconstruct the picture.
+  scoped_refptr<Picture> two_rect_picture_check =
+      Picture::CreateFromValue(serialized_two_rect.get());
+  EXPECT_TRUE(!!two_rect_picture_check.get());
 
-    // Check for equivalence.
-    unsigned char two_rect_buffer[4 * 100 * 100] = {0};
-    DrawPicture(two_rect_buffer, layer_rect, two_rect_picture);
-    unsigned char two_rect_buffer_check[4 * 100 * 100] = {0};
-    DrawPicture(two_rect_buffer_check, layer_rect, two_rect_picture_check);
+  // Check for equivalence.
+  unsigned char two_rect_buffer[4 * 100 * 100] = {0};
+  DrawPicture(two_rect_buffer, layer_rect, two_rect_picture);
+  unsigned char two_rect_buffer_check[4 * 100 * 100] = {0};
+  DrawPicture(two_rect_buffer_check, layer_rect, two_rect_picture_check);
 
-    EXPECT_EQ(two_rect_picture->LayerRect(),
-              two_rect_picture_check->LayerRect());
-    EXPECT_EQ(0, memcmp(two_rect_buffer, two_rect_buffer_check, 4 * 100 * 100));
-  }
+  EXPECT_EQ(two_rect_picture->LayerRect(), two_rect_picture_check->LayerRect());
+  EXPECT_EQ(0, memcmp(two_rect_buffer, two_rect_buffer_check, 4 * 100 * 100));
 }
 
 TEST(PictureTest, PixelRefIterator) {
   gfx::Rect layer_rect(2048, 2048);
 
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval = SkISize::Make(512, 512);
-  tile_grid_info.fMargin.setEmpty();
-  tile_grid_info.fOffset.setZero();
+  gfx::Size tile_grid_size(512, 512);
 
   FakeContentLayerClient content_layer_client;
 
@@ -140,11 +116,9 @@ TEST(PictureTest, PixelRefIterator) {
     }
   }
 
-  scoped_refptr<Picture> picture = Picture::Create(layer_rect,
-                                                   &content_layer_client,
-                                                   tile_grid_info,
-                                                   true,
-                                                   Picture::RECORD_NORMALLY);
+  scoped_refptr<Picture> picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, true,
+                      RecordingSource::RECORD_NORMALLY);
 
   // Default iterator does not have any pixel refs
   {
@@ -209,10 +183,7 @@ TEST(PictureTest, PixelRefIterator) {
 TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
   gfx::Rect layer_rect(1024, 0, 2048, 2048);
 
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval = SkISize::Make(512, 512);
-  tile_grid_info.fMargin.setEmpty();
-  tile_grid_info.fOffset.setZero();
+  gfx::Size tile_grid_size(512, 512);
 
   FakeContentLayerClient content_layer_client;
 
@@ -240,11 +211,9 @@ TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
     }
   }
 
-  scoped_refptr<Picture> picture = Picture::Create(layer_rect,
-                                                   &content_layer_client,
-                                                   tile_grid_info,
-                                                   true,
-                                                   Picture::RECORD_NORMALLY);
+  scoped_refptr<Picture> picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, true,
+                      RecordingSource::RECORD_NORMALLY);
 
   // Default iterator does not have any pixel refs
   {
@@ -332,10 +301,7 @@ TEST(PictureTest, PixelRefIteratorNonZeroLayer) {
 TEST(PictureTest, PixelRefIteratorOnePixelQuery) {
   gfx::Rect layer_rect(2048, 2048);
 
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval = SkISize::Make(512, 512);
-  tile_grid_info.fMargin.setEmpty();
-  tile_grid_info.fOffset.setZero();
+  gfx::Size tile_grid_size(512, 512);
 
   FakeContentLayerClient content_layer_client;
 
@@ -363,11 +329,9 @@ TEST(PictureTest, PixelRefIteratorOnePixelQuery) {
     }
   }
 
-  scoped_refptr<Picture> picture = Picture::Create(layer_rect,
-                                                   &content_layer_client,
-                                                   tile_grid_info,
-                                                   true,
-                                                   Picture::RECORD_NORMALLY);
+  scoped_refptr<Picture> picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, true,
+                      RecordingSource::RECORD_NORMALLY);
 
   for (int y = 0; y < 4; ++y) {
     for (int x = 0; x < 4; ++x) {
@@ -389,10 +353,7 @@ TEST(PictureTest, CreateFromSkpValue) {
 
   gfx::Rect layer_rect(100, 200);
 
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval = SkISize::Make(100, 200);
-  tile_grid_info.fMargin.setEmpty();
-  tile_grid_info.fOffset.setZero();
+  gfx::Size tile_grid_size(100, 200);
 
   FakeContentLayerClient content_layer_client;
 
@@ -412,11 +373,8 @@ TEST(PictureTest, CreateFromSkpValue) {
   // Single full-size rect picture.
   content_layer_client.add_draw_rect(layer_rect, red_paint);
   scoped_refptr<Picture> one_rect_picture =
-      Picture::Create(layer_rect,
-                      &content_layer_client,
-                      tile_grid_info,
-                      false,
-                      Picture::RECORD_NORMALLY);
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, false,
+                      RecordingSource::RECORD_NORMALLY);
   scoped_ptr<base::Value> serialized_one_rect(
       one_rect_picture->AsValue());
 
@@ -441,53 +399,43 @@ TEST(PictureTest, RecordingModes) {
 
   gfx::Rect layer_rect(100, 200);
 
-  SkTileGridFactory::TileGridInfo tile_grid_info;
-  tile_grid_info.fTileInterval = SkISize::Make(100, 200);
-  tile_grid_info.fMargin.setEmpty();
-  tile_grid_info.fOffset.setZero();
+  gfx::Size tile_grid_size(100, 200);
 
   FakeContentLayerClient content_layer_client;
   EXPECT_EQ(NULL, content_layer_client.last_canvas());
 
-  scoped_refptr<Picture> picture = Picture::Create(layer_rect,
-                                                   &content_layer_client,
-                                                   tile_grid_info,
-                                                   false,
-                                                   Picture::RECORD_NORMALLY);
+  scoped_refptr<Picture> picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, false,
+                      RecordingSource::RECORD_NORMALLY);
   EXPECT_TRUE(content_layer_client.last_canvas() != NULL);
-  EXPECT_EQ(ContentLayerClient::GRAPHICS_CONTEXT_ENABLED,
-            content_layer_client.last_context_status());
+  EXPECT_EQ(ContentLayerClient::PAINTING_BEHAVIOR_NORMAL,
+            content_layer_client.last_painting_control());
   EXPECT_TRUE(picture.get());
 
-  picture = Picture::Create(layer_rect,
-                            &content_layer_client,
-                            tile_grid_info,
-                            false,
-                            Picture::RECORD_WITH_SK_NULL_CANVAS);
+  picture = Picture::Create(layer_rect, &content_layer_client, tile_grid_size,
+                            false, RecordingSource::RECORD_WITH_SK_NULL_CANVAS);
   EXPECT_TRUE(content_layer_client.last_canvas() != NULL);
-  EXPECT_EQ(ContentLayerClient::GRAPHICS_CONTEXT_ENABLED,
-            content_layer_client.last_context_status());
+  EXPECT_EQ(ContentLayerClient::PAINTING_BEHAVIOR_NORMAL,
+            content_layer_client.last_painting_control());
   EXPECT_TRUE(picture.get());
 
-  picture = Picture::Create(layer_rect,
-                            &content_layer_client,
-                            tile_grid_info,
-                            false,
-                            Picture::RECORD_WITH_PAINTING_DISABLED);
+  picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, false,
+                      RecordingSource::RECORD_WITH_PAINTING_DISABLED);
   EXPECT_TRUE(content_layer_client.last_canvas() != NULL);
-  EXPECT_EQ(ContentLayerClient::GRAPHICS_CONTEXT_DISABLED,
-            content_layer_client.last_context_status());
+  EXPECT_EQ(ContentLayerClient::DISPLAY_LIST_CONSTRUCTION_DISABLED,
+            content_layer_client.last_painting_control());
   EXPECT_TRUE(picture.get());
 
-  picture = Picture::Create(layer_rect,
-                            &content_layer_client,
-                            tile_grid_info,
-                            false,
-                            Picture::RECORD_WITH_SKRECORD);
+  picture =
+      Picture::Create(layer_rect, &content_layer_client, tile_grid_size, false,
+                      RecordingSource::RECORD_WITH_CACHING_DISABLED);
   EXPECT_TRUE(content_layer_client.last_canvas() != NULL);
+  EXPECT_EQ(ContentLayerClient::DISPLAY_LIST_CACHING_DISABLED,
+            content_layer_client.last_painting_control());
   EXPECT_TRUE(picture.get());
 
-  EXPECT_EQ(4, Picture::RECORDING_MODE_COUNT);
+  EXPECT_EQ(4, RecordingSource::RECORDING_MODE_COUNT);
 }
 
 }  // namespace

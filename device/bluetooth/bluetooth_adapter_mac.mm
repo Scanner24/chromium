@@ -141,6 +141,14 @@ void BluetoothAdapterMac::CreateL2capService(
       this, uuid, options, base::Bind(callback, socket), error_callback);
 }
 
+void BluetoothAdapterMac::RegisterAudioSink(
+    const BluetoothAudioSink::Options& options,
+    const AcquiredCallback& callback,
+    const BluetoothAudioSink::ErrorCallback& error_callback) {
+  NOTIMPLEMENTED();
+  error_callback.Run(BluetoothAudioSink::ERROR_UNSUPPORTED_PLATFORM);
+}
+
 void BluetoothAdapterMac::DeviceFound(IOBluetoothDevice* device) {
   DeviceAdded(device);
 }
@@ -162,6 +170,12 @@ void BluetoothAdapterMac::DeviceConnected(IOBluetoothDevice* device) {
   DVLOG(1) << "Adapter registered a new connection from device with address: "
            << BluetoothDeviceMac::GetDeviceAddress(device);
   DeviceAdded(device);
+}
+
+void BluetoothAdapterMac::DeleteOnCorrectThread() const {
+  if (ui_task_runner_->RunsTasksOnCurrentThread() ||
+      !ui_task_runner_->DeleteSoon(FROM_HERE, this))
+    delete this;
 }
 
 void BluetoothAdapterMac::AddDiscoverySession(

@@ -18,10 +18,10 @@
 #include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/compositor/test/draw_waiter_for_test.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/gfx_paths.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/transform.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/wm/core/default_activation_client.h"
@@ -40,10 +40,9 @@ class TestPaintingWindowDelegate : public aura::test::TestWindowDelegate {
       : window_size_(window_size) {
   }
 
-  virtual ~TestPaintingWindowDelegate() {
-  }
+  ~TestPaintingWindowDelegate() override {}
 
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {
     for (int y = 0; y < window_size_.height(); ++y) {
       for (int x = 0; x < window_size_.width(); ++x)
         canvas->FillRect(gfx::Rect(x, y, 1, 1), GetExpectedColorForPoint(x, y));
@@ -82,9 +81,9 @@ size_t GetFailedPixelsCount(const gfx::Image& image) {
 class SnapshotAuraTest : public testing::Test {
  public:
   SnapshotAuraTest() {}
-  virtual ~SnapshotAuraTest() {}
+  ~SnapshotAuraTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
 
     // The ContextFactory must exist before any Compositors are created.
@@ -99,7 +98,7 @@ class SnapshotAuraTest : public testing::Test {
     new ::wm::DefaultActivationClient(helper_->root_window());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     test_window_.reset();
     delegate_.reset();
     helper_->RunAllPendingInMessageLoop();
@@ -115,7 +114,8 @@ class SnapshotAuraTest : public testing::Test {
 
   void WaitForDraw() {
     helper_->host()->compositor()->ScheduleDraw();
-    ui::DrawWaiterForTest::Wait(helper_->host()->compositor());
+    ui::DrawWaiterForTest::WaitForCompositingEnded(
+        helper_->host()->compositor());
   }
 
   void SetupTestWindow(const gfx::Rect& window_bounds) {

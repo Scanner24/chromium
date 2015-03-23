@@ -65,7 +65,7 @@ class SupervisedUserCreationScreenHandler : public BaseScreenHandler {
   };
 
   SupervisedUserCreationScreenHandler();
-  virtual ~SupervisedUserCreationScreenHandler();
+  ~SupervisedUserCreationScreenHandler() override;
 
   virtual void PrepareToShow();
   virtual void Show();
@@ -75,7 +75,6 @@ class SupervisedUserCreationScreenHandler : public BaseScreenHandler {
   void ShowManagerPasswordError();
 
   void ShowIntroPage();
-  void ShowManagerSelectionPage();
   void ShowUsernamePage();
 
   // Shows progress or error message close in the button area. |is_progress| is
@@ -95,11 +94,12 @@ class SupervisedUserCreationScreenHandler : public BaseScreenHandler {
   void ShowExistingSupervisedUsers(const base::ListValue* users);
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  void DeclareLocalizedValues(
+      ::login::LocalizedValuesBuilder* builder) override;
+  void Initialize() override;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // WebUI message handlers.

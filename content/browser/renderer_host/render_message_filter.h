@@ -27,6 +27,7 @@
 #include "media/base/channel_layout.h"
 #include "net/cookies/canonical_cookie.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/surface/transport_dib.h"
@@ -46,6 +47,7 @@
 #endif
 
 struct FontDescriptor;
+struct FrameHostMsg_AddNavigationTransitionData_Params;
 struct ViewHostMsg_CreateWindow_Params;
 
 namespace blink {
@@ -100,13 +102,13 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
                       DOMStorageContextWrapper* dom_storage_context);
 
   // IPC::MessageFilter methods:
-  virtual void OnChannelClosing() OVERRIDE;
+  void OnChannelClosing() override;
 
   // BrowserMessageFilter methods:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnDestruct() const OVERRIDE;
-  virtual base::TaskRunner* OverrideTaskRunnerForMessage(
-      const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OnDestruct() const override;
+  base::TaskRunner* OverrideTaskRunnerForMessage(
+      const IPC::Message& message) override;
 
   bool OffTheRecord() const;
 
@@ -118,7 +120,7 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   net::CookieStore* GetCookieStoreForURL(const GURL& url);
 
  protected:
-  virtual ~RenderMessageFilter();
+  ~RenderMessageFilter() override;
 
   // This method will be overridden by TestSaveImageFromDataURL class for test.
   virtual void DownloadUrl(int render_view_id,
@@ -203,6 +205,9 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
                                              bool is_external);
   void OnOpenChannelToPpapiBroker(int routing_id,
                                   const base::FilePath& path);
+  void OnPluginInstanceThrottleStateChange(int plugin_child_id,
+                                           int32 pp_instance,
+                                           bool is_throttled);
 #endif  // defined(ENABLE_PLUGINS)
   void OnGenerateRoutingID(int* route_id);
   void OnDownloadUrl(int render_view_id,
@@ -210,8 +215,6 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
                      const Referrer& referrer,
                      const base::string16& suggested_name);
   void OnSaveImageFromDataURL(int render_view_id, const std::string& url_str);
-  void OnCheckNotificationPermission(const GURL& source_origin,
-                                     int* permission_level);
 
   void OnGetAudioHardwareConfig(media::AudioParameters* input_params,
                                 media::AudioParameters* output_params);
@@ -238,13 +241,13 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   void OnDeletedSharedBitmap(const cc::SharedBitmapId& id);
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
-  // Browser side transport DIB allocation
-  void OnAllocTransportDIB(uint32 size,
-                           bool cache_in_browser,
-                           TransportDIB::Handle* result);
-  void OnFreeTransportDIB(TransportDIB::Id dib_id);
+  // Browser side discardable shared memory allocation.
+  void OnAllocateLockedDiscardableSharedMemory(
+      uint32 size,
+      base::SharedMemoryHandle* handle);
+
   void OnCacheableMetadataAvailable(const GURL& url,
-                                    double expected_response_time,
+                                    base::Time expected_response_time,
                                     const std::vector<char>& data);
   void OnKeygen(uint32 key_size_index, const std::string& challenge_string,
                 const GURL& url, IPC::Message* reply_msg);
@@ -288,20 +291,17 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
 #endif
 
   void OnAddNavigationTransitionData(
-    int render_frame_id,
-    const std::string& allowed_destination_host_pattern,
-    const std::string& selector,
-    const std::string& markup);
+      FrameHostMsg_AddNavigationTransitionData_Params params);
 
   void OnAllocateGpuMemoryBuffer(uint32 width,
                                  uint32 height,
-                                 uint32 internalformat,
-                                 uint32 usage,
+                                 gfx::GpuMemoryBuffer::Format format,
+                                 gfx::GpuMemoryBuffer::Usage usage,
                                  IPC::Message* reply);
   void GpuMemoryBufferAllocated(IPC::Message* reply,
                                 const gfx::GpuMemoryBufferHandle& handle);
-  void OnDeletedGpuMemoryBuffer(gfx::GpuMemoryBufferType type,
-                                const gfx::GpuMemoryBufferId& id);
+  void OnDeletedGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
+                                uint32 sync_point);
 
   // Cached resource request dispatcher host and plugin service, guaranteed to
   // be non-null if Init succeeds. We do not own the objects, they are managed

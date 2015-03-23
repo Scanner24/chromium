@@ -17,7 +17,7 @@
 #include "media/base/android/media_player_android.h"
 #include "media/base/android/media_player_manager.h"
 #include "media/base/android/media_url_interceptor.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "url/gurl.h"
 
 namespace media {
@@ -54,12 +54,9 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
 
   ContentViewCoreImpl* GetContentViewCore() const;
 
-  virtual ~BrowserMediaPlayerManager();
+  ~BrowserMediaPlayerManager() override;
 
   // Fullscreen video playback controls.
-  virtual void FullscreenPlayerPlay();
-  virtual void FullscreenPlayerPause();
-  virtual void FullscreenPlayerSeek(int msec);
   virtual void ExitFullscreen(bool release_media_player);
   virtual void SetVideoSurface(gfx::ScopedJavaSurface surface);
 
@@ -71,32 +68,28 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   void ReleaseAllMediaPlayers();
 
   // media::MediaPlayerManager overrides.
-  virtual void OnTimeUpdate(
-      int player_id,
-      base::TimeDelta current_timestamp,
-      base::TimeTicks current_time_ticks) OVERRIDE;
-  virtual void OnMediaMetadataChanged(
-      int player_id,
-      base::TimeDelta duration,
-      int width,
-      int height,
-      bool success) OVERRIDE;
-  virtual void OnPlaybackComplete(int player_id) OVERRIDE;
-  virtual void OnMediaInterrupted(int player_id) OVERRIDE;
-  virtual void OnBufferingUpdate(int player_id, int percentage) OVERRIDE;
-  virtual void OnSeekComplete(
-      int player_id,
-      const base::TimeDelta& current_time) OVERRIDE;
-  virtual void OnError(int player_id, int error) OVERRIDE;
-  virtual void OnVideoSizeChanged(
-      int player_id, int width, int height) OVERRIDE;
-  virtual media::MediaResourceGetter* GetMediaResourceGetter() OVERRIDE;
-  virtual media::MediaUrlInterceptor* GetMediaUrlInterceptor() OVERRIDE;
-  virtual media::MediaPlayerAndroid* GetFullscreenPlayer() OVERRIDE;
-  virtual media::MediaPlayerAndroid* GetPlayer(int player_id) OVERRIDE;
-  virtual void RequestFullScreen(int player_id) OVERRIDE;
+  void OnTimeUpdate(int player_id,
+                    base::TimeDelta current_timestamp,
+                    base::TimeTicks current_time_ticks) override;
+  void OnMediaMetadataChanged(int player_id,
+                              base::TimeDelta duration,
+                              int width,
+                              int height,
+                              bool success) override;
+  void OnPlaybackComplete(int player_id) override;
+  void OnMediaInterrupted(int player_id) override;
+  void OnBufferingUpdate(int player_id, int percentage) override;
+  void OnSeekComplete(int player_id,
+                      const base::TimeDelta& current_time) override;
+  void OnError(int player_id, int error) override;
+  void OnVideoSizeChanged(int player_id, int width, int height) override;
+  media::MediaResourceGetter* GetMediaResourceGetter() override;
+  media::MediaUrlInterceptor* GetMediaUrlInterceptor() override;
+  media::MediaPlayerAndroid* GetFullscreenPlayer() override;
+  media::MediaPlayerAndroid* GetPlayer(int player_id) override;
+  void RequestFullScreen(int player_id) override;
 #if defined(VIDEO_HOLE)
-  virtual bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo() OVERRIDE;
+  bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo() override;
 
   void AttachExternalVideoSurface(int player_id, jobject surface);
   void DetachExternalVideoSurface(int player_id);
@@ -169,6 +162,7 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   void ReleasePlayer(media::MediaPlayerAndroid* player);
 
 #if defined(VIDEO_HOLE)
+  void ReleasePlayerOfExternalVideoSurfaceIfNeeded(int future_player);
   void OnRequestExternalSurface(int player_id, const gfx::RectF& rect);
 #endif  // defined(VIDEO_HOLE)
 

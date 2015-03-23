@@ -11,13 +11,15 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_check_screen_actor.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
-#include "chrome/browser/chromeos/login/screens/error_screen.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
+#include "chrome/browser/chromeos/login/screens/network_error.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 
 namespace chromeos {
 
+class BaseScreenDelegate;
+class ErrorScreensHistogramHelper;
 class ScreenManager;
-class ScreenObserver;
 
 // Handles the control flow after OOBE auto-update completes to wait for the
 // enterprise auto-enrollment check that happens as part of OOBE. This includes
@@ -26,13 +28,12 @@ class ScreenObserver;
 // doesn't actually drive a dedicated screen.
 class AutoEnrollmentCheckScreen
     : public AutoEnrollmentCheckScreenActor::Delegate,
-      public WizardScreen,
+      public BaseScreen,
       public NetworkPortalDetector::Observer {
  public:
-  AutoEnrollmentCheckScreen(
-      ScreenObserver* observer,
-      AutoEnrollmentCheckScreenActor* actor);
-  virtual ~AutoEnrollmentCheckScreen();
+  AutoEnrollmentCheckScreen(BaseScreenDelegate* base_screen_delegate,
+                            AutoEnrollmentCheckScreenActor* actor);
+  ~AutoEnrollmentCheckScreen() override;
 
   static AutoEnrollmentCheckScreen* Get(ScreenManager* manager);
 
@@ -44,19 +45,19 @@ class AutoEnrollmentCheckScreen
     auto_enrollment_controller_ = auto_enrollment_controller;
   }
 
-  // WizardScreen implementation:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen implementation:
+  void PrepareToShow() override;
+  void Show() override;
+  void Hide() override;
+  std::string GetName() const override;
 
   // AutoEnrollmentCheckScreenActor::Delegate implementation:
-  virtual void OnActorDestroyed(AutoEnrollmentCheckScreenActor* actor) OVERRIDE;
+  void OnActorDestroyed(AutoEnrollmentCheckScreenActor* actor) override;
 
   // NetworkPortalDetector::Observer implementation:
-  virtual void OnPortalDetectionCompleted(
+  void OnPortalDetectionCompleted(
       const NetworkState* network,
-      const NetworkPortalDetector::CaptivePortalState& state) OVERRIDE;
+      const NetworkPortalDetector::CaptivePortalState& state) override;
 
  private:
   // Handles update notifications regarding the auto-enrollment check.
@@ -76,15 +77,12 @@ class AutoEnrollmentCheckScreen
       policy::AutoEnrollmentState auto_enrollment_state);
 
   // Configures the error screen.
-  void ShowErrorScreen(ErrorScreen::ErrorState error_state);
+  void ShowErrorScreen(NetworkError::ErrorState error_state);
 
   // Asynchronously signals completion. The owner might destroy |this| in
   // response, so no code should be run after the completion of a message loop
   // task, in which this function was called.
   void SignalCompletion();
-
-  // Terminates the screen.
-  void CallOnExit();
 
   // Returns whether enrollment check was completed and decision was made.
   bool IsCompleted() const;
@@ -97,6 +95,8 @@ class AutoEnrollmentCheckScreen
 
   NetworkPortalDetector::CaptivePortalStatus captive_portal_status_;
   policy::AutoEnrollmentState auto_enrollment_state_;
+
+  scoped_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 
   base::WeakPtrFactory<AutoEnrollmentCheckScreen> weak_ptr_factory_;
 

@@ -29,9 +29,16 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
                          public base::SupportsUserData::Data {
  public:
   explicit GuestViewManager(content::BrowserContext* context);
-  virtual ~GuestViewManager();
+  ~GuestViewManager() override;
 
+  // Returns the GuestViewManager associated with |context|. If one isn't
+  // available, then it is created and returned.
   static GuestViewManager* FromBrowserContext(content::BrowserContext* context);
+
+  // Returns the GuestViewManager associated with |context|. If one isn't
+  // available, then nullptr is returned.
+  static GuestViewManager* FromBrowserContextIfAvailable(
+      content::BrowserContext* context);
 
   // Overrides factory for testing. Default (NULL) value indicates regular
   // (non-test) environment.
@@ -50,40 +57,42 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   // Associates the Browser Plugin with |element_instance_id| to a
   // guest that has ID of |guest_instance_id| and sets initialization
   // parameters, |params| for it.
-  void AttachGuest(int embedder_render_process_id,
-                   int embedder_routing_id,
+  void AttachGuest(int embedder_process_id,
                    int element_instance_id,
                    int guest_instance_id,
                    const base::DictionaryValue& attach_params);
 
+  // Removes the association between |element_instance_id| and a guest instance
+  // ID if one exists.
+  void DetachGuest(GuestViewBase* guest);
+
   int GetNextInstanceID();
   int GetGuestInstanceIDForElementID(
-      content::WebContents* embedder_web_contents,
+      int owner_process_id,
       int element_instance_id);
 
-  typedef base::Callback<void(content::WebContents*)>
-      WebContentsCreatedCallback;
+  using WebContentsCreatedCallback =
+      base::Callback<void(content::WebContents*)>;
   void CreateGuest(const std::string& view_type,
-                   const std::string& embedder_extension_id,
-                   content::WebContents* embedder_web_contents,
+                   content::WebContents* owner_web_contents,
                    const base::DictionaryValue& create_params,
                    const WebContentsCreatedCallback& callback);
 
   content::WebContents* CreateGuestWithWebContentsParams(
       const std::string& view_type,
-      const std::string& embedder_extension_id,
-      int embedder_render_process_id,
+      content::WebContents* owner_web_contents,
       const content::WebContents::CreateParams& create_params);
 
   content::SiteInstance* GetGuestSiteInstance(
       const GURL& guest_site);
 
   // BrowserPluginGuestManager implementation.
-  virtual content::WebContents* GetGuestByInstanceID(
-      content::WebContents* embedder_web_contents,
-      int element_instance_id) OVERRIDE;
-  virtual bool ForEachGuest(content::WebContents* embedder_web_contents,
-                            const GuestCallback& callback) OVERRIDE;
+  content::WebContents* GetGuestByInstanceID(
+      int owner_process_id,
+      int element_instance_id) override;
+  bool ForEachGuest(content::WebContents* owner_web_contents,
+                    const GuestCallback& callback) override;
+
  protected:
   friend class GuestViewBase;
   FRIEND_TEST_ALL_PREFIXES(GuestViewManagerTest, AddRemove);
@@ -114,27 +123,26 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   static GuestViewManagerFactory* factory_;
 
   // Contains guests' WebContents, mapping from their instance ids.
-  typedef std::map<int, content::WebContents*> GuestInstanceMap;
+  using GuestInstanceMap = std::map<int, content::WebContents*>;
   GuestInstanceMap guest_web_contents_by_instance_id_;
 
   struct ElementInstanceKey {
-    content::WebContents* embedder_web_contents;
+    int embedder_process_id;
     int element_instance_id;
-    ElementInstanceKey(content::WebContents* embedder_web_contents,
-                       int element_instance_id)
-        : embedder_web_contents(embedder_web_contents),
-          element_instance_id(element_instance_id) {}
-    bool operator<(const ElementInstanceKey& other) const {
-      if (embedder_web_contents != other.embedder_web_contents)
-        return embedder_web_contents < other.embedder_web_contents;
-      return element_instance_id < other.element_instance_id;
-    }
+
+    ElementInstanceKey();
+    ElementInstanceKey(int embedder_process_id,
+                       int element_instance_id);
+
+    bool operator<(const ElementInstanceKey& other) const;
+    bool operator==(const ElementInstanceKey& other) const;
   };
 
-  typedef std::map<ElementInstanceKey, int> GuestInstanceIDMap;
+  using GuestInstanceIDMap = std::map<ElementInstanceKey, int>;
   GuestInstanceIDMap instance_id_map_;
+
   // The reverse map of GuestInstanceIDMap.
-  typedef std::map<int, ElementInstanceKey> GuestInstanceIDReverseMap;
+  using GuestInstanceIDReverseMap = std::map<int, ElementInstanceKey>;
   GuestInstanceIDReverseMap reverse_instance_id_map_;
 
   int current_instance_id_;

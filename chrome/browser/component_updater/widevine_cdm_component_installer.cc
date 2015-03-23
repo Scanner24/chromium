@@ -83,8 +83,8 @@ const char kWidevineCdmArch[] =
 // All values that are lists are delimited by commas. No trailing commas.
 // For example, "1,2,4".
 const char kCdmValueDelimiter = ',';
-COMPILE_ASSERT(kCdmValueDelimiter == kCdmSupportedCodecsValueDelimiter,
-               cdm_delimiters_do_not_match);
+static_assert(kCdmValueDelimiter == kCdmSupportedCodecsValueDelimiter,
+              "cdm delimiters must match");
 // The following entries are required.
 //  Interface versions are lists of integers (e.g. "1" or "1,2,4").
 //  These are checked in this file before registering the CDM.
@@ -234,22 +234,23 @@ void RegisterWidevineCdmWithChrome(const base::Version& cdm_version,
 class WidevineCdmComponentInstallerTraits : public ComponentInstallerTraits {
  public:
   WidevineCdmComponentInstallerTraits();
-  virtual ~WidevineCdmComponentInstallerTraits() {}
+  ~WidevineCdmComponentInstallerTraits() override {}
 
  private:
   // The following methods override ComponentInstallerTraits.
-  virtual bool CanAutoUpdate() const OVERRIDE;
-  virtual bool OnCustomInstall(const base::DictionaryValue& manifest,
-                               const base::FilePath& install_dir) OVERRIDE;
-  virtual bool VerifyInstallation(
-      const base::FilePath& install_dir) const OVERRIDE;
-  virtual void ComponentReady(
+  bool CanAutoUpdate() const override;
+  bool OnCustomInstall(const base::DictionaryValue& manifest,
+                               const base::FilePath& install_dir) override;
+  bool VerifyInstallation(
+      const base::DictionaryValue& manifest,
+      const base::FilePath& install_dir) const override;
+  void ComponentReady(
       const base::Version& version,
       const base::FilePath& path,
-      scoped_ptr<base::DictionaryValue> manifest) OVERRIDE;
-  virtual base::FilePath GetBaseDirectory() const OVERRIDE;
-  virtual void GetHash(std::vector<uint8_t>* hash) const OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+      scoped_ptr<base::DictionaryValue> manifest) override;
+  base::FilePath GetBaseDirectory() const override;
+  void GetHash(std::vector<uint8_t>* hash) const override;
+  std::string GetName() const override;
 
   // Checks and updates CDM adapter if necessary to make sure the latest CDM
   // adapter is always used.
@@ -296,9 +297,11 @@ void WidevineCdmComponentInstallerTraits::ComponentReady(
 }
 
 bool WidevineCdmComponentInstallerTraits::VerifyInstallation(
+    const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) const {
-  return base::PathExists(
-      GetPlatformDirectory(install_dir).AppendASCII(kWidevineCdmFileName));
+  return IsCompatibleWithChrome(manifest) &&
+         base::PathExists(GetPlatformDirectory(install_dir)
+                              .AppendASCII(kWidevineCdmFileName));
 }
 
 // The base directory on Windows looks like:

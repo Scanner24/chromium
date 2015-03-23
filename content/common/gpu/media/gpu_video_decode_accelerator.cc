@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/stl_util.h"
 
@@ -21,6 +22,7 @@
 #include "ipc/message_filter.h"
 #include "media/base/limits.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_image.h"
 #include "ui/gl/gl_surface_egl.h"
 
 #if defined(OS_WIN)
@@ -28,20 +30,23 @@
 #include "content/common/gpu/media/dxva_video_decode_accelerator.h"
 #elif defined(OS_MACOSX)
 #include "content/common/gpu/media/vt_video_decode_accelerator.h"
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL) && defined(USE_X11)
+#elif defined(OS_CHROMEOS)
+#if defined(USE_V4L2_CODEC)
+#include "content/common/gpu/media/v4l2_slice_video_decode_accelerator.h"
 #include "content/common/gpu/media/v4l2_video_decode_accelerator.h"
 #include "content/common/gpu/media/v4l2_video_device.h"
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY) && defined(USE_X11)
+#endif
+#if defined(ARCH_CPU_X86_FAMILY)
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
-#include "ui/gl/gl_context_glx.h"
 #include "ui/gl/gl_implementation.h"
+#endif
 #elif defined(USE_OZONE)
 #include "media/ozone/media_ozone_platform.h"
 #elif defined(OS_ANDROID)
 #include "content/common/gpu/media/android_video_decode_accelerator.h"
 #endif
 
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace content {
 
@@ -62,7 +67,7 @@ static bool MakeDecoderContextCurrent(
 
 // DebugAutoLock works like AutoLock but only acquires the lock when
 // DCHECK is on.
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
 typedef base::AutoLock DebugAutoLock;
 #else
 class DebugAutoLock {
@@ -76,20 +81,18 @@ class GpuVideoDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
   MessageFilter(GpuVideoDecodeAccelerator* owner, int32 host_route_id)
       : owner_(owner), host_route_id_(host_route_id) {}
 
-  virtual void OnChannelError() OVERRIDE { sender_ = NULL; }
+  void OnChannelError() override { sender_ = NULL; }
 
-  virtual void OnChannelClosing() OVERRIDE { sender_ = NULL; }
+  void OnChannelClosing() override { sender_ = NULL; }
 
-  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE {
-    sender_ = sender;
-  }
+  void OnFilterAdded(IPC::Sender* sender) override { sender_ = sender; }
 
-  virtual void OnFilterRemoved() OVERRIDE {
+  void OnFilterRemoved() override {
     // This will delete |owner_| and |this|.
     owner_->OnFilterRemoved();
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& msg) override {
     if (msg.routing_id() != host_route_id_)
       return false;
 
@@ -111,7 +114,7 @@ class GpuVideoDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
   }
 
  protected:
-  virtual ~MessageFilter() {}
+  ~MessageFilter() override {}
 
  private:
   GpuVideoDecodeAccelerator* owner_;
@@ -210,10 +213,9 @@ void GpuVideoDecodeAccelerator::PictureReady(
   }
 
   if (!Send(new AcceleratedVideoDecoderHostMsg_PictureReady(
-          host_route_id_,
-          picture.picture_buffer_id(),
-          picture.bitstream_buffer_id(),
-          picture.visible_rect()))) {
+          host_route_id_, picture.picture_buffer_id(),
+          picture.bitstream_buffer_id(), picture.visible_rect(),
+          picture.allow_overlay()))) {
     DLOG(ERROR) << "Send(AcceleratedVideoDecoderHostMsg_PictureReady) failed";
   }
 }
@@ -247,73 +249,143 @@ void GpuVideoDecodeAccelerator::Initialize(
   }
 #endif
 
-#if defined(OS_WIN)
-  if (base::win::GetVersion() < base::win::VERSION_WIN7) {
-    NOTIMPLEMENTED() << "HW video decode acceleration not available.";
-    SendCreateDecoderReply(init_done_msg, false);
+  std::vector<GpuVideoDecodeAccelerator::CreateVDAFp>
+      create_vda_fps = CreateVDAFps();
+
+  for (size_t i = 0; i < create_vda_fps.size(); ++i) {
+    video_decode_accelerator_ = (this->*create_vda_fps[i])();
+    if (!video_decode_accelerator_ ||
+        !video_decode_accelerator_->Initialize(profile, this))
+      continue;
+
+    if (video_decode_accelerator_->CanDecodeOnIOThread()) {
+      filter_ = new MessageFilter(this, host_route_id_);
+      stub_->channel()->AddFilter(filter_.get());
+    }
+    SendCreateDecoderReply(init_done_msg, true);
     return;
   }
-  DVLOG(0) << "Initializing DXVA HW decoder for windows.";
-  video_decode_accelerator_.reset(
-      new DXVAVideoDecodeAccelerator(make_context_current_));
-#elif defined(OS_MACOSX)
-  video_decode_accelerator_.reset(new VTVideoDecodeAccelerator(
-      static_cast<CGLContextObj>(
-          stub_->decoder()->GetGLContext()->GetHandle())));
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL) && defined(USE_X11)
-  scoped_ptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kDecoder);
-  if (!device.get()) {
-    SendCreateDecoderReply(init_done_msg, false);
-    return;
-  }
-  video_decode_accelerator_.reset(new V4L2VideoDecodeAccelerator(
-      gfx::GLSurfaceEGL::GetHardwareDisplay(),
-      stub_->decoder()->GetGLContext()->GetHandle(),
-      weak_factory_for_io_.GetWeakPtr(),
-      make_context_current_,
-      device.Pass(),
-      io_message_loop_));
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY) && defined(USE_X11)
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationDesktopGL) {
-    VLOG(1) << "HW video decode acceleration not available without "
-               "DesktopGL (GLX).";
-    SendCreateDecoderReply(init_done_msg, false);
-    return;
-  }
-  gfx::GLContextGLX* glx_context =
-      static_cast<gfx::GLContextGLX*>(stub_->decoder()->GetGLContext());
-  video_decode_accelerator_.reset(new VaapiVideoDecodeAccelerator(
-      glx_context->display(), make_context_current_));
-#elif defined(USE_OZONE)
-  media::MediaOzonePlatform* platform =
-      media::MediaOzonePlatform::GetInstance();
-  video_decode_accelerator_.reset(platform->CreateVideoDecodeAccelerator(
-      make_context_current_));
-  if (!video_decode_accelerator_) {
-    SendCreateDecoderReply(init_done_msg, false);
-    return;
-  }
-#elif defined(OS_ANDROID)
-  video_decode_accelerator_.reset(new AndroidVideoDecodeAccelerator(
-      stub_->decoder()->AsWeakPtr(),
-      make_context_current_));
-#else
+  video_decode_accelerator_.reset();
   NOTIMPLEMENTED() << "HW video decode acceleration not available.";
   SendCreateDecoderReply(init_done_msg, false);
-  return;
+}
+
+std::vector<GpuVideoDecodeAccelerator::CreateVDAFp>
+GpuVideoDecodeAccelerator::CreateVDAFps() {
+  std::vector<GpuVideoDecodeAccelerator::CreateVDAFp> create_vda_fps;
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateDXVAVDA);
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateV4L2VDA);
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateV4L2SliceVDA);
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateVaapiVDA);
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateVTVDA);
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateOzoneVDA);
+  create_vda_fps.push_back(&GpuVideoDecodeAccelerator::CreateAndroidVDA);
+  return create_vda_fps;
+}
+
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateDXVAVDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
+    DVLOG(0) << "Initializing DXVA HW decoder for windows.";
+    decoder.reset(new DXVAVideoDecodeAccelerator(make_context_current_));
+  } else {
+    NOTIMPLEMENTED() << "HW video decode acceleration not available.";
+  }
 #endif
+  return decoder.Pass();
+}
 
-  if (video_decode_accelerator_->CanDecodeOnIOThread()) {
-    filter_ = new MessageFilter(this, host_route_id_);
-    stub_->channel()->AddFilter(filter_.get());
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateV4L2VDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
+  scoped_refptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kDecoder);
+  if (device.get()) {
+    decoder.reset(new V4L2VideoDecodeAccelerator(
+        gfx::GLSurfaceEGL::GetHardwareDisplay(),
+        stub_->decoder()->GetGLContext()->GetHandle(),
+        weak_factory_for_io_.GetWeakPtr(),
+        make_context_current_,
+        device,
+        io_message_loop_));
   }
+#endif
+  return decoder.Pass();
+}
 
-  if (!video_decode_accelerator_->Initialize(profile, this)) {
-    SendCreateDecoderReply(init_done_msg, false);
-    return;
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateV4L2SliceVDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
+  scoped_refptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kDecoder);
+  if (device.get()) {
+    decoder.reset(new V4L2SliceVideoDecodeAccelerator(
+        device,
+        gfx::GLSurfaceEGL::GetHardwareDisplay(),
+        stub_->decoder()->GetGLContext()->GetHandle(),
+        weak_factory_for_io_.GetWeakPtr(),
+        make_context_current_,
+        io_message_loop_));
   }
+#endif
+  return decoder.Pass();
+}
 
-  SendCreateDecoderReply(init_done_msg, true);
+void GpuVideoDecodeAccelerator::BindImage(uint32 client_texture_id,
+                                          uint32 texture_target,
+                                          scoped_refptr<gfx::GLImage> image) {
+  gpu::gles2::GLES2Decoder* command_decoder = stub_->decoder();
+  gpu::gles2::TextureManager* texture_manager =
+      command_decoder->GetContextGroup()->texture_manager();
+  gpu::gles2::TextureRef* ref = texture_manager->GetTexture(client_texture_id);
+  if (ref)
+    texture_manager->SetLevelImage(ref, texture_target, 0, image.get());
+}
+
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateVaapiVDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+  decoder.reset(new VaapiVideoDecodeAccelerator(
+      make_context_current_, base::Bind(&GpuVideoDecodeAccelerator::BindImage,
+                                        base::Unretained(this))));
+#endif
+  return decoder.Pass();
+}
+
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateVTVDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if defined(OS_MACOSX)
+  decoder.reset(new VTVideoDecodeAccelerator(
+      static_cast<CGLContextObj>(stub_->decoder()->GetGLContext()->GetHandle()),
+      make_context_current_));
+#endif
+  return decoder.Pass();
+}
+
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateOzoneVDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if !defined(OS_CHROMEOS) && defined(USE_OZONE)
+  media::MediaOzonePlatform* platform =
+      media::MediaOzonePlatform::GetInstance();
+  decoder.reset(platform->CreateVideoDecodeAccelerator(make_context_current_));
+#endif
+  return decoder.Pass();
+}
+
+scoped_ptr<media::VideoDecodeAccelerator>
+GpuVideoDecodeAccelerator::CreateAndroidVDA() {
+  scoped_ptr<media::VideoDecodeAccelerator> decoder;
+#if defined(OS_ANDROID)
+  decoder.reset(new AndroidVideoDecodeAccelerator(
+      stub_->decoder()->AsWeakPtr(),
+      make_context_current_));
+#endif
+  return decoder.Pass();
 }
 
 // Runs on IO thread if video_decode_accelerator_->CanDecodeOnIOThread() is
@@ -372,18 +444,18 @@ void GpuVideoDecodeAccelerator::OnAssignPictureBuffers(
       return;
     }
     if (texture_target_ == GL_TEXTURE_EXTERNAL_OES ||
-        texture_target_ == GL_TEXTURE_RECTANGLE) {
+        texture_target_ == GL_TEXTURE_RECTANGLE_ARB) {
       // These textures have their dimensions defined by the underlying storage.
       // Use |texture_dimensions_| for this size.
       texture_manager->SetLevelInfo(texture_ref,
                                     texture_target_,
                                     0,
-                                    0,
+                                    GL_RGBA,
                                     texture_dimensions_.width(),
                                     texture_dimensions_.height(),
                                     1,
                                     0,
-                                    0,
+                                    GL_RGBA,
                                     0,
                                     false);
     } else {
@@ -396,16 +468,18 @@ void GpuVideoDecodeAccelerator::OnAssignPictureBuffers(
         NotifyError(media::VideoDecodeAccelerator::INVALID_ARGUMENT);
         return;
       }
+
+      // TODO(dshwang): after moving to D3D11, remove this. crbug.com/438691
+      GLenum format =
+          video_decode_accelerator_.get()->GetSurfaceInternalFormat();
+      if (format != GL_RGBA) {
+        texture_manager->SetLevelInfo(texture_ref, texture_target_, 0, format,
+                                      width, height, 1, 0, format, 0, false);
+      }
     }
-    uint32 service_texture_id;
-    if (!command_decoder->GetServiceTextureId(
-            texture_ids[i], &service_texture_id)) {
-      DLOG(ERROR) << "Failed to translate texture!";
-      NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
-      return;
-    }
-    buffers.push_back(media::PictureBuffer(
-        buffer_ids[i], texture_dimensions_, service_texture_id));
+    buffers.push_back(media::PictureBuffer(buffer_ids[i], texture_dimensions_,
+                                           texture_ref->service_id(),
+                                           texture_ids[i]));
     textures.push_back(texture_ref);
   }
   video_decode_accelerator_->AssignPictureBuffers(buffers);

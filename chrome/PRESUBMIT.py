@@ -5,7 +5,7 @@
 """Presubmit script for changes affecting chrome/
 
 See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
-for more details about the presubmit API built into gcl.
+for more details about the presubmit API built into depot_tools.
 """
 
 import re
@@ -26,20 +26,8 @@ EXCLUDE = (
   r'.*resource.h$',
   # Header trickery
   r'.*-inl\.h$',
-  # Templates
-  r'sigslotrepeater\.h$',
-  # GCC attribute trickery
-  r'sel_main\.cc$',
-  # Mozilla code
-  r'mork_reader\.h$',
-  r'mork_reader\.cc$',
-  r'nss_decryptor_linux\.cc$',
   # Has safe printf usage that cpplint complains about
   r'safe_browsing_util\.cc$',
-  # Bogus ifdef tricks
-  r'renderer_webkitplatformsupport_impl\.cc$',
-  # Lines > 100 chars
-  r'gcapi\.cc$',
 )
 
 def _CheckChangeLintsClean(input_api, output_api):

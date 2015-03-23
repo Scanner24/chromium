@@ -26,14 +26,11 @@ class ChromiumApplication {
   // Opens a protected content settings page, if available.
   static void OpenProtectedContentSettings();
 
-  // Opens the sync settings page.
-  static void ShowSyncSettings();
-
   // Opens the autofill settings page.
   static void ShowAutofillSettings();
 
-  // Shows a dialog with the terms of service.
-  static void ShowTermsOfServiceDialog();
+  // Opens the password settings page.
+  static void ShowPasswordSettings();
 
   // Open the clear browsing data UI.
   static void OpenClearBrowsingData(content::WebContents* web_contents);

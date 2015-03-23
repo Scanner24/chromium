@@ -12,6 +12,7 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "components/bookmarks/browser/bookmark_node.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "policy/policy_constants.h"
@@ -19,6 +20,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/base/layout.h"
 
+using bookmarks::BookmarkNode;
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::AddURL;
 using bookmarks_helper::AllModelsMatch;
@@ -64,9 +66,9 @@ const char kValidPassphrase[] = "passphrase!";
 class TwoClientBookmarksSyncTest : public SyncTest {
  public:
   TwoClientBookmarksSyncTest() : SyncTest(TWO_CLIENT) {}
-  virtual ~TwoClientBookmarksSyncTest() {}
+  ~TwoClientBookmarksSyncTest() override {}
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  void TearDownInProcessBrowserTestFixture() override {
     SyncTest::TearDownInProcessBrowserTestFixture();
     policy_provider_.Shutdown();
   }
@@ -82,7 +84,7 @@ class TwoClientBookmarksSyncTest : public SyncTest {
 class LegacyTwoClientBookmarksSyncTest : public SyncTest {
  public:
   LegacyTwoClientBookmarksSyncTest() : SyncTest(TWO_CLIENT_LEGACY) {}
-  virtual ~LegacyTwoClientBookmarksSyncTest() {}
+  ~LegacyTwoClientBookmarksSyncTest() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LegacyTwoClientBookmarksSyncTest);
@@ -851,7 +853,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, SC_ReverseTheOrderOf10BMs) {
 
 // Test Scribe ID - 371954.
 // flaky on Windows: http://crbug.com/412169
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 #define MAYBE_SC_MovingBMsFromBMBarToBMFolder DISABLED_SC_MovingBMsFromBMBarToBMFolder
 #else
 #define MAYBE_SC_MovingBMsFromBMBarToBMFolder SC_MovingBMsFromBMBarToBMFolder
@@ -883,8 +885,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
 }
 
 // Test Scribe ID - 371957.
-// flaky on Windows: http://crbug.com/412169
-#if defined(OS_WIN)
+// flaky on Windows and Mac: http://crbug.com/412169
+#if defined(OS_WIN) || defined(OS_MACOSX)
 #define MAYBE_SC_MovingBMsFromBMFoldToBMBar DISABLED_SC_MovingBMsFromBMFoldToBMBar
 #else
 #define MAYBE_SC_MovingBMsFromBMFoldToBMBar SC_MovingBMsFromBMFoldToBMBar
@@ -1141,8 +1143,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
       ASSERT_TRUE(AddURL(0, folder, i, title, url) != NULL);
     }
     std::string title = IndexedFolderName(level);
-    folder = AddFolder(
-        0, folder, folder->child_count(), title);
+    folder = AddFolder(0, folder, folder->child_count(), title);
     ASSERT_TRUE(folder != NULL);
     if (level == 5) folder_L5 = folder;
   }

@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -429,8 +430,8 @@ class PopupZoomer extends View {
 
         canvas.save();
         // Calculate the elapsed fraction of animation.
-        float time = (SystemClock.uptimeMillis() - mAnimationStartTime + mTimeLeft) /
-                ((float) ANIMATION_DURATION);
+        float time = (SystemClock.uptimeMillis() - mAnimationStartTime + mTimeLeft)
+                / ((float) ANIMATION_DURATION);
         time = constrain(time, 0, 1);
         if (time >= 1) {
             mAnimating = false;
@@ -538,6 +539,7 @@ class PopupZoomer extends View {
         return !mClipRect.contains(x, y);
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         mGestureDetector.onTouchEvent(event);

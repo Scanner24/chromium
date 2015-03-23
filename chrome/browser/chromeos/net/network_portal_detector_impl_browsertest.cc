@@ -19,6 +19,7 @@
 #include "components/captive_portal/captive_portal_testing_utils.h"
 #include "content/public/test/test_utils.h"
 #include "dbus/object_path.h"
+#include "net/base/net_errors.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_observer.h"
@@ -31,11 +32,11 @@ namespace chromeos {
 
 namespace {
 
-const char* kNotificationId =
+const char* const kNotificationId =
     NetworkPortalNotificationController::kNotificationId;
-const char* kNotificationMetric =
+const char* const kNotificationMetric =
     NetworkPortalNotificationController::kNotificationMetric;
-const char* kUserActionMetric =
+const char* const kUserActionMetric =
     NetworkPortalNotificationController::kUserActionMetric;
 
 const char kTestUser[] = "test-user@gmail.com";
@@ -61,25 +62,22 @@ class TestObserver : public MessageCenterObserver {
     MessageCenter::Get()->AddObserver(this);
   }
 
-  virtual ~TestObserver() {
-    MessageCenter::Get()->RemoveObserver(this);
-  }
+  ~TestObserver() override { MessageCenter::Get()->RemoveObserver(this); }
 
   void WaitAndReset() {
     run_loop_->Run();
     run_loop_.reset(new base::RunLoop());
   }
 
-  virtual void OnNotificationDisplayed(
+  void OnNotificationDisplayed(
       const std::string& notification_id,
-      const message_center::DisplaySource source)
-      OVERRIDE {
+      const message_center::DisplaySource source) override {
     if (notification_id == kNotificationId)
       MessageLoop::current()->PostTask(FROM_HERE, run_loop_->QuitClosure());
   }
 
-  virtual void OnNotificationRemoved(const std::string& notification_id,
-                                     bool by_user) OVERRIDE {
+  void OnNotificationRemoved(const std::string& notification_id,
+                             bool by_user) override {
     if (notification_id == kNotificationId && by_user)
       MessageLoop::current()->PostTask(FROM_HERE, run_loop_->QuitClosure());
   }
@@ -98,9 +96,9 @@ class NetworkPortalDetectorImplBrowserTest
  public:
   NetworkPortalDetectorImplBrowserTest()
       : LoginManagerTest(false), network_portal_detector_(NULL) {}
-  virtual ~NetworkPortalDetectorImplBrowserTest() {}
+  ~NetworkPortalDetectorImplBrowserTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     LoginManagerTest::SetUpOnMainThread();
 
     ShillServiceClient::TestInterface* service_test =

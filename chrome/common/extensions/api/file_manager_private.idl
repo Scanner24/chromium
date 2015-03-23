@@ -18,6 +18,9 @@ enum DeviceType { usb, sd, optical, mobile, unknown };
 // supported.
 enum MountCondition { unknown, unsupported };
 
+// Additional information of the context the volume was mounted.
+enum MountContext { user, auto };
+
 // Is the event raised for mounting or unmounting.
 enum MountCompletedEventType { mount, unmount };
 
@@ -143,12 +146,25 @@ enum DriveShareType {
   can_view
 };
 
-// ImageSet that represents multi-scale images.
-dictionary ImageSet {
-  // 1x scale URL.
-  DOMString scale1xUrl;
-  // 2x scale URL.
-  DOMString scale2xUrl;
+// Names of properies for getEntryProperties().
+enum EntryPropertyName {
+  size,
+  modificationTime,
+  thumbnailUrl,
+  imageWidth,
+  imageHeight,
+  imageRotation,
+  pinned,
+  present,
+  hosted,
+  availableOffline,
+  availableWhenMetered,
+  dirty,
+  customIconUrl,
+  contentMimeType,
+  sharedWithMe,
+  shared,
+  externalFileUrl
 };
 
 // A file task represents an action that the file manager can perform over the
@@ -167,15 +183,21 @@ dictionary FileTask {
 
   // True if this task is a default task for the selected files.
   boolean isDefault;
+
+  // True if this task is from generic file handler. Generic file handler is a
+  // file handler which handles any type of files (e.g. extensions: ["*"],
+  // types: ["*/*"]). Partial wild card (e.g. types: ["image/*"]) is not
+  // generic file handler.
+  boolean isGenericFileHandler;
 };
 
 // Additional entry properties.
 dictionary EntryProperties {
   // Size of this file.
-  double? fileSize;
+  double? size;
 
   // Timestamp of entry update time, in milliseconds past the epoch.
-  double? lastModifiedTime;
+  double? modificationTime;
 
   // URL to the Drive thumbnail image for this file.
   DOMString? thumbnailUrl;
@@ -190,19 +212,22 @@ dictionary EntryProperties {
   long? imageRotation;
 
   // True if the file is pinned in cache.
-  boolean? isPinned;
+  boolean? pinned;
 
   // True if the file is present in cache.
-  boolean? isPresent;
+  boolean? present;
 
   // True if the file is hosted on a server instead of local.
-  boolean? isHosted;
+  boolean? hosted;
 
   // True if the file is available offline.
-  boolean? isAvailableOffline;
+  boolean? availableOffline;
 
   // True if the file is available on metered connection.
-  boolean? isAvailableWhenMetered;
+  boolean? availableWhenMetered;
+
+  // True if the file has local change (has not been fully synced to the cloud).
+  boolean? dirty;
 
   // URL to the custom icon for this file.
   DOMString? customIconUrl;
@@ -216,6 +241,9 @@ dictionary EntryProperties {
   // True if the entry is labeled as shared (either from me to others or to me
   // by others.)
   boolean? shared;
+
+  // External file URL to open the file in browser.
+  DOMString? externalFileUrl;
 };
 
 // Information about total and remaining size on the mount point.
@@ -279,9 +307,15 @@ dictionary VolumeMetadata {
   // Flag that specifies if volume is mounted in read-only mode.
   boolean isReadOnly;
 
+  // Flag that specifies whether the volume contains media.
+  boolean hasMedia;
+
   // Additional data about mount, for example, that the filesystem is not
   // supported.
   MountCondition? mountCondition;
+
+  // Context in which the volume has been mounted.
+  MountContext? mountContext;
 };
 
 // Payload data for mount event.
@@ -446,6 +480,10 @@ dictionary DriveConnectionState {
 
   // Reasons of offline.
   DOMString? reason;
+
+  // Whether the device has a cellular network access or not. i.e. the |type|
+  // can be 'metered' or not.
+  boolean hasCellularNetworkAccess;
 };
 
 // Device event dispatched to listeners of onDeviceChaged.  See also
@@ -460,11 +498,17 @@ dictionary DeviceEvent {
 // Callback that does not take arguments.
 callback SimpleCallback = void();
 
+// |result| Boolean result returned by the invoked function.
+callback BooleanCallback = void(boolean result);
+
 // |result| Result of the task execution.
 callback ExecuteTaskCallback = void(TaskResult result);
 
 // |tasks| The list of matched file URL patterns for this task.
 callback GetFileTasksCallback = void(FileTask[] tasks);
+
+// |result| Mime type of the file.
+callback GetMimeTypeCallback = void(DOMString result);
 
 // |result| Hash containing the string assets.
 callback GetStringsCallback = void(object result);
@@ -514,6 +558,10 @@ callback SearchDriveCallback =
 
 callback SearchDriveMetadataCallback = void(SearchResult[] results);
 
+// |urls| The map of hash and array of FileEntry's URL. The array can be empty
+// if the corresponding file is not found.
+callback SearchFilesByHashesCallback = void(object urls);
+
 callback ZipSelectionCallback = void(optional boolean success);
 
 callback GetDriveConnectionStateCallback = void(DriveConnectionState result);
@@ -540,6 +588,9 @@ callback GetProfilesCallback = void(ProfileInfo[] profiles,
 // |entryUrl| URL of an entry in a normal file system.
 callback ResolveEntriesCallback =
     void([instanceOf=FileEntry] object[] entries);
+
+// |checksum| Result checksum.
+callback ComputeChecksumCallback = void(DOMString checksum);
 
 interface Functions {
   // Logout the current user for navigating to the re-authentication screen for
@@ -573,6 +624,12 @@ interface Functions {
   // |callback|
   static void getFileTasks(DOMString[] fileUrls,
                            GetFileTasksCallback callback);
+
+  // Gets the MIME type of a file.
+  // |fileUrl| File url
+  // |callback|
+  static void getMimeType(DOMString fileUrl,
+                          GetMimeTypeCallback callback);
 
   // Gets localized strings and initialization data.
   // |callback|
@@ -626,9 +683,13 @@ interface Functions {
 
   // Requests additional properties for files.
   // |fileUrls| list of URLs of files
-  // |callback|
+  // |names| list of requested properties by their names.
+  // |callback| Completion callback. May return less than requested properties
+  //     if some are not available. In the same time, it can return properties
+  //     which were not requested (if it's cheap to compute them).
   static void getEntryProperties(
       DOMString[] fileUrls,
+      EntryPropertyName[] names,
       GetEntryPropertiesCallback callback);
 
   // Pins/unpins a Drive file in the cache.
@@ -665,10 +726,11 @@ interface Functions {
 
   // Cancels ongoing file transfers for selected files.
   // |fileUrls| Array of files for which ongoing transfer should be canceled.
-  //     If this is absent, all jobs are canceled. 
-  // |callback|
-  static void cancelFileTransfers(optional DOMString[] fileUrls,
-                                  CancelFileTransfersCallback callback);
+  //     If this is absent, all jobs are canceled.
+  // |callback| Completion callback of the cancel.
+  static void cancelFileTransfers(
+      optional DOMString[] fileUrls,
+      optional CancelFileTransfersCallback callback);
 
   // Starts to copy an entry. If the source is a directory, the copy is done
   // recursively.
@@ -714,6 +776,12 @@ interface Functions {
   // |callback|
   static void searchDriveMetadata(SearchMetadataParams searchParams,
                                   SearchDriveMetadataCallback callback);
+
+  // Search files in the volume having |volumeId| by using |hashList|.
+  // sub-directories) the given |targetDirectoryUrl|.
+  static void searchFilesByHashes(DOMString volumeId,
+                                  DOMString[] hashList,
+                                  SearchFilesByHashesCallback callback);
 
   // Create a zip file for the selected files.
   // |dirURL| URL of the directory containing the selected files.
@@ -783,13 +851,18 @@ interface Functions {
   // Obtains a list of profiles that are logged-in.
   static void getProfiles(GetProfilesCallback callback);
 
-  // Moves the window to other user's desktop.
-  static void visitDesktop(DOMString profileId,
-                           optional SimpleCallback callback);
-
   // Opens inspector window.
   // |type| InspectionType which specifies how to open inspector.
   static void openInspector(InspectionType type);
+
+  // Computes an MD5 checksum for the given file.
+  // |fileURL| The URL of the file to checksum.
+  // |callback|
+  static void computeChecksum(DOMString fileURL,
+                              ComputeChecksumCallback callback);
+
+  // Is UMA enabled?
+  static void isUMAEnabled(BooleanCallback callback);
 };
 
 interface Events {

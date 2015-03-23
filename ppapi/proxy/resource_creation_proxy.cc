@@ -7,6 +7,7 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/proxy/audio_input_resource.h"
+#include "ppapi/proxy/camera_device_resource.h"
 #include "ppapi/proxy/compositor_resource.h"
 #include "ppapi/proxy/connection.h"
 #include "ppapi/proxy/file_chooser_resource.h"
@@ -50,6 +51,7 @@
 #include "ppapi/proxy/video_capture_resource.h"
 #include "ppapi/proxy/video_decoder_resource.h"
 #include "ppapi/proxy/video_destination_resource.h"
+#include "ppapi/proxy/video_encoder_resource.h"
 #include "ppapi/proxy/video_source_resource.h"
 #include "ppapi/proxy/websocket_resource.h"
 #include "ppapi/shared_impl/api_id.h"
@@ -253,6 +255,7 @@ PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
     PP_Instance instance,
     PP_Resource share_context,
     const int32_t* attrib_list,
+    gpu::Capabilities* capabilities,
     base::SharedMemoryHandle* shared_state) {
   // Not proxied. The raw creation function is used only in the implementation
   // of the proxy on the host side.
@@ -386,6 +389,10 @@ PP_Resource ResourceCreationProxy::CreateVideoDestination(
                                        instance))->GetReference();
 }
 
+PP_Resource ResourceCreationProxy::CreateVideoEncoder(PP_Instance instance) {
+  return (new VideoEncoderResource(GetConnection(), instance))->GetReference();
+}
+
 PP_Resource ResourceCreationProxy::CreateVideoSource(
     PP_Instance instance) {
   return (new VideoSourceResource(GetConnection(), instance))->GetReference();
@@ -423,6 +430,11 @@ PP_Resource ResourceCreationProxy::CreateBrowserFont(
 PP_Resource ResourceCreationProxy::CreateBuffer(PP_Instance instance,
                                                 uint32_t size) {
   return PPB_Buffer_Proxy::CreateProxyResource(instance, size);
+}
+
+PP_Resource ResourceCreationProxy::CreateCameraDevicePrivate(
+    PP_Instance instance) {
+  return (new CameraDeviceResource(GetConnection(), instance))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateFlashDRM(PP_Instance instance) {

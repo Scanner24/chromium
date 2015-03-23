@@ -84,8 +84,6 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
 
     // New streams rely on having the peer's flow control receive window
     // negotiated in the config.
-    session_.config()->SetInitialFlowControlWindowToSend(
-        kInitialSessionFlowControlWindowForTest);
     session_.config()->SetInitialStreamFlowControlWindowToSend(
         kInitialStreamFlowControlWindowForTest);
     session_.config()->SetInitialSessionFlowControlWindowToSend(
@@ -97,7 +95,7 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
     QuicInMemoryCachePeer::ResetForTests();
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     QuicInMemoryCache* cache = QuicInMemoryCache::GetInstance();
 
     BalsaHeaders request_headers, response_headers;
@@ -115,7 +113,7 @@ class QuicSpdyServerStreamTest : public ::testing::TestWithParam<QuicVersion> {
     // Check if response already exists and matches.
     const QuicInMemoryCache::Response* cached_response =
         cache->GetResponse(request_headers);
-    if (cached_response != NULL) {
+    if (cached_response != nullptr) {
       string cached_response_headers_str, response_headers_str;
       cached_response->headers().DumpToString(&cached_response_headers_str);
       response_headers.DumpToString(&response_headers_str);
@@ -213,8 +211,7 @@ TEST_P(QuicSpdyServerStreamTest, TestSendResponse) {
   response_headers_.ReplaceOrAppendHeader("content-length", "3");
 
   InSequence s;
-  EXPECT_CALL(session_,
-              WritevData(kHeadersStreamId, _, 0, false, _, NULL));
+  EXPECT_CALL(session_, WritevData(kHeadersStreamId, _, 0, false, _, nullptr));
   EXPECT_CALL(session_, WritevData(_, _, _, _, _, _)).Times(1).
       WillOnce(Return(QuicConsumedData(3, true)));
 
@@ -229,8 +226,7 @@ TEST_P(QuicSpdyServerStreamTest, TestSendErrorResponse) {
   response_headers_.ReplaceOrAppendHeader("content-length", "3");
 
   InSequence s;
-  EXPECT_CALL(session_,
-              WritevData(kHeadersStreamId, _, 0, false, _, NULL));
+  EXPECT_CALL(session_, WritevData(kHeadersStreamId, _, 0, false, _, nullptr));
   EXPECT_CALL(session_, WritevData(_, _, _, _, _, _)).Times(1).
       WillOnce(Return(QuicConsumedData(3, true)));
 

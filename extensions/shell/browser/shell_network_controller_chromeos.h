@@ -23,12 +23,12 @@ class ShellNetworkController : public chromeos::NetworkStateHandlerObserver {
   // This class must be instantiated after chromeos::DBusThreadManager and
   // destroyed before it.
   explicit ShellNetworkController(const std::string& preferred_network_name);
-  virtual ~ShellNetworkController();
+  ~ShellNetworkController() override;
 
   // chromeos::NetworkStateHandlerObserver overrides:
-  virtual void NetworkListChanged() OVERRIDE;
-  virtual void NetworkConnectionStateChanged(
-      const chromeos::NetworkState* state) OVERRIDE;
+  void NetworkListChanged() override;
+  void NetworkConnectionStateChanged(
+      const chromeos::NetworkState* state) override;
 
  private:
   // State of communication with the connection manager.

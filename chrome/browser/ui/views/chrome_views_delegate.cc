@@ -13,12 +13,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
-#include "chrome/common/pref_names.h"
+#include "content/public/browser/context_factory.h"
 #include "grit/chrome_unscaled_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
@@ -34,7 +33,6 @@
 #endif
 
 #if defined(USE_AURA)
-#include "content/public/browser/context_factory.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #endif
@@ -207,28 +205,19 @@ bool ChromeViewsDelegate::GetSavedWindowPlacement(
 
 void ChromeViewsDelegate::NotifyAccessibilityEvent(
     views::View* view, ui::AXEvent event_type) {
-  AccessibilityEventRouterViews::GetInstance()->HandleAccessibilityEvent(
-      view, event_type);
-
 #if defined(USE_ASH)
   AutomationManagerAsh::GetInstance()->HandleEvent(
       GetProfileForWindow(view->GetWidget()), view, event_type);
 #endif
 }
 
-void ChromeViewsDelegate::NotifyMenuItemFocused(
-    const base::string16& menu_name,
-    const base::string16& menu_item_name,
-    int item_index,
-    int item_count,
-    bool has_submenu) {
-  AccessibilityEventRouterViews::GetInstance()->HandleMenuItemFocused(
-      menu_name, menu_item_name, item_index, item_count, has_submenu);
-}
-
 #if defined(OS_WIN)
 HICON ChromeViewsDelegate::GetDefaultWindowIcon() const {
   return GetAppIcon();
+}
+
+HICON ChromeViewsDelegate::GetSmallWindowIcon() const {
+  return GetSmallAppIcon();
 }
 
 bool ChromeViewsDelegate::IsWindowInMetro(gfx::NativeWindow window) const {
@@ -383,11 +372,9 @@ bool ChromeViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
 }
 #endif
 
-#if defined(USE_AURA)
 ui::ContextFactory* ChromeViewsDelegate::GetContextFactory() {
   return content::GetContextFactory();
 }
-#endif
 
 #if defined(OS_WIN)
 int ChromeViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,

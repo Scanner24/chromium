@@ -23,19 +23,18 @@ class DisplayOptionsHandler : public ::options::OptionsPageUIHandler,
                               public ash::DisplayController::Observer {
  public:
   DisplayOptionsHandler();
-  virtual ~DisplayOptionsHandler();
+  ~DisplayOptionsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializePage() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // ash::DisplayController::Observer implementation.
-  virtual void OnDisplayConfigurationChanging() OVERRIDE;
-  virtual void OnDisplayConfigurationChanged() OVERRIDE;
+  void OnDisplayConfigurationChanging() override;
+  void OnDisplayConfigurationChanged() override;
 
  private:
   // Sends all of the current display information to the web_ui of options page.

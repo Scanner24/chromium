@@ -5,12 +5,14 @@
 #include "content/renderer/input/input_handler_manager.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/input/input_handler.h"
 #include "content/renderer/input/input_event_filter.h"
 #include "content/renderer/input/input_handler_manager_client.h"
 #include "content/renderer/input/input_handler_wrapper.h"
+#include "content/renderer/input/input_scroll_elasticity_controller.h"
+#include "content/renderer/scheduler/renderer_scheduler.h"
 
 using blink::WebInputEvent;
 
@@ -36,9 +38,11 @@ InputEventAckState InputEventDispositionToAck(
 
 InputHandlerManager::InputHandlerManager(
     const scoped_refptr<base::MessageLoopProxy>& message_loop_proxy,
-    InputHandlerManagerClient* client)
+    InputHandlerManagerClient* client,
+    RendererScheduler* renderer_scheduler)
     : message_loop_proxy_(message_loop_proxy),
-      client_(client) {
+      client_(client),
+      renderer_scheduler_(renderer_scheduler) {
   DCHECK(client_);
   client_->SetBoundHandler(base::Bind(&InputHandlerManager::HandleInputEvent,
                                       base::Unretained(this)));
@@ -103,13 +107,38 @@ void InputHandlerManager::RemoveInputHandler(int routing_id) {
   input_handlers_.erase(routing_id);
 }
 
+void InputHandlerManager::ObserveWheelEventAndResultOnMainThread(
+    int routing_id,
+    const blink::WebMouseWheelEvent& wheel_event,
+    const cc::InputHandlerScrollResult& scroll_result) {
+  message_loop_proxy_->PostTask(
+      FROM_HERE,
+      base::Bind(
+          &InputHandlerManager::ObserveWheelEventAndResultOnCompositorThread,
+          base::Unretained(this), routing_id, wheel_event, scroll_result));
+}
+
+void InputHandlerManager::ObserveWheelEventAndResultOnCompositorThread(
+    int routing_id,
+    const blink::WebMouseWheelEvent& wheel_event,
+    const cc::InputHandlerScrollResult& scroll_result) {
+  auto it = input_handlers_.find(routing_id);
+  if (it == input_handlers_.end())
+    return;
+
+  InputHandlerProxy* proxy = it->second->input_handler_proxy();
+  DCHECK(proxy->scroll_elasticity_controller());
+  proxy->scroll_elasticity_controller()->ObserveWheelEventAndResult(
+      wheel_event, scroll_result);
+}
+
 InputEventAckState InputHandlerManager::HandleInputEvent(
     int routing_id,
     const WebInputEvent* input_event,
     ui::LatencyInfo* latency_info) {
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
 
-  InputHandlerMap::iterator it = input_handlers_.find(routing_id);
+  auto it = input_handlers_.find(routing_id);
   if (it == input_handlers_.end()) {
     TRACE_EVENT1("input", "InputHandlerManager::HandleInputEvent",
                  "result", "NoInputHandlerFound");
@@ -129,6 +158,15 @@ void InputHandlerManager::DidOverscroll(int routing_id,
 
 void InputHandlerManager::DidStopFlinging(int routing_id) {
   client_->DidStopFlinging(routing_id);
+}
+
+void InputHandlerManager::DidReceiveInputEvent(
+    const blink::WebInputEvent& web_input_event) {
+  renderer_scheduler_->DidReceiveInputEventOnCompositorThread(web_input_event);
+}
+
+void InputHandlerManager::DidAnimateForInput() {
+  renderer_scheduler_->DidAnimateForInputOnCompositorThread();
 }
 
 }  // namespace content

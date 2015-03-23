@@ -10,7 +10,7 @@
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
-#include "mojo/public/cpp/system/core.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/core.h"
 
 namespace gin {
 class PerContextData;
@@ -34,12 +34,12 @@ class WebUIMojo
   class MainFrameObserver : public RenderFrameObserver {
    public:
     explicit MainFrameObserver(WebUIMojo* web_ui_mojo);
-    virtual ~MainFrameObserver();
+    ~MainFrameObserver() override;
 
     // RenderFrameObserver overrides:
-    virtual void WillReleaseScriptContext(v8::Handle<v8::Context> context,
-                                          int world_id) OVERRIDE;
-    virtual void DidFinishDocumentLoad() OVERRIDE;
+    void WillReleaseScriptContext(v8::Handle<v8::Context> context,
+                                  int world_id) override;
+    void DidFinishDocumentLoad() override;
 
    private:
     WebUIMojo* web_ui_mojo_;
@@ -47,7 +47,7 @@ class WebUIMojo
     DISALLOW_COPY_AND_ASSIGN(MainFrameObserver);
   };
 
-  virtual ~WebUIMojo();
+  ~WebUIMojo() override;
 
   void CreateContextState();
   void DestroyContextState(v8::Handle<v8::Context> context);
@@ -59,8 +59,8 @@ class WebUIMojo
   WebUIMojoContextState* GetContextState();
 
   // RenderViewObserver overrides:
-  virtual void DidCreateDocumentElement(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void DidClearWindowObject(blink::WebLocalFrame* frame) OVERRIDE;
+  void DidCreateDocumentElement(blink::WebLocalFrame* frame) override;
+  void DidClearWindowObject(blink::WebLocalFrame* frame) override;
 
   MainFrameObserver main_frame_observer_;
 

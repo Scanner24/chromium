@@ -26,6 +26,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/shell/browser/layout_test/layout_test_devtools_frontend.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_content_browser_client.h"
@@ -201,21 +202,24 @@ WebKitTestController* WebKitTestController::Get() {
 WebKitTestController::WebKitTestController()
     : main_window_(NULL),
       test_phase_(BETWEEN_TESTS),
-      is_leak_detection_enabled_(CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableLeakDetection)),
-      crash_when_leak_found_(false) {
+      is_leak_detection_enabled_(
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableLeakDetection)),
+      crash_when_leak_found_(false),
+      devtools_frontend_(NULL) {
   CHECK(!instance_);
   instance_ = this;
 
   if (is_leak_detection_enabled_) {
     std::string switchValue =
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kEnableLeakDetection);
     crash_when_leak_found_ = switchValue == switches::kCrashOnFailure;
   }
 
   printer_.reset(new WebKitTestResultPrinter(&std::cout, &std::cerr));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEncodeBinary))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEncodeBinary))
     printer_->set_encode_binary_data(true);
   registrar_.Add(this,
                  NOTIFICATION_RENDERER_PROCESS_CREATED,
@@ -259,7 +263,6 @@ bool WebKitTestController::PrepareForLayoutTest(
         browser_context,
         GURL(),
         NULL,
-        MSG_ROUTING_NONE,
         initial_size_);
     WebContentsObserver::Observe(main_window_->web_contents());
     send_configuration_to_next_host_ = true;
@@ -335,7 +338,7 @@ void WebKitTestController::OverrideWebkitPrefs(WebPreferences* prefs) {
   } else {
     ApplyLayoutTestDefaultPreferences(prefs);
     if (is_compositing_test_) {
-      CommandLine& command_line = *CommandLine::ForCurrentProcess();
+      base::CommandLine& command_line = *base::CommandLine::ForCurrentProcess();
       if (!command_line.HasSwitch(switches::kDisableGpu))
         prefs->accelerated_2d_canvas_enabled = true;
       prefs->mock_scrollbars_enabled = true;
@@ -350,7 +353,6 @@ void WebKitTestController::OpenURL(const GURL& url) {
   Shell::CreateNewWindow(main_window_->web_contents()->GetBrowserContext(),
                          url,
                          main_window_->web_contents()->GetSiteInstance(),
-                         MSG_ROUTING_NONE,
                          gfx::Size());
 }
 
@@ -432,7 +434,9 @@ void WebKitTestController::RenderProcessGone(base::TerminationStatus status) {
 void WebKitTestController::DevToolsProcessCrashed() {
   DCHECK(CalledOnValidThread());
   printer_->AddErrorMessage("#CRASHED - devtools");
-  DiscardMainWindow();
+  if (devtools_frontend_)
+      devtools_frontend_->Close();
+  devtools_frontend_ = NULL;
 }
 
 void WebKitTestController::WebContentsDestroyed() {
@@ -497,8 +501,9 @@ void WebKitTestController::SendTestConfiguration() {
   params.temp_path = temp_path_;
   params.test_url = test_url_;
   params.enable_pixel_dumping = enable_pixel_dumping_;
-  params.allow_external_pages = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAllowExternalPages);
+  params.allow_external_pages =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAllowExternalPages);
   params.expected_pixel_hash = expected_pixel_hash_;
   params.initial_size = initial_size_;
   render_view_host->Send(new ShellViewMsg_SetTestConfiguration(
@@ -530,14 +535,9 @@ void WebKitTestController::OnImageDump(
   if (actual_pixel_hash != expected_pixel_hash_) {
     std::vector<unsigned char> png;
 
-    // Only the expected PNGs for Mac have a valid alpha channel.
-#if defined(OS_MACOSX)
-    bool discard_transparency = false;
-#else
     bool discard_transparency = true;
-#endif
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableOverlayFullscreenVideo))
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableOverlayFullscreenVideo))
       discard_transparency = false;
 
     std::vector<gfx::PNGCodec::Comment> comments;
@@ -583,16 +583,26 @@ void WebKitTestController::OnClearDevToolsLocalStorage() {
   StoragePartition* storage_partition =
       BrowserContext::GetStoragePartition(browser_context, NULL);
   storage_partition->GetDOMStorageContext()->DeleteLocalStorage(
-      content::GetDevToolsPathAsURL("", "").GetOrigin());
+      content::LayoutTestDevToolsFrontend::GetDevToolsPathAsURL("", "")
+          .GetOrigin());
 }
 
 void WebKitTestController::OnShowDevTools(const std::string& settings,
                                           const std::string& frontend_url) {
-  main_window_->ShowDevToolsForTest(settings, frontend_url);
+  if (!devtools_frontend_) {
+    devtools_frontend_ = LayoutTestDevToolsFrontend::Show(
+        main_window_->web_contents(), settings, frontend_url);
+  } else {
+    devtools_frontend_->ReuseFrontend(
+        main_window_->web_contents(), settings, frontend_url);
+  }
+  devtools_frontend_->Activate();
+  devtools_frontend_->Focus();
 }
 
 void WebKitTestController::OnCloseDevTools() {
-  main_window_->CloseDevTools();
+  if (devtools_frontend_)
+    devtools_frontend_->DisconnectFromTarget();
 }
 
 void WebKitTestController::OnGoToOffset(int offset) {
@@ -655,8 +665,10 @@ void WebKitTestController::OnCaptureSessionHistory() {
 void WebKitTestController::OnCloseRemainingWindows() {
   DevToolsAgentHost::DetachAllClients();
   std::vector<Shell*> open_windows(Shell::windows());
+  Shell* devtools_shell = devtools_frontend_ ?
+      devtools_frontend_->frontend_shell() : NULL;
   for (size_t i = 0; i < open_windows.size(); ++i) {
-    if (open_windows[i] != main_window_)
+    if (open_windows[i] != main_window_ && open_windows[i] != devtools_shell)
       open_windows[i]->Close();
   }
   base::MessageLoop::current()->RunUntilIdle();

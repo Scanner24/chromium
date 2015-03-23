@@ -49,8 +49,11 @@ MEDIA_EXPORT extern const char kUseCras[];
 
 MEDIA_EXPORT extern const char kUseFakeDeviceForMediaStream[];
 MEDIA_EXPORT extern const char kUseFileForFakeVideoCapture[];
+MEDIA_EXPORT extern const char kUseFileForFakeAudioCapture[];
 
 MEDIA_EXPORT extern const char kEnableInbandTextTracks[];
+
+MEDIA_EXPORT extern const char kRequireAudioHardwareForTesting[];
 
 }  // namespace switches
 

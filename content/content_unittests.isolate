@@ -5,7 +5,8 @@
   'conditions': [
     ['OS=="android" or OS=="linux" or OS=="mac" or OS=="win"', {
       'variables': {
-        'isolate_dependency_untracked': [
+        'files': [
+          '../net/data/ssl/certificates/',
           '../media/test/data/',
           'test/data/',
         ],
@@ -13,21 +14,21 @@
     }],
     ['OS=="android"', {
       'variables': {
-        'isolate_dependency_tracked': [
+        'files': [
           '<(PRODUCT_DIR)/content_shell/assets/content_shell.pak',
         ],
       },
     }],
     ['OS=="linux" or OS=="mac" or OS=="win"', {
       'variables': {
-        'isolate_dependency_tracked': [
+        'files': [
           '<(PRODUCT_DIR)/content_shell.pak',
         ],
       },
     }],
     ['OS=="linux" or OS=="mac" or OS=="win"', {
       'variables': {
-        'isolate_dependency_tracked': [
+        'files': [
           '../testing/test_env.py',
           '<(PRODUCT_DIR)/content_unittests<(EXECUTABLE_SUFFIX)',
         ],
@@ -41,8 +42,12 @@
           '<(PRODUCT_DIR)/content_unittests<(EXECUTABLE_SUFFIX)',
           '--brave-new-test-launcher',
           '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
-        'isolate_dependency_tracked': [
+        'files': [
           '../testing/xvfb.py',
           '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
@@ -51,7 +56,7 @@
     }],
     ['OS=="linux" and use_ozone==0', {
       'variables': {
-        'isolate_dependency_tracked': [
+        'files': [
           '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
         ],
       },
@@ -63,8 +68,12 @@
           '<(PRODUCT_DIR)/content_unittests<(EXECUTABLE_SUFFIX)',
           '--brave-new-test-launcher',
           '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
-        'isolate_dependency_tracked': [
+        'files': [
           '<(PRODUCT_DIR)/ffmpegsumo.so',
           '<(PRODUCT_DIR)/osmesa.so',
         ],
@@ -77,16 +86,29 @@
           '<(PRODUCT_DIR)/content_unittests<(EXECUTABLE_SUFFIX)',
           '--brave-new-test-launcher',
           '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
-        'isolate_dependency_tracked': [
+        'files': [
           '<(PRODUCT_DIR)/ffmpegsumo.dll',
           '<(PRODUCT_DIR)/osmesa.dll',
         ],
       },
     }],
+    ['OS=="mac" and asan==1 and fastbuild==0', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/content_unittests.dSYM/',
+          '<(PRODUCT_DIR)/ffmpegsumo.so.dSYM/',
+          '<(PRODUCT_DIR)/osmesa.so.dSYM/',
+        ],
+      },
+    }],
     ['OS=="win" and (fastbuild==0 or fastbuild==1)', {
       'variables': {
-        'isolate_dependency_untracked': [
+        'files': [
           '<(PRODUCT_DIR)/content_unittests.exe.pdb',
         ],
       },
@@ -94,5 +116,6 @@
   ],
   'includes': [
     '../base/base.isolate',
+    '../gin/v8.isolate',
   ],
 }

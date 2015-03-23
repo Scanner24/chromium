@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile_info_interface.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
@@ -37,21 +38,19 @@ class Observer : public chrome::BrowserListObserver,
     BrowserList::AddObserver(this);
   }
 
-  virtual ~Observer() {
-    BrowserList::RemoveObserver(this);
-  }
+  ~Observer() override { BrowserList::RemoveObserver(this); }
 
   // chrome::BrowserListObserver:
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE {}
-  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE {
+  void OnBrowserAdded(Browser* browser) override {}
+  void OnBrowserRemoved(Browser* browser) override {
     [controller_ activeBrowserChangedTo:chrome::GetLastActiveBrowser()];
   }
-  virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE {
+  void OnBrowserSetLastActive(Browser* browser) override {
     [controller_ activeBrowserChangedTo:browser];
   }
 
   // AvatarMenuObserver:
-  virtual void OnAvatarMenuChanged(AvatarMenu* menu) OVERRIDE {
+  void OnAvatarMenuChanged(AvatarMenu* menu) override {
     [controller_ rebuildMenu];
   }
 
@@ -84,29 +83,35 @@ class Observer : public chrome::BrowserListObserver,
 }
 
 - (IBAction)switchToProfileFromMenu:(id)sender {
-  menu_->SwitchToProfile([sender tag], false,
-                         ProfileMetrics::SWITCH_PROFILE_MENU);
+  avatarMenu_->SwitchToProfile([sender tag], false,
+                               ProfileMetrics::SWITCH_PROFILE_MENU);
 }
 
 - (IBAction)switchToProfileFromDock:(id)sender {
   // Explicitly bring to the foreground when taking action from the dock.
   [NSApp activateIgnoringOtherApps:YES];
-  menu_->SwitchToProfile([sender tag], false,
-                         ProfileMetrics::SWITCH_PROFILE_DOCK);
+  avatarMenu_->SwitchToProfile([sender tag], false,
+                               ProfileMetrics::SWITCH_PROFILE_DOCK);
 }
 
 - (IBAction)editProfile:(id)sender {
-  menu_->EditProfile(menu_->GetActiveProfileIndex());
+  avatarMenu_->EditProfile(avatarMenu_->GetActiveProfileIndex());
 }
 
 - (IBAction)newProfile:(id)sender {
-  menu_->AddNewProfile(ProfileMetrics::ADD_NEW_USER_MENU);
+  profiles::CreateAndSwitchToNewProfile(chrome::HOST_DESKTOP_TYPE_NATIVE,
+                                        ProfileManager::CreateCallback(),
+                                        ProfileMetrics::ADD_NEW_USER_MENU);
 }
 
 - (BOOL)insertItemsIntoMenu:(NSMenu*)menu
                    atOffset:(NSInteger)offset
                    fromDock:(BOOL)dock {
-  if (!menu_ || !menu_->ShouldShowAvatarMenu())
+  if (!avatarMenu_ || !avatarMenu_->ShouldShowAvatarMenu())
+    return NO;
+
+  // Don't show the list of profiles in the dock if only one profile exists.
+  if (dock && avatarMenu_->GetNumberOfItems() <= 1)
     return NO;
 
   if (dock) {
@@ -120,8 +125,8 @@ class Observer : public chrome::BrowserListObserver,
     [menu insertItem:header atIndex:offset++];
   }
 
-  for (size_t i = 0; i < menu_->GetNumberOfItems(); ++i) {
-    const AvatarMenu::Item& itemData = menu_->GetItemAt(i);
+  for (size_t i = 0; i < avatarMenu_->GetNumberOfItems(); ++i) {
+    const AvatarMenu::Item& itemData = avatarMenu_->GetItemAt(i);
     NSString* name = base::SysUTF16ToNSString(itemData.name);
     SEL action = dock ? @selector(switchToProfileFromDock:)
                       : @selector(switchToProfileFromMenu:);
@@ -131,7 +136,13 @@ class Observer : public chrome::BrowserListObserver,
     if (dock) {
       [item setIndentationLevel:1];
     } else {
-      gfx::Image itemIcon = itemData.icon;
+      gfx::Image itemIcon;
+      bool isRectangle;
+      // Always use the low-res, small default avatars in the menu.
+      AvatarMenu::GetImageForMenuButton(itemData.profile_path,
+                                        &itemIcon,
+                                        &isRectangle);
+
       // The image might be too large and need to be resized (i.e. if this is
       // a signed-in user using the GAIA profile photo).
       if (itemIcon.Width() > profiles::kAvatarIconWidth ||
@@ -158,8 +169,8 @@ class Observer : public chrome::BrowserListObserver,
            [menuItem action] != @selector(editProfile:);
   }
 
-  const AvatarMenu::Item& itemData = menu_->GetItemAt(
-      menu_->GetActiveProfileIndex());
+  const AvatarMenu::Item& itemData = avatarMenu_->GetItemAt(
+      avatarMenu_->GetActiveProfileIndex());
   if ([menuItem action] == @selector(switchToProfileFromDock:) ||
       [menuItem action] == @selector(switchToProfileFromMenu:)) {
     if (!itemData.supervised)
@@ -182,11 +193,11 @@ class Observer : public chrome::BrowserListObserver,
 
 - (void)initializeMenu {
   observer_.reset(new ProfileMenuControllerInternal::Observer(self));
-  menu_.reset(new AvatarMenu(
+  avatarMenu_.reset(new AvatarMenu(
       &g_browser_process->profile_manager()->GetProfileInfoCache(),
       observer_.get(),
       NULL));
-  menu_->RebuildMenu();
+  avatarMenu_->RebuildMenu();
 
   [[self menu] addItem:[NSMenuItem separatorItem]];
 
@@ -208,12 +219,12 @@ class Observer : public chrome::BrowserListObserver,
 // menu item and menu need to be updated to reflect that.
 - (void)activeBrowserChangedTo:(Browser*)browser {
   // Tell the menu that the browser has changed.
-  menu_->ActiveBrowserChanged(browser);
+  avatarMenu_->ActiveBrowserChanged(browser);
 
   // If |browser| is NULL, it may be because the current profile was deleted
   // and there are no other loaded profiles. In this case, calling
-  // |menu_->GetActiveProfileIndex()| may result in a profile being loaded,
-  // which is inappropriate to do on the UI thread.
+  // |avatarMenu_->GetActiveProfileIndex()| may result in a profile being
+  // loaded, which is inappropriate to do on the UI thread.
   //
   // An early return provides the desired behavior:
   //   a) If the profile was deleted, the menu would have been rebuilt and no
@@ -223,15 +234,17 @@ class Observer : public chrome::BrowserListObserver,
   if (!browser)
     return;
 
-  // In guest mode, there is no active menu item.
-  size_t activeProfileIndex = browser->profile()->IsGuestSession() ?
-      std::string::npos : menu_->GetActiveProfileIndex();
+  // Update the avatar menu to get the active item states. Don't call
+  // avatarMenu_->GetActiveProfileIndex() as the index might be
+  // incorrect if -activeBrowserChangedTo: is called while we deleting the
+  // active profile and closing all its browser windows.
+  avatarMenu_->RebuildMenu();
 
   // Update the state for the menu items.
-  for (size_t i = 0; i < menu_->GetNumberOfItems(); ++i) {
-    size_t tag = menu_->GetItemAt(i).menu_index;
-    [[[self menu] itemWithTag:tag]
-        setState:activeProfileIndex == tag ? NSOnState : NSOffState];
+  for (size_t i = 0; i < avatarMenu_->GetNumberOfItems(); ++i) {
+    const AvatarMenu::Item& itemData = avatarMenu_->GetItemAt(i);
+    [[[self menu] itemWithTag:itemData.menu_index]
+        setState:itemData.active ? NSOnState : NSOffState];
   }
 }
 

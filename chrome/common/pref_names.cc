@@ -133,6 +133,11 @@ const char kSupervisedUserSecondCustodianProfileURL[] =
 // the format.
 const char kSupervisedUserSharedSettings[] = "profile.managed.shared_settings";
 
+// A dictionary storing whitelists for a supervised user. The key is the CRX ID
+// of the whitelist, the value a dictionary containing whitelist properties
+// (currently the name).
+const char kSupervisedUserWhitelists[] = "profile.managed.whitelists";
+
 // The application locale.
 // For OS_CHROMEOS we maintain kApplicationLocale property in both local state
 // and user's profile.  Global property determines locale of login screen,
@@ -332,10 +337,6 @@ const char kSafeBrowsingExtendedReportingEnabled[] =
 const char kSafeBrowsingProceedAnywayDisabled[] =
     "safebrowsing.proceed_anyway_disabled";
 
-// Boolean that is true when SafeBrowsing has sent an incident report.
-const char kSafeBrowsingIncidentReportSent[] =
-    "safebrowsing.incident_report_sent";
-
 // A dictionary mapping incident types to a dict of incident key:digest pairs.
 const char kSafeBrowsingIncidentsSent[] = "safebrowsing.incidents_sent";
 
@@ -459,39 +460,6 @@ const char kDefaultAppsInstallState[] = "default_apps_install_state";
 const char kHideWebStoreIcon[] = "hide_web_store_icon";
 
 #if defined(OS_CHROMEOS)
-// A dictionary pref to hold the mute setting for all the currently known
-// audio devices.
-const char kAudioDevicesMute[] = "settings.audio.devices.mute";
-
-// A dictionary pref storing the volume settings for all the currently known
-// audio devices.
-const char kAudioDevicesVolumePercent[] =
-    "settings.audio.devices.volume_percent";
-
-// An integer pref to initially mute volume if 1. This pref is ignored if
-// |kAudioOutputAllowed| is set to false, but its value is preserved, therefore
-// when the policy is lifted the original mute state is restored.  This setting
-// is here only for migration purposes now. It is being replaced by the
-// |kAudioDevicesMute| setting.
-const char kAudioMute[] = "settings.audio.mute";
-
-// A double pref storing the user-requested volume. This setting is here only
-// for migration purposes now. It is being replaced by the
-// |kAudioDevicesVolumePercent| setting.
-const char kAudioVolumePercent[] = "settings.audio.volume_percent";
-
-// An integer pref to record user's spring charger check result.
-// 0 - unknown charger, not checked yet.
-// 1 - confirmed safe charger.
-// 2 - confirmed original charger and declined to order new charger.
-// 3 - confirmed original charger and ordered new charger online.
-// 4 - confirmed original charger and ordered new charger by phone.
-// 5 - confirmed original charger, ordered a new one online, but continue to use
-//     the old one.
-// 6 - confirmed original charger, ordered a new one by phone, but continue to
-//     use the old one.
-const char kSpringChargerCheck[] = "settings.spring_charger.check_result";
-
 // A boolean pref set to true if touchpad tap-to-click is enabled.
 const char kTapToClickEnabled[] = "settings.touchpad.enable_tap_to_click";
 
@@ -516,6 +484,11 @@ const char kTouchpadSensitivity[] = "settings.touchpad.sensitivity2";
 
 // A boolean pref set to true if time should be displayed in 24-hour clock.
 const char kUse24HourClock[] = "settings.clock.use_24hour_clock";
+
+// This setting disables manual timezone selection and starts periodic timezone
+// refresh.
+const char kResolveTimezoneByGeolocation[] =
+    "settings.resolve_timezone_by_geolocation";
 
 // A boolean pref to disable Google Drive integration.
 // The pref prefix should remain as "gdata" for backward compatibility.
@@ -551,14 +524,25 @@ const char kLanguageHotkeyPreviousEngine[] =
 // (ex. "en-US,fr,ko").
 const char kLanguagePreferredLanguages[] =
     "settings.language.preferred_languages";
+const char kLanguagePreferredLanguagesSyncable[] =
+    "settings.language.preferred_languages_syncable";
 
 // A string pref (comma-separated list) set to the preloaded (active) input
 // method IDs (ex. "pinyin,mozc").
 const char kLanguagePreloadEngines[] = "settings.language.preload_engines";
+const char kLanguagePreloadEnginesSyncable[] =
+    "settings.language.preload_engines_syncable";
 
-// A List pref (comma-separated list) set to the extension IMEs to be enabled.
+// A string pref (comma-separated list) set to the extension IMEs to be enabled.
 const char kLanguageEnabledExtensionImes[] =
     "settings.language.enabled_extension_imes";
+const char kLanguageEnabledExtensionImesSyncable[] =
+    "settings.language.enabled_extension_imes_syncable";
+
+// A boolean pref to indicate whether we still need to add the globally synced
+// input methods. False after the initial post-OOBE sync.
+const char kLanguageShouldMergeInputMethods[] =
+    "settings.language.merge_input_methods";
 
 // Integer prefs which determine how we remap modifier keys (e.g. swap Alt and
 // Control.) Possible values for these prefs are 0-4. See ModifierKey enum in
@@ -720,6 +704,11 @@ const char kPowerBatteryIdleWarningDelayMs[] =
 const char kPowerBatteryIdleDelayMs[] =
     "power.battery_idle_delay_ms";
 
+// Inactivity delays used to dim the screen or turn it off while the screen is
+// locked.
+const char kPowerLockScreenDimDelayMs[] = "power.lock_screen_dim_delay_ms";
+const char kPowerLockScreenOffDelayMs[] = "power.lock_screen_off_delay_ms";
+
 // Action that should be performed when the idle delay is reached while the
 // system is on AC power or battery power.
 // Values are from the chromeos::PowerPolicyController::Action enum.
@@ -753,6 +742,11 @@ const char kPowerUserActivityScreenDimDelayFactor[] =
 // user activity has been observed in a session.
 const char kPowerWaitForInitialUserActivity[] =
     "power.wait_for_initial_user_activity";
+
+// Boolean controlling whether the panel backlight should be forced to a
+// nonzero level when user activity is observed.
+const char kPowerForceNonzeroBrightnessForUserActivity[] =
+    "power.force_nonzero_brightness_for_user_activity";
 
 // The URL from which the Terms of Service can be downloaded. The value is only
 // honored for public accounts.
@@ -835,6 +829,9 @@ const char kFileSystemProviderMounted[] = "file_system_provider.mounted";
 // A boolean pref set to true if the virtual keyboard should be enabled.
 const char kTouchVirtualKeyboardEnabled[] = "ui.touch_virtual_keyboard_enabled";
 
+// A boolean pref that controls whether wake on SSID is enabled.
+const char kWakeOnWifiSsid[] = "settings.internet.wake_on_wifi_ssid";
+
 #endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
@@ -888,8 +885,21 @@ const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 // permitted.
 const char kAllowDeletingBrowserHistory[] = "history.deleting_enabled";
 
-// Boolean controlling whether SafeSearch is mandatory for Google Web Searches.
+// Boolean controlling whether SafeSearch is mandatory for Google Web Searches
+// and also whether Safety Mode is mandatory on YouTube.
+// DEPRECATED: This is replaced by kForceGoogleSafeSearch and
+// kForceYouTubeSafetyMode, and still exists for legacy reasons only.
 const char kForceSafeSearch[] = "settings.force_safesearch";
+
+// Boolean controlling whether SafeSearch is mandatory for Google Web Searches.
+const char kForceGoogleSafeSearch[] = "settings.force_google_safesearch";
+
+// Boolean controlling whether Safety Mode is mandatory on YouTube.
+const char kForceYouTubeSafetyMode[] = "settings.force_youtube_safety_mode";
+
+// Boolean controlling whether History is recorded and synced for
+// supervised users.
+const char kRecordHistory[] = "settings.history_recorded";
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 // Linux specific preference on whether we should match the system theme.
@@ -987,28 +997,6 @@ const char kShowUpdatePromotionInfoBar[] =
 // true, we draw a custom chrome frame (thicker title bar and blue border).
 const char kUseCustomChromeFrame[] = "browser.custom_chrome_frame";
 
-// Dictionary of content settings applied to all hosts by default.
-const char kDefaultContentSettings[] = "profile.default_content_settings";
-
-// Dictionary of content settings that can globally disallow all hosts by
-// default. If a value is set, it means the setting is globally disallowed.
-// If a value is not set, it means the setting is allowed.
-const char kOverrideContentSettings[] = "profile.override_content_settings";
-
-// Boolean indicating whether the clear on exit pref was migrated to content
-// settings yet.
-const char kContentSettingsClearOnExitMigrated[] =
-    "profile.content_settings.clear_on_exit_migrated";
-
-// Version of the pattern format used to define content settings.
-const char kContentSettingsVersion[] = "profile.content_settings.pref_version";
-
-// Patterns for mapping origins to origin related settings. Default settings
-// will be applied to origins that don't match any of the patterns. The pattern
-// format used is defined by kContentSettingsVersion.
-const char kContentSettingsPatternPairs[] =
-    "profile.content_settings.pattern_pairs";
-
 #if !defined(OS_ANDROID)
 // Which plugins have been whitelisted manually by the user.
 const char kContentSettingsPluginWhitelist[] =
@@ -1024,11 +1012,16 @@ const char kBlockThirdPartyCookies[] = "profile.block_third_party_cookies";
 const char kClearSiteDataOnExit[] = "profile.clear_site_data_on_exit";
 
 // Double that indicates the default zoom level.
-const char kDefaultZoomLevel[] = "profile.default_zoom_level";
+const char kPartitionDefaultZoomLevel[] = "partition.default_zoom_level";
+// TODO(wjmaclean): Remove this once sufficient users have migrated to the
+// per-StoragePartition zoom levels. http://crbug.com/420643.
+const char kDefaultZoomLevelDeprecated[] = "profile.default_zoom_level";
 
 // Dictionary that maps hostnames to zoom levels.  Hosts not in this pref will
 // be displayed at the default zoom level.
-const char kPerHostZoomLevels[] = "profile.per_host_zoom_levels";
+const char kPartitionPerHostZoomLevels[] = "partition.per_host_zoom_levels";
+// TODO(wjmaclean): Remove this.
+const char kPerHostZoomLevelsDeprecated[] = "profile.per_host_zoom_levels";
 
 // A dictionary that tracks the default data model to use for each section of
 // the dialog.
@@ -1063,26 +1056,6 @@ const char kAutofillDialogDefaults[] = "autofill.rac_dialog_defaults";
 #if !defined(OS_ANDROID)
 const char kPinnedTabs[] = "pinned_tabs";
 #endif
-
-#if defined(OS_ANDROID)
-// Boolean that controls the enabled-state of Geolocation in content.
-const char kGeolocationEnabled[] = "geolocation.enabled";
-#endif
-
-#if defined(ENABLE_GOOGLE_NOW)
-// Boolean that is true when Google services can use the user's location.
-const char kGoogleGeolocationAccessEnabled[] =
-    "googlegeolocationaccess.enabled";
-#endif
-
-// The default audio capture device used by the Media content setting.
-const char kDefaultAudioCaptureDevice[] = "media.default_audio_capture_device";
-
-// The default video capture device used by the Media content setting.
-const char kDefaultVideoCaptureDevice[] = "media.default_video_capture_Device";
-
-// The salt used for creating random MediaSource IDs.
-const char kMediaDeviceIdSalt[] = "media.device_id_salt";
 
 // Preference to disable 3D APIs (WebGL, Pepper 3D).
 const char kDisable3DAPIs[] = "disable_3d_apis";
@@ -1233,27 +1206,47 @@ const char kLocalDiscoveryNotificationsEnabled[] =
 // a preference was reset.
 const char kPreferenceResetTime[] = "prefs.preference_reset_time";
 
-// The GCM channel's enabled state.
-const char kGCMChannelEnabled[] = "gcm.channel_enabled";
-
 // How many Service Workers are registered with the Push API (could be zero).
 const char kPushMessagingRegistrationCount[] =
     "gcm.push_messaging_registration_count";
 
-// Whether Easy Unlock is enabled.
-const char kEasyUnlockEnabled[] = "easy_unlock.enabled";
-
-// Whether to show the Easy Unlock first run tutorial.
-const char kEasyUnlockShowTutorial[] = "easy_unlock.show_tutorial";
-
-// Preference storing Easy Unlock pairing data.
-const char kEasyUnlockPairing[] = "easy_unlock.pairing";
+// Maps from app ids to origin + Service Worker registration ID.
+const char kPushMessagingApplicationIdMap[] =
+    "gcm.push_messaging_application_id_map";
 
 // Whether a user is allowed to use Easy Unlock.
 const char kEasyUnlockAllowed[] = "easy_unlock.allowed";
 
+// Whether Easy Unlock is enabled.
+const char kEasyUnlockEnabled[] = "easy_unlock.enabled";
+
+// Preference storing Easy Unlock pairing data.
+const char kEasyUnlockPairing[] = "easy_unlock.pairing";
+
+// Whether close proximity between the remote and the local device is required
+// in order to use Easy Unlock.
+const char kEasyUnlockProximityRequired[] = "easy_unlock.proximity_required";
+
+// Whether to show the Easy Unlock first run tutorial.
+const char kEasyUnlockShowTutorial[] = "easy_unlock.show_tutorial";
+
 // A cache of zero suggest results using JSON serialized into a string.
 const char kZeroSuggestCachedResults[] = "zerosuggest.cachedresults";
+
+// These device IDs are used by the copresence component, to uniquely identify
+// this device to the server. For privacy, authenticated and unauthenticated
+// calls are made using different device IDs.
+#if defined(ENABLE_EXTENSIONS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+const char kCopresenceAuthenticatedDeviceId[] =
+    "apps.copresence.auth_device_id";
+const char kCopresenceAnonymousDeviceId[] = "apps.copresence.unauth_device_id";
+#endif
+
+// Whether WebRTC should bind to individual NICs to explore all possible routing
+// options. Default is true.
+#if defined(ENABLE_WEBRTC)
+const char kWebRTCMultipleRoutesEnabled[] = "webrtc.multiple_routes_enabled";
+#endif
 
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
@@ -1307,9 +1300,6 @@ const char kDisableSSLRecordSplitting[] = "ssl.ssl_record_splitting.disabled";
 // through.
 const char kSSLBlockingBypassed[] = "ssl.ssl_blocking_bypassed";
 
-// A boolean pref of the EULA accepted flag.
-const char kEulaAccepted[] = "EulaAccepted";
-
 // Boolean that specifies whether or not crash reporting and metrics reporting
 // are sent over the network for analysis.
 const char kMetricsReportingEnabled[] =
@@ -1322,6 +1312,9 @@ const char kCrashReportingEnabled[] =
     "user_experience_metrics_crash.reporting_enabled";
 #endif
 
+// Base64-encoded compressed serialized form of the variations seed protobuf.
+const char kVariationsCompressedSeed[] = "variations_compressed_seed";
+
 // 64-bit integer serialization of the base::Time from the last successful seed
 // fetch (i.e. when the Variations server responds with 200 or 304).
 const char kVariationsLastFetchTime[] = "variations_last_fetch_time";
@@ -1329,14 +1322,11 @@ const char kVariationsLastFetchTime[] = "variations_last_fetch_time";
 // String for the restrict parameter to be appended to the variations URL.
 const char kVariationsRestrictParameter[] = "variations_restrict_parameter";
 
-// String serialized form of variations seed protobuf.
+// Base64-encoded serialized form of the variations seed protobuf.
 const char kVariationsSeed[] = "variations_seed";
 
 // 64-bit integer serialization of the base::Time from the last seed received.
 const char kVariationsSeedDate[] = "variations_seed_date";
-
-// SHA-1 hash of the serialized variations seed data (hex encoded).
-const char kVariationsSeedHash[] = "variations_seed_hash";
 
 // Digital signature of the binary variations seed data, base64-encoded.
 const char kVariationsSeedSignature[] = "variations_seed_signature";
@@ -1443,10 +1433,6 @@ const char kTaskManagerWindowPlacement[] = "task_manager.window_placement";
 // restore on startup.
 const char kAppWindowPlacement[] = "browser.app_window_placement";
 
-// An integer specifying the total number of bytes to be used by the
-// renderer's in-memory cache of objects.
-const char kMemoryCacheSize[] = "renderer.memory_cache.size";
-
 // String which specifies where to download files to by default.
 const char kDownloadDefaultDirectory[] = "download.default_directory";
 
@@ -1454,10 +1440,10 @@ const char kDownloadDefaultDirectory[] = "download.default_directory";
 // upgrade a unsafe location to a safe location.
 const char kDownloadDirUpgraded[] = "download.directory_upgrade";
 
-#if defined(OS_WIN)
-// Whether downloaded PDFs should be opened in Adobe Acrobat Reader.
-const char kOpenPdfDownloadInAdobeReader[] =
-    "download.open_pdf_in_adobe_reader";
+#if defined(OS_WIN) || defined(OS_LINUX) || \
+    (defined(OS_MACOSX) && !defined(OS_IOS))
+const char kOpenPdfDownloadInSystemReader[] =
+    "download.open_pdf_in_system_reader";
 #endif
 
 // String which specifies where to save html files to by default.
@@ -1511,11 +1497,6 @@ const char kSafeBrowsingWrappedKey[] = "safe_browsing.wrapped_key";
 // Integer that specifies the index of the tab the user was on when they
 // last visited the options window.
 const char kOptionsWindowLastTabIndex[] = "options_window.last_tab_index";
-
-// Integer that specifies the index of the tab the user was on when they
-// last visited the content settings window.
-const char kContentSettingsWindowLastTabIndex[] =
-    "content_settings_window.last_tab_index";
 
 // Integer that specifies the index of the tab the user was on when they
 // last visited the Certificate Manager window.
@@ -1590,9 +1571,6 @@ const char kNtpMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
 // True if a desktop sync session was found for this user.
 const char kNtpPromoDesktopSessionFound[] = "ntp.promo_desktop_session_found";
 
-// Last time of update of promo_resource_cache.
-const char kNtpPromoResourceCacheUpdate[] = "ntp.promo_resource_cache_update";
-
 // Which bookmarks folder should be visible on the new tab page v4.
 const char kNtpShownBookmarksFolder[] = "ntp.shown_bookmarks_folder";
 
@@ -1650,7 +1628,7 @@ const char kInvalidationServiceUseGCMChannel[] =
 // when on-line authentication is not available.
 const char kGoogleServicesPasswordHash[] = "google.services.password_hash";
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 // Tracks the number of times that we have shown the sign in promo at startup.
 const char kSignInPromoStartupCount[] = "sync_promo.startup_count";
 
@@ -1678,47 +1656,29 @@ const char kWebAppCreateInQuickLaunchBar[] =
 // corresponding access token.
 const char kGeolocationAccessToken[] = "geolocation.access_token";
 
-// Boolean that indicates whether to allow firewall traversal while trying to
-// establish the initial connection from the client or host.
-const char kRemoteAccessHostFirewallTraversal[] =
-    "remote_access.host_firewall_traversal";
+#if defined(OS_ANDROID)
+// Boolean that controls the enabled-state of Geolocation in content.
+const char kGeolocationEnabled[] = "geolocation.enabled";
+#endif
 
-// Boolean controlling whether 2-factor auth should be required when connecting
-// to a host (instead of a PIN).
-const char kRemoteAccessHostRequireTwoFactor[] =
-    "remote_access.host_require_two_factor";
+#if defined(ENABLE_GOOGLE_NOW)
+// Boolean that is true when Google services can use the user's location.
+const char kGoogleGeolocationAccessEnabled[] =
+    "googlegeolocationaccess.enabled";
+#endif
 
-// String containing the domain name that hosts must belong to. If blank, then
-// hosts can belong to any domain.
-const char kRemoteAccessHostDomain[] = "remote_access.host_domain";
+// Boolean that specifies whether to enable the Google Now Launcher extension.
+// Note: This is not the notifications component gated by ENABLE_GOOGLE_NOW.
+const char kGoogleNowLauncherEnabled[] = "google_now_launcher.enabled";
 
-// String containing the domain name of the Chromoting Directory.
-// Used by Chromoting host and client.
-const char kRemoteAccessHostTalkGadgetPrefix[] =
-    "remote_access.host_talkgadget_prefix";
+// The default audio capture device used by the Media content setting.
+const char kDefaultAudioCaptureDevice[] = "media.default_audio_capture_device";
 
-// Boolean controlling whether curtaining is required when connecting to a host.
-const char kRemoteAccessHostRequireCurtain[] =
-    "remote_access.host_require_curtain";
+// The default video capture device used by the Media content setting.
+const char kDefaultVideoCaptureDevice[] = "media.default_video_capture_Device";
 
-// Boolean controlling whether curtaining is required when connecting to a host.
-const char kRemoteAccessHostAllowClientPairing[] =
-    "remote_access.host_allow_client_pairing";
-
-// Whether Chrome Remote Desktop can proxy gnubby authentication traffic.
-const char kRemoteAccessHostAllowGnubbyAuth[] =
-    "remote_access.host_allow_gnubby_auth";
-
-// Boolean that indicates whether the Chromoting host should allow connections
-// using relay servers.
-const char kRemoteAccessHostAllowRelayedConnection[] =
-    "remote_access.host_allow_relayed_connection";
-
-// String containing the UDP port range that the Chromoting host should used
-// when connecting to clients. The port range should be in the form:
-// <min_port>-<max_port>. E.g. 12400-12409.
-const char kRemoteAccessHostUdpPortRange[] =
-    "remote_access.host_udp_port_range";
+// The salt used for creating random MediaSource IDs.
+const char kMediaDeviceIdSalt[] = "media.device_id_salt";
 
 // The last used printer and its settings.
 const char kPrintPreviewStickySettings[] =
@@ -1803,8 +1763,15 @@ const char kHotwordSearchEnabled[] = "hotword.search_enabled_2";
 // trigger from any screen.
 const char kHotwordAlwaysOnSearchEnabled[] = "hotword.always_on_search_enabled";
 
+// A boolean pref that indicates whether the hotword always-on notification
+// has been seen already.
+const char kHotwordAlwaysOnNotificationSeen[] =
+    "hotword.always_on_notification_seen";
+
 // A boolean pref that controls whether the sound of "Ok, Google" plus a few
-// seconds of audio data before is sent back to improve voice search.
+// seconds of audio data before and the spoken query are sent back to be stored
+// in a user's Voice & Audio Activity. Updated whenever the user opens
+// chrome://settings and also polled for every 24 hours.
 const char kHotwordAudioLoggingEnabled[] = "hotword.audio_logging_enabled";
 
 // A string holding the locale information under which Hotword was installed.
@@ -1854,14 +1821,6 @@ const char kDeviceLocation[] = "device_status.location";
 // A pref holding the value of the policy used to disable mounting of external
 // storage for the user.
 const char kExternalStorageDisabled[] = "hardware.external_storage_disabled";
-
-// A pref holding the value of the policy used to disable playing audio on
-// ChromeOS devices. This pref overrides |kAudioMute| but does not overwrite
-// it, therefore when the policy is lifted the original mute state is restored.
-const char kAudioOutputAllowed[] = "hardware.audio_output_enabled";
-
-// A dictionary that maps usernames to wallpaper properties.
-const char kUsersWallpaperInfo[] = "user_wallpaper_info";
 
 // Copy of owner swap mouse buttons option to use on login screen.
 const char kOwnerPrimaryMouseButtonRight[] = "owner.mouse.primary_right";
@@ -1943,12 +1902,19 @@ const char kCustomizationDefaultWallpaperURL[] =
 // This is saved to file and cleared after chrome process starts.
 const char kLogoutStartedLast[] = "chromeos.logout-started";
 
-// An integer pref of the current consumer management enrollment stage. The
-// meaning of the value is defined in the enum EnrollmentStage in:
-//   chrome/browser/chromeos/policy/consumer_management_service.h
-const char kConsumerManagementEnrollmentStage[] =
-    "consumer_management.enrollment_stage";
-#endif
+// An integer pref of the current consumer management stage. The meaning of the
+// value is defined in:
+//   chrome/browser/chromeos/policy/consumer_management_stage.h
+const char kConsumerManagementStage[] = "consumer_management.stage";
+
+// A boolean pref. If set to true, new experimental OOBE UI is displayed.
+const char kNewOobe[] = "NewOobe";
+
+// A boolean pref. If set to true, experimental webview based signin flow
+// activated.
+extern const char kWebviewSigninEnabled[] =
+    "webview_signin_enabled";
+#endif  // defined(OS_CHROMEOS)
 
 // Whether there is a Flash version installed that supports clearing LSO data.
 const char kClearPluginLSODataEnabled[] = "browser.clear_lso_data_enabled";
@@ -1982,6 +1948,9 @@ const char kTabStripStackedLayout[] = "tab-strip-stacked-layout";
 // Indicates that factory reset was requested from options page or reset screen.
 const char kFactoryResetRequested[] = "FactoryResetRequested";
 
+// Indicates that debugging features were requested from oobe screen.
+const char kDebuggingFeaturesRequested[] = "DebuggingFeaturesRequested";
+
 // Boolean recording whether we have showed a balloon that calls out the message
 // center for desktop notifications.
 const char kMessageCenterShowedFirstRunBalloon[] =
@@ -1993,6 +1962,14 @@ const char kMessageCenterShowIcon[] = "message_center.show_icon";
 
 const char kMessageCenterForcedOnTaskbar[] =
     "message_center.was_forced_on_taskbar";
+
+#if defined(OS_CHROMEOS)
+// This setting starts periodic timezone refresh when not in user session.
+// (user session is controlled by user profile preference
+// kResolveTimezoneByGeolocation
+const char kResolveDeviceTimezoneByGeolocation[] =
+    "settings.resolve_device_timezone_by_geolocation";
+#endif  // defined(OS_CHROMEOS)
 
 // *************** SERVICE PREFS ***************
 // These are attached to the service process.
@@ -2035,56 +2012,6 @@ const char kCloudPrintSubmitEnabled[] = "cloud_print.submit_enabled";
 // Preference to store proxy settings.
 const char kProxy[] = "proxy";
 const char kMaxConnectionsPerProxy[] = "net.max_connections_per_proxy";
-
-// Preferences that are exclusively used to store managed values for default
-// content settings.
-const char kManagedDefaultCookiesSetting[] =
-    "profile.managed_default_content_settings.cookies";
-const char kManagedDefaultImagesSetting[] =
-    "profile.managed_default_content_settings.images";
-const char kManagedDefaultJavaScriptSetting[] =
-    "profile.managed_default_content_settings.javascript";
-const char kManagedDefaultPluginsSetting[] =
-    "profile.managed_default_content_settings.plugins";
-const char kManagedDefaultPopupsSetting[] =
-    "profile.managed_default_content_settings.popups";
-const char kManagedDefaultGeolocationSetting[] =
-    "profile.managed_default_content_settings.geolocation";
-const char kManagedDefaultNotificationsSetting[] =
-    "profile.managed_default_content_settings.notifications";
-const char kManagedDefaultMediaStreamSetting[] =
-    "profile.managed_default_content_settings.media_stream";
-
-// Preferences that are exclusively used to store managed
-// content settings patterns.
-const char kManagedCookiesAllowedForUrls[] =
-    "profile.managed_cookies_allowed_for_urls";
-const char kManagedCookiesBlockedForUrls[] =
-    "profile.managed_cookies_blocked_for_urls";
-const char kManagedCookiesSessionOnlyForUrls[] =
-    "profile.managed_cookies_sessiononly_for_urls";
-const char kManagedImagesAllowedForUrls[] =
-    "profile.managed_images_allowed_for_urls";
-const char kManagedImagesBlockedForUrls[] =
-    "profile.managed_images_blocked_for_urls";
-const char kManagedJavaScriptAllowedForUrls[] =
-    "profile.managed_javascript_allowed_for_urls";
-const char kManagedJavaScriptBlockedForUrls[] =
-    "profile.managed_javascript_blocked_for_urls";
-const char kManagedPluginsAllowedForUrls[] =
-    "profile.managed_plugins_allowed_for_urls";
-const char kManagedPluginsBlockedForUrls[] =
-    "profile.managed_plugins_blocked_for_urls";
-const char kManagedPopupsAllowedForUrls[] =
-    "profile.managed_popups_allowed_for_urls";
-const char kManagedPopupsBlockedForUrls[] =
-    "profile.managed_popups_blocked_for_urls";
-const char kManagedNotificationsAllowedForUrls[] =
-    "profile.managed_notifications_allowed_for_urls";
-const char kManagedNotificationsBlockedForUrls[] =
-    "profile.managed_notifications_blocked_for_urls";
-const char kManagedAutoSelectCertificateForUrls[] =
-    "profile.managed_auto_select_certificate_for_urls";
 
 #if defined(OS_MACOSX)
 // Set to true if the user removed our login item so we should not create a new
@@ -2201,14 +2128,12 @@ const char kShowLogoutButtonInTray[] = "show_logout_button_in_tray";
 // Tuning settings for gestures.
 const char kMaxSeparationForGestureTouchesInPixels[] =
     "gesture.max_separation_for_gesture_touches_in_pixels";
-const char kSemiLongPressTimeInSeconds[] =
-    "gesture.semi_long_press_time_in_seconds";
-const char kTabScrubActivationDelayInMS[] =
+const char kSemiLongPressTimeInMs[] = "gesture.semi_long_press_time_in_ms";
+const char kTabScrubActivationDelayInMs[] =
     "gesture.tab_scrub_activation_delay_in_ms";
 const char kFlingMaxCancelToDownTimeInMs[] =
     "gesture.fling_max_cancel_to_down_time_in_ms";
-const char kFlingMaxTapGapTimeInMs[] =
-    "gesture.fling_max_tap_gap_time_in_ms";
+const char kFlingMaxTapGapTimeInMs[] = "gesture.fling_max_tap_gap_time_in_ms";
 const char kOverscrollHorizontalThresholdComplete[] =
     "overscroll.horizontal_threshold_complete";
 const char kOverscrollVerticalThresholdComplete[] =
@@ -2284,6 +2209,10 @@ const char kShowAppLauncherPromo[] = "app_launcher.show_promo";
 // is unsynable and used to track local mappings only.
 const char kAppLauncherDriveAppMapping[] =
     "apps.app_launcher.drive_app_mapping";
+
+// A list of Drive app ids that tracks the uninstallable Drive apps.
+const char kAppLauncherUninstalledDriveApps[] =
+    "apps.app_launcher.uninstalled_drive_apps";
 #endif
 
 // If set, the user requested to launch the app with this extension id while
@@ -2313,9 +2242,6 @@ const char kEnableDRM[] = "settings.privacy.drm_enabled";
 // ActivityLog initialization before the extension system is initialized.
 const char kWatchdogExtensionActive[] =
     "profile.extensions.activity_log.num_consumers_active";
-// The old version was a bool.
-const char kWatchdogExtensionActiveOld[] =
-    "profile.extensions.activity_log.watchdog_extension_active";
 
 #if defined(OS_ANDROID)
 // A list of partner bookmark rename/remove mappings.
@@ -2335,7 +2261,46 @@ const char kBrowserGuestModeEnabled[] = "profile.browser_guest_enabled";
 // Whether Adding a new Person is enabled within the user manager.
 const char kBrowserAddPersonEnabled[] = "profile.add_person_enabled";
 
+// Device identifier used by Easy Unlock stored in local state. This id will be
+// combined with a user id, before being registered with the CryptAuth server,
+// so it can't correlate users on the same device.
+extern const char kEasyUnlockDeviceId[] = "easy_unlock.device_id";
+
 // A dictionary that maps user id to hardlock state.
 const char kEasyUnlockHardlockState[] = "easy_unlock.hardlock_state";
+
+// A dictionary that maps user id to public part of RSA key pair used by
+// Easy Sign-in for the user.
+const char kEasyUnlockLocalStateTpmKeys[] = "easy_unlock.public_tpm_keys";
+
+// A dictionary in local state containing each user's Easy Unlock profile
+// preferences, so they can be accessed outside of the user's profile. The value
+// is a dictionary containing an entry for each user. Each user's entry mirrors
+// their profile's Easy Unlock preferences.
+const char kEasyUnlockLocalStateUserPrefs[] = "easy_unlock.user_prefs";
+
+// The beginning of time span when we count user's "Nope" for the password
+// bubble.
+const char kPasswordBubbleTimeStamp[] = "password_bubble.timestamp";
+
+// The count of user's "Nope" for the password bubble.
+const char kPasswordBubbleNopesCount[] = "password_bubble.nopes";
+
+// Last user's interaction with the password bubble.
+const char kPasswordBubbleLastInteractions[] = "password_bubble.interactions";
+
+// Boolean that indicates whether elevation is needed to recover Chrome upgrade.
+const char kRecoveryComponentNeedsElevation[] =
+    "recovery_component.needs_elevation";
+
+// A dictionary that maps from supervised user whitelist IDs to their properties
+// (name and a list of clients that registered the whitelist).
+const char kRegisteredSupervisedUserWhitelists[] =
+    "supervised_users.whitelists";
+
+#if defined(ENABLE_EXTENSIONS)
+// Policy that indicates how to handle animated images.
+const char kAnimationPolicy[] = "settings.a11y.animation_policy";
+#endif
 
 }  // namespace prefs

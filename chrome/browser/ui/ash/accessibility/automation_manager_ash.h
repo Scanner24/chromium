@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-
 #include "chrome/browser/extensions/api/automation_internal/automation_action_adapter.h"
 #include "chrome/browser/ui/ash/accessibility/ax_tree_source_ash.h"
 #include "ui/accessibility/ax_tree_serializer.h"
@@ -40,11 +39,13 @@ class AutomationManagerAsh : public extensions::AutomationActionAdapter {
                    views::View* view,
                    ui::AXEvent event_type);
 
+  void HandleAlert(content::BrowserContext* context, const std::string& text);
+
   // AutomationActionAdapter implementation.
-  virtual void DoDefault(int32 id) OVERRIDE;
-  virtual void Focus(int32 id) OVERRIDE;
-  virtual void MakeVisible(int32 id) OVERRIDE;
-  virtual void SetSelection(int32 id, int32 start, int32 end) OVERRIDE;
+  void DoDefault(int32 id) override;
+  void Focus(int32 id) override;
+  void MakeVisible(int32 id) override;
+  void SetSelection(int32 id, int32 start, int32 end) override;
 
  protected:
   virtual ~AutomationManagerAsh();
@@ -55,7 +56,7 @@ class AutomationManagerAsh : public extensions::AutomationActionAdapter {
   AutomationManagerAsh();
 
     // Reset all state in this manager.
-  void Reset();
+  void ResetSerializer();
 
   void SendEvent(content::BrowserContext* context,
                  views::AXAuraObjWrapper* aura_obj,
@@ -73,6 +74,8 @@ class AutomationManagerAsh : public extensions::AutomationActionAdapter {
   // |current_tree_|.
   scoped_ptr<ui::AXTreeSerializer<views::AXAuraObjWrapper*> >
       current_tree_serializer_;
+
+  std::string pending_alert_text_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationManagerAsh);
 };

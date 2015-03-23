@@ -31,15 +31,13 @@ const int kRequestId = 2;
 class FileSystemProviderOperationsUnmountTest : public testing::Test {
  protected:
   FileSystemProviderOperationsUnmountTest() {}
-  virtual ~FileSystemProviderOperationsUnmountTest() {}
+  ~FileSystemProviderOperationsUnmountTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               false /* writable */,
-                               base::FilePath() /* mount_path */);
+  void SetUp() override {
+    file_system_info_ = ProvidedFileSystemInfo(
+        kExtensionId,
+        MountOptions(kFileSystemId, "" /* display_name */),
+        base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;

@@ -23,6 +23,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -30,12 +31,12 @@
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_bytes_element_reader.h"
-#include "net/base/upload_data_stream.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/redirect_info.h"
@@ -283,9 +284,9 @@ class OCSPRequestSession
     return data_;
   }
 
-  virtual void OnReceivedRedirect(URLRequest* request,
-                                  const RedirectInfo& redirect_info,
-                                  bool* defer_redirect) OVERRIDE {
+  void OnReceivedRedirect(URLRequest* request,
+                          const RedirectInfo& redirect_info,
+                          bool* defer_redirect) override {
     DCHECK_EQ(request_.get(), request);
     DCHECK_EQ(base::MessageLoopForIO::current(), io_loop_);
 
@@ -296,7 +297,12 @@ class OCSPRequestSession
     }
   }
 
-  virtual void OnResponseStarted(URLRequest* request) OVERRIDE {
+  void OnResponseStarted(URLRequest* request) override {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 OCSPRequestSession::OnResponseStarted"));
+
     DCHECK_EQ(request_.get(), request);
     DCHECK_EQ(base::MessageLoopForIO::current(), io_loop_);
 
@@ -310,8 +316,12 @@ class OCSPRequestSession
     OnReadCompleted(request_.get(), bytes_read);
   }
 
-  virtual void OnReadCompleted(URLRequest* request,
-                               int bytes_read) OVERRIDE {
+  void OnReadCompleted(URLRequest* request, int bytes_read) override {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "423948 OCSPRequestSession::OnReadCompleted"));
+
     DCHECK_EQ(request_.get(), request);
     DCHECK_EQ(base::MessageLoopForIO::current(), io_loop_);
 
@@ -359,7 +369,7 @@ class OCSPRequestSession
  private:
   friend class base::RefCountedThreadSafe<OCSPRequestSession>;
 
-  virtual ~OCSPRequestSession() {
+  ~OCSPRequestSession() override {
     // When this destructor is called, there should be only one thread that has
     // a reference to this object, and so that thread doesn't need to lock
     // |lock_| here.
@@ -411,8 +421,8 @@ class OCSPRequestSession
 
       scoped_ptr<UploadElementReader> reader(new UploadBytesElementReader(
           upload_content_.data(), upload_content_.size()));
-      request_->set_upload(make_scoped_ptr(
-          UploadDataStream::CreateWithReader(reader.Pass(), 0)));
+      request_->set_upload(
+          ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0));
     }
     if (!extra_request_headers_.IsEmpty())
       request_->SetExtraRequestHeaders(extra_request_headers_);

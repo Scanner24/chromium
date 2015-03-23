@@ -51,7 +51,11 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         mOverlayButton = (ImageButton) findViewById(R.id.desktop_overlay_button);
         mRemoteHostDesktop.setDesktop(this);
 
-        // Ensure the button is initially hidden.
+        // For this Activity, the home button in the action bar acts as a Disconnect button, so
+        // set the description for accessibility/screen readers.
+        getSupportActionBar().setHomeActionContentDescription(R.string.disconnect_myself_button);
+
+        // Ensure the overlay button is initially hidden.
         showActionBar();
 
         View decorView = getWindow().getDecorView();
@@ -66,26 +70,28 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
     protected void onStart() {
         super.onStart();
         mActivityLifecycleListener.onActivityStarted(this);
+        JniInterface.enableVideoChannel(true);
     }
 
     @Override
     protected void onPause() {
-      if (isFinishing()) {
-        mActivityLifecycleListener.onActivityPaused(this);
-      }
-      super.onPause();
+        if (isFinishing()) mActivityLifecycleListener.onActivityPaused(this);
+        super.onPause();
+        JniInterface.enableVideoChannel(false);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         mActivityLifecycleListener.onActivityResumed(this);
+        JniInterface.enableVideoChannel(true);
     }
 
     @Override
     protected void onStop() {
         mActivityLifecycleListener.onActivityStopped(this);
         super.onStop();
+        JniInterface.enableVideoChannel(false);
     }
 
     /** Called when the activity is finally finished. */
@@ -191,7 +197,7 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
             hideActionBar();
             return true;
         }
-        if (id == R.id.actionbar_disconnect) {
+        if (id == R.id.actionbar_disconnect || id == android.R.id.home) {
             JniInterface.disconnectFromHost();
             return true;
         }
@@ -248,11 +254,11 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         // want to send it as KeyEvent.
         int unicode = keyCode != KeyEvent.KEYCODE_ENTER ? event.getUnicodeChar() : 0;
 
-        boolean no_modifiers = !event.isAltPressed() &&
-                               !event.isCtrlPressed() && !event.isMetaPressed();
+        boolean no_modifiers = !event.isAltPressed()
+                && !event.isCtrlPressed() && !event.isMetaPressed();
 
-        if (event.getDeviceId() == KeyCharacterMap.VIRTUAL_KEYBOARD &&
-            pressed && unicode != 0 && no_modifiers) {
+        if (event.getDeviceId() == KeyCharacterMap.VIRTUAL_KEYBOARD
+                && pressed && unicode != 0 && no_modifiers) {
             mPressedTextKeys.add(keyCode);
             int[] codePoints = { unicode };
             JniInterface.sendTextEvent(new String(codePoints, 0, 1));

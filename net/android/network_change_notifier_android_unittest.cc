@@ -21,19 +21,24 @@ namespace {
 class NetworkChangeNotifierDelegateAndroidObserver
     : public NetworkChangeNotifierDelegateAndroid::Observer {
  public:
-  NetworkChangeNotifierDelegateAndroidObserver() : notifications_count_(0) {}
+  NetworkChangeNotifierDelegateAndroidObserver()
+      : type_notifications_count_(0), max_bandwidth_notifications_count_(0) {}
 
   // NetworkChangeNotifierDelegateAndroid::Observer:
-  virtual void OnConnectionTypeChanged() OVERRIDE {
-    notifications_count_++;
+  void OnConnectionTypeChanged() override { type_notifications_count_++; }
+
+  void OnMaxBandwidthChanged(double max_bandwidth_mbps) override {
+    max_bandwidth_notifications_count_++;
   }
 
-  int notifications_count() const {
-    return notifications_count_;
+  int type_notifications_count() const { return type_notifications_count_; }
+  int bandwidth_notifications_count() const {
+    return max_bandwidth_notifications_count_;
   }
 
  private:
-  int notifications_count_;
+  int type_notifications_count_;
+  int max_bandwidth_notifications_count_;
 };
 
 class NetworkChangeNotifierObserver
@@ -42,8 +47,8 @@ class NetworkChangeNotifierObserver
   NetworkChangeNotifierObserver() : notifications_count_(0) {}
 
   // NetworkChangeNotifier::Observer:
-  virtual void OnConnectionTypeChanged(
-      NetworkChangeNotifier::ConnectionType connection_type) OVERRIDE {
+  void OnConnectionTypeChanged(
+      NetworkChangeNotifier::ConnectionType connection_type) override {
     notifications_count_++;
   }
 
@@ -61,7 +66,7 @@ class BaseNetworkChangeNotifierAndroidTest : public testing::Test {
  protected:
   typedef NetworkChangeNotifier::ConnectionType ConnectionType;
 
-  virtual ~BaseNetworkChangeNotifierAndroidTest() {}
+  ~BaseNetworkChangeNotifierAndroidTest() override {}
 
   void RunTest(
       const base::Callback<int(void)>& notifications_count_getter,
@@ -141,7 +146,7 @@ class NetworkChangeNotifierDelegateAndroidTest
     delegate_.AddObserver(&other_delegate_observer_);
   }
 
-  virtual ~NetworkChangeNotifierDelegateAndroidTest() {
+  ~NetworkChangeNotifierDelegateAndroidTest() override {
     delegate_.RemoveObserver(&delegate_observer_);
     delegate_.RemoveObserver(&other_delegate_observer_);
   }
@@ -155,17 +160,16 @@ class NetworkChangeNotifierDelegateAndroidTest
 // delegate's observers are instances of NetworkChangeNotifierAndroid.
 TEST_F(NetworkChangeNotifierDelegateAndroidTest, DelegateObserverNotified) {
   // Test the logic with a single observer.
-  RunTest(
-      base::Bind(
-          &NetworkChangeNotifierDelegateAndroidObserver::notifications_count,
-          base::Unretained(&delegate_observer_)),
-      base::Bind(
-          &NetworkChangeNotifierDelegateAndroid::GetCurrentConnectionType,
-          base::Unretained(&delegate_)));
+  RunTest(base::Bind(&NetworkChangeNotifierDelegateAndroidObserver::
+                         type_notifications_count,
+                     base::Unretained(&delegate_observer_)),
+          base::Bind(
+              &NetworkChangeNotifierDelegateAndroid::GetCurrentConnectionType,
+              base::Unretained(&delegate_)));
   // Check that *all* the observers are notified. Both observers should have the
   // same state.
-  EXPECT_EQ(delegate_observer_.notifications_count(),
-            other_delegate_observer_.notifications_count());
+  EXPECT_EQ(delegate_observer_.type_notifications_count(),
+            other_delegate_observer_.type_notifications_count());
 }
 
 class NetworkChangeNotifierAndroidTest
@@ -211,6 +215,29 @@ TEST_F(NetworkChangeNotifierAndroidTest,
   // Check that *all* the observers are notified.
   EXPECT_EQ(connection_type_observer_.notifications_count(),
             other_connection_type_observer_.notifications_count());
+}
+
+TEST_F(NetworkChangeNotifierAndroidTest, MaxBandwidth) {
+  SetOnline();
+  EXPECT_EQ(NetworkChangeNotifier::CONNECTION_UNKNOWN,
+            notifier_.GetConnectionType());
+  EXPECT_EQ(std::numeric_limits<double>::infinity(),
+            notifier_.GetMaxBandwidth());
+  SetOffline();
+  EXPECT_EQ(NetworkChangeNotifier::CONNECTION_NONE,
+            notifier_.GetConnectionType());
+  EXPECT_EQ(0.0, notifier_.GetMaxBandwidth());
+}
+
+TEST_F(NetworkChangeNotifierDelegateAndroidTest,
+       MaxBandwidthNotifiedOnConnectionChange) {
+  EXPECT_EQ(0, delegate_observer_.bandwidth_notifications_count());
+  SetOffline();
+  EXPECT_EQ(1, delegate_observer_.bandwidth_notifications_count());
+  SetOnline();
+  EXPECT_EQ(2, delegate_observer_.bandwidth_notifications_count());
+  SetOnline();
+  EXPECT_EQ(2, delegate_observer_.bandwidth_notifications_count());
 }
 
 }  // namespace net

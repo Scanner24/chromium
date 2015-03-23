@@ -43,7 +43,7 @@ void FakeStreamSocket::AppendInputData(const std::string& data) {
     memcpy(read_buffer_->data(),
            &(*input_data_.begin()) + input_pos_, result);
     input_pos_ += result;
-    read_buffer_ = NULL;
+    read_buffer_ = nullptr;
 
     net::CompletionCallback callback = read_callback_;
     read_callback_.Reset();
@@ -266,7 +266,7 @@ void FakeStreamChannelFactory::NotifyChannelCreated(
     const std::string& name,
     const ChannelCreatedCallback& callback) {
   if (channels_.find(name) != channels_.end())
-    callback.Run(owned_channel.PassAs<net::StreamSocket>());
+    callback.Run(owned_channel.Pass());
 }
 
 void FakeStreamChannelFactory::CancelChannelCreation(const std::string& name) {

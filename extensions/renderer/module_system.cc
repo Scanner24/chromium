@@ -6,10 +6,11 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
@@ -72,7 +73,7 @@ class DefaultExceptionHandler : public ModuleSystem::ExceptionHandler {
   // Fatally dumps the debug info from |try_catch| to the console.
   // Make sure this is never used for exceptions that originate in external
   // code!
-  virtual void HandleUncaughtException(const v8::TryCatch& try_catch) OVERRIDE {
+  void HandleUncaughtException(const v8::TryCatch& try_catch) override {
     v8::HandleScope handle_scope(context_->isolate());
     std::string stack_trace = "<stack trace unavailable>";
     if (!try_catch.StackTrace().IsEmpty()) {
@@ -101,7 +102,7 @@ std::string ModuleSystem::ExceptionHandler::CreateExceptionString(
   std::string resource_name = "<unknown resource>";
   if (!message->GetScriptOrigin().ResourceName().IsEmpty()) {
     v8::String::Utf8Value resource_name_v8(
-        message->GetScriptOrigin().ResourceName()->ToString());
+        message->GetScriptOrigin().ResourceName());
     resource_name.assign(*resource_name_v8, resource_name_v8.length());
   }
 
@@ -144,6 +145,10 @@ ModuleSystem::ModuleSystem(ScriptContext* context, SourceMap* source_map)
                          v8::External::New(isolate, this));
 
   gin::ModuleRegistry::From(context->v8_context())->AddObserver(this);
+  if (context_->GetRenderFrame()) {
+    context_->GetRenderFrame()->EnsureMojoBuiltinsAreAvailable(
+        context->isolate(), context->v8_context());
+  }
 }
 
 ModuleSystem::~ModuleSystem() { Invalidate(); }
@@ -196,7 +201,7 @@ v8::Handle<v8::Value> ModuleSystem::Require(const std::string& module_name) {
 
 void ModuleSystem::RequireForJs(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  v8::Handle<v8::String> module_name = args[0]->ToString();
+  v8::Handle<v8::String> module_name = args[0]->ToString(args.GetIsolate());
   args.GetReturnValue().Set(RequireForJsInner(module_name));
 }
 
@@ -349,10 +354,8 @@ void ModuleSystem::LazyFieldGetterInner(
   ModuleSystem* module_system = static_cast<ModuleSystem*>(
       v8::Handle<v8::External>::Cast(module_system_value)->Value());
 
-  std::string name =
-      *v8::String::Utf8Value(
-          parameters->Get(v8::String::NewFromUtf8(info.GetIsolate(),
-                                                  kModuleName))->ToString());
+  std::string name = *v8::String::Utf8Value(parameters->Get(
+      v8::String::NewFromUtf8(info.GetIsolate(), kModuleName)));
 
   // Switch to our v8 context because we need functions created while running
   // the require()d module to belong to our context, not the current one.
@@ -373,7 +376,7 @@ void ModuleSystem::LazyFieldGetterInner(
   v8::Handle<v8::Object> module = v8::Handle<v8::Object>::Cast(module_value);
   v8::Handle<v8::String> field =
       parameters->Get(v8::String::NewFromUtf8(info.GetIsolate(), kModuleField))
-          ->ToString();
+          ->ToString(info.GetIsolate());
 
   if (!module->Has(field)) {
     std::string field_str = *v8::String::Utf8Value(field);
@@ -486,7 +489,7 @@ v8::Handle<v8::Value> ModuleSystem::GetSource(const std::string& module_name) {
 void ModuleSystem::RequireNative(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
-  std::string native_name = *v8::String::Utf8Value(args[0]->ToString());
+  std::string native_name = *v8::String::Utf8Value(args[0]);
   args.GetReturnValue().Set(RequireNativeFromString(native_name));
 }
 
@@ -521,7 +524,7 @@ v8::Handle<v8::Value> ModuleSystem::RequireNativeFromString(
 void ModuleSystem::RequireAsync(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
-  std::string module_name = *v8::String::Utf8Value(args[0]->ToString());
+  std::string module_name = *v8::String::Utf8Value(args[0]);
   v8::Handle<v8::Promise::Resolver> resolver(
       v8::Promise::Resolver::New(GetIsolate()));
   args.GetReturnValue().Set(resolver->GetPromise());
@@ -560,13 +563,26 @@ v8::Handle<v8::String> ModuleSystem::WrapSource(v8::Handle<v8::String> source) {
 
 void ModuleSystem::Private(const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
-  CHECK(args[0]->IsObject());
+  if (!args[0]->IsObject() || args[0]->IsNull()) {
+    GetIsolate()->ThrowException(
+        v8::Exception::TypeError(v8::String::NewFromUtf8(GetIsolate(),
+            args[0]->IsUndefined()
+                ? "Method called without a valid receiver (this). "
+                  "Did you forget to call .bind()?"
+                : "Invalid invocation: receiver is not an object!")));
+    return;
+  }
   v8::Local<v8::Object> obj = args[0].As<v8::Object>();
   v8::Local<v8::String> privates_key =
       v8::String::NewFromUtf8(GetIsolate(), "privates");
   v8::Local<v8::Value> privates = obj->GetHiddenValue(privates_key);
   if (privates.IsEmpty()) {
     privates = v8::Object::New(args.GetIsolate());
+    if (privates.IsEmpty()) {
+      GetIsolate()->ThrowException(
+          v8::String::NewFromUtf8(GetIsolate(), "Failed to create privates"));
+      return;
+    }
     obj->SetHiddenValue(privates_key, privates);
   }
   args.GetReturnValue().Set(privates);
@@ -614,7 +630,7 @@ v8::Handle<v8::Value> ModuleSystem::LoadModule(const std::string& module_name) {
           GetIsolate(), "requireAsync", v8::String::kInternalizedString)),
       exports,
       // Libraries that we magically expose to every module.
-      console::AsV8Object(),
+      console::AsV8Object(GetIsolate()),
       natives->Get(v8::String::NewFromUtf8(
           GetIsolate(), "privates", v8::String::kInternalizedString)),
       // Each safe builtin. Keep in order with the arguments in WrapSource.
@@ -641,17 +657,20 @@ v8::Handle<v8::Value> ModuleSystem::LoadModule(const std::string& module_name) {
 void ModuleSystem::OnDidAddPendingModule(
     const std::string& id,
     const std::vector<std::string>& dependencies) {
-  if (!source_map_->Contains(id))
-    return;
+  bool module_system_managed = source_map_->Contains(id);
 
   gin::ModuleRegistry* registry =
       gin::ModuleRegistry::From(context_->v8_context());
   DCHECK(registry);
-  for (std::vector<std::string>::const_iterator it = dependencies.begin();
-       it != dependencies.end();
-       ++it) {
-    if (registry->available_modules().count(*it) == 0)
-      LoadModule(*it);
+  for (const auto& dependency : dependencies) {
+    // If a dependency is not available, and either the module or this
+    // dependency is managed by ModuleSystem, attempt to load it. Other
+    // gin::ModuleRegistry users (WebUI and users of the mojoPrivate API) are
+    // responsible for loading their module dependencies when required.
+    if (registry->available_modules().count(dependency) == 0 &&
+        (module_system_managed || source_map_->Contains(dependency))) {
+      LoadModule(dependency);
+    }
   }
   registry->AttemptToLoadMoreModules(GetIsolate());
 }

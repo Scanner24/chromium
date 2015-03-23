@@ -84,7 +84,7 @@ class ShillToONCTranslator {
   void TranslateCellularDevice();
   void TranslateNetworkWithState();
   void TranslateIPConfig();
-  void TranslateSavedOrStaticIPConfig(const std::string& nameserver_property);
+  void TranslateSavedOrStaticIPConfig();
   void TranslateSavedIPConfig();
   void TranslateStaticIPConfig();
 
@@ -298,7 +298,7 @@ void ShillToONCTranslator::TranslateVPN() {
     TranslateAndAddNestedObject(::onc::vpn::kIPsec, *provider);
     TranslateAndAddNestedObject(::onc::vpn::kL2TP, *provider);
     provider_type_dictionary = ::onc::vpn::kIPsec;
-  } else {
+  } else if (onc_provider_type != ::onc::vpn::kThirdPartyVpn) {
     TranslateAndAddNestedObject(onc_provider_type, *provider);
     provider_type_dictionary = onc_provider_type;
   }
@@ -313,12 +313,22 @@ void ShillToONCTranslator::TranslateVPN() {
 }
 
 void ShillToONCTranslator::TranslateWiFiWithState() {
-  TranslateWithTableAndSet(
-      shill::kSecurityProperty, kWiFiSecurityTable, ::onc::wifi::kSecurity);
+  TranslateWithTableAndSet(shill::kSecurityClassProperty,
+                           kWiFiSecurityTable,
+                           ::onc::wifi::kSecurity);
+  bool unknown_encoding = true;
   std::string ssid = shill_property_util::GetSSIDFromProperties(
-      *shill_dictionary_, NULL /* ignore unknown encoding */);
-  if (!ssid.empty())
+      *shill_dictionary_, false /* verbose_logging */, &unknown_encoding);
+  if (!unknown_encoding && !ssid.empty())
     onc_object_->SetStringWithoutPathExpansion(::onc::wifi::kSSID, ssid);
+
+  bool link_monitor_disable;
+  if (shill_dictionary_->GetBooleanWithoutPathExpansion(
+          shill::kLinkMonitorDisableProperty, &link_monitor_disable)) {
+    onc_object_->SetBooleanWithoutPathExpansion(
+        ::onc::wifi::kAllowGatewayARPPolling, !link_monitor_disable);
+  }
+
   CopyPropertiesAccordingToSignature();
   TranslateAndAddNestedObject(::onc::wifi::kEAP);
 }
@@ -373,6 +383,12 @@ void ShillToONCTranslator::TranslateCellularDevice() {
     TranslateAndAddNestedObject(::onc::cellular::kSIMLockStatus,
                                 *shill_sim_lock_status);
   }
+  const base::DictionaryValue* shill_home_provider = NULL;
+  if (shill_dictionary_->GetDictionaryWithoutPathExpansion(
+          shill::kHomeProviderProperty, &shill_home_provider)) {
+    TranslateAndAddNestedObject(::onc::cellular::kHomeProvider,
+                                *shill_home_provider);
+  }
   const base::ListValue* shill_apns = NULL;
   if (shill_dictionary_->GetListWithoutPathExpansion(
           shill::kCellularApnListProperty, &shill_apns)) {
@@ -424,8 +440,8 @@ void ShillToONCTranslator::TranslateNetworkWithState() {
     }
     onc_object_->SetStringWithoutPathExpansion(
         ::onc::network_config::kConnectionState, onc_state);
-    // Only set 'RestrictedConnectivity' if true.
-    if (state == shill::kStatePortal) {
+    // Only set 'RestrictedConnectivity' if captive portal state is true.
+    if (NetworkState::NetworkStateIsCaptivePortal(*shill_dictionary_)) {
       onc_object_->SetBooleanWithoutPathExpansion(
           ::onc::network_config::kRestrictedConnectivity, true);
     }
@@ -471,8 +487,38 @@ void ShillToONCTranslator::TranslateNetworkWithState() {
                                  *shill_ipconfigs);
   }
 
-  TranslateAndAddNestedObject(::onc::network_config::kSavedIPConfig);
-  TranslateAndAddNestedObject(::onc::network_config::kStaticIPConfig);
+  const base::DictionaryValue* saved_ipconfig = nullptr;
+  if (shill_dictionary_->GetDictionaryWithoutPathExpansion(
+        shill::kSavedIPConfigProperty, &saved_ipconfig)) {
+    TranslateAndAddNestedObject(::onc::network_config::kSavedIPConfig,
+                                *saved_ipconfig);
+  }
+
+  // Translate the StaticIPConfig object and set the IP config types.
+  const base::DictionaryValue* static_ipconfig = nullptr;
+  if (shill_dictionary_->GetDictionaryWithoutPathExpansion(
+          shill::kStaticIPConfigProperty, &static_ipconfig)) {
+    std::string ip_address;
+    if (static_ipconfig->GetStringWithoutPathExpansion(shill::kAddressProperty,
+                                                       &ip_address) &&
+        !ip_address.empty()) {
+      onc_object_->SetStringWithoutPathExpansion(
+          ::onc::network_config::kIPAddressConfigType,
+          ::onc::network_config::kIPConfigTypeStatic);
+    }
+    const base::ListValue* name_servers = nullptr;
+    if (static_ipconfig->GetListWithoutPathExpansion(
+            shill::kNameServersProperty, &name_servers) &&
+        !name_servers->empty()) {
+      onc_object_->SetStringWithoutPathExpansion(
+          ::onc::network_config::kNameServersConfigType,
+          ::onc::network_config::kIPConfigTypeStatic);
+    }
+    if (!ip_address.empty() || (name_servers && !name_servers->empty())) {
+      TranslateAndAddNestedObject(::onc::network_config::kStaticIPConfig,
+                                  *static_ipconfig);
+    }
+  }
 }
 
 void ShillToONCTranslator::TranslateIPConfig() {
@@ -494,24 +540,9 @@ void ShillToONCTranslator::TranslateIPConfig() {
   onc_object_->SetStringWithoutPathExpansion(::onc::ipconfig::kType, type);
 }
 
-void ShillToONCTranslator::TranslateSavedOrStaticIPConfig(
-    const std::string& nameserver_property) {
+void ShillToONCTranslator::TranslateSavedOrStaticIPConfig() {
   CopyPropertiesAccordingToSignature();
-  // Saved/Static IP config nameservers are stored as a comma separated list.
-  std::string shill_nameservers;
-  shill_dictionary_->GetStringWithoutPathExpansion(
-      nameserver_property, &shill_nameservers);
-  std::vector<std::string> onc_nameserver_vector;
-  if (Tokenize(shill_nameservers, ",", &onc_nameserver_vector) > 0) {
-    scoped_ptr<base::ListValue> onc_nameservers(new base::ListValue);
-    for (std::vector<std::string>::iterator iter =
-             onc_nameserver_vector.begin();
-         iter != onc_nameserver_vector.end(); ++iter) {
-      onc_nameservers->AppendString(*iter);
-    }
-    onc_object_->SetWithoutPathExpansion(::onc::ipconfig::kNameServers,
-                                         onc_nameservers.release());
-  }
+
   // Static and Saved IPConfig in Shill are always of type IPv4. Set this type
   // in ONC, but not if the object would be empty except the type.
   if (!onc_object_->empty()) {
@@ -521,11 +552,11 @@ void ShillToONCTranslator::TranslateSavedOrStaticIPConfig(
 }
 
 void ShillToONCTranslator::TranslateSavedIPConfig() {
-  TranslateSavedOrStaticIPConfig(shill::kSavedIPNameServersProperty);
+  TranslateSavedOrStaticIPConfig();
 }
 
 void ShillToONCTranslator::TranslateStaticIPConfig() {
-  TranslateSavedOrStaticIPConfig(shill::kStaticIPNameServersProperty);
+  TranslateSavedOrStaticIPConfig();
 }
 
 void ShillToONCTranslator::TranslateAndAddNestedObject(
@@ -639,8 +670,8 @@ void ShillToONCTranslator::CopyProperty(
     return;
   }
 
- onc_object_->SetWithoutPathExpansion(field_signature->onc_field_name,
-                                      shill_value->DeepCopy());
+  onc_object_->SetWithoutPathExpansion(field_signature->onc_field_name,
+                                       shill_value->DeepCopy());
 }
 
 void ShillToONCTranslator::TranslateWithTableAndSet(

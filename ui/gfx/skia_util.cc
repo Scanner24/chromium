@@ -11,9 +11,9 @@
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "third_party/skia/include/effects/SkLayerDrawLooper.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/image/image_skia_rep.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/gfx/transform.h"
 
@@ -45,6 +45,15 @@ RectF SkRectToRectF(const SkRect& rect) {
                SkScalarToFloat(rect.y()),
                SkScalarToFloat(rect.width()),
                SkScalarToFloat(rect.height()));
+}
+
+SkSize SizeFToSkSize(const SizeF& size) {
+  return SkSize::Make(SkFloatToScalar(size.width()),
+                      SkFloatToScalar(size.height()));
+}
+
+SizeF SkSizeToSizeF(const SkSize& size) {
+  return SizeF(SkScalarToFloat(size.width()), SkScalarToFloat(size.height()));
 }
 
 void TransformToFlattenedSkMatrix(const gfx::Transform& transform,
@@ -174,7 +183,7 @@ void ConvertSkiaToRGBA(const unsigned char* skia,
     const uint32_t pixel_in = *reinterpret_cast<const uint32_t*>(&skia[i]);
 
     // Pack the components here.
-    int alpha = SkGetPackedA32(pixel_in);
+    SkAlpha alpha = SkGetPackedA32(pixel_in);
     if (alpha != 0 && alpha != 255) {
       SkColor unmultiplied = SkUnPreMultiply::PMColorToColor(pixel_in);
       rgba[i + 0] = SkColorGetR(unmultiplied);

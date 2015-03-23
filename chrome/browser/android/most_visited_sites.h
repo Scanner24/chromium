@@ -10,12 +10,12 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/top_sites_observer.h"
 #include "components/suggestions/proto/suggestions.pb.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
 namespace suggestions {
 class SuggestionsService;
@@ -23,7 +23,7 @@ class SuggestionsService;
 
 // Provides the list of most visited sites and their thumbnails to Java.
 class MostVisitedSites : public ProfileSyncServiceObserver,
-                         public content::NotificationObserver {
+                         public history::TopSitesObserver {
  public:
   typedef base::Callback<
       void(base::android::ScopedJavaGlobalRef<jobject>* bitmap,
@@ -44,19 +44,20 @@ class MostVisitedSites : public ProfileSyncServiceObserver,
   void BlacklistUrl(JNIEnv* env, jobject obj, jstring j_url);
   void RecordOpenedMostVisitedItem(JNIEnv* env, jobject obj, jint index);
 
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
   // Registers JNI methods.
   static bool Register(JNIEnv* env);
 
  private:
-  virtual ~MostVisitedSites();
+  // The source of the Most Visited sites.
+  enum MostVisitedSource {
+    TOP_SITES,
+    SUGGESTIONS_SERVICE
+  };
+
+  ~MostVisitedSites() override;
   void QueryMostVisitedURLs();
 
   // Initialize the query to Top Sites. Called if the SuggestionsService is not
@@ -94,6 +95,10 @@ class MostVisitedSites : public ProfileSyncServiceObserver,
   // Records specific UMA histogram metrics.
   void RecordUMAMetrics();
 
+  // history::TopSitesObserver implementation.
+  void TopSitesLoaded(history::TopSites* top_sites) override;
+  void TopSitesChanged(history::TopSites* top_sites) override;
+
   // The profile whose most visited sites will be queried.
   Profile* profile_;
 
@@ -105,6 +110,9 @@ class MostVisitedSites : public ProfileSyncServiceObserver,
 
   // Whether the user is in a control group for the purposes of logging.
   bool is_control_group_;
+
+  // Keeps track of whether the initial NTP load has been done.
+  bool initial_load_done_;
 
   // Counters for UMA metrics.
 
@@ -119,17 +127,12 @@ class MostVisitedSites : public ProfileSyncServiceObserver,
   // Copy of the server suggestions (if enabled). Used for logging.
   suggestions::SuggestionsProfile server_suggestions_;
 
+  ScopedObserver<history::TopSites, history::TopSitesObserver> scoped_observer_;
+
+  MostVisitedSource mv_source_;
+
   // For callbacks may be run after destruction.
   base::WeakPtrFactory<MostVisitedSites> weak_ptr_factory_;
-
-  content::NotificationRegistrar registrar_;
-
-  // The source of the Most Visited sites.
-  enum MostVisitedSource {
-    TOP_SITES,
-    SUGGESTIONS_SERVICE
-  };
-  MostVisitedSource mv_source_;
 
   DISALLOW_COPY_AND_ASSIGN(MostVisitedSites);
 };

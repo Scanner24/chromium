@@ -29,13 +29,16 @@ void MutableEntry::Init(WriteTransaction* trans,
   kernel->put(ID, trans->directory_->NextId());
   kernel->put(META_HANDLE, trans->directory_->NextMetahandle());
   kernel->mark_dirty(&trans->directory_->kernel_->dirty_metahandles);
-  kernel->put(PARENT_ID, parent_id);
   kernel->put(NON_UNIQUE_NAME, name);
   const base::Time& now = base::Time::Now();
   kernel->put(CTIME, now);
   kernel->put(MTIME, now);
   // We match the database defaults here
   kernel->put(BASE_VERSION, CHANGES_VERSION);
+
+  if (!parent_id.IsNull()) {
+    kernel->put(PARENT_ID, parent_id);
+  }
 
   // Normally the SPECIFICS setting code is wrapped in logic to deal with
   // unknown fields and encryption.  Since all we want to do here is ensure that
@@ -52,6 +55,20 @@ void MutableEntry::Init(WriteTransaction* trans,
 
   // Now swap the pointers.
   kernel_ = kernel.release();
+}
+
+MutableEntry::MutableEntry(WriteTransaction* trans,
+                           Create,
+                           ModelType model_type,
+                           const string& name)
+    : ModelNeutralMutableEntry(trans), write_transaction_(trans) {
+  Init(trans, model_type, Id(), name);
+  // We need to have a valid position ready before we can index the item.
+  DCHECK_NE(BOOKMARKS, model_type);
+  DCHECK(!ShouldMaintainPosition());
+
+  bool result = trans->directory()->InsertEntry(trans, kernel_);
+  DCHECK(result);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans,
@@ -170,7 +187,9 @@ void MutableEntry::PutIsDel(bool value) {
     // - Let us delete this entry permanently through
     //   DirectoryBackingStore::DropDeletedEntries() when we next restart sync.
     //   This will save memory and avoid crbug.com/125381.
-    if (!GetId().ServerKnows()) {
+    // Note: do not unset IsUnsynced if the syncer is in the middle of
+    // attempting to commit this entity.
+    if (!GetId().ServerKnows() && !GetSyncing()) {
       PutIsUnsynced(false);
     }
   }
@@ -225,10 +244,14 @@ void MutableEntry::PutUniquePosition(const UniquePosition& value) {
 }
 
 bool MutableEntry::PutPredecessor(const Id& predecessor_id) {
-  MutableEntry predecessor(write_transaction(), GET_BY_ID, predecessor_id);
-  if (!predecessor.good())
-    return false;
-  dir()->PutPredecessor(kernel_, predecessor.kernel_);
+  if (predecessor_id.IsNull()) {
+    dir()->PutPredecessor(kernel_, NULL);
+  } else {
+    MutableEntry predecessor(write_transaction(), GET_BY_ID, predecessor_id);
+    if (!predecessor.good())
+      return false;
+    dir()->PutPredecessor(kernel_, predecessor.kernel_);
+  }
   return true;
 }
 

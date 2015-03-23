@@ -23,31 +23,34 @@ namespace gfx {
 class RenderTextMac : public RenderText {
  public:
   RenderTextMac();
-  virtual ~RenderTextMac();
+  ~RenderTextMac() override;
 
-  // Overridden from RenderText:
-  virtual Size GetStringSize() OVERRIDE;
-  virtual SizeF GetStringSizeF() OVERRIDE;
-  virtual SelectionModel FindCursorPosition(const Point& point) OVERRIDE;
-  virtual std::vector<FontSpan> GetFontSpansForTesting() OVERRIDE;
+  // RenderText:
+  scoped_ptr<RenderText> CreateInstanceOfSameType() const override;
+  const base::string16& GetDisplayText() override;
+  Size GetStringSize() override;
+  SizeF GetStringSizeF() override;
+  SelectionModel FindCursorPosition(const Point& point) override;
+  std::vector<FontSpan> GetFontSpansForTesting() override;
 
  protected:
-  // Overridden from RenderText:
-  virtual int GetLayoutTextBaseline() OVERRIDE;
-  virtual SelectionModel AdjacentCharSelectionModel(
+  // RenderText:
+  int GetDisplayTextBaseline() override;
+  SelectionModel AdjacentCharSelectionModel(
       const SelectionModel& selection,
-      VisualCursorDirection direction) OVERRIDE;
-  virtual SelectionModel AdjacentWordSelectionModel(
+      VisualCursorDirection direction) override;
+  SelectionModel AdjacentWordSelectionModel(
       const SelectionModel& selection,
-      VisualCursorDirection direction) OVERRIDE;
-  virtual Range GetGlyphBounds(size_t index) OVERRIDE;
-  virtual std::vector<Rect> GetSubstringBounds(const Range& range) OVERRIDE;
-  virtual size_t TextIndexToLayoutIndex(size_t index) const OVERRIDE;
-  virtual size_t LayoutIndexToTextIndex(size_t index) const OVERRIDE;
-  virtual bool IsValidCursorIndex(size_t index) OVERRIDE;
-  virtual void ResetLayout() OVERRIDE;
-  virtual void EnsureLayout() OVERRIDE;
-  virtual void DrawVisualText(Canvas* canvas) OVERRIDE;
+      VisualCursorDirection direction) override;
+  Range GetGlyphBounds(size_t index) override;
+  std::vector<Rect> GetSubstringBounds(const Range& range) override;
+  size_t TextIndexToDisplayIndex(size_t index) override;
+  size_t DisplayIndexToTextIndex(size_t index) override;
+  bool IsValidCursorIndex(size_t index) override;
+  void OnLayoutTextAttributeChanged(bool text_changed) override;
+  void OnDisplayTextAttributeChanged() override;
+  void EnsureLayout() override;
+  void DrawVisualText(Canvas* canvas) override;
 
  private:
   struct TextRun {

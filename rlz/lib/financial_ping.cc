@@ -200,7 +200,7 @@ class FinancialPingUrlFetcherDelegate : public net::URLFetcherDelegate {
   FinancialPingUrlFetcherDelegate(const base::Closure& callback)
       : callback_(callback) {
   }
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
  private:
   base::Closure callback_;
@@ -318,7 +318,6 @@ bool FinancialPing::PingServer(const char* request, std::string* response) {
 
   fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                         net::LOAD_DO_NOT_SEND_AUTH_DATA |
-                        net::LOAD_DO_NOT_PROMPT_FOR_LOGIN |
                         net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES);
 

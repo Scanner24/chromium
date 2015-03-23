@@ -136,7 +136,7 @@ class SwitchToMetroUIHandler
 
  private:
   virtual void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
+      ShellIntegration::DefaultWebClientUIState state) override {
     switch (state) {
       case ShellIntegration::STATE_PROCESSING:
         return;
@@ -157,7 +157,7 @@ class SwitchToMetroUIHandler
     delete this;
   }
 
-  virtual void OnSetAsDefaultConcluded(bool success)  OVERRIDE {
+  virtual void OnSetAsDefaultConcluded(bool success)  override {
     if (!success) {
       delete this;
       return;
@@ -166,7 +166,7 @@ class SwitchToMetroUIHandler
     default_browser_worker_->StartCheckIsDefault();
   }
 
-  virtual bool IsInteractiveSetDefaultPermitted() OVERRIDE {
+  virtual bool IsInteractiveSetDefaultPermitted() override {
     return true;
   }
 
@@ -341,6 +341,11 @@ void BrowserCommandController::LoadingStateChanged(bool is_loading,
   UpdateReloadStopState(is_loading, force);
 }
 
+void BrowserCommandController::ExtensionStateChanged() {
+  // Extensions may disable the bookmark editing commands.
+  UpdateCommandsForBookmarkEditing();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserCommandController, CommandUpdaterDelegate implementation:
 
@@ -456,7 +461,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_FULLSCREEN:
 #if defined(OS_MACOSX)
-      chrome::ToggleFullscreenWithChromeOrFallback(browser_);
+      chrome::ToggleFullscreenWithToolbarOrFallback(browser_);
 #else
       chrome::ToggleFullscreenMode(browser_);
 #endif
@@ -510,6 +515,9 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
         chrome::AttemptRestartToMetroMode();
       }
       break;
+    case IDC_PIN_TO_START_SCREEN:
+      TogglePagePinnedToStartScreen(browser_);
+      break;
 #endif
 
 #if defined(OS_MACOSX)
@@ -526,10 +534,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       SavePage(browser_);
       break;
     case IDC_BOOKMARK_PAGE:
-      BookmarkCurrentPage(browser_);
-      break;
-    case IDC_PIN_TO_START_SCREEN:
-      TogglePagePinnedToStartScreen(browser_);
+      BookmarkCurrentPageAllowingExtensionOverrides(browser_);
       break;
     case IDC_BOOKMARK_ALL_TABS:
       BookmarkAllTabs(browser_);
@@ -543,12 +548,12 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_PRINT:
       Print(browser_);
       break;
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
     case IDC_BASIC_PRINT:
       content::RecordAction(base::UserMetricsAction("Accel_Advanced_Print"));
       BasicPrint(browser_);
       break;
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
     case IDC_TRANSLATE_PAGE:
       Translate(browser_);
       break;
@@ -562,7 +567,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_ENCODING_UTF8:
     case IDC_ENCODING_UTF16LE:
-    case IDC_ENCODING_ISO88591:
     case IDC_ENCODING_WINDOWS1252:
     case IDC_ENCODING_GBK:
     case IDC_ENCODING_GB18030:
@@ -762,7 +766,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ShowHelp(browser_, HELP_SOURCE_MENU);
       break;
     case IDC_SHOW_SIGNIN:
-      ShowBrowserSignin(browser_, signin::SOURCE_MENU);
+      ShowBrowserSigninOrSettings(browser_, signin_metrics::SOURCE_MENU);
       break;
     case IDC_TOGGLE_SPEECH_INPUT:
       ToggleSpeechInput(browser_);
@@ -770,6 +774,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_DISTILL_PAGE:
       DistillCurrentPage(browser_);
       break;
+#if defined(OS_CHROMEOS)
+    case IDC_TOUCH_HUD_PROJECTION_TOGGLE:
+      ash::accelerators::ToggleTouchHudProjection();
+      break;
+#endif
 
     default:
       LOG(WARNING) << "Received Unimplemented Command: " << id;
@@ -845,11 +854,11 @@ class BrowserCommandController::InterstitialObserver
         controller_(controller) {
   }
 
-  virtual void DidAttachInterstitialPage() OVERRIDE {
+  void DidAttachInterstitialPage() override {
     controller_->UpdateCommandsForTabState();
   }
 
-  virtual void DidDetachInterstitialPage() OVERRIDE {
+  void DidDetachInterstitialPage() override {
     controller_->UpdateCommandsForTabState();
   }
 
@@ -904,7 +913,6 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_AUTO_DETECT, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_UTF8, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_UTF16LE, true);
-  command_updater_.UpdateCommandEnabled(IDC_ENCODING_ISO88591, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_WINDOWS1252, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_GBK, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_GB18030, true);
@@ -965,6 +973,7 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_CLEAR_BROWSING_DATA, normal_window);
 #if defined(OS_CHROMEOS)
   command_updater_.UpdateCommandEnabled(IDC_TAKE_SCREENSHOT, true);
+  command_updater_.UpdateCommandEnabled(IDC_TOUCH_HUD_PROJECTION_TOGGLE, true);
 #else
   // Chrome OS uses the system tray menu to handle multi-profiles.
   if (normal_window && (guest_session || !profile()->IsOffTheRecord()))
@@ -976,8 +985,8 @@ void BrowserCommandController::InitCommandState() {
   // Navigation commands
   command_updater_.UpdateCommandEnabled(
       IDC_HOME,
-      normal_window || (extensions::util::IsStreamlinedHostedAppsEnabled() &&
-                        browser_->is_app()));
+      normal_window ||
+          (extensions::util::IsNewBookmarkAppsEnabled() && browser_->is_app()));
 
   // Window management commands
   command_updater_.UpdateCommandEnabled(IDC_SELECT_NEXT_TAB, normal_window);
@@ -1013,9 +1022,8 @@ void BrowserCommandController::InitCommandState() {
 
   // Distill current page.
   command_updater_.UpdateCommandEnabled(
-      IDC_DISTILL_PAGE,
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableDomDistiller));
+      IDC_DISTILL_PAGE, base::CommandLine::ForCurrentProcess()->HasSwitch(
+                            switches::kEnableDomDistiller));
 
   // Initialize other commands whose state changes based on various conditions.
   UpdateCommandsForFullscreenMode();
@@ -1114,9 +1122,9 @@ void BrowserCommandController::UpdateCommandsForTabState() {
   command_updater_.UpdateCommandEnabled(
       IDC_CREATE_SHORTCUTS,
       CanCreateApplicationShortcuts(browser_));
+#endif
   command_updater_.UpdateCommandEnabled(IDC_CREATE_HOSTED_APP,
                                         CanCreateBookmarkApp(browser_));
-#endif
 
   command_updater_.UpdateCommandEnabled(
       IDC_TOGGLE_REQUEST_TABLET_SITE,
@@ -1172,8 +1180,9 @@ void BrowserCommandController::UpdateCommandsForBookmarkEditing() {
                                         CanBookmarkCurrentPage(browser_));
   command_updater_.UpdateCommandEnabled(IDC_BOOKMARK_ALL_TABS,
                                         CanBookmarkAllTabs(browser_));
-  command_updater_.UpdateCommandEnabled(IDC_PIN_TO_START_SCREEN,
-                                        true);
+#if defined(OS_WIN)
+  command_updater_.UpdateCommandEnabled(IDC_PIN_TO_START_SCREEN, true);
+#endif
 }
 
 void BrowserCommandController::UpdateCommandsForBookmarkBar() {
@@ -1272,10 +1281,10 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode() {
 void BrowserCommandController::UpdatePrintingState() {
   bool print_enabled = CanPrint(browser_);
   command_updater_.UpdateCommandEnabled(IDC_PRINT, print_enabled);
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
   command_updater_.UpdateCommandEnabled(IDC_BASIC_PRINT,
                                         CanBasicPrint(browser_));
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 }
 
 void BrowserCommandController::UpdateSaveAsState() {

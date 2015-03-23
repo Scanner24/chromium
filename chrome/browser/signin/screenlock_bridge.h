@@ -25,23 +25,18 @@ class Profile;
 // used solely for the lock screen anymore.
 class ScreenlockBridge {
  public:
-  class Observer {
-   public:
-    // Invoked after the screen is locked.
-    virtual void OnScreenDidLock() = 0;
-    // Invoked after the screen lock is dismissed.
-    virtual void OnScreenDidUnlock() = 0;
-    // Invoked when the user focused on the lock screen changes.
-    virtual void OnFocusedUserChanged(const std::string& user_id) = 0;
-   protected:
-    virtual ~Observer() {}
-  };
-
   // User pod icons supported by lock screen / signin screen UI.
   enum UserPodCustomIcon {
     USER_POD_CUSTOM_ICON_NONE,
     USER_POD_CUSTOM_ICON_HARDLOCKED,
     USER_POD_CUSTOM_ICON_LOCKED,
+    USER_POD_CUSTOM_ICON_LOCKED_TO_BE_ACTIVATED,
+    // TODO(isherman): The "locked with proximity hint" icon is currently the
+    // same as the "locked" icon. It's treated as a separate case to allow an
+    // easy asset swap without changing the code, in case we decide to use a
+    // different icon for this case. If we definitely decide against that, then
+    // this enum entry should be removed.
+    USER_POD_CUSTOM_ICON_LOCKED_WITH_PROXIMITY_HINT,
     USER_POD_CUSTOM_ICON_UNLOCKED,
     USER_POD_CUSTOM_ICON_SPINNER
   };
@@ -64,13 +59,17 @@ class ScreenlockBridge {
     // shown with the icon.
     void SetTooltip(const base::string16& tooltip, bool autoshow);
 
-    // Sets the accessiblity label of the icon. If this attribute is not
+    // Sets the accessibility label of the icon. If this attribute is not
     // provided, then the tooltip will be used.
     void SetAriaLabel(const base::string16& aria_label);
 
     // If hardlock on click is set, clicking the icon in the screenlock will
     // go to state where password is required for unlock.
     void SetHardlockOnClick();
+
+    // If the current lock screen is a trial run to introduce users to Easy
+    // Unlock, the icon will record metrics upon click.
+    void SetTrialRun();
 
    private:
     UserPodCustomIcon icon_;
@@ -81,6 +80,8 @@ class ScreenlockBridge {
     base::string16 aria_label_;
 
     bool hardlock_on_click_;
+
+    bool is_trial_run_;
 
     DISALLOW_COPY_AND_ASSIGN(UserPodCustomIconOptions);
   };
@@ -96,6 +97,12 @@ class ScreenlockBridge {
       USER_CLICK = 3,
       EXPAND_THEN_USER_CLICK = 4,
       FORCE_OFFLINE_PASSWORD = 5
+    };
+
+    enum ScreenType {
+      SIGNIN_SCREEN = 0,
+      LOCK_SCREEN = 1,
+      OTHER_SCREEN = 2
     };
 
     // Displays |message| in a banner on the lock screen.
@@ -120,6 +127,9 @@ class ScreenlockBridge {
     // Returns the authentication type used for a user.
     virtual AuthType GetAuthType(const std::string& user_email) const = 0;
 
+    // Returns the type of the screen -- a signin or a lock screen.
+    virtual ScreenType GetScreenType() const = 0;
+
     // Unlock from easy unlock app for a user.
     virtual void Unlock(const std::string& user_email) = 0;
 
@@ -132,8 +142,23 @@ class ScreenlockBridge {
     virtual ~LockHandler() {}
   };
 
+  class Observer {
+   public:
+    // Invoked after the screen is locked.
+    virtual void OnScreenDidLock(LockHandler::ScreenType screen_type) = 0;
+
+    // Invoked after the screen lock is dismissed.
+    virtual void OnScreenDidUnlock(LockHandler::ScreenType screen_type) = 0;
+
+    // Invoked when the user focused on the lock screen changes.
+    virtual void OnFocusedUserChanged(const std::string& user_id) = 0;
+
+   protected:
+    virtual ~Observer() {}
+  };
+
   static ScreenlockBridge* Get();
-  static std::string GetAuthenticatedUserEmail(Profile* profile);
+  static std::string GetAuthenticatedUserEmail(const Profile* profile);
 
   void SetLockHandler(LockHandler* lock_handler);
   void SetFocusedUser(const std::string& user_id);

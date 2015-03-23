@@ -119,7 +119,10 @@ void GetSelectedFileInfoInternal(Profile* profile,
       // MTP, or provided file system), we should resolve the path.
       switch (params->local_path_option) {
         case NO_LOCAL_PATH_RESOLUTION:
-          break;  // No special handling needed.
+          // Pass empty local path.
+          params->selected_files.push_back(
+              ui::SelectedFileInfo(file_path, base::FilePath()));
+          break;
         case NEED_LOCAL_PATH_FOR_OPENING:
           GetFileNativeLocalPathForOpening(
               profile,
@@ -137,9 +140,10 @@ void GetSelectedFileInfoInternal(Profile* profile,
                          base::Passed(&params)));
           return;  // Remaining work is done in ContinueGetSelectedFileInfo.
       }
+    } else {
+      params->selected_files.push_back(
+          ui::SelectedFileInfo(file_path, file_path));
     }
-    params->selected_files.push_back(
-        ui::SelectedFileInfo(file_path, base::FilePath()));
   }
   params->callback.Run(params->selected_files);
 }
@@ -170,7 +174,7 @@ void VolumeInfoToVolumeMetadata(
 
   // TODO(kinaba): fill appropriate information once multi-profile support is
   // implemented.
-  volume_metadata->profile.display_name = profile->GetProfileName();
+  volume_metadata->profile.display_name = profile->GetProfileUserName();
   volume_metadata->profile.is_current_profile = true;
 
   if (!volume_info.source_path.empty()) {
@@ -256,6 +260,7 @@ void VolumeInfoToVolumeMetadata(
   }
 
   volume_metadata->is_read_only = volume_info.is_read_only;
+  volume_metadata->has_media = volume_info.has_media;
 
   switch (volume_info.mount_condition) {
     case chromeos::disks::MOUNT_CONDITION_NONE:
@@ -269,6 +274,18 @@ void VolumeInfoToVolumeMetadata(
     case chromeos::disks::MOUNT_CONDITION_UNSUPPORTED_FILESYSTEM:
       volume_metadata->mount_condition =
           file_manager_private::MOUNT_CONDITION_UNSUPPORTED;
+      break;
+  }
+
+  // If the context is known, then pass it.
+  switch (volume_info.mount_context) {
+    case MOUNT_CONTEXT_USER:
+      volume_metadata->mount_context = file_manager_private::MOUNT_CONTEXT_USER;
+      break;
+    case MOUNT_CONTEXT_AUTO:
+      volume_metadata->mount_context = file_manager_private::MOUNT_CONTEXT_AUTO;
+      break;
+    case MOUNT_CONTEXT_UNKNOWN:
       break;
   }
 }

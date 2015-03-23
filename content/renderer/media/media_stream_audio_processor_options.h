@@ -16,6 +16,7 @@ namespace webrtc {
 
 class AudioFrame;
 class AudioProcessing;
+class EchoCancellation;
 class MediaConstraintsInterface;
 class TypingDetection;
 
@@ -40,6 +41,7 @@ class CONTENT_EXPORT MediaAudioConstraints {
   static const char kGoogExperimentalAutoGainControl[];
   static const char kGoogNoiseSuppression[];
   static const char kGoogExperimentalNoiseSuppression[];
+  static const char kGoogBeamforming[];
   static const char kGoogHighpassFilter[];
   static const char kGoogTypingNoiseDetection[];
   static const char kGoogAudioMirroring[];
@@ -57,10 +59,6 @@ class CONTENT_EXPORT MediaAudioConstraints {
   MediaAudioConstraints(const blink::WebMediaConstraints& constraints,
                         int effects);
   virtual ~MediaAudioConstraints();
-
-  // Checks if any audio constraints are set that requires audio processing to
-  // be applied.
-  bool NeedsAudioProcessing();
 
   // Gets the property of the constraint named by |key| in |constraints_|.
   // Returns the constraint's value if the key is found; Otherwise returns the
@@ -88,6 +86,28 @@ class CONTENT_EXPORT MediaAudioConstraints {
   bool default_audio_processing_constraint_value_;
 };
 
+// A helper class to log echo information in general and Echo Cancellation
+// quality in particular.
+class CONTENT_EXPORT EchoInformation {
+ public:
+  EchoInformation();
+  virtual ~EchoInformation();
+
+  void UpdateAecDelayStats(webrtc::EchoCancellation* echo_cancellation);
+
+ private:
+  // Updates UMA histograms with an interval of 5 seconds.
+  void LogAecDelayStats();
+
+  // Counters to be able to aquire a 5 second aggregated metric out of 1 second
+  // aggregated webrtc::EchoCancellation::GetEchoDelayMetrics() queries.
+  int num_chunks_;
+  int num_queries_;
+  float echo_fraction_poor_delays_;
+
+  DISALLOW_COPY_AND_ASSIGN(EchoInformation);
+};
+
 // Enables the echo cancellation in |audio_processing|.
 void EnableEchoCancellation(AudioProcessing* audio_processing);
 
@@ -112,7 +132,7 @@ void StopEchoCancellationDump(AudioProcessing* audio_processing);
 
 void EnableAutomaticGainControl(AudioProcessing* audio_processing);
 
-void GetAecStats(AudioProcessing* audio_processing,
+void GetAecStats(webrtc::EchoCancellation* echo_cancellation,
                  webrtc::AudioProcessorInterface::AudioProcessorStats* stats);
 
 }  // namespace content

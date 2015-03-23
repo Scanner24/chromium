@@ -32,7 +32,7 @@ class MockPrivetURLFetcherDelegate : public PrivetURLFetcher::Delegate {
   }
 
   virtual void OnError(PrivetURLFetcher* fetcher,
-                       PrivetURLFetcher::ErrorType error) OVERRIDE {
+                       PrivetURLFetcher::ErrorType error) override {
     OnErrorInternal(error);
   }
 
@@ -40,7 +40,7 @@ class MockPrivetURLFetcherDelegate : public PrivetURLFetcher::Delegate {
 
   virtual void OnParsedJson(PrivetURLFetcher* fetcher,
                             const base::DictionaryValue& value,
-                            bool has_error) OVERRIDE {
+                            bool has_error) override {
     saved_value_.reset(value.DeepCopy());
     OnParsedJsonInternal(has_error);
   }
@@ -311,7 +311,8 @@ TEST_F(PrivetURLFetcherTest, V3Mode) {
 
   std::string header_token;
   ASSERT_FALSE(headers.GetHeader("X-Privet-Token", &header_token));
-  ASSERT_TRUE(headers.GetHeader("X-Privet-Auth", &header_token));
+  ASSERT_FALSE(headers.GetHeader("X-Privet-Auth", &header_token));
+  ASSERT_TRUE(headers.GetHeader("Authorization", &header_token));
   ASSERT_EQ("MyAuthToken", header_token);
 }
 

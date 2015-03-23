@@ -53,10 +53,11 @@ class DriveServiceInterface {
     base::Time last_viewed_by_me_date;
   };
 
-  // Optional parameters for InitiateUploadNewFile().
-  struct InitiateUploadNewFileOptions {
-    InitiateUploadNewFileOptions();
-    ~InitiateUploadNewFileOptions();
+  // Optional parameters for InitiateUploadNewFile() and
+  // MultipartUploadNewFile().
+  struct UploadNewFileOptions {
+    UploadNewFileOptions();
+    ~UploadNewFileOptions();
 
     // modified_date of the file.
     // Pass the null Time if you are not interested in setting this property.
@@ -67,10 +68,11 @@ class DriveServiceInterface {
     base::Time last_viewed_by_me_date;
   };
 
-  // Optional parameters for InitiateUploadExistingFile().
-  struct InitiateUploadExistingFileOptions {
-    InitiateUploadExistingFileOptions();
-    ~InitiateUploadExistingFileOptions();
+  // Optional parameters for InitiateUploadExistingFile() and
+  // MultipartUploadExistingFile().
+  struct UploadExistingFileOptions {
+    UploadExistingFileOptions();
+    ~UploadExistingFileOptions();
 
     // Expected ETag of the file. UPLOAD_ERROR_CONFLICT error is generated when
     // matching fails.
@@ -263,8 +265,6 @@ class DriveServiceInterface {
   // and it'll be named |new_title|.
   // If |last_modified| is not null, the modified date of the resource on the
   // server will be set to the date.
-  // This request is supported only on DriveAPIService, because GData WAPI
-  // doesn't support the function unfortunately.
   // Upon completion, invokes |callback| with results on the calling thread.
   // |callback| must not be null.
   virtual google_apis::CancelCallback CopyResource(
@@ -278,8 +278,7 @@ class DriveServiceInterface {
   // |parent_resource_id| with renaming to |new_title|.
   // If |last_modified| or |last_accessed| is not null, the modified/accessed
   // date of the resource on the server will be set to the date.
-  // This request is supported only on DriveAPIService, because GData WAPI
-  // doesn't support the function unfortunately.
+  // If |properties| are specified, then they will be set on |resource_id|.
   // Upon completion, invokes |callback| with results on the calling thread.
   // |callback| must not be null.
   virtual google_apis::CancelCallback UpdateResource(
@@ -288,6 +287,7 @@ class DriveServiceInterface {
       const std::string& new_title,
       const base::Time& last_modified,
       const base::Time& last_viewed_by_me,
+      const google_apis::drive::Properties& properties,
       const google_apis::FileResourceCallback& callback) = 0;
 
   // Adds a resource (document, file, or collection) identified by its
@@ -349,7 +349,7 @@ class DriveServiceInterface {
       int64 content_length,
       const std::string& parent_resource_id,
       const std::string& title,
-      const InitiateUploadNewFileOptions& options,
+      const UploadNewFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) = 0;
 
   // Initiates uploading of an existing document/file.
@@ -360,7 +360,7 @@ class DriveServiceInterface {
       const std::string& content_type,
       int64 content_length,
       const std::string& resource_id,
-      const InitiateUploadExistingFileOptions& options,
+      const UploadExistingFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) = 0;
 
   // Resumes uploading of a document/file on the calling thread.
@@ -384,6 +384,33 @@ class DriveServiceInterface {
       int64 content_length,
       const google_apis::drive::UploadRangeCallback& callback) = 0;
 
+  // Uploads a file by a single request with multipart body. It's more efficient
+  // for small files than using |InitiateUploadNewFile| and |ResumeUpload|.
+  // |content_type| and |content_length| should be the ones of the file to be
+  // uploaded.  |callback| must not be null. |progress_callback| may be null.
+  virtual google_apis::CancelCallback MultipartUploadNewFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const base::FilePath& local_file_path,
+      const UploadNewFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) = 0;
+
+  // Uploads a file by a single request with multipart body. It's more efficient
+  // for small files than using |InitiateUploadExistingFile| and |ResumeUpload|.
+  // |content_type| and |content_length| should be the ones of the file to be
+  // uploaded.  |callback| must not be null. |progress_callback| may be null.
+  virtual google_apis::CancelCallback MultipartUploadExistingFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const base::FilePath& local_file_path,
+      const UploadExistingFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) = 0;
+
   // Authorizes a Drive app with the id |app_id| to open the given file.
   // Upon completion, invokes |callback| with the link to open the file with
   // the provided app. |callback| must not be null.
@@ -398,7 +425,6 @@ class DriveServiceInterface {
       const google_apis::EntryActionCallback& callback) = 0;
 
   // Authorizes the account |email| to access |resource_id| as a |role|.
-  //
   // |callback| must not be null.
   virtual google_apis::CancelCallback AddPermission(
       const std::string& resource_id,

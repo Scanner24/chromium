@@ -39,6 +39,7 @@ namespace content {
 // Threshold on the number of media players per renderer before we start
 // attempting to release inactive media players.
 const int kMediaPlayerThreshold = 1;
+const int kInvalidMediaPlayerId = -1;
 
 static BrowserMediaPlayerManager::Factory g_factory = NULL;
 static media::MediaUrlInterceptor* media_url_interceptor_ = NULL;
@@ -122,7 +123,7 @@ MediaPlayerAndroid* BrowserMediaPlayerManager::CreateMediaPlayer(
 BrowserMediaPlayerManager::BrowserMediaPlayerManager(
     RenderFrameHost* render_frame_host)
     : render_frame_host_(render_frame_host),
-      fullscreen_player_id_(-1),
+      fullscreen_player_id_(kInvalidMediaPlayerId),
       fullscreen_player_is_released_(false),
       web_contents_(WebContents::FromRenderFrameHost(render_frame_host)),
       weak_ptr_factory_(this) {
@@ -135,42 +136,9 @@ BrowserMediaPlayerManager::~BrowserMediaPlayerManager() {
   // |players_| will be destroyed here because |player_| is a ScopedVector.
 }
 
-void BrowserMediaPlayerManager::FullscreenPlayerPlay() {
-  MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player) {
-    if (fullscreen_player_is_released_) {
-      video_view_->OpenVideo();
-      fullscreen_player_is_released_ = false;
-    }
-    player->Start();
-    Send(new MediaPlayerMsg_DidMediaPlayerPlay(RoutingID(),
-                                               fullscreen_player_id_));
-  }
-}
-
-void BrowserMediaPlayerManager::FullscreenPlayerPause() {
-  MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player) {
-    player->Pause(true);
-    Send(new MediaPlayerMsg_DidMediaPlayerPause(RoutingID(),
-                                                fullscreen_player_id_));
-  }
-}
-
-void BrowserMediaPlayerManager::FullscreenPlayerSeek(int msec) {
-  MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player) {
-    // TODO(kbalazs): if |fullscreen_player_is_released_| is true
-    // at this point, player->GetCurrentTime() will be wrong until
-    // FullscreenPlayerPlay (http://crbug.com/322798).
-    OnSeekRequest(fullscreen_player_id_,
-                  base::TimeDelta::FromMilliseconds(msec));
-  }
-}
-
 void BrowserMediaPlayerManager::ExitFullscreen(bool release_media_player) {
   if (WebContentsDelegate* delegate = web_contents_->GetDelegate())
-    delegate->ToggleFullscreenModeForTab(web_contents_, false);
+    delegate->ExitFullscreenModeForTab(web_contents_);
   if (RenderWidgetHostViewAndroid* view_android =
       static_cast<RenderWidgetHostViewAndroid*>(
           web_contents_->GetRenderWidgetHostView())) {
@@ -181,9 +149,15 @@ void BrowserMediaPlayerManager::ExitFullscreen(bool release_media_player) {
       new MediaPlayerMsg_DidExitFullscreen(RoutingID(), fullscreen_player_id_));
   video_view_.reset();
   MediaPlayerAndroid* player = GetFullscreenPlayer();
-  fullscreen_player_id_ = -1;
+  fullscreen_player_id_ = kInvalidMediaPlayerId;
   if (!player)
     return;
+
+#if defined(VIDEO_HOLE)
+  if (external_video_surface_container_)
+    external_video_surface_container_->OnFrameInfoUpdated();
+#endif  // defined(VIDEO_HOLE)
+
   if (release_media_player)
     ReleaseFullscreenPlayer(player);
   else
@@ -209,7 +183,6 @@ void BrowserMediaPlayerManager::SetVideoSurface(
   if (empty_surface)
     return;
 
-  Send(new MediaPlayerMsg_DidEnterFullscreen(RoutingID(), player->player_id()));
   if (RenderWidgetHostViewAndroid* view_android =
       static_cast<RenderWidgetHostViewAndroid*>(
           web_contents_->GetRenderWidgetHostView())) {
@@ -322,7 +295,7 @@ void BrowserMediaPlayerManager::RequestFullScreen(int player_id) {
   if (fullscreen_player_id_ == player_id)
     return;
 
-  if (fullscreen_player_id_ != -1) {
+  if (fullscreen_player_id_ != kInvalidMediaPlayerId) {
     // TODO(qinmin): Determine the correct error code we should report to WMPA.
     OnError(player_id, MediaPlayerAndroid::MEDIA_ERROR_DECODE);
     return;
@@ -354,6 +327,9 @@ void BrowserMediaPlayerManager::DetachExternalVideoSurface(int player_id) {
 }
 
 void BrowserMediaPlayerManager::OnFrameInfoUpdated() {
+  if (fullscreen_player_id_ != kInvalidMediaPlayerId)
+    return;
+
   if (external_video_surface_container_)
     external_video_surface_container_->OnFrameInfoUpdated();
 }
@@ -372,6 +348,20 @@ void BrowserMediaPlayerManager::OnNotifyExternalSurface(
   }
 }
 
+void BrowserMediaPlayerManager::ReleasePlayerOfExternalVideoSurfaceIfNeeded(
+    int future_player) {
+  int current_player = ExternalVideoSurfaceContainer::kInvalidPlayerId;
+
+  if (external_video_surface_container_)
+    current_player = external_video_surface_container_->GetCurrentPlayerId();
+
+  if (current_player == ExternalVideoSurfaceContainer::kInvalidPlayerId)
+    return;
+
+  if (current_player != future_player)
+    OnMediaInterrupted(current_player);
+}
+
 void BrowserMediaPlayerManager::OnRequestExternalSurface(
     int player_id, const gfx::RectF& rect) {
   if (!external_video_surface_container_) {
@@ -382,6 +372,8 @@ void BrowserMediaPlayerManager::OnRequestExternalSurface(
   // It's safe to use base::Unretained(this), because the callbacks will not
   // be called after running ReleaseExternalVideoSurface().
   if (external_video_surface_container_) {
+    // In case we're stealing the external surface from another player.
+    ReleasePlayerOfExternalVideoSurfaceIfNeeded(player_id);
     external_video_surface_container_->RequestExternalVideoSurface(
         player_id,
         base::Bind(&BrowserMediaPlayerManager::AttachExternalVideoSurface,
@@ -393,8 +385,11 @@ void BrowserMediaPlayerManager::OnRequestExternalSurface(
 #endif  // defined(VIDEO_HOLE)
 
 void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
-  DCHECK_EQ(fullscreen_player_id_, -1);
+  DCHECK_EQ(fullscreen_player_id_, kInvalidMediaPlayerId);
 #if defined(VIDEO_HOLE)
+  // If this fullscreen player is started when another player
+  // uses the external surface, release that other player.
+  ReleasePlayerOfExternalVideoSurfaceIfNeeded(player_id);
   if (external_video_surface_container_)
     external_video_surface_container_->ReleaseExternalVideoSurface(player_id);
 #endif  // defined(VIDEO_HOLE)
@@ -415,10 +410,6 @@ void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
   }
 
   // Force the second video to exit fullscreen.
-  // TODO(qinmin): There is no need to send DidEnterFullscreen message.
-  // However, if we don't send the message, page layers will not be
-  // correctly restored. http:crbug.com/367346.
-  Send(new MediaPlayerMsg_DidEnterFullscreen(RoutingID(), player_id));
   Send(new MediaPlayerMsg_DidExitFullscreen(RoutingID(), player_id));
   video_view_.reset();
 }
@@ -443,11 +434,12 @@ void BrowserMediaPlayerManager::OnInitialize(
 
   RenderProcessHostImpl* host = static_cast<RenderProcessHostImpl*>(
       web_contents()->GetRenderProcessHost());
-  MediaPlayerAndroid* player = CreateMediaPlayer(
-      media_player_params,
+  MediaPlayerAndroid* player =
+      CreateMediaPlayer(media_player_params,
 
-      host->GetBrowserContext()->IsOffTheRecord(), this,
-      host->browser_demuxer_android());
+                        host->GetBrowserContext()->IsOffTheRecord(),
+                        this,
+                        host->browser_demuxer_android().get());
 
   if (!player)
     return;
@@ -503,7 +495,7 @@ void BrowserMediaPlayerManager::OnReleaseResources(int player_id) {
 void BrowserMediaPlayerManager::OnDestroyPlayer(int player_id) {
   RemovePlayer(player_id);
   if (fullscreen_player_id_ == player_id)
-    fullscreen_player_id_ = -1;
+    fullscreen_player_id_ = kInvalidMediaPlayerId;
 }
 
 void BrowserMediaPlayerManager::OnRequestRemotePlayback(int /* player_id */) {

@@ -4,11 +4,23 @@
 
 package org.chromium.net;
 
+import java.util.concurrent.Executor;
+
 /**
  * HTTP request (GET, PUT or POST).
  * Note:  All methods must be called on the Executor passed in during creation.
  */
 public interface UrlRequest {
+    public static final int REQUEST_PRIORITY_IDLE = 0;
+
+    public static final int REQUEST_PRIORITY_LOWEST = 1;
+
+    public static final int REQUEST_PRIORITY_LOW = 2;
+
+    public static final int REQUEST_PRIORITY_MEDIUM = 3;
+
+    public static final int REQUEST_PRIORITY_HIGHEST = 4;
+
     /**
      * More setters go here.  They may only be called before start (Maybe
      * also allow during redirects).  Could optionally instead use arguments
@@ -16,7 +28,8 @@ public interface UrlRequest {
      */
 
     /**
-     * Sets the HTTP method verb to use for this request.
+     * Sets the HTTP method verb to use for this request. Must be done before
+     * request has started.
      *
      * <p>The default when this method is not called is "GET" if the request has
      * no body or "POST" if it does.
@@ -34,20 +47,38 @@ public interface UrlRequest {
     public void addHeader(String header, String value);
 
     /**
-     * Starts the request, all callbacks go to listener.
-     * @param listener
+     * Sets upload data. Must be done before request has started. May only be
+     * invoked once per request. Switches method to "POST" if not explicitly
+     * set. Starting the request will throw an exception if a Content-Type
+     * header is not set.
+     *
+     * @param uploadDataProvider responsible for providing the upload data.
+     * @param executor All {@code uploadDataProvider} methods will be called
+     *     using this {@code Executor}. May optionally be the same
+     *     {@code Executor} the request itself is using.
      */
-    public void start(UrlRequestListener listener);
+    public void setUploadDataProvider(UploadDataProvider uploadDataProvider, Executor executor);
 
     /**
-     * Can be called at any time.
+     * Starts the request, all callbacks go to listener. May only be called
+     * once. May not be called if cancel has been called on the request.
+     */
+    public void start();
+
+    /**
+     * Cancels the request.
+     *
+     * Can be called at any time.  If the Executor passed to UrlRequest on
+     * construction runs tasks on a single thread, and cancel is called on that
+     * thread, no listener methods will be invoked after cancel is called.
+     * Otherwise, at most one listener method may be made after cancel has
+     * completed.
      */
     public void cancel();
 
     /**
-     *
      * @return True if the request has been cancelled by the embedder.
-     * TBD(mmenke): False in all other cases (Including errors).
+     * False in all other cases (Including errors).
      */
     public boolean isCanceled();
 
@@ -73,6 +104,12 @@ public interface UrlRequest {
      * asynchronously.
      */
     public void resume();
+
+    /**
+     * Disables cache for the request. If context is not set up to use cache,
+     * this call has no effect.
+     */
+    public void disableCache();
 
     /**
      * Note:  There are deliberately no accessors for the results of the request

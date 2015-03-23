@@ -160,10 +160,8 @@ bool ProcessProxy::Write(const std::string& text) {
 
   // We don't want to write '\0' to the pipe.
   size_t data_size = text.length() * sizeof(*text.c_str());
-  int bytes_written =
-      base::WriteFileDescriptor(pt_pair_[PT_MASTER_FD],
-                                text.c_str(), data_size);
-  return (bytes_written == static_cast<int>(data_size));
+  return base::WriteFileDescriptor(
+             pt_pair_[PT_MASTER_FD], text.c_str(), data_size);
 }
 
 bool ProcessProxy::OnTerminalResize(int width, int height) {
@@ -233,8 +231,14 @@ bool ProcessProxy::LaunchProcess(const std::string& command, int slave_fd,
   options.environ["TERM"] = "xterm";
 
   // Launch the process.
-  return base::LaunchProcess(CommandLine(base::FilePath(command)), options,
-                             pid);
+  base::Process process =
+      base::LaunchProcess(base::CommandLine(base::FilePath(command)), options);
+
+  // TODO(rvargas) crbug/417532: This is somewhat wrong but the interface of
+  // Open vends pid_t* so ownership is quite vague anyway, and Process::Close
+  // doesn't do much in POSIX.
+  *pid = process.Pid();
+  return process.IsValid();
 }
 
 void ProcessProxy::CloseAllFdPairs() {

@@ -20,7 +20,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/point.h"
 #endif
 
 namespace content {
@@ -111,9 +111,6 @@ struct CONTENT_EXPORT ContextMenuParams {
   // The misspelled word under the cursor, if any. Used to generate the
   // |dictionary_suggestions| list.
   base::string16 misspelled_word;
-
-  // The identifier of the misspelling under the cursor, if any.
-  uint32 misspelling_hash;
 
   // Suggested replacements for a misspelled word under the cursor.
   // This vector gets populated in the render process host

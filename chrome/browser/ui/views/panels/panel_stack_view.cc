@@ -12,8 +12,8 @@
 #include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/ui/views/panels/panel_view.h"
 #include "ui/gfx/animation/linear_animation.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/rect.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
@@ -34,18 +34,18 @@ class PanelStackWindow : public views::WidgetObserver,
  public:
   PanelStackWindow(const gfx::Rect& bounds,
                    NativePanelStackWindowDelegate* delegate);
-  virtual ~PanelStackWindow();
+  ~PanelStackWindow() override;
 
   // Overridden from views::WidgetDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
-  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
+  base::string16 GetWindowTitle() const override;
+  gfx::ImageSkia GetWindowAppIcon() override;
+  gfx::ImageSkia GetWindowIcon() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetClosing(views::Widget* widget) override;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
  private:
   views::Widget* window_;  // Weak pointer, own us.

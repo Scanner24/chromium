@@ -105,7 +105,7 @@ class PasswordFormBuilder {
 class PasswordFormConversionUtilsTest : public content::RenderViewTest {
  public:
   PasswordFormConversionUtilsTest() : content::RenderViewTest() {}
-  virtual ~PasswordFormConversionUtilsTest() {}
+  ~PasswordFormConversionUtilsTest() override {}
 
  protected:
   // Loads the given |html|, retrieves the sole WebFormElement from it, and then
@@ -131,7 +131,7 @@ class PasswordFormConversionUtilsTest : public content::RenderViewTest {
         input_element->setActivatedSubmit(true);
     }
 
-    *password_form = CreatePasswordForm(forms[0]);
+    *password_form = CreatePasswordForm(forms[0], nullptr);
   }
 
  private:
@@ -165,7 +165,6 @@ TEST_F(PasswordFormConversionUtilsTest, BasicFormAttributes) {
   EXPECT_FALSE(password_form->preferred);
   EXPECT_FALSE(password_form->blacklisted_by_user);
   EXPECT_EQ(PasswordForm::TYPE_MANUAL, password_form->type);
-  EXPECT_FALSE(password_form->use_additional_authentication);
 }
 
 TEST_F(PasswordFormConversionUtilsTest, DisabledFieldsAreIgnored) {
@@ -220,7 +219,7 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingUsernameFields) {
       {{"USERNAME", NULL, "uSeRNaMe"}, "username1", "John", "Smith"},
       {{"uSeRNaMe", NULL, "USERNAME"}, "username1", "John", "Smith"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     for (size_t nonempty_username_fields = 0; nonempty_username_fields < 2;
          ++nonempty_username_fields) {
       SCOPED_TRACE(testing::Message()
@@ -294,7 +293,7 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingTwoPasswordFields) {
       {{"", "beta"}, "password1", "", "password2", "beta"},
       {{"alpha", "beta"}, "password1", "alpha", "password2", "beta"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);
@@ -343,7 +342,10 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingThreePasswordFields) {
       {{"alpha", "", ""}, "password1", "alpha", "password2", ""},
       {{"", "beta", "beta"}, "password1", "", "password2", "beta"},
       {{"alpha", "beta", "beta"}, "password1", "alpha", "password2", "beta"},
-      {{"beta", "beta", "alpha"}, "password3", "alpha", "password1", "beta"},
+      // If confirmed password comes first, assume that the third password
+      // field is related to security question, SSN, or credit card and ignore
+      // it.
+      {{"beta", "beta", "alpha"}, "", "", "password1", "beta"},
       // If the fields are yet empty, we speculate that we will identify them as
       // (current + new + new) once they are filled out, so we should classify
       // them the same for now to keep our abstract interpretation less flaky.
@@ -351,7 +353,7 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingThreePasswordFields) {
       // Note: In all other cases, we give up and consider the form invalid.
       // This is tested in InvalidFormDueToConfusingPasswordFields.
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);
@@ -483,7 +485,7 @@ TEST_F(PasswordFormConversionUtilsTest,
       {{NULL, "nEw-PaSsWoRd", NULL},
        "", "", "password2", "beta"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);
@@ -557,7 +559,7 @@ TEST_F(PasswordFormConversionUtilsTest,
       {"alpha", "alpha", "alpha"},
       {"alpha", "beta", "alpha"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);

@@ -15,27 +15,28 @@ import urllib2
 from telemetry import decorators
 from telemetry.core import platform
 from telemetry.core import possible_browser
+from telemetry.core.platform import trybot_device
 
 CHROMIUM_CONFIG_FILENAME = 'tools/run-perf-test.cfg'
 BLINK_CONFIG_FILENAME = 'Tools/run-perf-test.cfg'
 SUCCESS, NO_CHANGES, ERROR = range(3)
 
 
+
 class PossibleTrybotBrowser(possible_browser.PossibleBrowser):
   """A script that sends a job to a trybot."""
 
-  def __init__(self, browser_type, finder_options):
+  def __init__(self, browser_type, _):
     target_os = browser_type.split('-')[1]
     self._buildername = '%s_perf_bisect' % browser_type.replace(
         'trybot-', '').replace('-', '_')
-    super(PossibleTrybotBrowser, self).__init__(browser_type, target_os,
-                                                finder_options, True)
+    super(PossibleTrybotBrowser, self).__init__(browser_type, target_os, True)
 
-  def Create(self):
+  def Create(self, finder_options):
     raise NotImplementedError()
 
   def SupportsOptions(self, finder_options):
-    if (finder_options.android_device or
+    if ((finder_options.device and finder_options.device != 'trybot') or
         finder_options.chrome_root or
         finder_options.cros_remote or
         finder_options.extensions_to_load or
@@ -48,6 +49,7 @@ class PossibleTrybotBrowser(possible_browser.PossibleBrowser):
     return True
 
   def _RunProcess(self, cmd):
+    logging.debug('Running process: "%s"', ' '.join(cmd))
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = proc.communicate()
     returncode = proc.poll()
@@ -108,9 +110,9 @@ class PossibleTrybotBrowser(possible_browser.PossibleBrowser):
     # Generate the command line for the perf trybots
     arguments = sys.argv
     if self._target_os == 'win':
-      arguments[0] = 'python tools\\perf\\run_measurement'
+      arguments[0] = 'python tools\\perf\\run_benchmark'
     else:
-      arguments[0] = './tools/perf/run_measurement'
+      arguments[0] = './tools/perf/run_benchmark'
     for index, arg in enumerate(arguments):
       if arg.startswith('--browser='):
         if self._target_os == 'android':
@@ -206,7 +208,7 @@ class PossibleTrybotBrowser(possible_browser.PossibleBrowser):
     else:
       logging.error('No local changes found in chromium or blink trees. '
                     'browser=%s argument sends local changes to the %s '
-                    'perf trybot.', self._browser_type, self._buildername)
+                    'perf trybot.', self.browser_type, self._buildername)
       return
 
   def _InitPlatformIfNeeded(self):
@@ -250,7 +252,10 @@ def FindAllBrowserTypes(finder_options):
   return []
 
 
-def FindAllAvailableBrowsers(finder_options):
+def FindAllAvailableBrowsers(finder_options, device):
   """Find all perf trybots on tryserver.chromium.perf."""
+  if not isinstance(device, trybot_device.TrybotDevice):
+    return []
+
   return [PossibleTrybotBrowser(b, finder_options) for b in
           FindAllBrowserTypes(finder_options)]

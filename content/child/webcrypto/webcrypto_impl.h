@@ -23,6 +23,9 @@ class WebCryptoImpl : public blink::WebCrypto {
  public:
   WebCryptoImpl();
 
+  // TODO(eroman): Once Blink and Chromium repositories are merged, use
+  //               "override" in place of virtual.
+
   virtual ~WebCryptoImpl();
 
   virtual void encrypt(const blink::WebCryptoAlgorithm& algorithm,
@@ -41,14 +44,14 @@ class WebCryptoImpl : public blink::WebCrypto {
                       blink::WebCryptoResult result);
   virtual void generateKey(const blink::WebCryptoAlgorithm& algorithm,
                            bool extractable,
-                           blink::WebCryptoKeyUsageMask usage_mask,
+                           blink::WebCryptoKeyUsageMask usages,
                            blink::WebCryptoResult result);
   virtual void importKey(blink::WebCryptoKeyFormat format,
                          const unsigned char* key_data,
                          unsigned int key_data_size,
                          const blink::WebCryptoAlgorithm& algorithm,
                          bool extractable,
-                         blink::WebCryptoKeyUsageMask usage_mask,
+                         blink::WebCryptoKeyUsageMask usages,
                          blink::WebCryptoResult result);
   virtual void exportKey(blink::WebCryptoKeyFormat format,
                          const blink::WebCryptoKey& key,
@@ -64,7 +67,7 @@ class WebCryptoImpl : public blink::WebCrypto {
                                unsigned int signature_size,
                                const unsigned char* data,
                                unsigned int data_size,
-                              blink::WebCryptoResult result);
+                               blink::WebCryptoResult result);
   virtual void wrapKey(blink::WebCryptoKeyFormat format,
                        const blink::WebCryptoKey& key,
                        const blink::WebCryptoKey& wrapping_key,
@@ -80,6 +83,19 @@ class WebCryptoImpl : public blink::WebCrypto {
       bool extractable,
       blink::WebCryptoKeyUsageMask usages,
       blink::WebCryptoResult result);
+
+  virtual void deriveBits(const blink::WebCryptoAlgorithm& algorithm,
+                          const blink::WebCryptoKey& base_key,
+                          unsigned int length_bits,
+                          blink::WebCryptoResult result);
+
+  virtual void deriveKey(const blink::WebCryptoAlgorithm& algorithm,
+                         const blink::WebCryptoKey& base_key,
+                         const blink::WebCryptoAlgorithm& import_algorithm,
+                         const blink::WebCryptoAlgorithm& key_length_algorithm,
+                         bool extractable,
+                         blink::WebCryptoKeyUsageMask usages,
+                         blink::WebCryptoResult result);
 
   // This method returns a digestor object that can be used to synchronously
   // compute a digest one chunk at a time. Thus, the consume does not need to

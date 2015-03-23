@@ -4,6 +4,11 @@
 
 // This file defines the names used by GC infrastructure.
 
+// TODO: Restructure the name determination to use fully qualified names (ala,
+// blink::Foo) so that the plugin can be enabled for all of chromium. Doing so
+// would allow us to catch errors with structures outside of blink that might
+// have unsafe pointers to GC allocated blink structures.
+
 #ifndef TOOLS_BLINK_GC_PLUGIN_CONFIG_H_
 #define TOOLS_BLINK_GC_PLUGIN_CONFIG_H_
 
@@ -13,11 +18,15 @@
 const char kNewOperatorName[] = "operator new";
 const char kCreateName[] = "create";
 const char kTraceName[] = "trace";
+const char kTraceImplName[] = "traceImpl";
 const char kFinalizeName[] = "finalizeGarbageCollectedObject";
 const char kTraceAfterDispatchName[] = "traceAfterDispatch";
 const char kRegisterWeakMembersName[] = "registerWeakMembers";
 const char kHeapAllocatorName[] = "HeapAllocator";
 const char kTraceIfNeededName[] = "TraceIfNeeded";
+const char kVisitorDispatcherName[] = "VisitorDispatcher";
+const char kAdjustAndMarkName[] = "adjustAndMark";
+const char kIsHeapObjectAliveName[] = "isHeapObjectAlive";
 
 class Config {
  public:
@@ -94,7 +103,7 @@ class Config {
 
   // Following http://crrev.com/369633033 (Blink r177436),
   // ignore blink::ScriptWrappable's destructor.
-  // FIXME: remove when its non-Oilpan destructor is removed.
+  // TODO: remove when its non-Oilpan destructor is removed.
   static bool HasIgnorableDestructor(const std::string& ns,
                                      const std::string& name) {
     return ns == "blink" && name == "ScriptWrappable";
@@ -154,18 +163,11 @@ class Config {
            IsIgnoreAnnotated(decl);
   }
 
-  static bool IsVisitor(const std::string& name) { return name == "Visitor"; }
+  static bool IsVisitor(const std::string& name) {
+    return name == "Visitor" || name == "VisitorHelper";
+  }
 
-  static bool IsTraceMethod(clang::FunctionDecl* method,
-                            bool* isTraceAfterDispatch = 0) {
-    if (method->getNumParams() != 1)
-      return false;
-
-    const std::string& name = method->getNameAsString();
-    if (name != kTraceName && name != kTraceAfterDispatchName)
-      return false;
-
-    const clang::QualType& formal_type = method->getParamDecl(0)->getType();
+  static bool IsVisitorPtrType(const clang::QualType& formal_type) {
     if (!formal_type->isPointerType())
       return false;
 
@@ -177,8 +179,50 @@ class Config {
     if (!IsVisitor(pointee_type->getName()))
       return false;
 
-    if (isTraceAfterDispatch)
-      *isTraceAfterDispatch = (name == kTraceAfterDispatchName);
+    return true;
+  }
+
+  static bool IsVisitorDispatcherType(const clang::QualType& formal_type) {
+    if (const clang::SubstTemplateTypeParmType* subst_type =
+            clang::dyn_cast<clang::SubstTemplateTypeParmType>(
+                formal_type.getTypePtr())) {
+      if (IsVisitorPtrType(subst_type->getReplacementType())) {
+        // VisitorDispatcher template parameter substituted to Visitor*.
+        return true;
+      }
+    } else if (const clang::TemplateTypeParmType* parm_type =
+                   clang::dyn_cast<clang::TemplateTypeParmType>(
+                       formal_type.getTypePtr())) {
+      if (parm_type->getDecl()->getName() == kVisitorDispatcherName) {
+        // Unresolved, but its parameter name is VisitorDispatcher.
+        return true;
+      }
+    }
+
+    return IsVisitorPtrType(formal_type);
+  }
+
+  static bool IsTraceMethod(clang::FunctionDecl* method,
+                            bool* is_trace_after_dispatch) {
+    if (method->getNumParams() != 1)
+      return false;
+
+    const std::string& name = method->getNameAsString();
+    if (name != kTraceName && name != kTraceAfterDispatchName &&
+        name != kTraceImplName)
+      return false;
+
+    const clang::QualType& formal_type = method->getParamDecl(0)->getType();
+    if (name == kTraceImplName) {
+      if (!IsVisitorDispatcherType(formal_type))
+        return false;
+    } else if (!IsVisitorPtrType(formal_type)) {
+      return false;
+    }
+
+    if (is_trace_after_dispatch)
+      *is_trace_after_dispatch = (name == kTraceAfterDispatchName);
+
     return true;
   }
 

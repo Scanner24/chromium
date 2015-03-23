@@ -38,7 +38,7 @@ import org.chromium.content_public.browser.WebContents;
     }
 
     @CalledByNative
-    private void destroy() {
+    private void clearNativePtr() {
         mNativeWebContentsAndroid = 0;
         mNavigationController = null;
     }
@@ -46,6 +46,11 @@ import org.chromium.content_public.browser.WebContents;
     @CalledByNative
     private long getNativePointer() {
         return mNativeWebContentsAndroid;
+    }
+
+    @Override
+    public void destroy() {
+        if (mNativeWebContentsAndroid != 0) nativeDestroyWebContents(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -64,6 +69,16 @@ import org.chromium.content_public.browser.WebContents;
     }
 
     @Override
+    public boolean isLoading() {
+        return nativeIsLoading(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public boolean isLoadingToDifferentDocument() {
+        return nativeIsLoadingToDifferentDocument(mNativeWebContentsAndroid);
+    }
+
+    @Override
     public void stop() {
         nativeStop(mNativeWebContentsAndroid);
     }
@@ -76,7 +91,7 @@ import org.chromium.content_public.browser.WebContents;
 
     @Override
     public void onHide() {
-         nativeOnHide(mNativeWebContentsAndroid);
+        nativeOnHide(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -151,18 +166,23 @@ import org.chromium.content_public.browser.WebContents;
     }
 
     @Override
+    public String getLastCommittedUrl() {
+        return nativeGetLastCommittedURL(mNativeWebContentsAndroid);
+    }
+
+    @Override
     public boolean isIncognito() {
         return nativeIsIncognito(mNativeWebContentsAndroid);
     }
 
     @Override
     public void resumeResponseDeferredAtStart() {
-         nativeResumeResponseDeferredAtStart(mNativeWebContentsAndroid);
+        nativeResumeResponseDeferredAtStart(mNativeWebContentsAndroid);
     }
 
     @Override
     public void setHasPendingNavigationTransitionForTesting() {
-         nativeSetHasPendingNavigationTransitionForTesting(mNativeWebContentsAndroid);
+        nativeSetHasPendingNavigationTransitionForTesting(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -183,8 +203,46 @@ import org.chromium.content_public.browser.WebContents;
      * exiting-transition stylesheets.
      */
     @Override
-    public void beginExitTransition(String cssSelector) {
-        nativeBeginExitTransition(mNativeWebContentsAndroid, cssSelector);
+    public void beginExitTransition(String cssSelector, boolean exitToNativeApp) {
+        nativeBeginExitTransition(mNativeWebContentsAndroid, cssSelector, exitToNativeApp);
+    }
+
+    /**
+     * Revert the effect of exit transition.
+     */
+    @Override
+    public void revertExitTransition() {
+        nativeRevertExitTransition(mNativeWebContentsAndroid);
+    }
+
+    /**
+     * Hide transition elements.
+     */
+    public void hideTransitionElements(String cssSelector) {
+        nativeHideTransitionElements(mNativeWebContentsAndroid, cssSelector);
+    }
+
+    /**
+     * Show transition elements.
+     */
+    public void showTransitionElements(String cssSelector) {
+        nativeShowTransitionElements(mNativeWebContentsAndroid, cssSelector);
+    }
+
+    /**
+     * Clear the navigation transition data.
+     */
+    @Override
+    public void clearNavigationTransitionData() {
+        nativeClearNavigationTransitionData(mNativeWebContentsAndroid);
+    }
+
+    /**
+     * Fetch transition elements.
+     */
+    @Override
+    public void fetchTransitionElements(String url) {
+        nativeFetchTransitionElements(mNativeWebContentsAndroid, url);
     }
 
     @CalledByNative
@@ -216,9 +274,34 @@ import org.chromium.content_public.browser.WebContents;
         }
     }
 
+    @CalledByNative
+    private void addNavigationTransitionElements(String name, int x, int y, int width, int height) {
+        if (mNavigationTransitionDelegate != null) {
+            mNavigationTransitionDelegate.addNavigationTransitionElements(
+                    name, x, y, width, height);
+        }
+    }
+
+    @CalledByNative
+    private void onTransitionElementsFetched(String cssSelector) {
+        if (mNavigationTransitionDelegate != null) {
+            mNavigationTransitionDelegate.onTransitionElementsFetched(cssSelector);
+        }
+    }
+
     @Override
     public void evaluateJavaScript(String script, JavaScriptCallback callback) {
-         nativeEvaluateJavaScript(mNativeWebContentsAndroid, script, callback);
+        nativeEvaluateJavaScript(mNativeWebContentsAndroid, script, callback);
+    }
+
+    @Override
+    public void addMessageToDevToolsConsole(int level, String message) {
+        nativeAddMessageToDevToolsConsole(mNativeWebContentsAndroid, level, message);
+    }
+
+    @Override
+    public boolean hasAccessedInitialDocument() {
+        return nativeHasAccessedInitialDocument(mNativeWebContentsAndroid);
     }
 
     @CalledByNative
@@ -227,8 +310,13 @@ import org.chromium.content_public.browser.WebContents;
         callback.handleJavaScriptResult(jsonResult);
     }
 
+    // This is static to avoid exposing a public destroy method on the native side of this class.
+    private static native void nativeDestroyWebContents(long webContentsAndroidPtr);
+
     private native String nativeGetTitle(long nativeWebContentsAndroid);
     private native String nativeGetVisibleURL(long nativeWebContentsAndroid);
+    private native boolean nativeIsLoading(long nativeWebContentsAndroid);
+    private native boolean nativeIsLoadingToDifferentDocument(long nativeWebContentsAndroid);
     private native void nativeStop(long nativeWebContentsAndroid);
     private native void nativeInsertCSS(long nativeWebContentsAndroid, String css);
     private native void nativeOnHide(long nativeWebContentsAndroid);
@@ -248,6 +336,7 @@ import org.chromium.content_public.browser.WebContents;
     private native void nativeScrollFocusedEditableNodeIntoView(long nativeWebContentsAndroid);
     private native void nativeSelectWordAroundCaret(long nativeWebContentsAndroid);
     private native String nativeGetURL(long nativeWebContentsAndroid);
+    private native String nativeGetLastCommittedURL(long nativeWebContentsAndroid);
     private native boolean nativeIsIncognito(long nativeWebContentsAndroid);
     private native void nativeResumeResponseDeferredAtStart(long nativeWebContentsAndroid);
     private native void nativeSetHasPendingNavigationTransitionForTesting(
@@ -255,7 +344,18 @@ import org.chromium.content_public.browser.WebContents;
     private native void nativeSetupTransitionView(long nativeWebContentsAndroid,
             String markup);
     private native void nativeBeginExitTransition(long nativeWebContentsAndroid,
+            String cssSelector, boolean exitToNativeApp);
+    private native void nativeRevertExitTransition(long nativeWebContentsAndroid);
+    private native void nativeHideTransitionElements(long nativeWebContentsAndroid,
             String cssSelector);
+    private native void nativeShowTransitionElements(long nativeWebContentsAndroid,
+            String cssSelector);
+    private native void nativeClearNavigationTransitionData(long nativeWebContentsAndroid);
+    private native void nativeFetchTransitionElements(long nativeWebContentsAndroid, String url);
     private native void nativeEvaluateJavaScript(long nativeWebContentsAndroid,
             String script, JavaScriptCallback callback);
+    private native void nativeAddMessageToDevToolsConsole(
+            long nativeWebContentsAndroid, int level, String message);
+    private native boolean nativeHasAccessedInitialDocument(
+            long nativeWebContentsAndroid);
 }

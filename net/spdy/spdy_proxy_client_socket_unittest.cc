@@ -66,7 +66,7 @@ class SpdyProxyClientSocketTest
  public:
   SpdyProxyClientSocketTest();
 
-  virtual void TearDown();
+  void TearDown() override;
 
  protected:
   void Initialize(MockRead* reads, size_t reads_count, MockWrite* writes,
@@ -142,8 +142,7 @@ class SpdyProxyClientSocketTest
 INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdyProxyClientSocketTest,
-    testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
+    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
 
 SpdyProxyClientSocketTest::SpdyProxyClientSocketTest()
     : spdy_util_(GetParam()),
@@ -1317,8 +1316,7 @@ class DeleteSockCallback : public TestCompletionCallbackBase {
                              base::Unretained(this))) {
   }
 
-  virtual ~DeleteSockCallback() {
-  }
+  ~DeleteSockCallback() override {}
 
   const CompletionCallback& callback() const { return callback_; }
 

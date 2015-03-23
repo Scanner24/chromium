@@ -13,15 +13,72 @@
 
 namespace base {
 
+Process::Process(ProcessHandle handle) : process_(handle) {
+}
+
+Process::Process(RValue other)
+    : process_(other.object->process_) {
+  other.object->Close();
+}
+
+Process& Process::operator=(RValue other) {
+  if (this != other.object) {
+    process_ = other.object->process_;
+    other.object->Close();
+  }
+  return *this;
+}
+
 // static
 Process Process::Current() {
   return Process(GetCurrentProcessHandle());
 }
 
-ProcessId Process::pid() const {
-  if (process_ == 0)
-    return 0;
+// static
+Process Process::Open(ProcessId pid) {
+  if (pid == GetCurrentProcId())
+    return Current();
 
+  // On POSIX process handles are the same as PIDs.
+  return Process(pid);
+}
+
+// static
+Process Process::OpenWithExtraPriviles(ProcessId pid) {
+  // On POSIX there are no privileges to set.
+  return Open(pid);
+}
+
+// static
+Process Process::DeprecatedGetProcessFromHandle(ProcessHandle handle) {
+  DCHECK_NE(handle, GetCurrentProcessHandle());
+  return Process(handle);
+}
+
+#if !defined(OS_LINUX)
+// static
+bool Process::CanBackgroundProcesses() {
+  return false;
+}
+#endif  // !defined(OS_LINUX)
+
+bool Process::IsValid() const {
+  return process_ != kNullProcessHandle;
+}
+
+ProcessHandle Process::Handle() const {
+  return process_;
+}
+
+Process Process::Duplicate() const {
+  if (is_current())
+    return Current();
+
+  return Process(process_);
+}
+
+ProcessId Process::Pid() const {
+  DCHECK(IsValid());
   return GetProcId(process_);
 }
 
@@ -30,7 +87,7 @@ bool Process::is_current() const {
 }
 
 void Process::Close() {
-  process_ = 0;
+  process_ = kNullProcessHandle;
   // if the process wasn't terminated (so we waited) or the state
   // wasn't already collected w/ a wait from process_utils, we're gonna
   // end up w/ a zombie when it does finally exit.
@@ -38,16 +95,28 @@ void Process::Close() {
 
 void Process::Terminate(int result_code) {
   // result_code isn't supportable.
-  if (!process_)
-    return;
+  DCHECK(IsValid());
   // We don't wait here. It's the responsibility of other code to reap the
   // child.
   KillProcess(process_, result_code, false);
 }
 
+bool Process::WaitForExit(int* exit_code) {
+  // TODO(rvargas) crbug.com/417532: Remove this constant.
+  const int kNoTimeout = -1;
+  return WaitForExitWithTimeout(TimeDelta::FromMilliseconds(kNoTimeout),
+                                exit_code);
+}
+
+bool Process::WaitForExitWithTimeout(TimeDelta timeout, int* exit_code) {
+  // TODO(rvargas) crbug.com/417532: Move the implementation here.
+  return base::WaitForExitCodeWithTimeout(Handle(), exit_code, timeout);
+}
+
 #if !defined(OS_LINUX)
 bool Process::IsProcessBackgrounded() const {
   // See SetProcessBackgrounded().
+  DCHECK(IsValid());
   return false;
 }
 
@@ -55,18 +124,13 @@ bool Process::SetProcessBackgrounded(bool value) {
   // POSIX only allows lowering the priority of a process, so if we
   // were to lower it we wouldn't be able to raise it back to its initial
   // priority.
+  DCHECK(IsValid());
   return false;
 }
-
-// static
-bool Process::CanBackgroundProcesses() {
-  return false;
-}
-
-#endif
+#endif  // !defined(OS_LINUX)
 
 int Process::GetPriority() const {
-  DCHECK(process_);
+  DCHECK(IsValid());
   return getpriority(PRIO_PROCESS, process_);
 }
 

@@ -7,6 +7,8 @@
 #include "base/command_line.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
@@ -25,11 +27,11 @@
 
 using content::BrowserContext;
 using content::WebContents;
+using testing::Return;
 
 namespace {
 
 const char kTestText[] = "abcd1234";
-const int kRequestId = 4;
 
 class MockLogReceiver : public password_manager::LogReceiver {
  public:
@@ -41,11 +43,10 @@ class TestChromePasswordManagerClient : public ChromePasswordManagerClient {
   explicit TestChromePasswordManagerClient(content::WebContents* web_contents)
       : ChromePasswordManagerClient(web_contents, NULL),
         is_sync_account_credential_(false) {}
-  virtual ~TestChromePasswordManagerClient() {}
+  ~TestChromePasswordManagerClient() override {}
 
-  virtual bool IsSyncAccountCredential(
-      const std::string& username,
-      const std::string& origin) const OVERRIDE {
+  bool IsSyncAccountCredential(const std::string& username,
+                               const std::string& origin) const override {
     return is_sync_account_credential_;
   }
 
@@ -65,7 +66,7 @@ class ChromePasswordManagerClientTest : public ChromeRenderViewHostTestHarness {
  public:
   ChromePasswordManagerClientTest();
 
-  virtual void SetUp() OVERRIDE;
+  virtual void SetUp() override;
 
  protected:
   ChromePasswordManagerClient* GetClient();
@@ -104,9 +105,9 @@ bool ChromePasswordManagerClientTest::WasLoggingActivationMessageSent(
       process()->sink().GetFirstMessageMatching(kMsgID);
   if (!message)
     return false;
-  Tuple1<bool> param;
+  Tuple<bool> param;
   AutofillMsg_SetLoggingState::Read(message, &param);
-  *activation_flag = param.a;
+  *activation_flag = get<0>(param);
   process()->sink().ClearMessages();
   return true;
 }
@@ -171,7 +172,8 @@ TEST_F(ChromePasswordManagerClientTest, AnswerToPingsAboutLoggingState_Active) {
 
   // Ping the client for logging activity update.
   AutofillHostMsg_PasswordAutofillAgentConstructed msg(0);
-  static_cast<IPC::Listener*>(GetClient())->OnMessageReceived(msg);
+  static_cast<content::WebContentsObserver*>(GetClient())->OnMessageReceived(
+      msg, web_contents()->GetMainFrame());
 
   bool logging_active = false;
   EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_active));
@@ -186,7 +188,8 @@ TEST_F(ChromePasswordManagerClientTest,
 
   // Ping the client for logging activity update.
   AutofillHostMsg_PasswordAutofillAgentConstructed msg(0);
-  static_cast<IPC::Listener*>(GetClient())->OnMessageReceived(msg);
+  static_cast<content::WebContentsObserver*>(GetClient())->OnMessageReceived(
+      msg, web_contents()->GetMainFrame());
 
   bool logging_active = true;
   EXPECT_TRUE(WasLoggingActivationMessageSent(&logging_active));
@@ -200,7 +203,7 @@ TEST_F(ChromePasswordManagerClientTest,
 
 TEST_F(ChromePasswordManagerClientTest,
        IsAutomaticPasswordSavingEnabledWhenFlagIsSetTest) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       password_manager::switches::kEnableAutomaticPasswordSaving);
   if (chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_UNKNOWN)
     EXPECT_TRUE(GetClient()->IsAutomaticPasswordSavingEnabled());
@@ -220,9 +223,22 @@ TEST_F(ChromePasswordManagerClientTest, LogToAReceiver) {
   EXPECT_FALSE(client->IsLoggingActive());
 }
 
+TEST_F(ChromePasswordManagerClientTest,
+       ShouldAskUserToSubmitURLDefaultBehaviour) {
+  ChromePasswordManagerClient* client = GetClient();
+  // TODO(melandory) Since "Ask user to submit URL" functionality is currently
+  // in development, so the user should not be asked to submit a URL.
+  EXPECT_FALSE(client->ShouldAskUserToSubmitURL(GURL("https://hostname.com/")));
+}
+
+TEST_F(ChromePasswordManagerClientTest, ShouldAskUserToSubmitURLEmptyURL) {
+  ChromePasswordManagerClient* client = GetClient();
+  EXPECT_FALSE(client->ShouldAskUserToSubmitURL(GURL::EmptyGURL()));
+}
+
 TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult_Reauth) {
   // Make client disallow only reauth requests.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(
       password_manager::switches::kDisallowAutofillSyncCredentialForReauth);
   scoped_ptr<TestChromePasswordManagerClient> client(
@@ -262,7 +278,7 @@ TEST_F(ChromePasswordManagerClientTest, ShouldFilterAutofillResult) {
   EXPECT_FALSE(client->ShouldFilterAutofillResult(form));
 
   // Adding disallow switch should cause sync credential to be filtered.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(
       password_manager::switches::kDisallowAutofillSyncCredential);
   client.reset(new TestChromePasswordManagerClient(web_contents()));
@@ -332,61 +348,56 @@ TEST_F(ChromePasswordManagerClientTest,
   EXPECT_TRUE(client->IsPasswordManagerEnabledForCurrentPage());
 }
 
-TEST_F(ChromePasswordManagerClientTest, CredentialManagerOnNotifyFailedSignIn) {
-  scoped_ptr<TestChromePasswordManagerClient> client(
-      new TestChromePasswordManagerClient(web_contents()));
+TEST_F(ChromePasswordManagerClientTest, IsPasswordSyncEnabled) {
+  ChromePasswordManagerClient* client = GetClient();
 
-  password_manager::CredentialInfo info(base::ASCIIToUTF16("id"),
-                                        base::ASCIIToUTF16("name"),
-                                        GURL("https://example.com/image.png"));
-  client->OnNotifyFailedSignIn(kRequestId, info);
+  ProfileSyncServiceMock* mock_sync_service =
+      static_cast<ProfileSyncServiceMock*>(
+          ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+              profile(), ProfileSyncServiceMock::BuildMockProfileSyncService));
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeFailedSignIn::ID;
-  const IPC::Message* message =
-      process()->sink().GetFirstMessageMatching(kMsgID);
-  EXPECT_TRUE(message);
-  process()->sink().ClearMessages();
-}
+  syncer::ModelTypeSet active_types;
+  active_types.Put(syncer::PASSWORDS);
+  EXPECT_CALL(*mock_sync_service, HasSyncSetupCompleted())
+      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_sync_service, SyncActive()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_sync_service, GetActiveDataTypes())
+      .WillRepeatedly(Return(active_types));
+  EXPECT_CALL(*mock_sync_service, IsUsingSecondaryPassphrase())
+      .WillRepeatedly(Return(false));
 
-TEST_F(ChromePasswordManagerClientTest, CredentialManagerOnNotifySignedIn) {
-  scoped_ptr<TestChromePasswordManagerClient> client(
-      new TestChromePasswordManagerClient(web_contents()));
+  // Passwords are syncing and custom passphrase isn't used.
+  EXPECT_FALSE(
+      client->IsPasswordSyncEnabled(password_manager::ONLY_CUSTOM_PASSPHRASE));
+  EXPECT_TRUE(client->IsPasswordSyncEnabled(
+      password_manager::WITHOUT_CUSTOM_PASSPHRASE));
 
-  password_manager::CredentialInfo info(base::ASCIIToUTF16("id"),
-                                        base::ASCIIToUTF16("name"),
-                                        GURL("https://example.com/image.png"));
-  client->OnNotifySignedIn(kRequestId, info);
+  // Again, using a custom passphrase.
+  EXPECT_CALL(*mock_sync_service, IsUsingSecondaryPassphrase())
+      .WillRepeatedly(Return(true));
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeSignedIn::ID;
-  const IPC::Message* message =
-      process()->sink().GetFirstMessageMatching(kMsgID);
-  EXPECT_TRUE(message);
-  process()->sink().ClearMessages();
-}
+  EXPECT_TRUE(
+      client->IsPasswordSyncEnabled(password_manager::ONLY_CUSTOM_PASSPHRASE));
+  EXPECT_FALSE(client->IsPasswordSyncEnabled(
+      password_manager::WITHOUT_CUSTOM_PASSPHRASE));
 
-TEST_F(ChromePasswordManagerClientTest, CredentialManagerOnNotifySignedOut) {
-  scoped_ptr<TestChromePasswordManagerClient> client(
-      new TestChromePasswordManagerClient(web_contents()));
+  // Always return false if we aren't syncing passwords.
+  active_types.Remove(syncer::PASSWORDS);
+  active_types.Put(syncer::BOOKMARKS);
+  EXPECT_CALL(*mock_sync_service, GetActiveDataTypes())
+      .WillRepeatedly(Return(active_types));
 
-  client->OnNotifySignedOut(kRequestId);
+  EXPECT_FALSE(
+      client->IsPasswordSyncEnabled(password_manager::ONLY_CUSTOM_PASSPHRASE));
+  EXPECT_FALSE(client->IsPasswordSyncEnabled(
+      password_manager::WITHOUT_CUSTOM_PASSPHRASE));
 
-  const uint32 kMsgID = CredentialManagerMsg_AcknowledgeSignedOut::ID;
-  const IPC::Message* message =
-      process()->sink().GetFirstMessageMatching(kMsgID);
-  EXPECT_TRUE(message);
-  process()->sink().ClearMessages();
-}
+  // Again, without a custom passphrase.
+  EXPECT_CALL(*mock_sync_service, IsUsingSecondaryPassphrase())
+      .WillRepeatedly(Return(false));
 
-TEST_F(ChromePasswordManagerClientTest, CredentialManagerOnRequestCredential) {
-  scoped_ptr<TestChromePasswordManagerClient> client(
-      new TestChromePasswordManagerClient(web_contents()));
-
-  std::vector<GURL> federations;
-  client->OnRequestCredential(kRequestId, false, federations);
-
-  const uint32 kMsgID = CredentialManagerMsg_SendCredential::ID;
-  const IPC::Message* message =
-      process()->sink().GetFirstMessageMatching(kMsgID);
-  EXPECT_TRUE(message);
-  process()->sink().ClearMessages();
+  EXPECT_FALSE(
+      client->IsPasswordSyncEnabled(password_manager::ONLY_CUSTOM_PASSPHRASE));
+  EXPECT_FALSE(client->IsPasswordSyncEnabled(
+      password_manager::WITHOUT_CUSTOM_PASSPHRASE));
 }

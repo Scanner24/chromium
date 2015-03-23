@@ -79,6 +79,7 @@
       ],
       'sources': [
         'ax_generated_tree_unittest.cc',
+        'ax_text_utils_unittest.cc',
         'ax_tree_serializer_unittest.cc',
         'ax_tree_unittest.cc',
       ]
@@ -111,5 +112,31 @@
         'root_namespace': 'ui',
       },
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'accessibility_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'accessibility_unittests',
+          ],
+          'includes': [
+            '../../build/isolate.gypi',
+          ],
+          'sources': [
+            'accessibility_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11 == 1', {
+              'dependencies': [
+                '../../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+          ],
+        },
+      ],
+    }],
   ],
 }

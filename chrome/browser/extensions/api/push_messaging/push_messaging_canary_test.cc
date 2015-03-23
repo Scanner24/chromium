@@ -9,13 +9,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/push_messaging/sync_setup_helper.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
-#include "extensions/common/extension_set.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
 
@@ -37,11 +36,10 @@ class PushMessagingCanaryTest : public ExtensionApiTest {
     sync_setup_helper_.reset(new SyncSetupHelper());
   }
 
-  virtual ~PushMessagingCanaryTest() {
-  }
+  ~PushMessagingCanaryTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+  void SetUp() override {
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
     ASSERT_TRUE(command_line->HasSwitch(kPasswordFileForTest));
     base::FilePath password_file =
@@ -74,9 +72,7 @@ class PushMessagingCanaryTest : public ExtensionApiTest {
   // InProcessBrowserTest override. Destroys the sync client and sync
   // profile created by the test.  We must clean up ProfileSyncServiceHarness
   // now before the profile is cleaned up.
-  virtual void TearDownOnMainThread() OVERRIDE {
-    sync_setup_helper_.reset();
-  }
+  void TearDownOnMainThread() override { sync_setup_helper_.reset(); }
 
   const SyncSetupHelper* sync_setup_helper() const {
     return sync_setup_helper_.get();
@@ -85,13 +81,13 @@ class PushMessagingCanaryTest : public ExtensionApiTest {
  protected:
   // Override InProcessBrowserTest. Change behavior of the default host
   // resolver to avoid DNS lookup errors, so we can make network calls.
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     // The resolver object lifetime is managed by sync_test_setup, not here.
     EnableDNSLookupForThisTest(
         new net::RuleBasedHostResolverProc(host_resolver()));
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  void TearDownInProcessBrowserTestFixture() override {
     DisableDNSLookupForThisTest();
   }
 
@@ -136,19 +132,19 @@ class PushMessagingCanaryTest : public ExtensionApiTest {
 IN_PROC_BROWSER_TEST_F(PushMessagingCanaryTest, MANUAL_ReceivesPush) {
   InitializeSync();
 
-  const ExtensionSet* installed_extensions = extension_service()->extensions();
-  if (!installed_extensions->Contains(kTestExtensionId)) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
+  if (!registry->enabled_extensions().GetByID(kTestExtensionId)) {
     const Extension* extension =
         LoadExtension(test_data_dir_.AppendASCII("push_messaging_canary"));
     ASSERT_TRUE(extension);
   }
-  ASSERT_TRUE(installed_extensions->Contains(kTestExtensionId));
+  ASSERT_TRUE(registry->enabled_extensions().GetByID(kTestExtensionId));
 
   ResultCatcher catcher;
   catcher.RestrictToBrowserContext(profile());
 
   const Extension* extension =
-      extension_service()->extensions()->GetByID(kTestExtensionId);
+      registry->enabled_extensions().GetByID(kTestExtensionId);
   ASSERT_TRUE(extension);
   ui_test_utils::NavigateToURL(
       browser(), extension->GetResourceURL("push_messaging_canary.html"));

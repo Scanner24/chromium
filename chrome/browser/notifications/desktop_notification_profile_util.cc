@@ -4,9 +4,9 @@
 
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 
 void DesktopNotificationProfileUtil::ResetToDefaultContentSetting(
@@ -67,12 +67,4 @@ ContentSetting DesktopNotificationProfileUtil::GetContentSetting(
       origin,
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
       NO_RESOURCE_IDENTIFIER);
-}
-
-void DesktopNotificationProfileUtil::UsePermission(Profile* profile,
-                                                   const GURL& origin) {
-  profile->GetHostContentSettingsMap()->UpdateLastUsageByPattern(
-      ContentSettingsPattern::FromURLNoWildcard(origin),
-      ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
 }

@@ -9,10 +9,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "cc/blink/context_provider_web_context.h"
 #include "cc/output/context_provider.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
-#include "webkit/common/gpu/context_provider_web_context.h"
 
 namespace webkit {
 namespace gpu {
@@ -25,7 +25,7 @@ namespace content {
 // Implementation of cc::ContextProvider that provides a
 // WebGraphicsContext3DCommandBufferImpl context and a GrContext.
 class CONTENT_EXPORT ContextProviderCommandBuffer
-    : NON_EXPORTED_BASE(public webkit::gpu::ContextProviderWebContext) {
+    : NON_EXPORTED_BASE(public cc_blink::ContextProviderWebContext) {
  public:
   static scoped_refptr<ContextProviderCommandBuffer> Create(
       scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d,
@@ -33,30 +33,33 @@ class CONTENT_EXPORT ContextProviderCommandBuffer
 
   CommandBufferProxyImpl* GetCommandBufferProxy();
 
-  // ContextProviderWebContext implementation.
-  virtual WebGraphicsContext3DCommandBufferImpl* WebContext3D() OVERRIDE;
+  // cc_blink::ContextProviderWebContext implementation.
+  WebGraphicsContext3DCommandBufferImpl* WebContext3D() override;
 
   // cc::ContextProvider implementation.
-  virtual bool BindToCurrentThread() OVERRIDE;
-  virtual gpu::gles2::GLES2Interface* ContextGL() OVERRIDE;
-  virtual gpu::ContextSupport* ContextSupport() OVERRIDE;
-  virtual class GrContext* GrContext() OVERRIDE;
-  virtual Capabilities ContextCapabilities() OVERRIDE;
-  virtual bool IsContextLost() OVERRIDE;
-  virtual void VerifyContexts() OVERRIDE;
-  virtual void DeleteCachedResources() OVERRIDE;
-  virtual bool DestroyedOnMainThread() OVERRIDE;
-  virtual void SetLostContextCallback(
-      const LostContextCallback& lost_context_callback) OVERRIDE;
-  virtual void SetMemoryPolicyChangedCallback(
+  bool BindToCurrentThread() override;
+  void DetachFromThread() override;
+  gpu::gles2::GLES2Interface* ContextGL() override;
+  gpu::ContextSupport* ContextSupport() override;
+  class GrContext* GrContext() override;
+  void SetupLock() override;
+  base::Lock* GetLock() override;
+  Capabilities ContextCapabilities() override;
+  bool IsContextLost() override;
+  void VerifyContexts() override;
+  void DeleteCachedResources() override;
+  bool DestroyedOnMainThread() override;
+  void SetLostContextCallback(
+      const LostContextCallback& lost_context_callback) override;
+  void SetMemoryPolicyChangedCallback(
       const MemoryPolicyChangedCallback& memory_policy_changed_callback)
-      OVERRIDE;
+      override;
 
  protected:
   ContextProviderCommandBuffer(
       scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d,
       const std::string& debug_name);
-  virtual ~ContextProviderCommandBuffer();
+  ~ContextProviderCommandBuffer() override;
 
   void OnLostContext();
   void OnMemoryAllocationChanged(const gpu::MemoryAllocation& allocation);
@@ -78,6 +81,8 @@ class CONTENT_EXPORT ContextProviderCommandBuffer
 
   base::Lock main_thread_lock_;
   bool destroyed_;
+
+  base::Lock context_lock_;
 
   class LostContextCallbackProxy;
   scoped_ptr<LostContextCallbackProxy> lost_context_callback_proxy_;

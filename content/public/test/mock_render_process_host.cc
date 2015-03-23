@@ -6,12 +6,14 @@
 
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
+#include "base/process/process_handle.h"
 #include "base/time/time.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/child_process_host_impl.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/storage_partition.h"
@@ -99,10 +101,14 @@ bool MockRenderProcessHost::IsIsolatedGuest() const {
 }
 
 StoragePartition* MockRenderProcessHost::GetStoragePartition() const {
-  return NULL;
+  return BrowserContext::GetDefaultStoragePartition(browser_context_);
 }
 
 void MockRenderProcessHost::AddWord(const base::string16& word) {
+}
+
+bool MockRenderProcessHost::Shutdown(int exit_code, bool wait) {
+  return true;
 }
 
 bool MockRenderProcessHost::FastShutdownIfPossible() {
@@ -124,7 +130,7 @@ base::ProcessHandle MockRenderProcessHost::GetHandle() const {
   // function.
   if (process_handle)
     return *process_handle;
-  return base::Process::Current().handle();
+  return base::GetCurrentProcessHandle();
 }
 
 bool MockRenderProcessHost::Send(IPC::Message* msg) {
@@ -166,9 +172,6 @@ void MockRenderProcessHost::AddPendingView() {
 void MockRenderProcessHost::RemovePendingView() {
 }
 
-void MockRenderProcessHost::SetSuddenTerminationAllowed(bool allowed) {
-}
-
 bool MockRenderProcessHost::SuddenTerminationAllowed() const {
   return true;
 }
@@ -190,18 +193,6 @@ IPC::ChannelProxy* MockRenderProcessHost::GetChannel() {
 void MockRenderProcessHost::AddFilter(BrowserMessageFilter* filter) {
 }
 
-int MockRenderProcessHost::GetActiveViewCount() {
-  int num_active_views = 0;
-  scoped_ptr<RenderWidgetHostIterator> widgets(
-      RenderWidgetHost::GetRenderWidgetHosts());
-  while (RenderWidgetHost* widget = widgets->GetNextHost()) {
-    // Count only RenderWidgetHosts in this process.
-    if (widget->GetProcess()->GetID() == GetID())
-      num_active_views++;
-  }
-  return num_active_views;
-}
-
 bool MockRenderProcessHost::FastShutdownForPageCount(size_t count) {
   if (static_cast<size_t>(GetActiveViewCount()) == count)
     return FastShutdownIfPossible();
@@ -221,6 +212,33 @@ void MockRenderProcessHost::NotifyTimezoneChange() {
 ServiceRegistry* MockRenderProcessHost::GetServiceRegistry() {
   return NULL;
 }
+
+const base::TimeTicks& MockRenderProcessHost::GetInitTimeForNavigationMetrics()
+    const {
+  static base::TimeTicks dummy_time = base::TimeTicks::Now();
+  return dummy_time;
+}
+
+bool MockRenderProcessHost::SubscribeUniformEnabled() const {
+  return false;
+}
+
+void MockRenderProcessHost::OnAddSubscription(unsigned int target) {
+}
+
+void MockRenderProcessHost::OnRemoveSubscription(unsigned int target) {
+}
+
+void MockRenderProcessHost::SendUpdateValueState(
+    unsigned int target, const gpu::ValueState& state) {
+}
+
+#if defined(ENABLE_BROWSER_CDMS)
+media::BrowserCdm* MockRenderProcessHost::GetBrowserCdm(int render_frame_id,
+                                                        int cdm_id) const {
+  return nullptr;
+}
+#endif
 
 void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {
   RenderProcessHostImpl::FilterURL(this, empty_allowed, url);

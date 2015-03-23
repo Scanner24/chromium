@@ -43,6 +43,10 @@ class ImageDecoder : public content::UtilityProcessHostClient {
                const std::string& image_data,
                ImageCodec image_codec);
 
+  ImageDecoder(Delegate* delegate,
+               const std::vector<char>& image_data,
+               ImageCodec image_codec);
+
   // Starts asynchronous image decoding. Once finished, the callback will be
   // posted back to |task_runner|.
   void Start(scoped_refptr<base::SequencedTaskRunner> task_runner);
@@ -56,10 +60,10 @@ class ImageDecoder : public content::UtilityProcessHostClient {
 
  private:
   // It's a reference counted object, so destructor is private.
-  virtual ~ImageDecoder();
+  ~ImageDecoder() override;
 
   // Overidden from UtilityProcessHostClient:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // IPC message handlers.
   void OnDecodeImageSucceeded(const SkBitmap& decoded_image);

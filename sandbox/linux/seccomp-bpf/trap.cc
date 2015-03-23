@@ -14,13 +14,14 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/seccomp-bpf/die.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
 
 // Android's signal.h doesn't define ucontext etc.
 #if defined(OS_ANDROID)
-#include "sandbox/linux/services/android_ucontext.h"
+#include "sandbox/linux/system_headers/android_ucontext.h"
 #endif
 
 namespace {
@@ -104,7 +105,7 @@ Trap::Trap()
   }
 }
 
-Trap* Trap::GetInstance() {
+bpf_dsl::TrapRegistry* Trap::Registry() {
   // Note: This class is not thread safe. It is the caller's responsibility
   // to avoid race conditions. Normally, this is a non-issue as the sandbox
   // can only be initialized if there are no other threads present.
@@ -251,10 +252,10 @@ bool Trap::TrapKey::operator<(const TrapKey& o) const {
 }
 
 uint16_t Trap::MakeTrap(TrapFnc fnc, const void* aux, bool safe) {
-  return GetInstance()->MakeTrapImpl(fnc, aux, safe);
+  return Registry()->Add(fnc, aux, safe);
 }
 
-uint16_t Trap::MakeTrapImpl(TrapFnc fnc, const void* aux, bool safe) {
+uint16_t Trap::Add(TrapFnc fnc, const void* aux, bool safe) {
   if (!safe && !SandboxDebuggingAllowedByUser()) {
     // Unless the user set the CHROME_SANDBOX_DEBUGGING environment variable,
     // we never return an ErrorCode that is marked as "unsafe". This also
@@ -358,18 +359,21 @@ bool Trap::SandboxDebuggingAllowedByUser() const {
 }
 
 bool Trap::EnableUnsafeTrapsInSigSysHandler() {
-  Trap* trap = GetInstance();
-  if (!trap->has_unsafe_traps_) {
+  return Registry()->EnableUnsafeTraps();
+}
+
+bool Trap::EnableUnsafeTraps() {
+  if (!has_unsafe_traps_) {
     // Unsafe traps are a one-way fuse. Once enabled, they can never be turned
     // off again.
     // We only allow enabling unsafe traps, if the user explicitly set an
     // appropriate environment variable. This prevents bugs that accidentally
     // disable all sandboxing for all users.
-    if (trap->SandboxDebuggingAllowedByUser()) {
+    if (SandboxDebuggingAllowedByUser()) {
       // We only ever print this message once, when we enable unsafe traps the
       // first time.
       SANDBOX_INFO("WARNING! Disabling sandbox for debugging purposes");
-      trap->has_unsafe_traps_ = true;
+      has_unsafe_traps_ = true;
     } else {
       SANDBOX_INFO(
           "Cannot disable sandbox and use unsafe traps unless "
@@ -377,14 +381,7 @@ bool Trap::EnableUnsafeTrapsInSigSysHandler() {
     }
   }
   // Returns the, possibly updated, value of has_unsafe_traps_.
-  return trap->has_unsafe_traps_;
-}
-
-bool Trap::IsSafeTrapId(uint16_t id) {
-  if (global_trap_ && id > 0 && id <= global_trap_->trap_array_size_) {
-    return global_trap_->trap_array_[id - 1].safe;
-  }
-  return false;
+  return has_unsafe_traps_;
 }
 
 Trap* Trap::global_trap_;

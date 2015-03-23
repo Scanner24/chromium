@@ -4,9 +4,9 @@
 
 #include "ui/gl/gl_context_egl.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "third_party/khronos/EGL/egl.h"
 #include "third_party/khronos/EGL/eglext.h"
@@ -29,7 +29,8 @@ GLContextEGL::GLContextEGL(GLShareGroup* share_group)
       context_(NULL),
       display_(NULL),
       config_(NULL),
-      unbind_fbo_on_makecurrent_(false) {
+      unbind_fbo_on_makecurrent_(false),
+      swap_interval_(1) {
 }
 
 bool GLContextEGL::Initialize(
@@ -125,6 +126,8 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
+  surface->OnSetSwapInterval(swap_interval_);
+
   release_current.Cancel();
   return true;
 }
@@ -172,11 +175,20 @@ void* GLContextEGL::GetHandle() {
   return context_;
 }
 
-void GLContextEGL::SetSwapInterval(int interval) {
-  DCHECK(IsCurrent(NULL));
+void GLContextEGL::OnSetSwapInterval(int interval) {
+  DCHECK(IsCurrent(NULL) && GLSurface::GetCurrent());
+
+  // This is a surfaceless context. eglSwapInterval doesn't take any effect in
+  // this case and will just return EGL_BAD_SURFACE.
+  if (GLSurface::GetCurrent()->IsSurfaceless())
+    return;
+
   if (!eglSwapInterval(display_, interval)) {
     LOG(ERROR) << "eglSwapInterval failed with error "
                << GetLastEGLErrorString();
+  } else {
+    swap_interval_ = interval;
+    GLSurface::GetCurrent()->OnSetSwapInterval(interval);
   }
 }
 

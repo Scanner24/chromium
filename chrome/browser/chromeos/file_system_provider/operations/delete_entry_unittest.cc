@@ -27,22 +27,21 @@ namespace {
 const char kExtensionId[] = "mbflcebpggnecokmikipoihdbecnjfoj";
 const char kFileSystemId[] = "testing-file-system";
 const int kRequestId = 2;
-const base::FilePath::CharType kEntryPath[] = "/kitty/and/puppy/happy";
+const base::FilePath::CharType kEntryPath[] =
+    FILE_PATH_LITERAL("/kitty/and/puppy/happy");
 
 }  // namespace
 
 class FileSystemProviderOperationsDeleteEntryTest : public testing::Test {
  protected:
   FileSystemProviderOperationsDeleteEntryTest() {}
-  virtual ~FileSystemProviderOperationsDeleteEntryTest() {}
+  ~FileSystemProviderOperationsDeleteEntryTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
+    MountOptions mount_options(kFileSystemId, "" /* display_name */);
+    mount_options.writable = true;
     file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* file_system_name */,
-                               true /* writable */,
-                               base::FilePath() /* mount_path */);
+        ProvidedFileSystemInfo(kExtensionId, mount_options, base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;
@@ -54,9 +53,7 @@ TEST_F(FileSystemProviderOperationsDeleteEntryTest, Execute) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  DeleteEntry delete_entry(NULL,
-                           file_system_info_,
-                           base::FilePath::FromUTF8Unsafe(kEntryPath),
+  DeleteEntry delete_entry(NULL, file_system_info_, base::FilePath(kEntryPath),
                            true /* recursive */,
                            base::Bind(&util::LogStatusCallback, &callback_log));
   delete_entry.SetDispatchEventImplForTesting(
@@ -89,9 +86,7 @@ TEST_F(FileSystemProviderOperationsDeleteEntryTest, Execute_NoListener) {
   util::LoggingDispatchEventImpl dispatcher(false /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  DeleteEntry delete_entry(NULL,
-                           file_system_info_,
-                           base::FilePath::FromUTF8Unsafe(kEntryPath),
+  DeleteEntry delete_entry(NULL, file_system_info_, base::FilePath(kEntryPath),
                            true /* recursive */,
                            base::Bind(&util::LogStatusCallback, &callback_log));
   delete_entry.SetDispatchEventImplForTesting(
@@ -107,15 +102,11 @@ TEST_F(FileSystemProviderOperationsDeleteEntryTest, Execute_ReadOnly) {
 
   const ProvidedFileSystemInfo read_only_file_system_info(
       kExtensionId,
-      kFileSystemId,
-      "" /* file_system_name */,
-      false /* writable */,
+      MountOptions(kFileSystemId, "" /* display_name */),
       base::FilePath() /* mount_path */);
 
-  DeleteEntry delete_entry(NULL,
-                           read_only_file_system_info,
-                           base::FilePath::FromUTF8Unsafe(kEntryPath),
-                           true /* recursive */,
+  DeleteEntry delete_entry(NULL, read_only_file_system_info,
+                           base::FilePath(kEntryPath), true /* recursive */,
                            base::Bind(&util::LogStatusCallback, &callback_log));
   delete_entry.SetDispatchEventImplForTesting(
       base::Bind(&util::LoggingDispatchEventImpl::OnDispatchEventImpl,
@@ -128,9 +119,7 @@ TEST_F(FileSystemProviderOperationsDeleteEntryTest, OnSuccess) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  DeleteEntry delete_entry(NULL,
-                           file_system_info_,
-                           base::FilePath::FromUTF8Unsafe(kEntryPath),
+  DeleteEntry delete_entry(NULL, file_system_info_, base::FilePath(kEntryPath),
                            true /* recursive */,
                            base::Bind(&util::LogStatusCallback, &callback_log));
   delete_entry.SetDispatchEventImplForTesting(
@@ -150,9 +139,7 @@ TEST_F(FileSystemProviderOperationsDeleteEntryTest, OnError) {
   util::LoggingDispatchEventImpl dispatcher(true /* dispatch_reply */);
   util::StatusCallbackLog callback_log;
 
-  DeleteEntry delete_entry(NULL,
-                           file_system_info_,
-                           base::FilePath::FromUTF8Unsafe(kEntryPath),
+  DeleteEntry delete_entry(NULL, file_system_info_, base::FilePath(kEntryPath),
                            true /* recursive */,
                            base::Bind(&util::LogStatusCallback, &callback_log));
   delete_entry.SetDispatchEventImplForTesting(

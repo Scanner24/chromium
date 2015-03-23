@@ -30,14 +30,15 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -108,6 +109,9 @@ void AppLauncherHandler::CreateAppInfo(
     const Extension* extension,
     ExtensionService* service,
     base::DictionaryValue* value) {
+  // The items which are to be written into |value| are also described in
+  // chrome/browser/resources/ntp4/page_list_view.js in @typedef for AppInfo.
+  // Please update it whenever you add or remove any keys here.
   value->Clear();
 
   // The Extension class 'helpfully' wraps bidi control characters that
@@ -508,20 +512,19 @@ void AppLauncherHandler::HandleLaunchApp(const base::ListValue* args) {
         webui::GetDispositionFromClick(args, 3) : CURRENT_TAB;
   if (extension_id != extensions::kWebStoreAppId) {
     CHECK_NE(launch_bucket, extension_misc::APP_LAUNCH_BUCKET_INVALID);
-    CoreAppLauncherHandler::RecordAppLaunchType(launch_bucket,
-                                                extension->GetType());
+    extensions::RecordAppLaunchType(launch_bucket, extension->GetType());
   } else {
-    CoreAppLauncherHandler::RecordWebStoreLaunch();
+    extensions::RecordWebStoreLaunch();
   }
 
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB ||
       disposition == NEW_WINDOW) {
     // TODO(jamescook): Proper support for background tabs.
     AppLaunchParams params(profile, extension,
-                           disposition == NEW_WINDOW ?
-                               extensions::LAUNCH_CONTAINER_WINDOW :
-                               extensions::LAUNCH_CONTAINER_TAB,
-                           disposition);
+                           disposition == NEW_WINDOW
+                               ? extensions::LAUNCH_CONTAINER_WINDOW
+                               : extensions::LAUNCH_CONTAINER_TAB,
+                           disposition, extensions::SOURCE_NEW_TAB_PAGE);
     params.override_url = GURL(url);
     OpenApplication(params);
   } else {
@@ -534,7 +537,8 @@ void AppLauncherHandler::HandleLaunchApp(const base::ListValue* args) {
       old_contents = browser->tab_strip_model()->GetActiveWebContents();
 
     AppLaunchParams params(profile, extension,
-                           old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB);
+                           old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB,
+                           extensions::SOURCE_NEW_TAB_PAGE);
     params.override_url = GURL(url);
     WebContents* new_contents = OpenApplication(params);
 
@@ -561,8 +565,7 @@ void AppLauncherHandler::HandleSetLaunchType(const base::ListValue* args) {
   base::AutoReset<bool> auto_reset(&ignore_changes_, true);
 
   extensions::SetLaunchType(
-      extension_service_,
-      extension_id,
+      Profile::FromWebUI(web_ui()), extension_id,
       static_cast<extensions::LaunchType>(static_cast<int>(launch_type)));
 }
 
@@ -687,8 +690,8 @@ void AppLauncherHandler::HandleGenerateAppForLink(const base::ListValue* args) {
       app_sorting->PageIntegerAsStringOrdinal(static_cast<size_t>(page_index));
 
   Profile* profile = Profile::FromWebUI(web_ui());
-  FaviconService* favicon_service =
-      FaviconServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
   if (!favicon_service) {
     LOG(ERROR) << "No favicon service";
     return;

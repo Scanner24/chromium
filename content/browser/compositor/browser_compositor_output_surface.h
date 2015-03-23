@@ -25,15 +25,14 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
       public ui::CompositorVSyncManager::Observer,
       public base::NonThreadSafe {
  public:
-  virtual ~BrowserCompositorOutputSurface();
+  ~BrowserCompositorOutputSurface() override;
 
   // cc::OutputSurface implementation.
-  virtual bool BindToClient(cc::OutputSurfaceClient* client) OVERRIDE;
-  virtual void OnSwapBuffersComplete() OVERRIDE;
+  bool BindToClient(cc::OutputSurfaceClient* client) override;
 
   // ui::CompositorOutputSurface::Observer implementation.
-  virtual void OnUpdateVSyncParameters(base::TimeTicks timebase,
-                                       base::TimeDelta interval) OVERRIDE;
+  void OnUpdateVSyncParameters(base::TimeTicks timebase,
+                               base::TimeDelta interval) override;
 
   void OnUpdateVSyncParametersFromGpu(base::TimeTicks tiembase,
                                       base::TimeDelta interval);
@@ -41,13 +40,15 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
   void SetReflector(ReflectorImpl* reflector);
 
 #if defined(OS_MACOSX)
-  void OnSurfaceDisplayed();
+  virtual void OnSurfaceDisplayed() = 0;
+  virtual void OnSurfaceRecycled() = 0;
+  virtual bool ShouldNotShowFramesAfterRecycle() const = 0;
 #endif
 
  protected:
   // Constructor used by the accelerated implementation.
   BrowserCompositorOutputSurface(
-      const scoped_refptr<ContextProviderCommandBuffer>& context,
+      const scoped_refptr<cc::ContextProvider>& context,
       int surface_id,
       IDMap<BrowserCompositorOutputSurface>* output_surface_map,
       const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager);

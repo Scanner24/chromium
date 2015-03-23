@@ -27,6 +27,7 @@
         'rappor/byte_vector_utils.h',
         'rappor/log_uploader.cc',
         'rappor/log_uploader.h',
+        'rappor/log_uploader_interface.h',
         'rappor/proto/rappor_metric.proto',
         'rappor/rappor_metric.cc',
         'rappor/rappor_metric.h',
@@ -34,6 +35,8 @@
         'rappor/rappor_parameters.h',
         'rappor/rappor_pref_names.cc',
         'rappor/rappor_pref_names.h',
+        'rappor/rappor_prefs.cc',
+        'rappor/rappor_prefs.h',
         'rappor/rappor_service.cc',
         'rappor/rappor_service.h',
       ],
@@ -42,6 +45,23 @@
         'proto_out_dir': 'components/rappor/proto',
       },
       'includes': [ '../build/protoc.gypi' ],
+    },
+    {
+      # GN version: //components/rappor:test_support
+      'target_name': 'rappor_test_support',
+      'type': 'static_library',
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        'rappor',
+      ],
+      'sources': [
+        'rappor/test_log_uploader.cc',
+        'rappor/test_log_uploader.h',
+        'rappor/test_rappor_service.cc',
+        'rappor/test_rappor_service.h',
+      ],
     },
   ],
 }

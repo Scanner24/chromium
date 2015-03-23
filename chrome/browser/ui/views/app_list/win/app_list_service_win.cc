@@ -38,6 +38,7 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/app_list/views/app_list_view.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/win/shell.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -49,15 +50,22 @@
 
 // static
 AppListService* AppListService::Get(chrome::HostDesktopType desktop_type) {
-  if (desktop_type == chrome::HOST_DESKTOP_TYPE_ASH)
+  if (desktop_type == chrome::HOST_DESKTOP_TYPE_ASH) {
+    DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kViewerConnect));
     return AppListServiceAsh::GetInstance();
+  }
 
   return AppListServiceWin::GetInstance();
 }
 
 // static
-void AppListService::InitAll(Profile* initial_profile) {
-  AppListServiceAsh::GetInstance()->Init(initial_profile);
+void AppListService::InitAll(Profile* initial_profile,
+                             const base::FilePath& profile_path) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kViewerConnect))
+    AppListServiceAsh::GetInstance()->Init(initial_profile);
+
   AppListServiceWin::GetInstance()->Init(initial_profile);
 }
 
@@ -98,15 +106,15 @@ base::string16 GetAppListShortcutName() {
   return dist->GetShortcutName(BrowserDistribution::SHORTCUT_APP_LAUNCHER);
 }
 
-CommandLine GetAppListCommandLine() {
+base::CommandLine GetAppListCommandLine() {
   const char* const kSwitchesToCopy[] = { switches::kUserDataDir };
-  CommandLine* current = CommandLine::ForCurrentProcess();
+  base::CommandLine* current = base::CommandLine::ForCurrentProcess();
   base::FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
      NOTREACHED();
-     return CommandLine(CommandLine::NO_PROGRAM);
+     return base::CommandLine(base::CommandLine::NO_PROGRAM);
   }
-  CommandLine command_line(chrome_exe);
+  base::CommandLine command_line(chrome_exe);
   command_line.CopySwitchesFrom(*current, kSwitchesToCopy,
                                 arraysize(kSwitchesToCopy));
   command_line.AppendSwitch(switches::kShowAppList);
@@ -118,7 +126,7 @@ base::string16 GetAppModelId() {
   // but different for different user data directories, so base it on the
   // initial profile in the current user data directory.
   base::FilePath initial_profile_path;
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kUserDataDir)) {
     initial_profile_path =
         command_line->GetSwitchValuePath(switches::kUserDataDir).AppendASCII(
@@ -135,8 +143,7 @@ void SetDidRunForNDayActiveStats() {
     NOTREACHED();
     return;
   }
-  bool system_install =
-      !InstallUtil::IsPerUserInstall(exe_path.value().c_str());
+  bool system_install = !InstallUtil::IsPerUserInstall(exe_path);
   // Using Chrome Binary dist: Chrome dist may not exist for the legacy
   // App Launcher, and App Launcher dist may be "shadow", which does not
   // contain the information needed to determine multi-install.
@@ -237,7 +244,7 @@ void SetWindowAttributes(HWND hwnd) {
   }
 
   ui::win::SetAppIdForWindow(GetAppModelId(), hwnd);
-  CommandLine relaunch = GetAppListCommandLine();
+  base::CommandLine relaunch = GetAppListCommandLine();
   base::string16 app_name(GetAppListShortcutName());
   ui::win::SetRelaunchDetailsForWindow(
       relaunch.GetCommandLineString(), app_name, hwnd);
@@ -256,8 +263,7 @@ AppListServiceWin* AppListServiceWin::GetInstance() {
 
 AppListServiceWin::AppListServiceWin()
     : AppListServiceViews(scoped_ptr<AppListControllerDelegate>(
-          new AppListControllerDelegateWin(this))),
-      enable_app_list_on_next_init_(false) {
+          new AppListControllerDelegateWin(this))) {
 }
 
 AppListServiceWin::~AppListServiceWin() {
@@ -289,24 +295,7 @@ void AppListServiceWin::SetAppListNextPaintCallback(void (*callback)()) {
     next_paint_callback_ = base::Bind(callback);
 }
 
-void AppListServiceWin::HandleFirstRun() {
-  PrefService* local_state = g_browser_process->local_state();
-  // If the app list is already enabled during first run, then the user had
-  // opted in to the app launcher before uninstalling, so we re-enable to
-  // restore shortcuts to the app list.
-  // Note we can't directly create the shortcuts here because the IO thread
-  // hasn't been created yet.
-  enable_app_list_on_next_init_ = local_state->GetBoolean(
-      prefs::kAppLauncherHasBeenEnabled);
-}
-
 void AppListServiceWin::Init(Profile* initial_profile) {
-  if (enable_app_list_on_next_init_) {
-    enable_app_list_on_next_init_ = false;
-    EnableAppList(initial_profile, ENABLE_ON_REINSTALL);
-    CreateShortcut();
-  }
-
   ScheduleWarmup();
 
   MigrateAppLauncherEnabledPref();
@@ -336,7 +325,28 @@ void AppListServiceWin::CreateShortcut() {
 void AppListServiceWin::ScheduleWarmup() {
   // Post a task to create the app list. This is posted to not impact startup
   // time.
-  const int kInitWindowDelay = 30;
+  /* const */ int kInitWindowDelay = 30;
+
+  // TODO(vadimt): Make kInitWindowDelay const and remove the below switch once
+  // crbug.com/431326 is fixed.
+
+  // Profiler UMA data is reported only for first 30 sec after browser startup.
+  // To make all invocations of AppListServiceWin::LoadProfileForWarmup visible
+  // to the server-side analysis tool, reducing this period to 10 sec in Dev
+  // builds and Canary, where profiler instrumentations are enabled.
+  switch (chrome::VersionInfo::GetChannel()) {
+    case chrome::VersionInfo::CHANNEL_UNKNOWN:
+    case chrome::VersionInfo::CHANNEL_CANARY:
+      kInitWindowDelay = 10;
+      break;
+
+    case chrome::VersionInfo::CHANNEL_DEV:
+    case chrome::VersionInfo::CHANNEL_BETA:
+    case chrome::VersionInfo::CHANNEL_STABLE:
+      // Profiler instrumentations are not enabled.
+      break;
+  }
+
   base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&AppListServiceWin::LoadProfileForWarmup,
@@ -345,8 +355,10 @@ void AppListServiceWin::ScheduleWarmup() {
 }
 
 bool AppListServiceWin::IsWarmupNeeded() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (!g_browser_process || g_browser_process->IsShuttingDown() ||
-      browser_shutdown::IsTryingToQuit()) {
+      browser_shutdown::IsTryingToQuit() ||
+      command_line->HasSwitch(switches::kTestType)) {
     return false;
   }
 

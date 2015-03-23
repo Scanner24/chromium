@@ -17,7 +17,7 @@
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "media/video/video_decode_accelerator.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -40,35 +40,51 @@ class GpuVideoDecodeAccelerator
       const scoped_refptr<base::MessageLoopProxy>& io_message_loop);
 
   // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // media::VideoDecodeAccelerator::Client implementation.
-  virtual void ProvidePictureBuffers(uint32 requested_num_of_buffers,
-                                     const gfx::Size& dimensions,
-                                     uint32 texture_target) OVERRIDE;
-  virtual void DismissPictureBuffer(int32 picture_buffer_id) OVERRIDE;
-  virtual void PictureReady(const media::Picture& picture) OVERRIDE;
-  virtual void NotifyError(media::VideoDecodeAccelerator::Error error) OVERRIDE;
-  virtual void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id) OVERRIDE;
-  virtual void NotifyFlushDone() OVERRIDE;
-  virtual void NotifyResetDone() OVERRIDE;
+  void ProvidePictureBuffers(uint32 requested_num_of_buffers,
+                             const gfx::Size& dimensions,
+                             uint32 texture_target) override;
+  void DismissPictureBuffer(int32 picture_buffer_id) override;
+  void PictureReady(const media::Picture& picture) override;
+  void NotifyError(media::VideoDecodeAccelerator::Error error) override;
+  void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id) override;
+  void NotifyFlushDone() override;
+  void NotifyResetDone() override;
 
   // GpuCommandBufferStub::DestructionObserver implementation.
-  virtual void OnWillDestroyStub() OVERRIDE;
+  void OnWillDestroyStub() override;
 
   // Function to delegate sending to actual sender.
-  virtual bool Send(IPC::Message* message) OVERRIDE;
+  bool Send(IPC::Message* message) override;
 
-  // Initialize the accelerator with the given profile and send the
-  // |init_done_msg| when done.
+  // Initialize VDAs from the set of VDAs supported for current platform until
+  // one of them succeeds for given |profile|. Send the |init_done_msg| when
+  // done. filter_ is passed to GpuCommandBufferStub channel only if the chosen
+  // VDA can decode on IO thread.
   void Initialize(const media::VideoCodecProfile profile,
                   IPC::Message* init_done_msg);
 
  private:
+  typedef scoped_ptr<media::VideoDecodeAccelerator>(
+      GpuVideoDecodeAccelerator::*CreateVDAFp)();
+
   class MessageFilter;
 
+  // Return a set of VDA Create function pointers applicable to the current
+  // platform.
+  std::vector<CreateVDAFp> CreateVDAFps();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateDXVAVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateV4L2VDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateV4L2SliceVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateVaapiVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateVTVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateOzoneVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateAndroidVDA();
+
   // We only allow self-delete, from OnWillDestroyStub(), after cleanup there.
-  virtual ~GpuVideoDecodeAccelerator();
+  ~GpuVideoDecodeAccelerator() override;
 
   // Handlers for IPC messages.
   void OnDecode(base::SharedMemoryHandle handle, int32 id, uint32 size);
@@ -87,6 +103,11 @@ class GpuVideoDecodeAccelerator
 
   // Helper for replying to the creation request.
   void SendCreateDecoderReply(IPC::Message* message, bool succeeded);
+
+  // Helper to bind |image| to the texture specified by |client_texture_id|.
+  void BindImage(uint32 client_texture_id,
+                 uint32 texture_target,
+                 scoped_refptr<gfx::GLImage> image);
 
   // Route ID to communicate with the host.
   int32 host_route_id_;

@@ -44,9 +44,10 @@ using sync_pb::GetUpdatesCallerInfo;
 class MockSyncer : public Syncer {
  public:
   MockSyncer();
-  MOCK_METHOD3(NormalSyncShare, bool(ModelTypeSet,
-                                     const sessions::NudgeTracker&,
-                                     sessions::SyncSession*));
+  MOCK_METHOD3(NormalSyncShare,
+               bool(ModelTypeSet,
+                    sessions::NudgeTracker*,
+                    sessions::SyncSession*));
   MOCK_METHOD3(ConfigureSyncShare,
                bool(ModelTypeSet,
                     sync_pb::GetUpdatesCallerInfo::GetUpdatesSource,
@@ -120,7 +121,7 @@ class SyncSchedulerTest : public testing::Test {
     MOCK_METHOD1(GetDelay, TimeDelta(const TimeDelta&));
   };
 
-  virtual void SetUp() {
+  void SetUp() override {
     dir_maker_.SetUp();
     syncer_ = new testing::StrictMock<MockSyncer>();
     delay_ = NULL;
@@ -172,7 +173,7 @@ class SyncSchedulerTest : public testing::Test {
     return TestTimeouts::action_timeout();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     PumpLoop();
     scheduler_.reset();
     PumpLoop();
@@ -235,8 +236,7 @@ class SyncSchedulerTest : public testing::Test {
   static scoped_ptr<InvalidationInterface> BuildInvalidation(
       int64 version,
       const std::string& payload) {
-    return MockInvalidation::Build(version, payload)
-        .PassAs<InvalidationInterface>();
+    return MockInvalidation::Build(version, payload);
   }
 
  private:
@@ -896,14 +896,14 @@ TEST_F(SyncSchedulerTest, ConfigurationMode) {
 }
 
 class BackoffTriggersSyncSchedulerTest : public SyncSchedulerTest {
-  virtual void SetUp() {
+  void SetUp() override {
     SyncSchedulerTest::SetUp();
     UseMockDelayProvider();
     EXPECT_CALL(*delay(), GetDelay(_))
         .WillRepeatedly(Return(TimeDelta::FromMilliseconds(10)));
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     StopSyncScheduler();
     SyncSchedulerTest::TearDown();
   }

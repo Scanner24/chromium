@@ -37,7 +37,7 @@ class MutableProfileOAuth2TokenServiceTest
         start_batch_changes_(0),
         end_batch_changes_(0) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
 #if defined(OS_MACOSX)
     OSCrypt::UseMockKeychain(true);
 #endif
@@ -46,13 +46,13 @@ class MutableProfileOAuth2TokenServiceTest
                              "",
                              net::HTTP_OK,
                              net::URLRequestStatus::SUCCESS);
-    oauth2_service_.Initialize(&client_);
+    oauth2_service_.Initialize(&client_, &signin_error_controller_);
     // Make sure PO2TS has a chance to load itself before continuing.
     base::RunLoop().RunUntilIdle();
     oauth2_service_.AddObserver(this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     oauth2_service_.RemoveObserver(this);
     oauth2_service_.Shutdown();
   }
@@ -65,21 +65,17 @@ class MutableProfileOAuth2TokenServiceTest
   }
 
   // OAuth2TokenService::Observer implementation.
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE {
+  void OnRefreshTokenAvailable(const std::string& account_id) override {
     ++token_available_count_;
   }
-  virtual void OnRefreshTokenRevoked(const std::string& account_id) OVERRIDE {
+  void OnRefreshTokenRevoked(const std::string& account_id) override {
     ++token_revoked_count_;
   }
-  virtual void OnRefreshTokensLoaded() OVERRIDE { ++tokens_loaded_count_; }
+  void OnRefreshTokensLoaded() override { ++tokens_loaded_count_; }
 
-  virtual void OnStartBatchChanges() OVERRIDE {
-    ++start_batch_changes_;
-  }
+  void OnStartBatchChanges() override { ++start_batch_changes_; }
 
-  virtual void OnEndBatchChanges() OVERRIDE {
-    ++end_batch_changes_;
-  }
+  void OnEndBatchChanges() override { ++end_batch_changes_; }
 
   void ResetObserverCounts() {
     token_available_count_ = 0;
@@ -123,6 +119,7 @@ class MutableProfileOAuth2TokenServiceTest
   TestSigninClient client_;
   MutableProfileOAuth2TokenService oauth2_service_;
   TestingOAuth2TokenServiceConsumer consumer_;
+  SigninErrorController signin_error_controller_;
   int token_available_count_;
   int token_revoked_count_;
   int tokens_loaded_count_;
@@ -366,5 +363,18 @@ TEST_F(MutableProfileOAuth2TokenServiceTest, FetchTransientError) {
       oauth2_service_.StartRequest(kEmail, scope_list, &consumer_));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(GoogleServiceAuthError::AuthErrorNone(),
-            oauth2_service_.signin_error_controller()->auth_error());
+           signin_error_controller_.auth_error());
+}
+
+TEST_F(MutableProfileOAuth2TokenServiceTest, CanonicalizeAccountId) {
+  std::map<std::string, std::string> tokens;
+  tokens["AccountId-user@gmail.com"] = "refresh_token";
+  tokens["AccountId-Foo.Bar@gmail.com"] = "refresh_token";
+  tokens["AccountId-12345"] = "refresh_token";
+
+  oauth2_service_.LoadAllCredentialsIntoMemory(tokens);
+
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("user@gmail.com"));
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("foobar@gmail.com"));
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("12345"));
 }

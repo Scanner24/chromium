@@ -48,18 +48,18 @@ class CertNotificationForwarder : public NSSCertDatabase::Observer {
   explicit CertNotificationForwarder(CertDatabase* cert_db)
       : cert_db_(cert_db) {}
 
-  virtual ~CertNotificationForwarder() {}
+  ~CertNotificationForwarder() override {}
 
   // NSSCertDatabase::Observer implementation:
-  virtual void OnCertAdded(const X509Certificate* cert) OVERRIDE {
+  void OnCertAdded(const X509Certificate* cert) override {
     cert_db_->NotifyObserversOfCertAdded(cert);
   }
 
-  virtual void OnCertRemoved(const X509Certificate* cert) OVERRIDE {
+  void OnCertRemoved(const X509Certificate* cert) override {
     cert_db_->NotifyObserversOfCertRemoved(cert);
   }
 
-  virtual void OnCACertChanged(const X509Certificate* cert) OVERRIDE {
+  void OnCACertChanged(const X509Certificate* cert) override {
     cert_db_->NotifyObserversOfCACertChanged(cert);
   }
 
@@ -438,18 +438,20 @@ void NSSCertDatabase::NotifyCertRemovalAndCallBack(
 }
 
 void NSSCertDatabase::NotifyObserversOfCertAdded(const X509Certificate* cert) {
-  observer_list_->Notify(&Observer::OnCertAdded, make_scoped_refptr(cert));
+  observer_list_->Notify(FROM_HERE, &Observer::OnCertAdded,
+                         make_scoped_refptr(cert));
 }
 
 void NSSCertDatabase::NotifyObserversOfCertRemoved(
     const X509Certificate* cert) {
-  observer_list_->Notify(&Observer::OnCertRemoved, make_scoped_refptr(cert));
+  observer_list_->Notify(FROM_HERE, &Observer::OnCertRemoved,
+                         make_scoped_refptr(cert));
 }
 
 void NSSCertDatabase::NotifyObserversOfCACertChanged(
     const X509Certificate* cert) {
-  observer_list_->Notify(
-      &Observer::OnCACertChanged, make_scoped_refptr(cert));
+  observer_list_->Notify(FROM_HERE, &Observer::OnCACertChanged,
+                         make_scoped_refptr(cert));
 }
 
 // static

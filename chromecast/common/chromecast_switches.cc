@@ -6,6 +6,14 @@
 
 namespace switches {
 
+// Enable the CMA media pipeline.
+const char kEnableCmaMediaPipeline[] = "enable-cma-media-pipeline";
+
+#if defined(OS_ANDROID)
+// Enable file accesses for debug.
+const char kEnableLocalFileAccesses[] = "enable-local-file-accesses";
+#endif  // defined(OS_ANDROID)
+
 // Override the URL to which metrics logs are sent for debugging.
 const char kOverrideMetricsUploadUrl[] = "override-metrics-upload-url";
 

@@ -29,10 +29,10 @@ class TestCompositorHostWin : public TestCompositorHost,
   }
 
   // Overridden from TestCompositorHost:
-  virtual void Show() OVERRIDE {
+  virtual void Show() override {
     ShowWindow(hwnd(), SW_SHOWNORMAL);
   }
-  virtual ui::Compositor* GetCompositor() OVERRIDE {
+  virtual ui::Compositor* GetCompositor() override {
     return compositor_.get();
   }
 
@@ -42,7 +42,7 @@ class TestCompositorHostWin : public TestCompositorHost,
   CR_END_MSG_MAP()
 
   void OnPaint(HDC dc) {
-    compositor_->Draw();
+    compositor_->ScheduleFullRedraw();
     ValidateRect(hwnd(), NULL);
   }
 

@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/webui/options/core_options_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
@@ -24,6 +25,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/url_data_source.h"
@@ -171,12 +173,14 @@ GURL GetLandingURL(const char* option, int value) {
   return GURL(url);
 }
 
-GURL GetPromoURL(Source source, bool auto_close) {
+GURL GetPromoURL(signin_metrics::Source source, bool auto_close) {
   return GetPromoURL(source, auto_close, false /* is_constrained */);
 }
 
-GURL GetPromoURL(Source source, bool auto_close, bool is_constrained) {
-  DCHECK_NE(SOURCE_UNKNOWN, source);
+GURL GetPromoURL(signin_metrics::Source source,
+                 bool auto_close,
+                 bool is_constrained) {
+  DCHECK_NE(signin_metrics::SOURCE_UNKNOWN, source);
 
   if (!switches::IsEnableWebBasedSignin()) {
     std::string url(chrome::kChromeUIChromeSigninURL);
@@ -219,20 +223,24 @@ GURL GetPromoURL(Source source, bool auto_close, bool is_constrained) {
 }
 
 GURL GetReauthURL(Profile* profile, const std::string& account_id) {
+  AccountTrackerService::AccountInfo info =
+      AccountTrackerServiceFactory::GetForProfile(profile)->
+          GetAccountInfo(account_id);
+
   if (switches::IsEnableWebBasedSignin()) {
     return net::AppendQueryParameter(
-        signin::GetPromoURL(signin::SOURCE_SETTINGS, true),
+        signin::GetPromoURL(signin_metrics::SOURCE_SETTINGS, true),
         "Email",
         account_id);
   }
 
-  signin::Source source = switches::IsNewAvatarMenu() ?
-      signin::SOURCE_REAUTH : signin::SOURCE_SETTINGS;
+  signin_metrics::Source source = switches::IsNewAvatarMenu() ?
+      signin_metrics::SOURCE_REAUTH : signin_metrics::SOURCE_SETTINGS;
 
   GURL url = signin::GetPromoURL(
       source, true /* auto_close */,
       switches::IsNewAvatarMenu() /* is_constrained */);
-  url = net::AppendQueryParameter(url, "email", account_id);
+  url = net::AppendQueryParameter(url, "email", info.email);
   url = net::AppendQueryParameter(url, "validateEmail", "1");
   return net::AppendQueryParameter(url, "readOnlyEmail", "1");
 }
@@ -248,16 +256,23 @@ GURL GetNextPageURLForPromoURL(const GURL& url) {
   return GURL();
 }
 
-Source GetSourceForPromoURL(const GURL& url) {
+GURL GetSigninPartitionURL() {
+  return GURL(switches::IsEnableWebviewBasedSignin() ?
+      "chrome-guest://chrome-signin/?" :
+      chrome::kChromeUIChromeSigninURL);
+}
+
+signin_metrics::Source GetSourceForPromoURL(const GURL& url) {
   std::string value;
   if (net::GetValueForKeyInQuery(url, kSignInPromoQueryKeySource, &value)) {
     int source = 0;
-    if (base::StringToInt(value, &source) && source >= SOURCE_START_PAGE &&
-        source < SOURCE_UNKNOWN) {
-      return static_cast<Source>(source);
+    if (base::StringToInt(value, &source) &&
+        source >= signin_metrics::SOURCE_START_PAGE &&
+        source < signin_metrics::SOURCE_UNKNOWN) {
+      return static_cast<signin_metrics::Source>(source);
     }
   }
-  return SOURCE_UNKNOWN;
+  return signin_metrics::SOURCE_UNKNOWN;
 }
 
 bool IsAutoCloseEnabledInURL(const GURL& url) {

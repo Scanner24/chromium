@@ -71,6 +71,7 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -85,15 +86,15 @@
 #include "crypto/rsa_private_key.h"
 #include "crypto/scoped_nss_types.h"
 #include "net/base/address_list.h"
-#include "net/base/connection_type_histograms.h"
 #include "net/base/dns_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/cert/asn1_util.h"
+#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
-#include "net/cert/ct_objects_extractor.h"
+#include "net/cert/ct_ev_whitelist.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/ct_verify_result.h"
 #include "net/cert/scoped_nss_types.h"
@@ -106,6 +107,7 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/nss_ssl_util.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
 
@@ -146,6 +148,14 @@ namespace net {
       VLOG(1) << (void *)this << " " << __FUNCTION__ << " jump to state " << s;\
       next_handshake_state_ = s;\
     } while (0)
+#endif
+
+#if !defined(CKM_AES_GCM)
+#define CKM_AES_GCM 0x00001087
+#endif
+
+#if !defined(CKM_NSS_CHACHA20_POLY1305)
+#define CKM_NSS_CHACHA20_POLY1305 (CKM_NSS + 26)
 #endif
 
 namespace {
@@ -218,8 +228,6 @@ bool IsOCSPStaplingSupported() {
   return GetCacheOCSPResponseFromSideChannelFunction() != NULL;
 }
 #else
-// TODO(agl): Figure out if we can plumb the OCSP response into Mac's system
-// certificate validation functions.
 bool IsOCSPStaplingSupported() {
   return false;
 }
@@ -407,6 +415,7 @@ struct HandshakeState {
   void Reset() {
     next_proto_status = SSLClientSocket::kNextProtoUnsupported;
     next_proto.clear();
+    negotiation_extension_ = SSLClientSocket::kExtensionUnknown;
     channel_id_sent = false;
     server_cert_chain.Reset(NULL);
     server_cert = NULL;
@@ -420,6 +429,9 @@ struct HandshakeState {
   // negotiated protocol stored in |next_proto|.
   SSLClientSocket::NextProtoStatus next_proto_status;
   std::string next_proto;
+
+  // TLS extension used for protocol negotiation.
+  SSLClientSocket::SSLNegotiationExtension negotiation_extension_;
 
   // True if a channel ID was sent.
   bool channel_id_sent;
@@ -759,6 +771,8 @@ class SSLClientSocketNSS::Core : public base::RefCountedThreadSafe<Core> {
   // UpdateNextProto gets any application-layer protocol that may have been
   // negotiated by the TLS connection.
   void UpdateNextProto();
+  // Record TLS extension used for protocol negotiation (NPN or ALPN).
+  void UpdateExtensionUsed();
 
   ////////////////////////////////////////////////////////////////////////////
   // Methods that are ONLY called on the network task runner:
@@ -968,8 +982,16 @@ bool SSLClientSocketNSS::Core::Init(PRFileDesc* socket,
   SECStatus rv = SECSuccess;
 
   if (!ssl_config_.next_protos.empty()) {
+    // TODO(bnc): Check ssl_config_.disabled_cipher_suites.
+    const bool adequate_encryption =
+        PK11_TokenExists(CKM_AES_GCM) ||
+        PK11_TokenExists(CKM_NSS_CHACHA20_POLY1305);
+    const bool adequate_key_agreement = PK11_TokenExists(CKM_DH_PKCS_DERIVE) ||
+                                        PK11_TokenExists(CKM_ECDH1_DERIVE);
     std::vector<uint8_t> wire_protos =
-        SerializeNextProtos(ssl_config_.next_protos);
+        SerializeNextProtos(ssl_config_.next_protos,
+                            adequate_encryption && adequate_key_agreement &&
+                                IsTLSVersionAdequateForHTTP2(ssl_config_));
     rv = SSL_SetNextProtoNego(
         nss_fd_, wire_protos.empty() ? NULL : &wire_protos[0],
         wire_protos.size());
@@ -1286,7 +1308,7 @@ SECStatus SSLClientSocketNSS::Core::PlatformClientAuthHandler(
   core->client_auth_cert_needed_ = !core->ssl_config_.send_client_cert;
 #if defined(OS_WIN)
   if (core->ssl_config_.send_client_cert) {
-    if (core->ssl_config_.client_cert) {
+    if (core->ssl_config_.client_cert.get()) {
       PCCERT_CONTEXT cert_context =
           core->ssl_config_.client_cert->os_cert_handle();
 
@@ -1594,6 +1616,16 @@ SECStatus SSLClientSocketNSS::Core::CanFalseStartCallback(
     return SECSuccess;
   }
 
+  SSLChannelInfo channel_info;
+  SECStatus ok =
+      SSL_GetChannelInfo(socket, &channel_info, sizeof(channel_info));
+  if (ok != SECSuccess || channel_info.length != sizeof(channel_info) ||
+      channel_info.protocolVersion < SSL_LIBRARY_VERSION_TLS_1_2 ||
+      !IsSecureTLSCipherSuite(channel_info.cipherSuite)) {
+    *can_false_start = PR_FALSE;
+    return SECSuccess;
+  }
+
   return SSL_RecommendedCanFalseStart(socket, can_false_start);
 }
 
@@ -1624,6 +1656,11 @@ void SSLClientSocketNSS::Core::HandshakeCallback(
 }
 
 void SSLClientSocketNSS::Core::HandshakeSucceeded() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::HandshakeSucceeded"));
+
   DCHECK(OnNSSTaskRunner());
 
   PRBool last_handshake_resumed;
@@ -1640,6 +1677,7 @@ void SSLClientSocketNSS::Core::HandshakeSucceeded() {
   UpdateStapledOCSPResponse();
   UpdateConnectionStatus();
   UpdateNextProto();
+  UpdateExtensionUsed();
 
   // Update the network task runners view of the handshake state whenever
   // a handshake has completed.
@@ -1649,6 +1687,11 @@ void SSLClientSocketNSS::Core::HandshakeSucceeded() {
 }
 
 int SSLClientSocketNSS::Core::HandleNSSError(PRErrorCode nss_error) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::HandleNSSError"));
+
   DCHECK(OnNSSTaskRunner());
 
   int net_error = MapNSSClientError(nss_error);
@@ -1670,7 +1713,7 @@ int SSLClientSocketNSS::Core::HandleNSSError(PRErrorCode nss_error) {
   // re-insert the smart card if not.
   if ((net_error == ERR_SSL_CLIENT_AUTH_CERT_NO_PRIVATE_KEY ||
        net_error == ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED) &&
-      ssl_config_.send_client_cert && ssl_config_.client_cert) {
+      ssl_config_.send_client_cert && ssl_config_.client_cert.get()) {
     CertSetCertificateContextProperty(
         ssl_config_.client_cert->os_cert_handle(),
         CERT_KEY_PROV_HANDLE_PROP_ID, 0, NULL);
@@ -1681,6 +1724,11 @@ int SSLClientSocketNSS::Core::HandleNSSError(PRErrorCode nss_error) {
 }
 
 int SSLClientSocketNSS::Core::DoHandshakeLoop(int last_io_result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoHandshakeLoop"));
+
   DCHECK(OnNSSTaskRunner());
 
   int rv = last_io_result;
@@ -1717,6 +1765,11 @@ int SSLClientSocketNSS::Core::DoHandshakeLoop(int last_io_result) {
 }
 
 int SSLClientSocketNSS::Core::DoReadLoop(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoReadLoop"));
+
   DCHECK(OnNSSTaskRunner());
   DCHECK(false_started_ || handshake_callback_called_);
   DCHECK_EQ(STATE_NONE, next_handshake_state_);
@@ -1776,10 +1829,20 @@ int SSLClientSocketNSS::Core::DoWriteLoop(int result) {
 }
 
 int SSLClientSocketNSS::Core::DoHandshake() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoHandshake"));
+
   DCHECK(OnNSSTaskRunner());
 
   int net_error = OK;
   SECStatus rv = SSL_ForceHandshake(nss_fd_);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoHandshake 1"));
 
   // Note: this function may be called multiple times during the handshake, so
   // even though channel id and client auth are separate else cases, they can
@@ -1827,6 +1890,11 @@ int SSLClientSocketNSS::Core::DoHandshake() {
 }
 
 int SSLClientSocketNSS::Core::DoGetDBCertComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoGetDBCertComplete"));
+
   SECStatus rv;
   PostOrRunCallback(
       FROM_HERE,
@@ -2011,6 +2079,11 @@ int SSLClientSocketNSS::Core::DoPayloadWrite() {
 // transport socket. Return true if some I/O performed, false
 // otherwise (error or ERR_IO_PENDING).
 bool SSLClientSocketNSS::Core::DoTransportIO() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoTransportIO"));
+
   DCHECK(OnNSSTaskRunner());
 
   bool network_moved = false;
@@ -2187,6 +2260,11 @@ void SSLClientSocketNSS::Core::OnSendComplete(int result) {
 // callback. For Read() and Write(), that's what we want. But for Connect(),
 // the caller expects OK (i.e. 0) for success.
 void SSLClientSocketNSS::Core::DoConnectCallback(int rv) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoConnectCallback"));
+
   DCHECK(OnNSSTaskRunner());
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(!user_connect_callback_.is_null());
@@ -2198,6 +2276,11 @@ void SSLClientSocketNSS::Core::DoConnectCallback(int rv) {
 }
 
 void SSLClientSocketNSS::Core::DoReadCallback(int rv) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424386 SSLClientSocketNSS::Core::DoReadCallback"));
+
   DCHECK(OnNSSTaskRunner());
   DCHECK_NE(ERR_IO_PENDING, rv);
   DCHECK(!user_read_callback_.is_null());
@@ -2213,6 +2296,10 @@ void SSLClientSocketNSS::Core::DoReadCallback(int rv) {
   PostOrRunCallback(
       FROM_HERE,
       base::Bind(&Core::DidNSSRead, this, rv));
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 SSLClientSocketNSS::Core::DoReadCallback"));
   PostOrRunCallback(
       FROM_HERE,
       base::Bind(base::ResetAndReturn(&user_read_callback_), rv));
@@ -2375,11 +2462,9 @@ void SSLClientSocketNSS::Core::UpdateStapledOCSPResponse() {
       reinterpret_cast<char*>(ocsp_responses->items[0].data),
       ocsp_responses->items[0].len);
 
-  // TODO(agl): figure out how to plumb an OCSP response into the Mac
-  // system library and update IsOCSPStaplingSupported for Mac.
   if (IsOCSPStaplingSupported()) {
   #if defined(OS_WIN)
-    if (nss_handshake_state_.server_cert) {
+    if (nss_handshake_state_.server_cert.get()) {
       CRYPT_DATA_BLOB ocsp_response_blob;
       ocsp_response_blob.cbData = ocsp_responses->items[0].len;
       ocsp_response_blob.pbData = ocsp_responses->items[0].data;
@@ -2406,24 +2491,23 @@ void SSLClientSocketNSS::Core::UpdateStapledOCSPResponse() {
 }
 
 void SSLClientSocketNSS::Core::UpdateConnectionStatus() {
+  // Note: This function may be called multiple times for a single connection
+  // if renegotiations occur.
+  nss_handshake_state_.ssl_connection_status = 0;
+
   SSLChannelInfo channel_info;
   SECStatus ok = SSL_GetChannelInfo(nss_fd_,
                                     &channel_info, sizeof(channel_info));
   if (ok == SECSuccess &&
       channel_info.length == sizeof(channel_info) &&
       channel_info.cipherSuite) {
-    nss_handshake_state_.ssl_connection_status |=
-        (static_cast<int>(channel_info.cipherSuite) &
-         SSL_CONNECTION_CIPHERSUITE_MASK) <<
-        SSL_CONNECTION_CIPHERSUITE_SHIFT;
+    nss_handshake_state_.ssl_connection_status |= channel_info.cipherSuite;
 
     nss_handshake_state_.ssl_connection_status |=
         (static_cast<int>(channel_info.compressionMethod) &
          SSL_CONNECTION_COMPRESSION_MASK) <<
         SSL_CONNECTION_COMPRESSION_SHIFT;
 
-    // NSS 3.14.x doesn't have a version macro for TLS 1.2 (because NSS didn't
-    // support it yet), so use 0x0303 directly.
     int version = SSL_CONNECTION_VERSION_UNKNOWN;
     if (channel_info.protocolVersion < SSL_LIBRARY_VERSION_3_0) {
       // All versions less than SSL_LIBRARY_VERSION_3_0 are treated as SSL
@@ -2431,11 +2515,11 @@ void SSLClientSocketNSS::Core::UpdateConnectionStatus() {
       version = SSL_CONNECTION_VERSION_SSL2;
     } else if (channel_info.protocolVersion == SSL_LIBRARY_VERSION_3_0) {
       version = SSL_CONNECTION_VERSION_SSL3;
-    } else if (channel_info.protocolVersion == SSL_LIBRARY_VERSION_3_1_TLS) {
+    } else if (channel_info.protocolVersion == SSL_LIBRARY_VERSION_TLS_1_0) {
       version = SSL_CONNECTION_VERSION_TLS1;
     } else if (channel_info.protocolVersion == SSL_LIBRARY_VERSION_TLS_1_1) {
       version = SSL_CONNECTION_VERSION_TLS1_1;
-    } else if (channel_info.protocolVersion == 0x0303) {
+    } else if (channel_info.protocolVersion == SSL_LIBRARY_VERSION_TLS_1_2) {
       version = SSL_CONNECTION_VERSION_TLS1_2;
     }
     nss_handshake_state_.ssl_connection_status |=
@@ -2488,6 +2572,23 @@ void SSLClientSocketNSS::Core::UpdateNextProto() {
     default:
       NOTREACHED();
       break;
+  }
+}
+
+void SSLClientSocketNSS::Core::UpdateExtensionUsed() {
+  PRBool negotiated_extension;
+  SECStatus rv = SSL_HandshakeNegotiatedExtension(nss_fd_,
+                                                  ssl_app_layer_protocol_xtn,
+                                                  &negotiated_extension);
+  if (rv == SECSuccess && negotiated_extension) {
+    nss_handshake_state_.negotiation_extension_ = kExtensionALPN;
+  } else {
+    rv = SSL_HandshakeNegotiatedExtension(nss_fd_,
+                                          ssl_next_proto_nego_xtn,
+                                          &negotiated_extension);
+    if (rv == SECSuccess && negotiated_extension) {
+      nss_handshake_state_.negotiation_extension_ = kExtensionNPN;
+    }
   }
 }
 
@@ -2623,6 +2724,11 @@ void SSLClientSocketNSS::Core::DidNSSWrite(int result) {
 }
 
 void SSLClientSocketNSS::Core::BufferSendComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 DidCompleteReadWrite => Core::BufferSendComplete"));
+
   if (!OnNSSTaskRunner()) {
     if (detached_)
       return;
@@ -2666,6 +2772,11 @@ void SSLClientSocketNSS::Core::OnGetChannelIDComplete(int result) {
 void SSLClientSocketNSS::Core::BufferRecvComplete(
     IOBuffer* read_buffer,
     int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 DidCompleteReadWrite => SSLClientSocketNSS::Core::..."));
+
   DCHECK(read_buffer);
 
   if (!OnNSSTaskRunner()) {
@@ -2748,6 +2859,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(
       nss_fd_(NULL),
       net_log_(transport_->socket()->NetLog()),
       transport_security_state_(context.transport_security_state),
+      policy_enforcer_(context.cert_policy_enforcer),
       valid_thread_id_(base::kInvalidThreadId) {
   EnterFunction("");
   InitCore();
@@ -2768,6 +2880,20 @@ void SSLClientSocket::ClearSessionCache() {
     return;
 
   SSL_ClearSessionCache();
+}
+
+#if !defined(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)
+#define CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256 (CKM_NSS + 24)
+#endif
+
+// static
+uint16 SSLClientSocket::GetMaxSupportedSSLVersion() {
+  crypto::EnsureNSSInit();
+  if (PK11_TokenExists(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)) {
+    return SSL_PROTOCOL_VERSION_TLS1_2;
+  } else {
+    return SSL_PROTOCOL_VERSION_TLS1_1;
+  }
 }
 
 bool SSLClientSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
@@ -3328,6 +3454,7 @@ int SSLClientSocketNSS::DoHandshakeComplete(int result) {
       !core_->state().sct_list_from_tls_extension.empty());
   set_stapled_ocsp_response_received(
       !core_->state().stapled_ocsp_response.empty());
+  set_negotiation_extension(core_->state().negotiation_extension_);
 
   LeaveFunction(result);
   return result;
@@ -3410,12 +3537,6 @@ int SSLClientSocketNSS::DoVerifyCertComplete(int result) {
   // purposes.  See https://bugzilla.mozilla.org/show_bug.cgi?id=508081 and
   // http://crbug.com/15630 for more info.
 
-  // TODO(hclam): Skip logging if server cert was expected to be bad because
-  // |server_cert_verify_result_| doesn't contain all the information about
-  // the cert.
-  if (result == OK)
-    LogConnectionTypeMetrics();
-
   const CertStatus cert_status = server_cert_verify_result_.cert_status;
   if (transport_security_state_ &&
       (result == OK ||
@@ -3451,43 +3572,31 @@ void SSLClientSocketNSS::VerifyCT() {
   // Note that this is a completely synchronous operation: The CT Log Verifier
   // gets all the data it needs for SCT verification and does not do any
   // external communication.
-  int result = cert_transparency_verifier_->Verify(
+  cert_transparency_verifier_->Verify(
       server_cert_verify_result_.verified_cert.get(),
       core_->state().stapled_ocsp_response,
-      core_->state().sct_list_from_tls_extension,
-      &ct_verify_result_,
-      net_log_);
+      core_->state().sct_list_from_tls_extension, &ct_verify_result_, net_log_);
   // TODO(ekasper): wipe stapled_ocsp_response and sct_list_from_tls_extension
   // from the state after verification is complete, to conserve memory.
 
-  VLOG(1) << "CT Verification complete: result " << result
-          << " Invalid scts: " << ct_verify_result_.invalid_scts.size()
-          << " Verified scts: " << ct_verify_result_.verified_scts.size()
-          << " scts from unknown logs: "
-          << ct_verify_result_.unknown_logs_scts.size();
-}
-
-void SSLClientSocketNSS::LogConnectionTypeMetrics() const {
-  UpdateConnectionTypeHistograms(CONNECTION_SSL);
-  int ssl_version = SSLConnectionStatusToVersion(
-      core_->state().ssl_connection_status);
-  switch (ssl_version) {
-    case SSL_CONNECTION_VERSION_SSL2:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_SSL2);
-      break;
-    case SSL_CONNECTION_VERSION_SSL3:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_SSL3);
-      break;
-    case SSL_CONNECTION_VERSION_TLS1:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1);
-      break;
-    case SSL_CONNECTION_VERSION_TLS1_1:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1_1);
-      break;
-    case SSL_CONNECTION_VERSION_TLS1_2:
-      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1_2);
-      break;
-  };
+  if (!policy_enforcer_) {
+    server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
+  } else {
+    if (server_cert_verify_result_.cert_status & CERT_STATUS_IS_EV) {
+      scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
+          SSLConfigService::GetEVCertsWhitelist();
+      if (!policy_enforcer_->DoesConformToCTEVPolicy(
+              server_cert_verify_result_.verified_cert.get(),
+              ev_whitelist.get(), ct_verify_result_, net_log_)) {
+        // TODO(eranm): Log via the BoundNetLog, see crbug.com/437766
+        VLOG(1) << "EV certificate for "
+                << server_cert_verify_result_.verified_cert->subject()
+                       .GetDisplayName()
+                << " does not conform to CT policy, removing EV status.";
+        server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
+      }
+    }
+  }
 }
 
 void SSLClientSocketNSS::EnsureThreadIdAssigned() const {

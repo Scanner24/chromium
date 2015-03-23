@@ -24,11 +24,10 @@ namespace {
 
 GURL UpgradeUrlToHttps(const GURL& original_url, int port) {
   GURL::Replacements replacements;
-  // new_sheme and new_port need to be in scope here because GURL::Replacements
-  // references the memory contained by them directly.
-  const std::string new_scheme = "https";
+  // new_port needs to be in scope here because GURL::Replacements references
+  // the memory contained by it directly.
   const std::string new_port = base::IntToString(port);
-  replacements.SetSchemeStr(new_scheme);
+  replacements.SetSchemeStr("https");
   replacements.SetPortStr(new_port);
   return original_url.ReplaceComponents(replacements);
 }
@@ -175,8 +174,7 @@ const HostMappingRules* HttpStreamFactoryImpl::GetHostMappingRules() const {
 AlternateProtocolInfo HttpStreamFactoryImpl::GetAlternateProtocolRequestFor(
     const GURL& original_url,
     GURL* alternate_url) {
-  const AlternateProtocolInfo kNoAlternateProtocol =
-      AlternateProtocolInfo(0,  UNINITIALIZED_ALTERNATE_PROTOCOL, 0);
+  const AlternateProtocolInfo kNoAlternateProtocol;
 
   if (!session_->params().use_alternate_protocols)
     return kNoAlternateProtocol;
@@ -184,23 +182,18 @@ AlternateProtocolInfo HttpStreamFactoryImpl::GetAlternateProtocolRequestFor(
   if (original_url.SchemeIs("ftp"))
     return kNoAlternateProtocol;
 
-  HostPortPair origin = HostPortPair(original_url.HostNoBrackets(),
-                                     original_url.EffectiveIntPort());
-
+  HostPortPair origin = HostPortPair::FromURL(original_url);
   HttpServerProperties& http_server_properties =
       *session_->http_server_properties();
-  if (!http_server_properties.HasAlternateProtocol(origin))
-    return kNoAlternateProtocol;
-
-  AlternateProtocolInfo alternate =
+  const AlternateProtocolInfo alternate =
       http_server_properties.GetAlternateProtocol(origin);
-  if (alternate.protocol == ALTERNATE_PROTOCOL_BROKEN) {
-    HistogramAlternateProtocolUsage(
-        ALTERNATE_PROTOCOL_USAGE_BROKEN,
-        http_server_properties.GetAlternateProtocolExperiment());
+
+  if (alternate.protocol == UNINITIALIZED_ALTERNATE_PROTOCOL)
+    return kNoAlternateProtocol;
+  if (alternate.is_broken) {
+    HistogramAlternateProtocolUsage(ALTERNATE_PROTOCOL_USAGE_BROKEN);
     return kNoAlternateProtocol;
   }
-
   if (!IsAlternateProtocolValid(alternate.protocol)) {
     NOTREACHED();
     return kNoAlternateProtocol;
@@ -231,7 +224,7 @@ AlternateProtocolInfo HttpStreamFactoryImpl::GetAlternateProtocolRequestFor(
   } else {
     DCHECK_EQ(QUIC, alternate.protocol);
     if (!session_->params().enable_quic)
-        return kNoAlternateProtocol;
+      return kNoAlternateProtocol;
 
     // TODO(rch):  Figure out how to make QUIC iteract with PAC
     // scripts.  By not re-writing the URL, we will query the PAC script

@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner.h"
 #include "base/time/time.h"
@@ -20,8 +21,8 @@ namespace domain_reliability {
 
 DomainReliabilityMonitor::DomainReliabilityMonitor(
     const std::string& upload_reporter_string,
-    scoped_refptr<base::SingleThreadTaskRunner> pref_thread,
-    scoped_refptr<base::SingleThreadTaskRunner> network_thread)
+    const scoped_refptr<base::SingleThreadTaskRunner>& pref_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& network_thread)
     : time_(new ActualTime()),
       upload_reporter_string_(upload_reporter_string),
       scheduler_params_(
@@ -33,12 +34,13 @@ DomainReliabilityMonitor::DomainReliabilityMonitor(
       discard_uploads_set_(false),
       weak_factory_(this) {
   DCHECK(OnPrefThread());
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
 }
 
 DomainReliabilityMonitor::DomainReliabilityMonitor(
     const std::string& upload_reporter_string,
-    scoped_refptr<base::SingleThreadTaskRunner> pref_thread,
-    scoped_refptr<base::SingleThreadTaskRunner> network_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& pref_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& network_thread,
     scoped_ptr<MockableTime> time)
     : time_(time.Pass()),
       upload_reporter_string_(upload_reporter_string),
@@ -51,6 +53,7 @@ DomainReliabilityMonitor::DomainReliabilityMonitor(
       discard_uploads_set_(false),
       weak_factory_(this) {
   DCHECK(OnPrefThread());
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
 }
 
 DomainReliabilityMonitor::~DomainReliabilityMonitor() {
@@ -60,6 +63,7 @@ DomainReliabilityMonitor::~DomainReliabilityMonitor() {
     DCHECK(OnPrefThread());
 
   ClearContexts();
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
 void DomainReliabilityMonitor::MoveToNetworkThread() {
@@ -71,6 +75,11 @@ void DomainReliabilityMonitor::MoveToNetworkThread() {
 
 void DomainReliabilityMonitor::InitURLRequestContext(
     net::URLRequestContext* url_request_context) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 DomainReliabilityMonitor::InitURLRequestContext"));
+
   DCHECK(OnNetworkThread());
   DCHECK(moved_to_network_thread_);
 
@@ -81,7 +90,8 @@ void DomainReliabilityMonitor::InitURLRequestContext(
 }
 
 void DomainReliabilityMonitor::InitURLRequestContext(
-    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter) {
+    const scoped_refptr<net::URLRequestContextGetter>&
+        url_request_context_getter) {
   DCHECK(OnNetworkThread());
   DCHECK(moved_to_network_thread_);
 
@@ -90,19 +100,27 @@ void DomainReliabilityMonitor::InitURLRequestContext(
   DCHECK(url_request_context_getter->GetNetworkTaskRunner()->
          RunsTasksOnCurrentThread());
 
-  uploader_ = DomainReliabilityUploader::Create(url_request_context_getter);
+  uploader_ = DomainReliabilityUploader::Create(time_.get(),
+                                                url_request_context_getter);
 }
 
 void DomainReliabilityMonitor::AddBakedInConfigs() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 DomainReliabilityMonitor::AddBakedInConfigs"));
+
   DCHECK(OnNetworkThread());
   DCHECK(moved_to_network_thread_);
 
   base::Time now = base::Time::Now();
   for (size_t i = 0; kBakedInJsonConfigs[i]; ++i) {
-    std::string json(kBakedInJsonConfigs[i]);
+    base::StringPiece json(kBakedInJsonConfigs[i]);
     scoped_ptr<const DomainReliabilityConfig> config =
         DomainReliabilityConfig::FromJSON(json);
-    if (config && config->IsExpired(now)) {
+    if (!config) {
+      continue;
+    } else if (config->IsExpired(now)) {
       LOG(WARNING) << "Baked-in Domain Reliability config for "
                    << config->domain << " is expired.";
       continue;
@@ -142,6 +160,11 @@ void DomainReliabilityMonitor::OnCompleted(net::URLRequest* request,
     // pending and eligible uploads.
     dispatcher_.RunEligibleTasks();
   }
+}
+
+void DomainReliabilityMonitor::OnNetworkChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  last_network_change_time_ = time_->NowTicks();
 }
 
 void DomainReliabilityMonitor::ClearBrowsingData(
@@ -218,6 +241,7 @@ DomainReliabilityContext* DomainReliabilityMonitor::AddContext(
       new DomainReliabilityContext(time_.get(),
                                    scheduler_params_,
                                    upload_reporter_string_,
+                                   &last_network_change_time_,
                                    &dispatcher_,
                                    uploader_.get(),
                                    config.Pass());
@@ -275,10 +299,15 @@ void DomainReliabilityMonitor::OnRequestLegComplete(
   DomainReliabilityBeacon beacon;
   beacon.status = beacon_status;
   beacon.chrome_error = error_code;
-  if (!request.response_info.was_fetched_via_proxy)
+  // If the response was cached, the socket address was the address that the
+  // response was originally received from, so it shouldn't be copied into the
+  // beacon.
+  //
+  // TODO(ttuttle): Wire up a way to get the real socket address in that case.
+  if (!request.response_info.was_cached &&
+      !request.response_info.was_fetched_via_proxy) {
     beacon.server_ip = request.response_info.socket_address.host();
-  else
-    beacon.server_ip.clear();
+  }
   beacon.protocol = GetDomainReliabilityProtocol(
       request.response_info.connection_info,
       request.response_info.ssl_info.is_valid());

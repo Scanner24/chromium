@@ -20,11 +20,10 @@ class AppListServiceWin : public AppListServiceViews {
   static AppListServiceWin* GetInstance();
 
   // AppListService overrides:
-  virtual void SetAppListNextPaintCallback(void (*callback)()) OVERRIDE;
-  virtual void HandleFirstRun() OVERRIDE;
-  virtual void Init(Profile* initial_profile) OVERRIDE;
-  virtual void ShowForProfile(Profile* requested_profile) OVERRIDE;
-  virtual void CreateShortcut() OVERRIDE;
+  virtual void SetAppListNextPaintCallback(void (*callback)()) override;
+  virtual void Init(Profile* initial_profile) override;
+  virtual void ShowForProfile(Profile* requested_profile) override;
+  virtual void CreateShortcut() override;
 
  private:
   friend struct DefaultSingletonTraits<AppListServiceWin>;
@@ -33,9 +32,9 @@ class AppListServiceWin : public AppListServiceViews {
   virtual void OnViewBeingDestroyed();
 
   // AppListShowerDelegate overrides:
-  virtual void OnViewCreated() OVERRIDE;
-  virtual void OnViewDismissed() OVERRIDE;
-  virtual void MoveNearCursor(app_list::AppListView* view) OVERRIDE;
+  virtual void OnViewCreated() override;
+  virtual void OnViewDismissed() override;
+  virtual void MoveNearCursor(app_list::AppListView* view) override;
 
   AppListServiceWin();
 
@@ -49,7 +48,6 @@ class AppListServiceWin : public AppListServiceViews {
   void LoadProfileForWarmup();
   void OnLoadProfileForWarmup(Profile* initial_profile);
 
-  bool enable_app_list_on_next_init_;
   scoped_ptr<ActivationTrackerWin> activation_tracker_;
 
   base::Closure next_paint_callback_;

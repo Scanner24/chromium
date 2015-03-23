@@ -9,12 +9,13 @@
 namespace password_manager {
 
 BrowserSavePasswordProgressLogger::BrowserSavePasswordProgressLogger(
-    PasswordManagerClient* client)
+    const PasswordManagerClient* client)
     : client_(client) {
   DCHECK(client_);
 }
 
-BrowserSavePasswordProgressLogger::~BrowserSavePasswordProgressLogger() {}
+BrowserSavePasswordProgressLogger::~BrowserSavePasswordProgressLogger() {
+}
 
 void BrowserSavePasswordProgressLogger::SendLog(const std::string& log) {
   client_->LogSavePasswordProgress(log);

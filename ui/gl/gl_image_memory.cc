@@ -4,8 +4,8 @@
 
 #include "ui/gl/gl_image_memory.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/scoped_binders.h"
 
@@ -17,60 +17,68 @@
 namespace gfx {
 namespace {
 
-bool ValidFormat(unsigned internalformat) {
+bool ValidInternalFormat(unsigned internalformat) {
   switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
+    case GL_RGBA:
       return true;
     default:
       return false;
   }
 }
 
-GLenum TextureFormat(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-      return GL_BGRA_EXT;
-    case GL_RGBA8_OES:
+bool ValidFormat(gfx::GpuMemoryBuffer::Format format) {
+  switch (format) {
+    case gfx::GpuMemoryBuffer::RGBA_8888:
+    case gfx::GpuMemoryBuffer::BGRA_8888:
+      return true;
+    case gfx::GpuMemoryBuffer::RGBX_8888:
+      return false;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+GLenum TextureFormat(gfx::GpuMemoryBuffer::Format format) {
+  switch (format) {
+    case gfx::GpuMemoryBuffer::RGBA_8888:
       return GL_RGBA;
-    default:
+    case gfx::GpuMemoryBuffer::BGRA_8888:
+      return GL_BGRA_EXT;
+    case gfx::GpuMemoryBuffer::RGBX_8888:
       NOTREACHED();
       return 0;
   }
+
+  NOTREACHED();
+  return 0;
 }
 
-GLenum DataFormat(unsigned internalformat) {
-  return TextureFormat(internalformat);
+GLenum DataFormat(gfx::GpuMemoryBuffer::Format format) {
+  return TextureFormat(format);
 }
 
-GLenum DataType(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
+GLenum DataType(gfx::GpuMemoryBuffer::Format format) {
+  switch (format) {
+    case gfx::GpuMemoryBuffer::RGBA_8888:
+    case gfx::GpuMemoryBuffer::BGRA_8888:
       return GL_UNSIGNED_BYTE;
-    default:
+    case gfx::GpuMemoryBuffer::RGBX_8888:
       NOTREACHED();
       return 0;
   }
-}
 
-int BytesPerPixel(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
-      return 4;
-    default:
-      NOTREACHED();
-      return 0;
-  }
+  NOTREACHED();
+  return 0;
 }
 
 }  // namespace
 
 GLImageMemory::GLImageMemory(const gfx::Size& size, unsigned internalformat)
-    : memory_(NULL),
-      size_(size),
+    : size_(size),
       internalformat_(internalformat),
+      memory_(NULL),
+      format_(gfx::GpuMemoryBuffer::RGBA_8888),
       in_use_(false),
       target_(0),
       need_do_bind_tex_image_(false)
@@ -91,15 +99,45 @@ GLImageMemory::~GLImageMemory() {
 #endif
 }
 
-bool GLImageMemory::Initialize(const unsigned char* memory) {
-  if (!ValidFormat(internalformat_)) {
-    DVLOG(0) << "Invalid format: " << internalformat_;
+// static
+bool GLImageMemory::StrideInBytes(size_t width,
+                                  gfx::GpuMemoryBuffer::Format format,
+                                  size_t* stride_in_bytes) {
+  base::CheckedNumeric<size_t> s = width;
+  switch (format) {
+    case gfx::GpuMemoryBuffer::RGBA_8888:
+    case gfx::GpuMemoryBuffer::BGRA_8888:
+      s *= 4;
+      if (!s.IsValid())
+        return false;
+
+      *stride_in_bytes = s.ValueOrDie();
+      return true;
+    case gfx::GpuMemoryBuffer::RGBX_8888:
+      NOTREACHED();
+      return false;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+bool GLImageMemory::Initialize(const unsigned char* memory,
+                               gfx::GpuMemoryBuffer::Format format) {
+  if (!ValidInternalFormat(internalformat_)) {
+    LOG(ERROR) << "Invalid internalformat: " << internalformat_;
+    return false;
+  }
+
+  if (!ValidFormat(format)) {
+    LOG(ERROR) << "Invalid format: " << format;
     return false;
   }
 
   DCHECK(memory);
   DCHECK(!memory_);
   memory_ = memory;
+  format_ = format;
   return true;
 }
 
@@ -149,15 +187,11 @@ bool GLImageMemory::CopyTexImage(unsigned target) {
     return false;
 
   DCHECK(memory_);
-  glTexImage2D(target,
-               0,  // mip level
-               TextureFormat(internalformat_),
-               size_.width(),
-               size_.height(),
-               0,  // border
-               DataFormat(internalformat_),
-               DataType(internalformat_),
-               memory_);
+  glTexSubImage2D(target, 0,  // level
+                  0,          // x
+                  0,          // y
+                  size_.width(), size_.height(), DataFormat(format_),
+                  DataType(format_), memory_);
 
   return true;
 }
@@ -186,14 +220,6 @@ bool GLImageMemory::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
   return false;
 }
 
-bool GLImageMemory::HasValidFormat() const {
-  return ValidFormat(internalformat_);
-}
-
-size_t GLImageMemory::Bytes() const {
-  return size_.GetArea() * BytesPerPixel(internalformat_);
-}
-
 void GLImageMemory::DoBindTexImage(unsigned target) {
   TRACE_EVENT0("gpu", "GLImageMemory::DoBindTexImage");
 
@@ -216,12 +242,12 @@ void GLImageMemory::DoBindTexImage(unsigned target) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D,
                      0,  // mip level
-                     TextureFormat(internalformat_),
+                     TextureFormat(format_),
                      size_.width(),
                      size_.height(),
                      0,  // border
-                     DataFormat(internalformat_),
-                     DataType(internalformat_),
+                     DataFormat(format_),
+                     DataType(format_),
                      memory_);
       }
 
@@ -245,8 +271,8 @@ void GLImageMemory::DoBindTexImage(unsigned target) {
                       0,  // y-offset
                       size_.width(),
                       size_.height(),
-                      DataFormat(internalformat_),
-                      DataType(internalformat_),
+                      DataFormat(format_),
+                      DataType(format_),
                       memory_);
     }
 
@@ -259,12 +285,12 @@ void GLImageMemory::DoBindTexImage(unsigned target) {
   DCHECK_NE(static_cast<GLenum>(GL_TEXTURE_EXTERNAL_OES), target);
   glTexImage2D(target,
                0,  // mip level
-               TextureFormat(internalformat_),
+               TextureFormat(format_),
                size_.width(),
                size_.height(),
                0,  // border
-               DataFormat(internalformat_),
-               DataType(internalformat_),
+               DataFormat(format_),
+               DataType(format_),
                memory_);
 }
 

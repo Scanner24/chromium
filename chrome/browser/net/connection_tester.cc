@@ -59,9 +59,7 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
         storage_(this),
         weak_factory_(this) {}
 
-  virtual ~ExperimentURLRequestContext() {
-    AssertNoURLRequests();
-  }
+  ~ExperimentURLRequestContext() override { AssertNoURLRequests(); }
 
   // Creates a proxy config service for |experiment|. On success returns net::OK
   // and fills |config_service| with a new pointer. Otherwise returns a network
@@ -187,8 +185,8 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
       ConnectionTester::ProxySettingsExperiment experiment,
       scoped_ptr<net::ProxyConfigService>* proxy_config_service,
       scoped_ptr<net::ProxyService>* experiment_proxy_service) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kSingleProcess)) {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kSingleProcess)) {
       // We can't create a standard proxy resolver in single-process mode.
       // Rather than falling-back to some other implementation, fail.
       return net::ERR_NOT_IMPLEMENTED;
@@ -318,9 +316,8 @@ class ConnectionTester::TestRunner : public net::URLRequest::Delegate {
   void Run(const Experiment& experiment);
 
   // Overridden from net::URLRequest::Delegate:
-  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
-  virtual void OnReadCompleted(net::URLRequest* request,
-                               int bytes_read) OVERRIDE;
+  void OnResponseStarted(net::URLRequest* request) override;
+  void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
   // TODO(eroman): handle cases requiring authentication.
 
  private:

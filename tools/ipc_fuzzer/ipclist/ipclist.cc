@@ -34,7 +34,7 @@ static msginfo msgtable[] = {
 #include "tools/ipc_fuzzer/message_lib/all_messages.h"
 };
 #define MSGTABLE_SIZE (sizeof(msgtable)/sizeof(msgtable[0]))
-COMPILE_ASSERT(MSGTABLE_SIZE, CHECK_YOUR_HEADERS_FOR_AN_EXTRA_SEMICOLON);
+static_assert(MSGTABLE_SIZE, "check your headers for an extra semicolon");
 
 static bool check_msgtable() {
   bool result = true;
@@ -49,9 +49,18 @@ static bool check_msgtable() {
   exemptions.push_back(TestMsgStart);
   exemptions.push_back(FirefoxImporterUnittestMsgStart);
   exemptions.push_back(ShellMsgStart);
+  exemptions.push_back(LayoutTestMsgStart);
   exemptions.push_back(MetroViewerMsgStart);
   exemptions.push_back(CCMsgStart);  // Nothing but param traits.
   exemptions.push_back(CldDataProviderMsgStart); // Conditional build.
+
+  // Sent from browser to renderer.
+  exemptions.push_back(WebCacheMsgStart);
+
+#if defined(DISABLE_NACL)
+  exemptions.push_back(NaClMsgStart);
+#endif  // defined(DISABLE_NACL)
+
 #if !defined(OS_ANDROID)
   exemptions.push_back(JavaBridgeMsgStart);
   exemptions.push_back(MediaPlayerMsgStart);
@@ -59,6 +68,11 @@ static bool check_msgtable() {
   exemptions.push_back(GinJavaBridgeMsgStart);
   exemptions.push_back(AndroidWebViewMsgStart);
 #endif  // !defined(OS_ANDROID)
+
+#if !defined(OS_POSIX)
+  exemptions.push_back(CastMediaMsgStart); // FIXME: Add support for types.
+#endif  // !defined(OS_POSIX)
+
 #if !defined(USE_OZONE)
   exemptions.push_back(OzoneGpuMsgStart);
 #endif  // !defined(USE_OZONE)

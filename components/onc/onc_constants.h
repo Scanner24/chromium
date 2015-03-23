@@ -61,15 +61,17 @@ ONC_EXPORT extern const char kCellular[];
 ONC_EXPORT extern const char kDevice[];
 ONC_EXPORT extern const char kEthernet[];
 ONC_EXPORT extern const char kGUID[];
+ONC_EXPORT extern const char kIPAddressConfigType[];
 ONC_EXPORT extern const char kIPConfigs[];
+ONC_EXPORT extern const char kIPConfigTypeDHCP[];
+ONC_EXPORT extern const char kIPConfigTypeStatic[];
 ONC_EXPORT extern const char kSavedIPConfig[];
 ONC_EXPORT extern const char kStaticIPConfig[];
 ONC_EXPORT extern const char kMacAddress[];
+ONC_EXPORT extern const char kNameServersConfigType[];
 ONC_EXPORT extern const char kName[];
-ONC_EXPORT extern const char kNameServers[];
 ONC_EXPORT extern const char kPriority[];
 ONC_EXPORT extern const char kProxySettings[];
-ONC_EXPORT extern const char kSearchDomains[];
 ONC_EXPORT extern const char kSource[];
 ONC_EXPORT extern const char kSourceDevice[];
 ONC_EXPORT extern const char kSourceDevicePolicy[];
@@ -135,6 +137,7 @@ ONC_EXPORT extern const char kRoamingState[];
 ONC_EXPORT extern const char kHome[];
 ONC_EXPORT extern const char kRoaming[];
 ONC_EXPORT extern const char kServingOperator[];
+ONC_EXPORT extern const char kSignalStrength[];
 ONC_EXPORT extern const char kSIMLockStatus[];
 ONC_EXPORT extern const char kSIMPresent[];
 ONC_EXPORT extern const char kSupportedCarriers[];
@@ -183,6 +186,7 @@ ONC_EXPORT extern const char kIPv4[];
 ONC_EXPORT extern const char kIPv6[];
 ONC_EXPORT extern const char kNameServers[];
 ONC_EXPORT extern const char kRoutingPrefix[];
+ONC_EXPORT extern const char kSearchDomains[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kWebProxyAutoDiscoveryUrl[];
 }  // namespace ipconfig
@@ -195,11 +199,13 @@ ONC_EXPORT extern const char k8021X[];
 }  // namespace ethernet
 
 namespace wifi {
+ONC_EXPORT extern const char kAllowGatewayARPPolling[];
 ONC_EXPORT extern const char kAutoConnect[];
 ONC_EXPORT extern const char kBSSID[];
 ONC_EXPORT extern const char kEAP[];
 ONC_EXPORT extern const char kFrequency[];
 ONC_EXPORT extern const char kFrequencyList[];
+ONC_EXPORT extern const char kHexSSID[];
 ONC_EXPORT extern const char kHiddenSSID[];
 ONC_EXPORT extern const char kPassphrase[];
 ONC_EXPORT extern const char kSSID[];
@@ -296,6 +302,7 @@ ONC_EXPORT extern const char kL2TP[];
 ONC_EXPORT extern const char kOpenVPN[];
 ONC_EXPORT extern const char kPassword[];
 ONC_EXPORT extern const char kSaveCredentials[];
+ONC_EXPORT extern const char kThirdPartyVpn[];
 ONC_EXPORT extern const char kTypeL2TP_IPsec[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kUsername[];
@@ -327,6 +334,8 @@ ONC_EXPORT extern const char kKeyDirection[];
 ONC_EXPORT extern const char kNoInteract[];
 ONC_EXPORT extern const char kNone[];
 ONC_EXPORT extern const char kNsCertType[];
+ONC_EXPORT extern const char kOTP[];
+ONC_EXPORT extern const char kPassword[];
 ONC_EXPORT extern const char kPort[];
 ONC_EXPORT extern const char kProto[];
 ONC_EXPORT extern const char kPushPeerInfo[];
@@ -345,10 +354,18 @@ ONC_EXPORT extern const char kShaper[];
 ONC_EXPORT extern const char kStaticChallenge[];
 ONC_EXPORT extern const char kTLSAuthContents[];
 ONC_EXPORT extern const char kTLSRemote[];
+ONC_EXPORT extern const char kUserAuthenticationType[];
 ONC_EXPORT extern const char kVerb[];
 ONC_EXPORT extern const char kVerifyHash[];
 ONC_EXPORT extern const char kVerifyX509[];
 }  // namespace openvpn
+
+namespace openvpn_user_auth_type {
+ONC_EXPORT extern const char kNone[];
+ONC_EXPORT extern const char kOTP[];
+ONC_EXPORT extern const char kPassword[];
+ONC_EXPORT extern const char kPasswordAndOTP[];
+}  // openvpn_user_auth_type
 
 namespace verify_x509 {
 ONC_EXPORT extern const char kName[];

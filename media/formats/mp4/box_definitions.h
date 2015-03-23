@@ -32,9 +32,9 @@ enum SampleFlags {
 
 #define DECLARE_BOX_METHODS(T) \
   T(); \
-  virtual ~T(); \
-  virtual bool Parse(BoxReader* reader) OVERRIDE; \
-  virtual FourCC BoxType() const OVERRIDE; \
+  ~T() override; \
+  bool Parse(BoxReader* reader) override; \
+  FourCC BoxType() const override;
 
 struct MEDIA_EXPORT FileType : Box {
   DECLARE_BOX_METHODS(FileType);

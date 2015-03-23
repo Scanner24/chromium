@@ -19,8 +19,8 @@
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/point.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/strings/grit/ui_strings.h"  // Accessibility names
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -109,8 +109,7 @@ const char FrameCaptionButtonContainerView::kViewClassName[] =
     "FrameCaptionButtonContainerView";
 
 FrameCaptionButtonContainerView::FrameCaptionButtonContainerView(
-    views::Widget* frame,
-    MinimizeAllowed minimize_allowed)
+    views::Widget* frame)
     : frame_(frame),
       minimize_button_(NULL),
       size_button_(NULL),
@@ -127,7 +126,7 @@ FrameCaptionButtonContainerView::FrameCaptionButtonContainerView(
   minimize_button_ = new FrameCaptionButton(this, CAPTION_BUTTON_ICON_MINIMIZE);
   minimize_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
-  minimize_button_->SetVisible(minimize_allowed == MINIMIZE_ALLOWED);
+  minimize_button_->SetVisible(frame_->widget_delegate()->CanMinimize());
   AddChildView(minimize_button_);
 
   size_button_ = new FrameSizeButton(this, frame, this);
@@ -152,11 +151,9 @@ void FrameCaptionButtonContainerView::TestApi::EndAnimations() {
 void FrameCaptionButtonContainerView::SetButtonImages(
     CaptionButtonIcon icon,
     int icon_image_id,
-    int inactive_icon_image_id,
     int hovered_background_image_id,
     int pressed_background_image_id) {
   button_icon_id_map_[icon] = ButtonIconIds(icon_image_id,
-                                            inactive_icon_image_id,
                                             hovered_background_image_id,
                                             pressed_background_image_id);
   FrameCaptionButton* buttons[] = {
@@ -167,7 +164,6 @@ void FrameCaptionButtonContainerView::SetButtonImages(
       buttons[i]->SetImages(icon,
                             FrameCaptionButton::ANIMATE_NO,
                             icon_image_id,
-                            inactive_icon_image_id,
                             hovered_background_image_id,
                             pressed_background_image_id);
     }
@@ -308,7 +304,6 @@ void FrameCaptionButtonContainerView::SetButtonIcon(FrameCaptionButton* button,
     button->SetImages(icon,
                       fcb_animate,
                       it->second.icon_image_id,
-                      it->second.inactive_icon_image_id,
                       it->second.hovered_background_image_id,
                       it->second.pressed_background_image_id);
   }
@@ -419,18 +414,15 @@ void FrameCaptionButtonContainerView::SetHoveredAndPressedButtons(
 
 FrameCaptionButtonContainerView::ButtonIconIds::ButtonIconIds()
     : icon_image_id(-1),
-      inactive_icon_image_id(-1),
       hovered_background_image_id(-1),
       pressed_background_image_id(-1) {
 }
 
 FrameCaptionButtonContainerView::ButtonIconIds::ButtonIconIds(
     int icon_id,
-    int inactive_icon_id,
     int hovered_background_id,
     int pressed_background_id)
     : icon_image_id(icon_id),
-      inactive_icon_image_id(inactive_icon_id),
       hovered_background_image_id(hovered_background_id),
       pressed_background_image_id(pressed_background_id) {
 }

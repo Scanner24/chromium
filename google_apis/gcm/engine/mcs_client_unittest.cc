@@ -4,12 +4,16 @@
 
 #include "google_apis/gcm/engine/mcs_client.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/simple_test_clock.h"
+#include "base/timer/timer.h"
 #include "google_apis/gcm/base/fake_encryptor.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/engine/fake_connection_factory.h"
@@ -74,7 +78,7 @@ class TestMCSClient : public MCSClient {
       next_id_(0) {
   }
 
-  virtual std::string GetNextPersistentId() OVERRIDE {
+  std::string GetNextPersistentId() override {
     return base::UintToString(++next_id_);
   }
 
@@ -85,9 +89,9 @@ class TestMCSClient : public MCSClient {
 class MCSClientTest : public testing::Test {
  public:
   MCSClientTest();
-  virtual ~MCSClientTest();
+  ~MCSClientTest() override;
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   void BuildMCSClient();
   void InitializeClient();
@@ -192,8 +196,7 @@ void MCSClientTest::LoginClient(
   for (size_t i = 0; i < acknowledged_ids.size(); ++i)
     login_request->add_received_persistent_id(acknowledged_ids[i]);
   GetFakeHandler()->ExpectOutgoingMessage(
-      MCSMessage(kLoginRequestTag,
-                 login_request.PassAs<const google::protobuf::MessageLite>()));
+      MCSMessage(kLoginRequestTag, login_request.Pass()));
   mcs_client_->Login(kAndroidId, kSecurityToken);
   run_loop_->Run();
   run_loop_.reset(new base::RunLoop());
@@ -351,11 +354,8 @@ TEST_F(MCSClientTest, SendMessageRMQWhileDisconnected) {
   // The initial (failed) send.
   GetFakeHandler()->ExpectOutgoingMessage(message);
   // The login request.
-  GetFakeHandler()->ExpectOutgoingMessage(
-      MCSMessage(
-          kLoginRequestTag,
-          BuildLoginRequest(kAndroidId, kSecurityToken, "").
-              PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ExpectOutgoingMessage(MCSMessage(
+      kLoginRequestTag, BuildLoginRequest(kAndroidId, kSecurityToken, "")));
   // The second (re)send.
   MCSMessage message2(BuildDataMessage(
       "from", "category", "X", 1, "1", kTTLValue, 1, kTTLValue - 1, "", 0));
@@ -374,9 +374,7 @@ TEST_F(MCSClientTest, SendMessageRMQWhileDisconnected) {
   // Receive the ack.
   scoped_ptr<mcs_proto::IqStanza> ack = BuildStreamAck();
   ack->set_last_stream_id_received(2);
-  GetFakeHandler()->ReceiveMessage(
-      MCSMessage(kIqStanzaTag,
-                 ack.PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ReceiveMessage(MCSMessage(kIqStanzaTag, ack.Pass()));
   WaitForMCSEvent();
 
   EXPECT_EQ(MCSClient::SENT, message_send_status());
@@ -443,9 +441,7 @@ TEST_F(MCSClientTest, SendMessageRMQWithStreamAck) {
   // Receive the ack.
   scoped_ptr<mcs_proto::IqStanza> ack = BuildStreamAck();
   ack->set_last_stream_id_received(kMessageBatchSize + 1);
-  GetFakeHandler()->ReceiveMessage(
-      MCSMessage(kIqStanzaTag,
-                 ack.PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ReceiveMessage(MCSMessage(kIqStanzaTag, ack.Pass()));
   WaitForMCSEvent();
 
   // Reconnect and ensure no messages are resent.
@@ -490,9 +486,7 @@ TEST_F(MCSClientTest, SendMessageRMQAckOnReconnect) {
   InitializeClient();
   LoginClient(std::vector<std::string>());
   scoped_ptr<mcs_proto::IqStanza> ack(BuildSelectiveAck(id_list));
-  GetFakeHandler()->ReceiveMessage(
-      MCSMessage(kIqStanzaTag,
-                 ack.PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ReceiveMessage(MCSMessage(kIqStanzaTag, ack.Pass()));
   EXPECT_TRUE(GetFakeHandler()->AllOutgoingMessagesReceived());
 }
 
@@ -552,9 +546,7 @@ TEST_F(MCSClientTest, SendMessageRMQPartialAckOnReconnect) {
     GetFakeHandler()->ExpectOutgoingMessage(message);
   }
   scoped_ptr<mcs_proto::IqStanza> ack(BuildSelectiveAck(acked_ids));
-  GetFakeHandler()->ReceiveMessage(
-      MCSMessage(kIqStanzaTag,
-                 ack.PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ReceiveMessage(MCSMessage(kIqStanzaTag, ack.Pass()));
   WaitForMCSEvent();
   PumpLoop();
   EXPECT_TRUE(GetFakeHandler()->AllOutgoingMessagesReceived());
@@ -612,9 +604,7 @@ TEST_F(MCSClientTest, SelectiveAckMidStream) {
   GetFakeHandler()->ExpectOutgoingMessage(cMessage3);
   std::vector<std::string> acked_ids(1, "1");
   scoped_ptr<mcs_proto::IqStanza> ack(BuildSelectiveAck(acked_ids));
-  GetFakeHandler()->ReceiveMessage(
-      MCSMessage(kIqStanzaTag,
-                 ack.PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ReceiveMessage(MCSMessage(kIqStanzaTag, ack.Pass()));
   WaitForMCSEvent();
   PumpLoop();
   EXPECT_TRUE(GetFakeHandler()->AllOutgoingMessagesReceived());
@@ -713,9 +703,7 @@ TEST_F(MCSClientTest, AckWhenLimitReachedWithHeartbeat) {
   // The stream ack.
   scoped_ptr<mcs_proto::IqStanza> ack = BuildStreamAck();
   ack->set_last_stream_id_received(kAckLimitSize + 1);
-  GetFakeHandler()->ExpectOutgoingMessage(
-      MCSMessage(kIqStanzaTag,
-                 ack.PassAs<const google::protobuf::MessageLite>()));
+  GetFakeHandler()->ExpectOutgoingMessage(MCSMessage(kIqStanzaTag, ack.Pass()));
 
   // Receive some messages.
   std::vector<std::string> id_list;
@@ -746,12 +734,10 @@ TEST_F(MCSClientTest, AckWhenLimitReachedWithHeartbeat) {
       new mcs_proto::HeartbeatAck());
   heartbeat_ack->set_last_stream_id_received(kAckLimitSize + 2);
   GetFakeHandler()->ExpectOutgoingMessage(
-      MCSMessage(kHeartbeatAckTag,
-                 heartbeat_ack.PassAs<const google::protobuf::MessageLite>()));
+      MCSMessage(kHeartbeatAckTag, heartbeat_ack.Pass()));
 
   GetFakeHandler()->ReceiveMessage(
-      MCSMessage(kHeartbeatPingTag,
-                 heartbeat.PassAs<const google::protobuf::MessageLite>()));
+      MCSMessage(kHeartbeatPingTag, heartbeat.Pass()));
   PumpLoop();
   EXPECT_TRUE(GetFakeHandler()->AllOutgoingMessagesReceived());
 

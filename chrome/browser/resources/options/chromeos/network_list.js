@@ -75,7 +75,7 @@ cr.define('options.network', function() {
 
   /**
    * Indicates the current SIM lock type of the cellular device.
-   * @type {boolean}
+   * @type {string}
    * @private
    */
   var cellularSimLockType_ = '';
@@ -110,7 +110,7 @@ cr.define('options.network', function() {
 
   /**
    * Icon to use when not connected to a particular type of network.
-   * @type {!Object.<string, string>} Mapping of network type to icon data url.
+   * @type {!Object<string, string>} Mapping of network type to icon data url.
    * @private
    */
   var defaultIcons_ = {};
@@ -149,6 +149,16 @@ cr.define('options.network', function() {
   }
 
   /**
+   * @param {string} servicePath The network service path.
+   */
+  function showDetails(servicePath) {
+    // TODO(stevenjb): chrome.networkingPrivate.getManagedProperties
+    // (Note: we will need to provide DetailsInternetPage.initializeDetailsPage
+    // as the callback).
+    chrome.send('getManagedProperties', [servicePath]);
+  }
+
+  /**
    * Decorate an element as a NetworkListItem.
    * @param {!Element} el The element to decorate.
    */
@@ -162,7 +172,7 @@ cr.define('options.network', function() {
 
     /**
      * Description of the network group or control.
-     * @type {Object.<string,Object>}
+     * @type {Object<string,Object>}
      * @private
      */
     data_: null,
@@ -403,7 +413,7 @@ cr.define('options.network', function() {
   /**
    * Creates a control for selecting or configuring a network connection based
    * on the type of connection (e.g. wifi versus vpn).
-   * @param {{key: string, networkList: Array.<NetworkInfo>}} data Description
+   * @param {{key: string, networkList: Array<NetworkInfo>}} data Description
    *     of the network.
    * @constructor
    * @extends {NetworkMenuItem}
@@ -677,7 +687,7 @@ cr.define('options.network', function() {
     /**
      * Extracts a mapping of network names to menu element and position.
      * @param {!Element} menu The menu to process.
-     * @return {Object.<string, ?{index: number, button: Element}>}
+     * @return {Object<string, ?{index: number, button: Element}>}
      *     Network mapping.
      * @private
      */
@@ -701,10 +711,11 @@ cr.define('options.network', function() {
      * @private
      */
     createNetworkOptionsCallback_: function(parent, data) {
+      var servicePath = data.servicePath;
       var menuItem = createCallback_(parent,
                                      data,
                                      getNetworkName(data),
-                                     'showDetails',
+                                     showDetails.bind(null, servicePath),
                                      data.iconURL);
       if (data.policyManaged)
         menuItem.appendChild(new ManagedNetworkIndicator());
@@ -756,8 +767,7 @@ cr.define('options.network', function() {
    * @param {!Element} menu Parent menu.
    * @param {Object} data Description of the network.
    * @param {!string} label Display name for the menu item.
-   * @param {?(string|!Function)} command Callback function or name
-   *     of the command for |networkCommand|.
+   * @param {!Function} command Callback function.
    * @param {string=} opt_iconURL Optional URL to an icon for the menu item.
    * @return {!Element} The created menu item.
    * @private
@@ -777,14 +787,7 @@ cr.define('options.network', function() {
     buttonLabel.textContent = label;
     button.appendChild(buttonLabel);
     var callback = null;
-    if (typeof command == 'string') {
-      var type = data.Type;
-      var path = data.servicePath;
-      callback = function() {
-        chrome.send('networkCommand', [type, path, command]);
-        closeMenu_();
-      };
-    } else if (command != null) {
+    if (command != null) {
       if (data) {
         callback = function() {
           (/** @type {Function} */(command))(data);
@@ -905,7 +908,7 @@ cr.define('options.network', function() {
 
     /**
      * Updates a network control.
-     * @param {Object.<string,string>} data Description of the entry.
+     * @param {Object<string,string>} data Description of the entry.
      */
     update: function(data) {
       this.startBatchUpdates();
@@ -953,7 +956,7 @@ cr.define('options.network', function() {
     createItem: function(entry) {
       if (entry.networkList)
         return new NetworkSelectorItem(
-            /** @type {{key: string, networkList: Array.<NetworkInfo>}} */(
+            /** @type {{key: string, networkList: Array<NetworkInfo>}} */(
                 entry));
       if (entry.command)
         return new NetworkButtonItem(
@@ -961,7 +964,7 @@ cr.define('options.network', function() {
                 entry));
       if (entry.menu)
         return new NetworkMenuItem(entry);
-      return undefined;
+      assertNotReached();
     },
 
     /**
@@ -992,7 +995,7 @@ cr.define('options.network', function() {
 
   /**
    * Sets the default icon to use for each network type if disconnected.
-   * @param {!Object.<string, string>} data Mapping of network type to icon
+   * @param {!Object<string, string>} data Mapping of network type to icon
    *     data url.
    */
   NetworkList.setDefaultNetworkIcons = function(data) {
@@ -1001,12 +1004,20 @@ cr.define('options.network', function() {
 
   /**
    * Chrome callback for updating network controls.
-   * @param {{wiredList: Array.<NetworkInfo>, wirelessList: Array.<NetworkInfo>,
-   *     vpnList: Array.<NetworkInfo>, rememberedList: Array.<NetworkInfo>,
-   *     wifiAvailable: boolean, wifiEnabled: boolean, wimaxAvailable: boolean,
-   *     wimaxEnabled: boolean, cellularAvailable: boolean,
-   *     cellularEnabled: boolean, cellularSupportsScan: boolean}} data
-   *     Description of available network devices and their corresponding state.
+   * @param {{cellularAvailable: boolean,
+   *          cellularEnabled: boolean,
+   *          cellularSimAbsent: boolean,
+   *          cellularSimLockType: string,
+   *          cellularSupportsScan: boolean,
+   *          rememberedList: Array<NetworkInfo>,
+   *          vpnList: Array<NetworkInfo>,
+   *          wifiAvailable: boolean,
+   *          wifiEnabled: boolean,
+   *          wimaxAvailable: boolean,
+   *          wimaxEnabled: boolean,
+   *          wiredList: Array<NetworkInfo>,
+   *          wirelessList: Array<NetworkInfo>}} data Description of available
+   *     network devices and their corresponding state.
    */
   NetworkList.refreshNetworkData = function(data) {
     var networkList = $('network-list');
@@ -1025,7 +1036,7 @@ cr.define('options.network', function() {
       var type = String('Ethernet');
       var path = ethernetConnection.servicePath;
       var ethernetOptions = function() {
-        chrome.send('networkCommand', [type, path, 'showDetails']);
+        showDetails(path);
       };
       networkList.update(
           { key: 'Ethernet',
@@ -1198,7 +1209,7 @@ cr.define('options.network', function() {
 
   /**
    * Fetches the active connection.
-   * @param {Array.<Object>} networkList List of networks.
+   * @param {Array<Object>} networkList List of networks.
    * @return {Object}
    * @private
    */
@@ -1226,7 +1237,7 @@ cr.define('options.network', function() {
         sendChromeMetricsAction('Options_NetworkJoinOtherWifi');
       else if (type == 'VPN')
         sendChromeMetricsAction('Options_NetworkJoinOtherVPN');
-      chrome.send('networkCommand', [type, '', 'add']);
+      chrome.send('addConnection', [type]);
     };
   }
 

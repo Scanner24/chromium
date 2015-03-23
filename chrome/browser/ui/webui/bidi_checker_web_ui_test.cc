@@ -80,12 +80,12 @@ static const base::FilePath::CharType* kBidiCheckerTestsJS =
     FILE_PATH_LITERAL("bidichecker_tests.js");
 
 void WebUIBidiCheckerBrowserTest::SetUp() {
-  argv_ = CommandLine::ForCurrentProcess()->GetArgs();
+  argv_ = base::CommandLine::ForCurrentProcess()->GetArgs();
 }
 
 void WebUIBidiCheckerBrowserTest::TearDown() {
   // Reset command line to the way it was before the test was run.
-  CommandLine::ForCurrentProcess()->InitFromArgv(argv_);
+  base::CommandLine::ForCurrentProcess()->InitFromArgv(argv_);
 }
 
 WebUIBidiCheckerBrowserTest::~WebUIBidiCheckerBrowserTest() {}
@@ -149,7 +149,7 @@ static void SetupHistoryPageTest(Browser* browser,
                                  const std::string& page_url,
                                  const std::string& page_title) {
   HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      browser->profile(), Profile::IMPLICIT_ACCESS);
+      browser->profile(), ServiceAccessType::IMPLICIT_ACCESS);
   const GURL history_url = GURL(page_url);
   history_service->AddPage(
       history_url, base::Time::Now(), history::SOURCE_BROWSED);

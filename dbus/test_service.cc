@@ -4,6 +4,9 @@
 
 #include "dbus/test_service.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
@@ -39,7 +42,11 @@ TestService::TestService(const Options& options)
       request_ownership_options_(options.request_ownership_options),
       dbus_task_runner_(options.dbus_task_runner),
       on_name_obtained_(false, false),
-      num_exported_methods_(0) {
+      num_exported_methods_(0),
+      send_immediate_properties_changed_(false),
+      has_ownership_(false),
+      exported_object_(NULL),
+      exported_object_manager_(NULL) {
 }
 
 TestService::~TestService() {
@@ -481,7 +488,7 @@ void TestService::PerformAction(
     RemoveObject(object_path);
   } else if (action == "SetSendImmediatePropertiesChanged") {
     SetSendImmediatePropertiesChanged();
-  } if (action == "ReleaseOwnership") {
+  } else if (action == "ReleaseOwnership") {
     ReleaseOwnership(base::Bind(&TestService::PerformActionResponse,
                                 base::Unretained(this),
                                 method_call, response_sender));

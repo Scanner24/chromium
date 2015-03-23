@@ -11,6 +11,7 @@ import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Message;
 import android.provider.MediaStore;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -19,8 +20,7 @@ import android.webkit.ValueCallback;
 
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.content.browser.ContentVideoView;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.InvalidateTypes;
 
 /**
  * Adapts the AwWebContentsDelegate interface to the AwContentsClient interface.
@@ -30,15 +30,19 @@ import org.chromium.content.browser.ContentViewCore;
 class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     private static final String TAG = "AwWebContentsDelegateAdapter";
 
-    final AwContentsClient mContentsClient;
-    View mContainerView;
-    final Context mContext;
+    private final AwContents mAwContents;
+    private final AwContentsClient mContentsClient;
+    private final AwContentViewClient mContentViewClient;
+    private final Context mContext;
+    private View mContainerView;
 
-    public AwWebContentsDelegateAdapter(AwContentsClient contentsClient,
-            View containerView, Context context) {
+    public AwWebContentsDelegateAdapter(AwContents awContents, AwContentsClient contentsClient,
+            AwContentViewClient contentViewClient, Context context, View containerView) {
+        mAwContents = awContents;
         mContentsClient = contentsClient;
-        setContainerView(containerView);
+        mContentViewClient = contentViewClient;
         mContext = context;
+        setContainerView(containerView);
     }
 
     public void setContainerView(View containerView) {
@@ -79,8 +83,8 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     @Override
     public boolean takeFocus(boolean reverse) {
         int direction =
-            (reverse == (mContainerView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL)) ?
-            View.FOCUS_RIGHT : View.FOCUS_LEFT;
+                (reverse == (mContainerView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL))
+                ? View.FOCUS_RIGHT : View.FOCUS_LEFT;
         if (tryToMoveFocus(direction)) return true;
         direction = reverse ? View.FOCUS_UP : View.FOCUS_DOWN;
         return tryToMoveFocus(direction);
@@ -135,7 +139,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     }
 
     @Override
-    public void showRepostFormWarningDialog(final ContentViewCore contentViewCore) {
+    public void showRepostFormWarningDialog() {
         // TODO(mkosiba) We should be using something akin to the JsResultReceiver as the
         // callback parameter (instead of ContentViewCore) and implement a way of converting
         // that to a pair of messages.
@@ -147,15 +151,15 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         final Handler handler = new Handler(ThreadUtils.getUiThreadLooper()) {
             @Override
             public void handleMessage(Message msg) {
+                if (mAwContents.getNavigationController() == null) return;
+
                 switch(msg.what) {
                     case msgContinuePendingReload: {
-                        contentViewCore.getWebContents().getNavigationController()
-                                .continuePendingReload();
+                        mAwContents.getNavigationController().continuePendingReload();
                         break;
                     }
                     case msgCancelPendingReload: {
-                        contentViewCore.getWebContents().getNavigationController()
-                                .cancelPendingReload();
+                        mAwContents.getNavigationController().cancelPendingReload();
                         break;
                     }
                     default:
@@ -211,10 +215,27 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     }
 
     @Override
+    public void navigationStateChanged(int flags) {
+        if ((flags & InvalidateTypes.URL) != 0
+                && mAwContents.hasAccessedInitialDocument()
+                && mAwContents.getDidAttemptLoad()) {
+            // Hint the client to show the last committed url, as it may be unsafe to show
+            // the pending entry.
+            String url = mAwContents.getLastCommittedUrl();
+            url = TextUtils.isEmpty(url) ? "about:blank" : url;
+            mContentsClient.onPageStarted(url);
+            mContentsClient.onLoadResource(url);
+            mContentsClient.onProgressChanged(100);
+            mContentsClient.onPageFinished(url);
+        }
+    }
+
+    @Override
     public void toggleFullscreenModeForTab(boolean enterFullscreen) {
-        if (!enterFullscreen) {
-            ContentVideoView videoView = ContentVideoView.getContentVideoView();
-            if (videoView != null) videoView.exitFullscreen(false);
+        if (enterFullscreen) {
+            mContentViewClient.enterFullscreen();
+        } else {
+            mContentViewClient.exitFullscreen();
         }
     }
 

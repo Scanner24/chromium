@@ -125,10 +125,6 @@ class FrameSender {
   // Max encoded frames generated per second.
   double max_frame_rate_;
 
-  // Maximum number of outstanding frames before the encoding and sending of
-  // new frames shall halt.
-  int max_unacked_frames_;
-
   // Counts how many RTCP reports are being "aggressively" sent (i.e., one per
   // frame) at the start of the session.  Once a threshold is reached, RTCP
   // reports are instead sent at the configured interval + random drift.
@@ -153,10 +149,6 @@ class FrameSender {
   // receiver hasn't yet received the first packet of the next frame.  In this
   // case, VideoSender will trigger a re-send of the next frame.
   int duplicate_ack_counter_;
-
-  // If this sender is ready for use, this is STATUS_AUDIO_INITIALIZED or
-  // STATUS_VIDEO_INITIALIZED.
-  CastInitializationStatus cast_initialization_status_;
 
   // This object controls how we change the bitrate to make sure the
   // buffer doesn't overflow.

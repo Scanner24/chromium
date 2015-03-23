@@ -7,12 +7,13 @@
 
 #include <jni.h>
 #include <vector>
+
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "ui/base/ui_base_export.h"
-#include "ui/gfx/vector2d_f.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace ui {
 
@@ -22,7 +23,7 @@ class WindowAndroidObserver;
 // Android implementation of the activity window.
 class UI_BASE_EXPORT WindowAndroid {
  public:
-  WindowAndroid(JNIEnv* env, jobject obj, jlong vsync_period);
+  WindowAndroid(JNIEnv* env, jobject obj);
 
   void Destroy(JNIEnv* env, jobject obj);
 
@@ -53,7 +54,10 @@ class UI_BASE_EXPORT WindowAndroid {
 
   void RequestVSyncUpdate();
   void SetNeedsAnimate();
-  void OnVSync(JNIEnv* env, jobject obj, jlong time_micros);
+  void OnVSync(JNIEnv* env,
+               jobject obj,
+               jlong time_micros,
+               jlong period_micros);
   void Animate(base::TimeTicks begin_frame_time);
 
  private:
@@ -62,7 +66,6 @@ class UI_BASE_EXPORT WindowAndroid {
   JavaObjectWeakGlobalRef weak_java_window_;
   gfx::Vector2dF content_offset_;
   WindowAndroidCompositor* compositor_;
-  base::TimeDelta vsync_period_;
 
   ObserverList<WindowAndroidObserver> observer_list_;
 

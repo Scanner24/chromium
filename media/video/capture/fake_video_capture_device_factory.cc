@@ -29,14 +29,14 @@ void FakeVideoCaptureDeviceFactory::GetDeviceNames(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(device_names->empty());
   for (int n = 0; n < number_of_devices_; ++n) {
-#if !defined(OS_MACOSX)
     VideoCaptureDevice::Name name(base::StringPrintf("fake_device_%d", n),
-                                  base::StringPrintf("/dev/video%d", n));
-#else
-    VideoCaptureDevice::Name name(base::StringPrintf("fake_device_%d", n),
-                                  base::StringPrintf("/dev/video%d", n),
-                                  VideoCaptureDevice::Name::AVFOUNDATION);
+                                  base::StringPrintf("/dev/video%d", n)
+#if defined(OS_MACOSX)
+                                  , VideoCaptureDevice::Name::AVFOUNDATION
+#elif defined(OS_WIN)
+                                  , VideoCaptureDevice::Name::DIRECT_SHOW
 #endif
+    );
     device_names->push_back(name);
   }
 }
@@ -48,7 +48,8 @@ void FakeVideoCaptureDeviceFactory::GetDeviceSupportedFormats(
   const int frame_rate = 1000 / FakeVideoCaptureDevice::kFakeCaptureTimeoutMs;
   const gfx::Size supported_sizes[] = {gfx::Size(320, 240),
                                        gfx::Size(640, 480),
-                                       gfx::Size(1280, 720)};
+                                       gfx::Size(1280, 720),
+                                       gfx::Size(1920, 1080)};
   supported_formats->clear();
   for (size_t i = 0; i < arraysize(supported_sizes); ++i) {
     supported_formats->push_back(VideoCaptureFormat(supported_sizes[i],

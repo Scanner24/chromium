@@ -4,6 +4,9 @@
 
 #include "content/browser/service_worker/service_worker_context_core.h"
 
+#include "base/barrier_closure.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -11,6 +14,7 @@
 #include "content/browser/service_worker/service_worker_cache_storage_manager.h"
 #include "content/browser/service_worker/service_worker_context_observer.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/browser/service_worker/service_worker_database_task_manager.h"
 #include "content/browser/service_worker/service_worker_info.h"
 #include "content/browser/service_worker/service_worker_job_coordinator.h"
 #include "content/browser/service_worker/service_worker_process_manager.h"
@@ -19,9 +23,29 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/public/browser/browser_thread.h"
+#include "storage/browser/quota/quota_manager_proxy.h"
 #include "url/gurl.h"
 
 namespace content {
+namespace {
+void SuccessCollectorCallback(const base::Closure& done_closure,
+                              bool* overall_success,
+                              ServiceWorkerStatusCode status) {
+  if (status != ServiceWorkerStatusCode::SERVICE_WORKER_OK) {
+    *overall_success = false;
+  }
+  done_closure.Run();
+}
+
+void SuccessReportingCallback(
+    const bool* success,
+    const ServiceWorkerContextCore::UnregistrationCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  bool result = *success;
+  callback.Run(result ? ServiceWorkerStatusCode::SERVICE_WORKER_OK
+                      : ServiceWorkerStatusCode::SERVICE_WORKER_ERROR_FAILED);
+}
+}  // namespace
 
 const base::FilePath::CharType
     ServiceWorkerContextCore::kServiceWorkerDirectory[] =
@@ -84,46 +108,52 @@ void ServiceWorkerContextCore::ProviderHostIterator::Initialize() {
 ServiceWorkerContextCore::ServiceWorkerContextCore(
     const base::FilePath& path,
     const scoped_refptr<base::SequencedTaskRunner>& cache_task_runner,
-    const scoped_refptr<base::SequencedTaskRunner>& database_task_runner,
+    scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
     const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
     storage::QuotaManagerProxy* quota_manager_proxy,
+    storage::SpecialStoragePolicy* special_storage_policy,
     ObserverListThreadSafe<ServiceWorkerContextObserver>* observer_list,
     ServiceWorkerContextWrapper* wrapper)
-    : weak_factory_(this),
-      wrapper_(wrapper),
+    : wrapper_(wrapper),
       providers_(new ProcessToProviderMap),
-      storage_(ServiceWorkerStorage::Create(path,
-                                            AsWeakPtr(),
-                                            database_task_runner,
-                                            disk_cache_thread,
-                                            quota_manager_proxy)),
-      cache_manager_(
-          ServiceWorkerCacheStorageManager::Create(path,
-                                                   cache_task_runner.get())),
-      embedded_worker_registry_(EmbeddedWorkerRegistry::Create(AsWeakPtr())),
-      job_coordinator_(new ServiceWorkerJobCoordinator(AsWeakPtr())),
+      cache_manager_(ServiceWorkerCacheStorageManager::Create(
+          path,
+          cache_task_runner.get(),
+          make_scoped_refptr(quota_manager_proxy))),
       next_handle_id_(0),
       next_registration_handle_id_(0),
-      observer_list_(observer_list) {
+      observer_list_(observer_list),
+      weak_factory_(this) {
+  // These get a WeakPtr from weak_factory_, so must be set after weak_factory_
+  // is initialized.
+  storage_ = ServiceWorkerStorage::Create(path,
+                                          AsWeakPtr(),
+                                          database_task_manager.Pass(),
+                                          disk_cache_thread,
+                                          quota_manager_proxy,
+                                          special_storage_policy);
+  embedded_worker_registry_ = EmbeddedWorkerRegistry::Create(AsWeakPtr());
+  job_coordinator_.reset(new ServiceWorkerJobCoordinator(AsWeakPtr()));
 }
 
 ServiceWorkerContextCore::ServiceWorkerContextCore(
     ServiceWorkerContextCore* old_context,
     ServiceWorkerContextWrapper* wrapper)
-    : weak_factory_(this),
-      wrapper_(wrapper),
+    : wrapper_(wrapper),
       providers_(old_context->providers_.release()),
-      storage_(
-          ServiceWorkerStorage::Create(AsWeakPtr(), old_context->storage())),
       cache_manager_(ServiceWorkerCacheStorageManager::Create(
           old_context->cache_manager())),
-      embedded_worker_registry_(EmbeddedWorkerRegistry::Create(
-          AsWeakPtr(),
-          old_context->embedded_worker_registry())),
-      job_coordinator_(new ServiceWorkerJobCoordinator(AsWeakPtr())),
-      next_handle_id_(0),
-      next_registration_handle_id_(0),
-      observer_list_(old_context->observer_list_) {
+      next_handle_id_(old_context->next_handle_id_),
+      next_registration_handle_id_(old_context->next_registration_handle_id_),
+      observer_list_(old_context->observer_list_),
+      weak_factory_(this) {
+  // These get a WeakPtr from weak_factory_, so must be set after weak_factory_
+  // is initialized.
+  storage_ = ServiceWorkerStorage::Create(AsWeakPtr(), old_context->storage());
+  embedded_worker_registry_ = EmbeddedWorkerRegistry::Create(
+      AsWeakPtr(),
+      old_context->embedded_worker_registry());
+  job_coordinator_.reset(new ServiceWorkerJobCoordinator(AsWeakPtr()));
 }
 
 ServiceWorkerContextCore::~ServiceWorkerContextCore() {
@@ -179,9 +209,8 @@ void ServiceWorkerContextCore::RegisterServiceWorker(
     const RegistrationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (storage()->IsDisabled()) {
-    callback.Run(SERVICE_WORKER_ERROR_ABORT,
-                 kInvalidServiceWorkerRegistrationId,
-                 kInvalidServiceWorkerVersionId);
+    callback.Run(SERVICE_WORKER_ERROR_ABORT, std::string(),
+                 kInvalidServiceWorkerRegistrationId);
     return;
   }
 
@@ -212,6 +241,45 @@ void ServiceWorkerContextCore::UnregisterServiceWorker(
                  callback));
 }
 
+void ServiceWorkerContextCore::UnregisterServiceWorkers(
+    const GURL& origin,
+    const UnregistrationCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (storage()->IsDisabled()) {
+    // Not posting as new task to match implementations above.
+    callback.Run(SERVICE_WORKER_ERROR_ABORT);
+    return;
+  }
+
+  storage()->GetAllRegistrations(base::Bind(
+      &ServiceWorkerContextCore::DidGetAllRegistrationsForUnregisterForOrigin,
+      AsWeakPtr(),
+      callback,
+      origin));
+}
+
+void ServiceWorkerContextCore::DidGetAllRegistrationsForUnregisterForOrigin(
+    const UnregistrationCallback& result,
+    const GURL& origin,
+    const std::vector<ServiceWorkerRegistrationInfo>& registrations) {
+  std::set<GURL> scopes;
+  for (const auto& registration_info : registrations) {
+    if (origin == registration_info.pattern.GetOrigin()) {
+      scopes.insert(registration_info.pattern);
+    }
+  }
+  bool* overall_success = new bool(true);
+  base::Closure barrier = base::BarrierClosure(
+      scopes.size(),
+      base::Bind(
+          &SuccessReportingCallback, base::Owned(overall_success), result));
+
+  for (const GURL& scope : scopes) {
+    UnregisterServiceWorker(
+        scope, base::Bind(&SuccessCollectorCallback, barrier, overall_success));
+  }
+}
+
 void ServiceWorkerContextCore::UpdateServiceWorker(
     ServiceWorkerRegistration* registration) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -224,23 +292,19 @@ void ServiceWorkerContextCore::RegistrationComplete(
     const GURL& pattern,
     const ServiceWorkerContextCore::RegistrationCallback& callback,
     ServiceWorkerStatusCode status,
-    ServiceWorkerRegistration* registration,
-    ServiceWorkerVersion* version) {
+    const std::string& status_message,
+    ServiceWorkerRegistration* registration) {
   if (status != SERVICE_WORKER_OK) {
-    DCHECK(!version);
-    callback.Run(status,
-                 kInvalidServiceWorkerRegistrationId,
-                 kInvalidServiceWorkerVersionId);
+    DCHECK(!registration);
+    callback.Run(status, status_message, kInvalidServiceWorkerRegistrationId);
     return;
   }
 
-  DCHECK(version);
-  DCHECK_EQ(version->registration_id(), registration->id());
-  callback.Run(status,
-               registration->id(),
-               version->version_id());
+  DCHECK(registration);
+  callback.Run(status, status_message, registration->id());
   if (observer_list_.get()) {
-    observer_list_->Notify(&ServiceWorkerContextObserver::OnRegistrationStored,
+    observer_list_->Notify(FROM_HERE,
+                           &ServiceWorkerContextObserver::OnRegistrationStored,
                            pattern);
   }
 }
@@ -248,11 +312,13 @@ void ServiceWorkerContextCore::RegistrationComplete(
 void ServiceWorkerContextCore::UnregistrationComplete(
     const GURL& pattern,
     const ServiceWorkerContextCore::UnregistrationCallback& callback,
+    int64 registration_id,
     ServiceWorkerStatusCode status) {
   callback.Run(status);
   if (observer_list_.get()) {
-    observer_list_->Notify(&ServiceWorkerContextObserver::OnRegistrationDeleted,
-                           pattern);
+    observer_list_->Notify(FROM_HERE,
+                           &ServiceWorkerContextObserver::OnRegistrationDeleted,
+                           registration_id, pattern);
   }
 }
 
@@ -342,29 +408,62 @@ void ServiceWorkerContextCore::SetBlobParametersForCache(
                                             blob_storage_context);
 }
 
+scoped_ptr<ServiceWorkerProviderHost>
+ServiceWorkerContextCore::TransferProviderHostOut(
+    int process_id, int provider_id) {
+  ProviderMap* map = GetProviderMapForProcess(process_id);
+  ServiceWorkerProviderHost* transferee = map->Lookup(provider_id);
+  ServiceWorkerProviderHost* replacement =
+      new ServiceWorkerProviderHost(process_id,
+                                    transferee->frame_id(),
+                                    provider_id,
+                                    transferee->provider_type(),
+                                    AsWeakPtr(),
+                                    transferee->dispatcher_host());
+  map->Replace(provider_id, replacement);
+  transferee->PrepareForCrossSiteTransfer();
+  return make_scoped_ptr(transferee);
+}
+
+void ServiceWorkerContextCore::TransferProviderHostIn(
+    int new_process_id, int new_provider_id,
+    scoped_ptr<ServiceWorkerProviderHost> transferee) {
+  ProviderMap* map = GetProviderMapForProcess(new_process_id);
+  ServiceWorkerProviderHost* temp = map->Lookup(new_provider_id);
+  DCHECK(temp->document_url().is_empty());
+  transferee->CompleteCrossSiteTransfer(new_process_id,
+                                        temp->frame_id(),
+                                        new_provider_id,
+                                        temp->provider_type(),
+                                        temp->dispatcher_host());
+  map->Replace(new_provider_id, transferee.release());
+  delete temp;
+}
+
 void ServiceWorkerContextCore::OnWorkerStarted(ServiceWorkerVersion* version) {
   if (!observer_list_.get())
     return;
-  observer_list_->Notify(&ServiceWorkerContextObserver::OnWorkerStarted,
-                         version->version_id(),
-                         version->embedded_worker()->process_id(),
-                         version->embedded_worker()->thread_id());
+  observer_list_->Notify(
+      FROM_HERE, &ServiceWorkerContextObserver::OnWorkerStarted,
+      version->version_id(), version->embedded_worker()->process_id(),
+      version->embedded_worker()->thread_id());
 }
 
 void ServiceWorkerContextCore::OnWorkerStopped(ServiceWorkerVersion* version) {
   if (!observer_list_.get())
     return;
-  observer_list_->Notify(&ServiceWorkerContextObserver::OnWorkerStopped,
-                         version->version_id(),
-                         version->embedded_worker()->process_id(),
-                         version->embedded_worker()->thread_id());
+  observer_list_->Notify(
+      FROM_HERE, &ServiceWorkerContextObserver::OnWorkerStopped,
+      version->version_id(), version->embedded_worker()->process_id(),
+      version->embedded_worker()->thread_id());
 }
 
 void ServiceWorkerContextCore::OnVersionStateChanged(
     ServiceWorkerVersion* version) {
   if (!observer_list_.get())
     return;
-  observer_list_->Notify(&ServiceWorkerContextObserver::OnVersionStateChanged,
+  observer_list_->Notify(FROM_HERE,
+                         &ServiceWorkerContextObserver::OnVersionStateChanged,
                          version->version_id());
 }
 
@@ -377,12 +476,11 @@ void ServiceWorkerContextCore::OnErrorReported(
   if (!observer_list_.get())
     return;
   observer_list_->Notify(
-      &ServiceWorkerContextObserver::OnErrorReported,
-      version->version_id(),
-      version->embedded_worker()->process_id(),
+      FROM_HERE, &ServiceWorkerContextObserver::OnErrorReported,
+      version->version_id(), version->embedded_worker()->process_id(),
       version->embedded_worker()->thread_id(),
-      ServiceWorkerContextObserver::ErrorInfo(
-          error_message, line_number, column_number, source_url));
+      ServiceWorkerContextObserver::ErrorInfo(error_message, line_number,
+                                              column_number, source_url));
 }
 
 void ServiceWorkerContextCore::OnReportConsoleMessage(
@@ -395,18 +493,15 @@ void ServiceWorkerContextCore::OnReportConsoleMessage(
   if (!observer_list_.get())
     return;
   observer_list_->Notify(
-      &ServiceWorkerContextObserver::OnReportConsoleMessage,
-      version->version_id(),
-      version->embedded_worker()->process_id(),
+      FROM_HERE, &ServiceWorkerContextObserver::OnReportConsoleMessage,
+      version->version_id(), version->embedded_worker()->process_id(),
       version->embedded_worker()->thread_id(),
       ServiceWorkerContextObserver::ConsoleMessage(
           source_identifier, message_level, message, line_number, source_url));
 }
 
 ServiceWorkerProcessManager* ServiceWorkerContextCore::process_manager() {
-  if (wrapper_)
-    return wrapper_->process_manager();
-  return NULL;
+  return wrapper_->process_manager();
 }
 
 }  // namespace content

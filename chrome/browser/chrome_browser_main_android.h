@@ -17,15 +17,15 @@ class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
  public:
   explicit ChromeBrowserMainPartsAndroid(
       const content::MainFunctionParams& parameters);
-  virtual ~ChromeBrowserMainPartsAndroid();
+  ~ChromeBrowserMainPartsAndroid() override;
 
   // content::BrowserMainParts overrides.
-  virtual void PreProfileInit() OVERRIDE;
-  virtual void PostProfileInit() OVERRIDE;
-  virtual void PreEarlyInitialization() OVERRIDE;
+  int PreCreateThreads() override;
+  void PostProfileInit() override;
+  void PreEarlyInitialization() override;
 
   // ChromeBrowserMainParts overrides.
-  virtual void ShowMissingLocaleMessageBox() OVERRIDE;
+  void ShowMissingLocaleMessageBox() override;
 
  private:
   scoped_ptr<base::MessageLoop> main_message_loop_;

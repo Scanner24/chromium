@@ -13,6 +13,9 @@
       'include_dirs': [
         '../..',
       ],
+      'dependencies': [
+        '../core/core.gyp:device_core',
+      ],
       'sources': [
         'device_monitor_linux.cc',
         'device_monitor_linux.h',
@@ -30,6 +33,8 @@
         'hid_device_filter.h',
         'hid_device_info.cc',
         'hid_device_info.h',
+        'hid_device_info_linux.cc',
+        'hid_device_info_linux.h',
         'hid_report_descriptor.cc',
         'hid_report_descriptor.h',
         'hid_report_descriptor_item.cc',

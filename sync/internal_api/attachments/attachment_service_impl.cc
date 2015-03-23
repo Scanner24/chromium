@@ -11,7 +11,6 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "sync/api/attachments/attachment.h"
-#include "sync/api/attachments/fake_attachment_store.h"
 #include "sync/internal_api/public/attachments/fake_attachment_downloader.h"
 #include "sync/internal_api/public/attachments/fake_attachment_uploader.h"
 
@@ -145,8 +144,8 @@ AttachmentServiceImpl::~AttachmentServiceImpl() {
 
 // Static.
 scoped_ptr<syncer::AttachmentService> AttachmentServiceImpl::CreateForTest() {
-  scoped_refptr<syncer::AttachmentStore> attachment_store(
-      new syncer::FakeAttachmentStore(base::ThreadTaskRunnerHandle::Get()));
+  scoped_refptr<syncer::AttachmentStore> attachment_store =
+      AttachmentStore::CreateInMemoryStore();
   scoped_ptr<AttachmentUploader> attachment_uploader(
       new FakeAttachmentUploader);
   scoped_ptr<AttachmentDownloader> attachment_downloader(
@@ -201,7 +200,8 @@ void AttachmentServiceImpl::ReadDone(
 
   AttachmentIdList::const_iterator iter = unavailable_attachment_ids->begin();
   AttachmentIdList::const_iterator end = unavailable_attachment_ids->end();
-  if (attachment_downloader_.get()) {
+  if (result != AttachmentStore::STORE_INITIALIZATION_FAILED &&
+      attachment_downloader_.get()) {
     // Try to download locally unavailable attachments.
     for (; iter != end; ++iter) {
       attachment_downloader_->DownloadAttachment(
@@ -216,6 +216,21 @@ void AttachmentServiceImpl::ReadDone(
     for (; iter != end; ++iter) {
       state->AddUnavailableAttachmentId(*iter);
     }
+  }
+}
+
+void AttachmentServiceImpl::WriteDone(
+    const scoped_refptr<GetOrDownloadState>& state,
+    const Attachment& attachment,
+    const AttachmentStore::Result& result) {
+  switch (result) {
+    case AttachmentStore::SUCCESS:
+      state->AddAttachment(attachment);
+      break;
+    case AttachmentStore::UNSPECIFIED_ERROR:
+    case AttachmentStore::STORE_INITIALIZATION_FAILED:
+      state->AddUnavailableAttachmentId(attachment.GetId());
+      break;
   }
 }
 
@@ -259,9 +274,15 @@ void AttachmentServiceImpl::DownloadDone(
     const AttachmentDownloader::DownloadResult& result,
     scoped_ptr<Attachment> attachment) {
   switch (result) {
-    case AttachmentDownloader::DOWNLOAD_SUCCESS:
-      state->AddAttachment(*attachment.get());
+    case AttachmentDownloader::DOWNLOAD_SUCCESS: {
+      AttachmentList attachment_list;
+      attachment_list.push_back(*attachment.get());
+      attachment_store_->Write(
+          attachment_list,
+          base::Bind(&AttachmentServiceImpl::WriteDone,
+                     weak_ptr_factory_.GetWeakPtr(), state, *attachment.get()));
       break;
+    }
     case AttachmentDownloader::DOWNLOAD_TRANSIENT_ERROR:
     case AttachmentDownloader::DOWNLOAD_UNSPECIFIED_ERROR:
       state->AddUnavailableAttachmentId(attachment_id);

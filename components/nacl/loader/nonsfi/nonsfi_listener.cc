@@ -20,7 +20,13 @@
 #include "ipc/ipc_sync_channel.h"
 #include "ppapi/nacl_irt/plugin_startup.h"
 
-#if !defined(OS_LINUX)
+#if defined(OS_NACL_NONSFI)
+#include "native_client/src/public/nonsfi/irt_random.h"
+#else
+#include "components/nacl/loader/nonsfi/irt_random.h"
+#endif
+
+#if !defined(OS_LINUX) && !defined(OS_NACL_NONSFI)
 # error "non-SFI mode is supported only on linux."
 #endif
 
@@ -38,7 +44,7 @@ NonSfiListener::~NonSfiListener() {
 
 void NonSfiListener::Listen() {
   channel_ = IPC::SyncChannel::Create(
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kProcessChannelID),
       IPC::Channel::MODE_CLIENT,
       this,  // As a Listener.
@@ -64,7 +70,11 @@ bool NonSfiListener::OnMessageReceived(const IPC::Message& msg) {
 
 void NonSfiListener::OnStart(const nacl::NaClStartParams& params) {
   // Random number source initialization.
+#if defined(OS_NACL_NONSFI)
+  nonsfi_set_urandom_fd(base::GetUrandomFD());
+#else
   SetUrandomFd(base::GetUrandomFD());
+#endif
 
   IPC::ChannelHandle browser_handle;
   IPC::ChannelHandle ppapi_renderer_handle;
@@ -138,12 +148,14 @@ void NonSfiListener::OnStart(const nacl::NaClStartParams& params) {
   CHECK(!params.enable_debug_stub);
   CHECK(params.debug_stub_server_bound_socket.fd == -1);
 
-  CHECK(!params.uses_irt);
   CHECK(params.handles.empty());
+  // We are only expecting non-SFI mode to be used with NaCl for now,
+  // not PNaCl processes.
+  CHECK(params.process_type == kNativeNaClProcessType);
 
   CHECK(params.nexe_file != IPC::InvalidPlatformFileForTransit());
-  CHECK(params.nexe_token_lo == 0);
-  CHECK(params.nexe_token_hi == 0);
+  CHECK(params.nexe_file_path_metadata.empty());
+
   MainStart(IPC::PlatformFileForTransitToPlatformFile(params.nexe_file));
 }
 

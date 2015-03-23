@@ -8,9 +8,9 @@
 #include <OpenGL/CGLTypes.h>
 #include <vector>
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
@@ -122,12 +122,15 @@ bool GLContextCGL::Initialize(GLSurface* compatible_surface,
 
 void GLContextCGL::Destroy() {
   if (discrete_pixelformat_) {
-    // Delay releasing the pixel format for 10 seconds to reduce the number of
-    // unnecessary GPU switches.
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&CGLReleasePixelFormat, discrete_pixelformat_),
-        base::TimeDelta::FromSeconds(10));
+    if (base::MessageLoop::current() != NULL) {
+      // Delay releasing the pixel format for 10 seconds to reduce the number of
+      // unnecessary GPU switches.
+      base::MessageLoop::current()->PostDelayedTask(
+          FROM_HERE, base::Bind(&CGLReleasePixelFormat, discrete_pixelformat_),
+          base::TimeDelta::FromSeconds(10));
+    } else {
+      CGLReleasePixelFormat(discrete_pixelformat_);
+    }
     discrete_pixelformat_ = NULL;
   }
   if (context_) {
@@ -136,7 +139,7 @@ void GLContextCGL::Destroy() {
   }
 }
 
-bool GLContextCGL::MakeCurrent(GLSurface* surface) {
+bool GLContextCGL::ForceGpuSwitchIfNeeded() {
   DCHECK(context_);
 
   // The call to CGLSetVirtualScreen can hang on some AMD drivers
@@ -174,6 +177,14 @@ bool GLContextCGL::MakeCurrent(GLSurface* surface) {
       renderer_id_ = renderer_id;
     }
   }
+  return true;
+}
+
+bool GLContextCGL::MakeCurrent(GLSurface* surface) {
+  DCHECK(context_);
+
+  if (!ForceGpuSwitchIfNeeded())
+    return false;
 
   if (IsCurrent(surface))
     return true;
@@ -230,11 +241,9 @@ void* GLContextCGL::GetHandle() {
   return context_;
 }
 
-void GLContextCGL::SetSwapInterval(int interval) {
+void GLContextCGL::OnSetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
-  LOG(WARNING) << "GLContex: GLContextCGL::SetSwapInterval is ignored.";
 }
-
 
 bool GLContextCGL::GetTotalGpuMemory(size_t* bytes) {
   DCHECK(bytes);

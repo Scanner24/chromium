@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "ash/ash_switches.h"
 #include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
@@ -20,7 +19,6 @@
 #include "ash/test/status_area_widget_test_helper.h"
 #include "ash/test/test_system_tray_delegate.h"
 #include "ash/wm/window_state.h"
-#include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/aura_constants.h"
@@ -28,8 +26,8 @@
 #include "ui/events/event.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/screen.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_tray.h"
@@ -72,15 +70,14 @@ class TestItem : public SystemTrayItem {
  public:
   TestItem() : SystemTrayItem(GetSystemTray()) {}
 
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE {
+  views::View* CreateDefaultView(user::LoginStatus status) override {
     views::View* default_view = new views::View;
     default_view->SetLayoutManager(new views::FillLayout);
     default_view->AddChildView(new views::Label(base::UTF8ToUTF16("Default")));
     return default_view;
   }
 
-  virtual views::View* CreateNotificationView(
-      user::LoginStatus status) OVERRIDE {
+  views::View* CreateNotificationView(user::LoginStatus status) override {
     return new views::View;
   }
 
@@ -93,15 +90,9 @@ class TestItem : public SystemTrayItem {
 class WebNotificationTrayTest : public test::AshTestBase {
  public:
   WebNotificationTrayTest() {}
-  virtual ~WebNotificationTrayTest() {}
+  ~WebNotificationTrayTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kAshEnableTouchViewTouchFeedback);
-    test::AshTestBase::SetUp();
-  }
-
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     GetMessageCenter()->RemoveAllNotifications(false);
     test::AshTestBase::TearDown();
   }

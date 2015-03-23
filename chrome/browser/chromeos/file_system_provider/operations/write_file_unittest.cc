@@ -5,9 +5,11 @@
 #include "chrome/browser/chromeos/file_system_provider/operations/write_file.h"
 
 #include <string>
+#include <vector>
 
 #include "base/files/file.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
@@ -37,15 +39,13 @@ const int kOffset = 10;
 class FileSystemProviderOperationsWriteFileTest : public testing::Test {
  protected:
   FileSystemProviderOperationsWriteFileTest() {}
-  virtual ~FileSystemProviderOperationsWriteFileTest() {}
+  ~FileSystemProviderOperationsWriteFileTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
+    MountOptions mount_options(kFileSystemId, "" /* display_name */);
+    mount_options.writable = true;
     file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               true /* writable */,
-                               base::FilePath() /* mount_path */);
+        ProvidedFileSystemInfo(kExtensionId, mount_options, base::FilePath());
     io_buffer_ = make_scoped_refptr(new net::StringIOBuffer(kWriteData));
   }
 
@@ -89,7 +89,9 @@ TEST_F(FileSystemProviderOperationsWriteFileTest, Execute) {
   EXPECT_EQ(kRequestId, options.request_id);
   EXPECT_EQ(kFileHandle, options.open_request_id);
   EXPECT_EQ(kOffset, static_cast<double>(options.offset));
-  EXPECT_EQ(std::string(kWriteData), options.data);
+  std::string write_data(kWriteData);
+  EXPECT_EQ(std::vector<char>(write_data.begin(), write_data.end()),
+            options.data);
 }
 
 TEST_F(FileSystemProviderOperationsWriteFileTest, Execute_NoListener) {
@@ -115,11 +117,9 @@ TEST_F(FileSystemProviderOperationsWriteFileTest, Execute_ReadOnly) {
   util::StatusCallbackLog callback_log;
 
   const ProvidedFileSystemInfo read_only_file_system_info(
-        kExtensionId,
-        kFileSystemId,
-        "" /* file_system_name */,
-        false /* writable */,
-        base::FilePath() /* mount_path */);
+      kExtensionId,
+      MountOptions(kFileSystemId, "" /* display_name */),
+      base::FilePath() /* mount_path */);
 
   WriteFile write_file(NULL,
                        read_only_file_system_info,

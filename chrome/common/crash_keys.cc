@@ -48,11 +48,11 @@ static const size_t kSingleChunkLength = 63;
 #endif
 
 // Guarantees for crash key sizes.
-COMPILE_ASSERT(kSmallSize <= kSingleChunkLength,
-               crash_key_chunk_size_too_small);
+static_assert(kSmallSize <= kSingleChunkLength,
+              "crash key chunk size too small");
 #if defined(OS_MACOSX)
-COMPILE_ASSERT(kMediumSize <= kSingleChunkLength,
-               mac_has_medium_size_crash_key_chunks);
+static_assert(kMediumSize <= kSingleChunkLength,
+              "mac has medium size crash key chunks");
 #endif
 
 const char kClientId[] = "guid";
@@ -71,8 +71,6 @@ const char kVariations[] = "variations";
 
 const char kExtensionID[] = "extension-%" PRIuS;
 const char kNumExtensionsCount[] = "num-extensions";
-
-const char kNumberOfViews[] = "num-views";
 
 const char kShutdownType[] = "shutdown-type";
 
@@ -127,7 +125,6 @@ size_t RegisterChromeCrashKeys() {
     { kNumVariations, kSmallSize },
     { kVariations, kLargeSize },
     { kNumExtensionsCount, kSmallSize },
-    { kNumberOfViews, kSmallSize },
     { kShutdownType, kSmallSize },
 #if !defined(OS_ANDROID)
     { kGPUVendorID, kSmallSize },
@@ -145,6 +142,7 @@ size_t RegisterChromeCrashKeys() {
 
     // base/:
     { "dm-usage", kSmallSize },
+    { "total-dm-usage", kSmallSize },
     // content/:
     { kFontKeyName, kSmallSize},
     { "ppapi_path", kMediumSize },
@@ -265,8 +263,7 @@ static bool IsBoringSwitch(const std::string& flag) {
          flag == "--flag-switches-begin" ||
          flag == "--flag-switches-end";
 #elif defined(OS_CHROMEOS)
-  static const char* kIgnoreSwitches[] = {
-    ::switches::kEnableImplSidePainting,
+  static const char* const kIgnoreSwitches[] = {
     ::switches::kEnableLogging,
     ::switches::kFlagSwitchesBegin,
     ::switches::kFlagSwitchesEnd,
@@ -280,10 +277,12 @@ static bool IsBoringSwitch(const std::string& flag) {
     ::switches::kV,
     ::switches::kVModule,
     // Cros/CC flgas are specified as raw strings to avoid dependency.
-    "ash-default-wallpaper-large",
-    "ash-default-wallpaper-small",
-    "ash-guest-wallpaper-large",
-    "ash-guest-wallpaper-small",
+    "child-wallpaper-large",
+    "child-wallpaper-small",
+    "default-wallpaper-large",
+    "default-wallpaper-small",
+    "guest-wallpaper-large",
+    "guest-wallpaper-small",
     "enterprise-enable-forced-re-enrollment",
     "enterprise-enrollment-initial-modulus",
     "enterprise-enrollment-modulus-limit",
@@ -308,12 +307,12 @@ static bool IsBoringSwitch(const std::string& flag) {
 #endif
 }
 
-void SetSwitchesFromCommandLine(const CommandLine* command_line) {
+void SetSwitchesFromCommandLine(const base::CommandLine* command_line) {
   DCHECK(command_line);
   if (!command_line)
     return;
 
-  const CommandLine::StringVector& argv = command_line->argv();
+  const base::CommandLine::StringVector& argv = command_line->argv();
 
   // Set the number of switches in case size > kNumSwitches.
   base::debug::SetCrashKeyValue(kNumSwitches,

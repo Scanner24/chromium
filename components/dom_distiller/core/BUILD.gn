@@ -3,24 +3,26 @@
 # found in the LICENSE file.
 
 # GYP version: components/dom_distiller.gypi:dom_distiller_core
-static_library("core") {
+source_set("core") {
   sources = [
     "../android/component_jni_registrar.cc",
     "../android/component_jni_registrar.h",
+    "article_attachments_data.cc",
+    "article_attachments_data.h",
     "article_distillation_update.cc",
     "article_distillation_update.h",
     "article_entry.cc",
     "article_entry.h",
     "distilled_content_store.cc",
     "distilled_content_store.h",
-    "distiller.cc",
-    "distiller.h",
-    "distiller_page.cc",
-    "distiller_page.h",
     "distilled_page_prefs.cc",
     "distilled_page_prefs.h",
     "distilled_page_prefs_android.cc",
     "distilled_page_prefs_android.h",
+    "distiller.cc",
+    "distiller.h",
+    "distiller_page.cc",
+    "distiller_page.h",
     "distiller_url_fetcher.cc",
     "distiller_url_fetcher.h",
     "dom_distiller_constants.cc",
@@ -38,10 +40,10 @@ static_library("core") {
     "task_tracker.h",
     "url_constants.cc",
     "url_constants.h",
-    "url_utils_android.cc",
-    "url_utils_android.h",
     "url_utils.cc",
     "url_utils.h",
+    "url_utils_android.cc",
+    "url_utils_android.h",
     "viewer.cc",
     "viewer.h",
   ]
@@ -52,7 +54,9 @@ static_library("core") {
   ]
   deps = [
     "//base",
+    "//base:prefs",
     "//components/leveldb_proto",
+    "//components/pref_registry",
     "//components/resources",
     "//components/strings",
     "//net",
@@ -63,12 +67,16 @@ static_library("core") {
   ]
 
   if (is_android) {
+    sources += [
+      "dom_distiller_service_android.cc",
+      "dom_distiller_service_android.h",
+    ]
     deps += [ ":jni_headers" ]
   }
 }
 
 # GYP version: components/dom_distiller.gypi:dom_distiller_test_support
-static_library("test_support") {
+source_set("test_support") {
   testonly = true
   sources = [
     "dom_distiller_test_util.cc",
@@ -81,10 +89,12 @@ static_library("test_support") {
 
   deps = [
     ":core",
+    "//base",
     "//components/leveldb_proto:test_support",
     "//sync",
     "//testing/gmock",
     "//testing/gtest",
+    "//url",
   ]
 }
 
@@ -107,8 +117,14 @@ source_set("unit_tests") {
   deps = [
     ":core",
     ":test_support",
+    "//base",
+    "//components/leveldb_proto:test_support",
+    "//components/pref_registry:test_support",
+    "//net:test_support",
+    "//sync",
     "//testing/gmock",
     "//testing/gtest",
+    "//url",
   ]
 }
 

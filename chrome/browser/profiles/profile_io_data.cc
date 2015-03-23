@@ -16,15 +16,16 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_network_controller.h"
@@ -42,21 +43,20 @@
 #include "chrome/browser/net/cookie_store_util.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_configurator.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_names_io_thread.h"
+#include "chrome/browser/ui/search/new_tab_page_interceptor_service.h"
+#include "chrome/browser/ui/search/new_tab_page_interceptor_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_config_service.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_configurator.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/common/data_reduction_proxy_switches.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/sync_driver/pref_names.h"
@@ -102,22 +102,21 @@
 #include "extensions/common/constants.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #endif
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
-#include "components/data_reduction_proxy/common/data_reduction_proxy_switches.h"
+#include "content/public/browser/android/content_protocol_handler.h"
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/fileapi/external_file_protocol_handler.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/net/cert_verify_proc_chromeos.h"
+#include "chrome/browser/chromeos/net/client_cert_filter_chromeos.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
@@ -125,9 +124,9 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/net/nss_context.h"
-#include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "chromeos/tpm/tpm_token_info_getter.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "crypto/nss_util.h"
@@ -207,13 +206,10 @@ bool IsSupportedDevToolsURL(const GURL& url, base::FilePath* path) {
 
 class DebugDevToolsInterceptor : public net::URLRequestInterceptor {
  public:
-  DebugDevToolsInterceptor() {}
-  virtual ~DebugDevToolsInterceptor() {}
-
   // net::URLRequestInterceptor implementation.
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     base::FilePath path;
     if (IsSupportedDevToolsURL(request->url(), &path))
       return new net::URLRequestFileJob(
@@ -258,28 +254,28 @@ class DebugDevToolsInterceptor : public net::URLRequestInterceptor {
 //                   v---------------------------------------/
 //     GetTPMInfoForUserOnUIThread
 //                   |
-// CryptohomeClient::Pkcs11GetTpmTokenInfoForUser
+// chromeos::TPMTokenInfoGetter::Start
 //                   |
 //     DidGetTPMInfoForUserOnUIThread
 //                   \---------------------------------------v
 //                                          crypto::InitializeTPMForChromeOSUser
 
-void DidGetTPMInfoForUserOnUIThread(const std::string& username_hash,
-                                    chromeos::DBusMethodCallStatus call_status,
-                                    const std::string& label,
-                                    const std::string& user_pin,
-                                    int slot_id) {
+void DidGetTPMInfoForUserOnUIThread(
+    scoped_ptr<chromeos::TPMTokenInfoGetter> getter,
+    const std::string& username_hash,
+    const chromeos::TPMTokenInfo& info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (call_status == chromeos::DBUS_METHOD_CALL_FAILURE) {
-    NOTREACHED() << "dbus error getting TPM info for " << username_hash;
-    return;
+  if (info.tpm_is_enabled && info.token_slot_id != -1) {
+    DVLOG(1) << "Got TPM slot for " << username_hash << ": "
+             << info.token_slot_id;
+    BrowserThread::PostTask(
+        BrowserThread::IO,
+        FROM_HERE,
+        base::Bind(&crypto::InitializeTPMForChromeOSUser,
+                   username_hash, info.token_slot_id));
+  } else {
+    NOTREACHED() << "TPMTokenInfoGetter reported invalid token.";
   }
-  DVLOG(1) << "Got TPM slot for " << username_hash << ": " << slot_id;
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          &crypto::InitializeTPMForChromeOSUser, username_hash, slot_id));
 }
 
 void GetTPMInfoForUserOnUIThread(const std::string& username,
@@ -287,11 +283,22 @@ void GetTPMInfoForUserOnUIThread(const std::string& username,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DVLOG(1) << "Getting TPM info from cryptohome for "
            << " " << username << " " << username_hash;
-  chromeos::DBusThreadManager::Get()
-      ->GetCryptohomeClient()
-      ->Pkcs11GetTpmTokenInfoForUser(
-            username,
-            base::Bind(&DidGetTPMInfoForUserOnUIThread, username_hash));
+  scoped_ptr<chromeos::TPMTokenInfoGetter> scoped_token_info_getter =
+      chromeos::TPMTokenInfoGetter::CreateForUserToken(
+          username,
+          chromeos::DBusThreadManager::Get()->GetCryptohomeClient(),
+          base::ThreadTaskRunnerHandle::Get());
+  chromeos::TPMTokenInfoGetter* token_info_getter =
+      scoped_token_info_getter.get();
+
+  // Bind |token_info_getter| to the callback to ensure it does not go away
+  // before TPM token info is fetched.
+  // TODO(tbarzic, pneubeck): Handle this in a nicer way when this logic is
+  //     moved to a separate profile service.
+  token_info_getter->Start(
+      base::Bind(&DidGetTPMInfoForUserOnUIThread,
+                 base::Passed(&scoped_token_info_getter),
+                 username_hash));
 }
 
 void StartTPMSlotInitializationOnIOThread(const std::string& username,
@@ -334,6 +341,17 @@ void StartNSSInitOnIOThread(const std::string& username,
   }
 }
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(USE_NSS)
+void InitializeAndPassKeygenHandler(
+    scoped_ptr<net::KeygenHandler> keygen_handler,
+    const base::Callback<void(scoped_ptr<net::KeygenHandler>)>& callback,
+    scoped_ptr<ChromeNSSCryptoModuleDelegate> delegate) {
+  if (delegate)
+    keygen_handler->set_crypto_module_delegate(delegate.Pass());
+  callback.Run(keygen_handler.Pass());
+}
+#endif  // defined(USE_NSS)
 
 void InvalidateContextGettersOnIO(
     scoped_ptr<ProfileIOData::ChromeURLRequestContextGetterVector> getters) {
@@ -382,10 +400,17 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->protocol_handler_interceptor =
       protocol_handler_registry->CreateJobInterceptorFactory();
 
+  NewTabPageInterceptorService* new_tab_interceptor_service =
+      NewTabPageInterceptorServiceFactory::GetForProfile(profile);
+  if (new_tab_interceptor_service) {
+    params->new_tab_page_interceptor =
+        new_tab_interceptor_service->CreateInterceptor();
+  }
+
   params->proxy_config_service
       .reset(ProxyServiceFactory::CreateProxyConfigService(
            profile->GetProxyConfigTracker()));
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
   params->supervised_user_url_filter =
@@ -394,7 +419,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 #if defined(OS_CHROMEOS)
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager) {
-    user_manager::User* user =
+    const user_manager::User* user =
         chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
     // No need to initialize NSS for users with empty username hash:
     // Getters for a user's NSS slots always return NULL slot if the user's
@@ -430,14 +455,12 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       &enable_referrers_,
       &enable_do_not_track_,
       &force_safesearch_,
+      &force_google_safesearch_,
+      &force_youtube_safety_mode_,
       pref_service);
 
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy =
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
-#if defined(ENABLE_PRINTING)
-  printing_enabled_.Init(prefs::kPrintingEnabled, pref_service);
-  printing_enabled_.MoveToThread(io_message_loop_proxy);
-#endif
 
   chrome_http_user_agent_settings_.reset(
       new ChromeHttpUserAgentSettings(pref_service));
@@ -695,7 +718,7 @@ bool ProfileIOData::IsHandledProtocol(const std::string& scheme) {
     content::kChromeUIScheme,
     url::kDataScheme,
 #if defined(OS_CHROMEOS)
-    chrome::kExternalFileScheme,
+    content::kExternalFileScheme,
 #endif  // defined(OS_CHROMEOS)
     url::kAboutScheme,
 #if !defined(DISABLE_FTP_SUPPORT)
@@ -864,9 +887,13 @@ bool ProfileIOData::GetMetricsEnabledStateOnIOThread() const {
 }
 
 bool ProfileIOData::IsDataReductionProxyEnabled() const {
-  return data_reduction_proxy_enabled_.GetValue() ||
-         CommandLine::ForCurrentProcess()->HasSwitch(
-            data_reduction_proxy::switches::kEnableDataReductionProxy);
+  return data_reduction_proxy_io_data()->IsEnabled();
+}
+
+void ProfileIOData::set_data_reduction_proxy_io_data(
+    scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
+        data_reduction_proxy_io_data) const {
+  data_reduction_proxy_io_data_ = data_reduction_proxy_io_data.Pass();
 }
 
 base::WeakPtr<net::HttpServerProperties>
@@ -906,8 +933,8 @@ ProfileIOData::ResourceContext::CreateClientCertStore() {
     return io_data_->client_cert_store_factory_.Run();
 #if defined(OS_CHROMEOS)
   return scoped_ptr<net::ClientCertStore>(new net::ClientCertStoreChromeOS(
-      io_data_->use_system_key_slot(),
-      io_data_->username_hash(),
+      make_scoped_ptr(new chromeos::ClientCertFilterChromeOS(
+          io_data_->use_system_key_slot(), io_data_->username_hash())),
       base::Bind(&CreateCryptoModuleBlockingPasswordDelegate,
                  chrome::kCryptoModulePasswordClientAuth)));
 #elif defined(USE_NSS)
@@ -938,21 +965,16 @@ void ProfileIOData::ResourceContext::CreateKeygenHandler(
   scoped_ptr<net::KeygenHandler> keygen_handler(
       new net::KeygenHandler(key_size_in_bits, challenge_string, url));
 
-  scoped_ptr<ChromeNSSCryptoModuleDelegate> delegate(
-      new ChromeNSSCryptoModuleDelegate(chrome::kCryptoModulePasswordKeygen,
-                                        net::HostPortPair::FromURL(url)));
-  ChromeNSSCryptoModuleDelegate* delegate_ptr = delegate.get();
-  keygen_handler->set_crypto_module_delegate(
-      delegate.PassAs<crypto::NSSCryptoModuleDelegate>());
+  base::Callback<void(scoped_ptr<ChromeNSSCryptoModuleDelegate>)>
+      got_delegate_callback = base::Bind(&InitializeAndPassKeygenHandler,
+                                         base::Passed(&keygen_handler),
+                                         callback);
 
-  base::Closure bound_callback =
-      base::Bind(callback, base::Passed(&keygen_handler));
-  if (delegate_ptr->InitializeSlot(this, bound_callback)) {
-    // Initialization complete, run the callback synchronously.
-    bound_callback.Run();
-    return;
-  }
-  // Otherwise, the InitializeSlot will run the callback asynchronously.
+  ChromeNSSCryptoModuleDelegate::CreateForResourceContext(
+      chrome::kCryptoModulePasswordKeygen,
+      net::HostPortPair::FromURL(url),
+      this,
+      got_delegate_callback);
 #else
   callback.Run(make_scoped_ptr(
       new net::KeygenHandler(key_size_in_bits, challenge_string, url)));
@@ -978,6 +1000,10 @@ std::string ProfileIOData::GetSSLSessionCacheShard() {
 void ProfileIOData::Init(
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init"));
+
   // The basic logic is implemented here. The specific initialization
   // is done in InitializeInternal(), implemented by subtypes. Static helper
   // functions have been provided to assist in common operations.
@@ -995,20 +1021,29 @@ void ProfileIOData::Init(
 
   IOThread* const io_thread = profile_params_->io_thread;
   IOThread::Globals* const io_thread_globals = io_thread->globals();
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init1"));
 
   // Create the common request contexts.
   main_request_context_.reset(new net::URLRequestContext());
   extensions_request_context_.reset(new net::URLRequestContext());
 
-  ChromeNetworkDelegate* network_delegate =
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init2"));
+
+  scoped_ptr<ChromeNetworkDelegate> network_delegate(
       new ChromeNetworkDelegate(
 #if defined(ENABLE_EXTENSIONS)
           io_thread_globals->extension_event_router_forwarder.get(),
 #else
           NULL,
 #endif
-          &enable_referrers_);
+          &enable_referrers_));
   if (command_line.HasSwitch(switches::kEnableClientHints))
     network_delegate->SetEnableClientHints();
 #if defined(ENABLE_EXTENSIONS)
@@ -1022,15 +1057,17 @@ void ProfileIOData::Init(
   network_delegate->set_profile_path(profile_params_->path);
   network_delegate->set_cookie_settings(profile_params_->cookie_settings.get());
   network_delegate->set_enable_do_not_track(&enable_do_not_track_);
-  network_delegate->set_force_google_safe_search(&force_safesearch_);
-  network_delegate->set_data_reduction_proxy_enabled_pref(
-      &data_reduction_proxy_enabled_);
+  network_delegate->set_force_safe_search(&force_safesearch_);
+  network_delegate->set_force_google_safe_search(&force_google_safesearch_);
+  network_delegate->set_force_youtube_safety_mode(&force_youtube_safety_mode_);
   network_delegate->set_prerender_tracker(profile_params_->prerender_tracker);
-  network_delegate_.reset(network_delegate);
-
   fraudulent_certificate_reporter_.reset(
       new chrome_browser_net::ChromeFraudulentCertificateReporter(
           main_request_context_.get()));
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init3"));
 
   // NOTE: Proxy service uses the default io thread network delegate, not the
   // delegate just created.
@@ -1050,6 +1087,10 @@ void ProfileIOData::Init(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
           IsOffTheRecord()));
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init4"));
+
   // Take ownership over these parameters.
   cookie_settings_ = profile_params_->cookie_settings;
   host_content_settings_map_ = profile_params_->host_content_settings_map;
@@ -1065,7 +1106,7 @@ void ProfileIOData::Init(
         profile_params_->resource_prefetch_predictor_observer_.release());
   }
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   supervised_user_url_filter_ = profile_params_->supervised_user_url_filter;
 #endif
 
@@ -1093,8 +1134,19 @@ void ProfileIOData::Init(
       io_thread_globals->cert_verifier.get());
 #endif
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 ProfileIOData::Init5"));
+
+  // Install the New Tab Page Interceptor.
+  if (profile_params_->new_tab_page_interceptor.get()) {
+    request_interceptors.push_back(
+        profile_params_->new_tab_page_interceptor.release());
+  }
+
   InitializeInternal(
-      profile_params_.get(), protocol_handlers, request_interceptors.Pass());
+      network_delegate.Pass(), profile_params_.get(),
+      protocol_handlers, request_interceptors.Pass());
 
   profile_params_.reset();
   initialized_ = true;
@@ -1144,11 +1196,19 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
 #if defined(OS_CHROMEOS)
   if (profile_params_) {
     set_protocol = job_factory->SetProtocolHandler(
-        chrome::kExternalFileScheme,
+        content::kExternalFileScheme,
         new chromeos::ExternalFileProtocolHandler(profile_params_->profile));
     DCHECK(set_protocol);
   }
 #endif  // defined(OS_CHROMEOS)
+#if defined(OS_ANDROID)
+  set_protocol = job_factory->SetProtocolHandler(
+      url::kContentScheme,
+      content::ContentProtocolHandler::Create(
+          content::BrowserThread::GetBlockingPool()->
+              GetTaskRunnerWithShutdownBehavior(
+                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+#endif
 
   job_factory->SetProtocolHandler(
       url::kAboutScheme, new chrome_browser_net::AboutProtocolHandler());
@@ -1164,8 +1224,7 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
 #endif
 
   // Set up interceptors in the reverse order.
-  scoped_ptr<net::URLRequestJobFactory> top_job_factory =
-      job_factory.PassAs<net::URLRequestJobFactory>();
+  scoped_ptr<net::URLRequestJobFactory> top_job_factory = job_factory.Pass();
   for (content::URLRequestInterceptorScopedVector::reverse_iterator i =
            request_interceptors.rbegin();
        i != request_interceptors.rend();
@@ -1177,7 +1236,7 @@ scoped_ptr<net::URLRequestJobFactory> ProfileIOData::SetUpJobFactoryDefaults(
 
   if (protocol_handler_interceptor) {
     protocol_handler_interceptor->Chain(top_job_factory.Pass());
-    return protocol_handler_interceptor.PassAs<net::URLRequestJobFactory>();
+    return protocol_handler_interceptor.Pass();
   } else {
     return top_job_factory.Pass();
   }
@@ -1198,12 +1257,12 @@ void ProfileIOData::ShutdownOnUIThread(
   enable_referrers_.Destroy();
   enable_do_not_track_.Destroy();
   force_safesearch_.Destroy();
+  force_google_safesearch_.Destroy();
+  force_youtube_safety_mode_.Destroy();
 #if !defined(OS_CHROMEOS)
   enable_metrics_.Destroy();
 #endif
   safe_browsing_enabled_.Destroy();
-  data_reduction_proxy_enabled_.Destroy();
-  printing_enabled_.Destroy();
   sync_disabled_.Destroy();
   signin_allowed_.Destroy();
   network_prediction_options_.Destroy();
@@ -1261,9 +1320,11 @@ scoped_ptr<net::HttpCache> ProfileIOData::CreateMainHttpFactory(
   params.ssl_session_cache_shard = GetSSLSessionCacheShard();
   params.ssl_config_service = context->ssl_config_service();
   params.http_auth_handler_factory = context->http_auth_handler_factory();
-  params.network_delegate = network_delegate();
+  params.network_delegate = context->network_delegate();
   params.http_server_properties = context->http_server_properties();
   params.net_log = context->net_log();
+  if (data_reduction_proxy_io_data_.get())
+    params.proxy_delegate = data_reduction_proxy_io_data_->proxy_delegate();
 
   network_controller_.reset(new DevToolsNetworkController());
 

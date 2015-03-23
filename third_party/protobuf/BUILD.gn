@@ -14,21 +14,22 @@ config("protobuf_config") {
     config_h_dir,
   ]
   defines = [
-    "PROTOBUF_USE_DLLS",
     "GOOGLE_PROTOBUF_NO_RTTI",
     "GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER",
   ]
+}
 
-  if (is_win) {
-    # TODO(jschuh): http://crbug.com/167187 size_t -> int.
-    cflags = [ "/wd4267" ]
+if (component_mode == "shared_library") {
+  config("protobuf_use_dlls") {
+    defines = [ "PROTOBUF_USE_DLLS" ]
   }
 }
 
-# This condif should be applied to targets using generated code from the proto
+# This config should be applied to targets using generated code from the proto
 # compiler. It sets up the include directories properly.
 config("using_proto") {
   include_dirs = [
+    "src",
     "$root_gen_dir/protoc_out",
   ]
 }
@@ -84,7 +85,7 @@ if (is_win) {
   ]
 }
 
-source_set("protobuf_lite") {
+component("protobuf_lite") {
   sources = protobuf_lite_sources
 
   configs -= [ "//build/config/compiler:chromium_code" ]
@@ -92,12 +93,19 @@ source_set("protobuf_lite") {
   if (is_win) {
     configs -= [ "//build/config/win:lean_and_mean" ]
   }
-  public_configs = [ ":protobuf_config" ]
+  public_configs = [
+    ":protobuf_config",
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
 
   cflags = protobuf_lite_cflags
 
   # Required for component builds. See http://crbug.com/172800.
-  defines = [ "LIBPROTOBUF_EXPORTS" ]
+  if (component_mode == "shared_library") {
+    public_configs += [ ":protobuf_use_dlls" ]
+    defines = [ "LIBPROTOBUF_EXPORTS" ]
+  }
 }
 
 # This is the full, heavy protobuf lib that's needed for c++ .protos that don't
@@ -131,7 +139,6 @@ source_set("protobuf_full") {
     "src/google/protobuf/compiler/java/java_doc_comment.cc",
     "src/google/protobuf/compiler/java/java_doc_comment.h",
     "src/google/protobuf/compiler/parser.h",
-
     "src/google/protobuf/stubs/strutil.cc",
     "src/google/protobuf/stubs/strutil.h",
     "src/google/protobuf/stubs/substitute.cc",
@@ -142,7 +149,6 @@ source_set("protobuf_full") {
     "src/google/protobuf/stubs/structurally_valid.cc",
     "src/google/protobuf/stubs/template_util.h",
     "src/google/protobuf/stubs/type_traits.h",
-
     "src/google/protobuf/descriptor.cc",
     "src/google/protobuf/descriptor.pb.cc",
     "src/google/protobuf/descriptor_database.cc",
@@ -154,6 +160,7 @@ source_set("protobuf_full") {
     "src/google/protobuf/service.cc",
     "src/google/protobuf/text_format.cc",
     "src/google/protobuf/wire_format.cc",
+
     # This file pulls in zlib, but it's not actually used by protoc, so
     # instead of compiling zlib for the host, let's just exclude this.
     # "src/src/google/protobuf/io/gzip_stream.cc",
@@ -169,7 +176,11 @@ source_set("protobuf_full") {
   if (is_win) {
     configs -= [ "//build/config/win:lean_and_mean" ]
   }
-  public_configs = [ ":protobuf_config" ]
+  public_configs = [
+    ":protobuf_config",
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
 
   cflags = protobuf_lite_cflags
 }
@@ -248,5 +259,6 @@ if (current_toolchain == host_toolchain) {
     deps = [
       ":protobuf_full",
     ]
+    deps += [ "//build/config/sanitizers:deps" ]
   }
 }

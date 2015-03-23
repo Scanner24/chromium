@@ -6,6 +6,7 @@
 
 #include <math.h>
 
+#include "base/i18n/rtl.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
@@ -27,8 +28,12 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/text_utils.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/android/chromium_application.h"
+#endif
 
 namespace autofill {
 
@@ -39,6 +44,7 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
     const PasswordForm& form,
     int max_length,
     password_manager::PasswordManager* password_manager,
+    password_manager::PasswordManagerDriver* driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view) {
@@ -54,13 +60,8 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
 
   PasswordGenerationPopupControllerImpl* controller =
       new PasswordGenerationPopupControllerImpl(
-          bounds,
-          form,
-          max_length,
-          password_manager,
-          observer,
-          web_contents,
-          container_view);
+          bounds, form, max_length, password_manager, driver, observer,
+          web_contents, container_view);
   return controller->GetWeakPtr();
 }
 
@@ -69,12 +70,14 @@ PasswordGenerationPopupControllerImpl::PasswordGenerationPopupControllerImpl(
     const PasswordForm& form,
     int max_length,
     password_manager::PasswordManager* password_manager,
+    password_manager::PasswordManagerDriver* driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view)
     : view_(NULL),
       form_(form),
       password_manager_(password_manager),
+      driver_(driver),
       observer_(observer),
       generator_(new PasswordGenerator(max_length)),
       controller_common_(bounds, container_view, web_contents),
@@ -146,11 +149,8 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
   if (!display_password_)
     return;
 
-  web_contents()->GetRenderViewHost()->Send(
-      new AutofillMsg_GeneratedPasswordAccepted(
-          web_contents()->GetRenderViewHost()->GetRoutingID(),
-          current_password_));
-  password_manager_->SetFormHasGeneratedPassword(form_);
+  driver_->GeneratedPasswordAccepted(current_password_);
+  password_manager_->SetFormHasGeneratedPassword(driver_, form_);
   Hide();
 }
 
@@ -177,6 +177,13 @@ void PasswordGenerationPopupControllerImpl::Show(bool display_password) {
 
   if (!view_) {
     view_ = PasswordGenerationPopupView::Create(this);
+
+    // Treat popup as being hidden if creation fails.
+    if (!view_) {
+      Hide();
+      return;
+    }
+
     CalculateBounds();
     view_->Show();
   } else {
@@ -213,9 +220,13 @@ void PasswordGenerationPopupControllerImpl::ViewDestroyed() {
 }
 
 void PasswordGenerationPopupControllerImpl::OnSavedPasswordsLinkClicked() {
+#if defined(OS_ANDROID)
+  chrome::android::ChromiumApplication::ShowPasswordSettings();
+#else
   chrome::ShowSettingsSubPage(
       chrome::FindBrowserWithWebContents(controller_common_.web_contents()),
       chrome::kPasswordManagerSubPage);
+#endif
 }
 
 void PasswordGenerationPopupControllerImpl::SetSelectionAtPoint(
@@ -241,6 +252,15 @@ gfx::NativeView PasswordGenerationPopupControllerImpl::container_view() {
 
 const gfx::Rect& PasswordGenerationPopupControllerImpl::popup_bounds() const {
   return popup_bounds_;
+}
+
+const gfx::RectF& PasswordGenerationPopupControllerImpl::element_bounds()
+    const {
+  return controller_common_.element_bounds();
+}
+
+bool PasswordGenerationPopupControllerImpl::IsRTL() const {
+  return base::i18n::IsRTL();
 }
 
 bool PasswordGenerationPopupControllerImpl::display_password() const {

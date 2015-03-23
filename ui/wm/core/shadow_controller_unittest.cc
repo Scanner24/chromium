@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/window.h"
@@ -25,9 +26,9 @@ namespace wm {
 class ShadowControllerTest : public aura::test::AuraTestBase {
  public:
   ShadowControllerTest() {}
-  virtual ~ShadowControllerTest() {}
+  ~ShadowControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     wm_state_.reset(new wm::WMState);
     AuraTestBase::SetUp();
     new wm::DefaultActivationClient(root_window());
@@ -35,7 +36,7 @@ class ShadowControllerTest : public aura::test::AuraTestBase {
         aura::client::GetActivationClient(root_window());
     shadow_controller_.reset(new ShadowController(activation_client));
   }
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     shadow_controller_.reset();
     AuraTestBase::TearDown();
     wm_state_.reset();
@@ -152,6 +153,30 @@ TEST_F(ShadowControllerTest, ShadowStyle) {
   ASSERT_TRUE(shadow2 != NULL);
   EXPECT_EQ(Shadow::STYLE_INACTIVE, shadow1->style());
   EXPECT_EQ(Shadow::STYLE_ACTIVE, shadow2->style());
+}
+
+// Tests that shadow gets updated when the window show state chagnes.
+TEST_F(ShadowControllerTest, ShowState) {
+  ShadowController::TestApi api(shadow_controller());
+
+  scoped_ptr<aura::Window> window(new aura::Window(NULL));
+  window->SetType(ui::wm::WINDOW_TYPE_NORMAL);
+  window->Init(aura::WINDOW_LAYER_TEXTURED);
+  ParentWindow(window.get());
+  window->Show();
+
+  Shadow* shadow = api.GetShadowForWindow(window.get());
+  ASSERT_TRUE(shadow != NULL);
+  EXPECT_EQ(Shadow::STYLE_INACTIVE, shadow->style());
+
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  EXPECT_FALSE(shadow->layer()->visible());
+
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  EXPECT_TRUE(shadow->layer()->visible());
+
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
+  EXPECT_FALSE(shadow->layer()->visible());
 }
 
 // Tests that we use smaller shadows for tooltips and menus.

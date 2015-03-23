@@ -9,10 +9,12 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
 #include "components/metrics/daily_event.h"
+#include "components/rappor/rappor_parameters.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -23,15 +25,15 @@ class URLRequestContextGetter;
 
 namespace rappor {
 
-class LogUploader;
+class LogUploaderInterface;
 class RapporMetric;
 class RapporReports;
-struct RapporParameters;
 
 // The type of data stored in a metric.
 enum RapporType {
   // For sampling the eTLD+1 of a URL.
   ETLD_PLUS_ONE_RAPPOR_TYPE = 0,
+  COARSE_RAPPOR_TYPE,
   NUM_RAPPOR_TYPES
 };
 
@@ -42,15 +44,24 @@ class RapporService {
   // Constructs a RapporService.
   // Calling code is responsible for ensuring that the lifetime of
   // |pref_service| is longer than the lifetime of RapporService.
-  explicit RapporService(PrefService* pref_service);
+  // |is_incognito_callback| will be called to test if incognito mode is active.
+  RapporService(PrefService* pref_service,
+                const base::Callback<bool(void)> is_incognito_callback);
   virtual ~RapporService();
 
   // Add an observer for collecting daily metrics.
   void AddDailyObserver(scoped_ptr<metrics::DailyEvent::Observer> observer);
 
-  // Starts the periodic generation of reports and upload attempts.
-  void Start(net::URLRequestContextGetter* context,
-             bool metrics_enabled);
+  // Initializes the rappor service, including loading the cohort and secret
+  // preferences from disk.
+  void Initialize(net::URLRequestContextGetter* context);
+
+  // Updates the settings for metric recording and uploading.
+  // The RapporService must be initialized before this method is called.
+  // If |recording_level| > REPORTING_DISABLED, periodic reports will be
+  // generated and queued for upload.
+  // If |may_upload| is true, reports will be uploaded from the queue.
+  void Update(RecordingLevel recording_level, bool may_upload);
 
   // Records a sample of the rappor metric specified by |metric_name|.
   // Creates and initializes the metric, if it doesn't yet exist.
@@ -58,31 +69,31 @@ class RapporService {
                     RapporType type,
                     const std::string& sample);
 
-  // Sets the cohort value. For use by tests only.
-  void SetCohortForTesting(uint32_t cohort) { cohort_ = cohort; }
-
-  // Sets the secret value. For use by tests only.
-  void SetSecretForTesting(const std::string& secret) { secret_ = secret; }
-
   // Registers the names of all of the preferences used by RapporService in the
   // provided PrefRegistry. This should be called before calling Start().
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
  protected:
-  // Retrieves the cohort number this client was assigned to, generating it if
-  // doesn't already exist. The cohort should be persistent.
-  void LoadCohort();
+  // Initializes the state of the RapporService.
+  void InitializeInternal(scoped_ptr<LogUploaderInterface> uploader,
+                          int32_t cohort,
+                          const std::string& secret);
 
-  // Retrieves the value for secret_ from preferences, generating it if doesn't
-  // already exist. The secret should be persistent, so that additional bits
-  // from the client do not get exposed over time.
-  void LoadSecret();
+  // Sets the recording level.
+  void SetRecordingLevel(RecordingLevel parameters);
+
+  // Cancels the next call to OnLogInterval.
+  virtual void CancelNextLogRotation();
+
+  // Schedules the next call to OnLogInterval.
+  virtual void ScheduleNextLogRotation(base::TimeDelta interval);
 
   // Logs all of the collected metrics to the reports proto message and clears
   // the internal map. Exposed for tests. Returns true if any metrics were
   // recorded.
   bool ExportMetrics(RapporReports* reports);
 
+ private:
   // Records a sample of the rappor metric specified by |parameters|.
   // Creates and initializes the metric, if it doesn't yet exist.
   // Exposed for tests.
@@ -90,8 +101,7 @@ class RapporService {
                             const RapporParameters& parameters,
                             const std::string& sample);
 
- private:
-  // Check if the service has been started successfully.
+  // Checks if the service has been started successfully.
   bool IsInitialized() const;
 
   // Called whenever the logging interval elapses to generate a new log of
@@ -106,6 +116,9 @@ class RapporService {
   // A weak pointer to the PrefService used to read and write preferences.
   PrefService* pref_service_;
 
+  // A callback for testing if incognito mode is active;
+  const base::Callback<bool(void)> is_incognito_callback_;
+
   // Client-side secret used to generate fake bits.
   std::string secret_;
 
@@ -119,7 +132,10 @@ class RapporService {
   metrics::DailyEvent daily_event_;
 
   // A private LogUploader instance for sending reports to the server.
-  scoped_ptr<LogUploader> uploader_;
+  scoped_ptr<LogUploaderInterface> uploader_;
+
+  // What reporting level of metrics are being reported.
+  RecordingLevel recording_level_;
 
   // We keep all registered metrics in a map, from name to metric.
   // The map owns the metrics it contains.

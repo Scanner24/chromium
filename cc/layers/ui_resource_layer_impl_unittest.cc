@@ -32,7 +32,7 @@ scoped_ptr<UIResourceLayerImpl> GenerateUIResourceLayer(
   layer->draw_properties().visible_content_rect = visible_content_rect;
   layer->SetBounds(layer_size);
   layer->SetContentBounds(layer_size);
-  layer->CreateRenderSurface();
+  layer->SetHasRenderSurface(true);
   layer->draw_properties().render_target = layer.get();
 
   UIResourceBitmap bitmap(bitmap_size, opaque);
@@ -45,11 +45,10 @@ scoped_ptr<UIResourceLayerImpl> GenerateUIResourceLayer(
 
 void QuadSizeTest(scoped_ptr<UIResourceLayerImpl> layer,
                   size_t expected_quad_size) {
-  MockOcclusionTracker<LayerImpl> occlusion_tracker;
   scoped_ptr<RenderPass> render_pass = RenderPass::Create();
 
   AppendQuadsData data;
-  layer->AppendQuads(render_pass.get(), occlusion_tracker, &data);
+  layer->AppendQuads(render_pass.get(), &data);
 
   // Verify quad rects
   const QuadList& quads = render_pass->quad_list;
@@ -86,11 +85,10 @@ TEST(UIResourceLayerImplTest, VerifyDrawQuads) {
 
 void OpaqueBoundsTest(scoped_ptr<UIResourceLayerImpl> layer,
                  const gfx::Rect& expected_opaque_bounds) {
-  MockOcclusionTracker<LayerImpl> occlusion_tracker;
   scoped_ptr<RenderPass> render_pass = RenderPass::Create();
 
   AppendQuadsData data;
-  layer->AppendQuads(render_pass.get(), occlusion_tracker, &data);
+  layer->AppendQuads(render_pass.get(), &data);
 
   // Verify quad rects
   const QuadList& quads = render_pass->quad_list;

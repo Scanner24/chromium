@@ -40,7 +40,6 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
   functions->fCompileShader = glCompileShader;
   functions->fCompressedTexImage2D = glCompressedTexImage2D;
   functions->fCopyTexSubImage2D = glCopyTexSubImage2D;
-  functions->fCopyTextureCHROMIUM = glCopyTextureCHROMIUM;
   functions->fCreateProgram = glCreateProgram;
   functions->fCreateShader = glCreateShader;
   functions->fCullFace = glCullFace;
@@ -70,6 +69,7 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
   functions->fGetProgramiv = glGetProgramiv;
   functions->fGetShaderInfoLog = glGetShaderInfoLog;
   functions->fGetShaderiv = glGetShaderiv;
+  functions->fGetShaderPrecisionFormat = glGetShaderPrecisionFormat;
   functions->fGetString = glGetString;
   functions->fGetUniformLocation = glGetUniformLocation;
   functions->fInsertEventMarker = glInsertEventMarkerEXT;
@@ -116,6 +116,9 @@ GrGLInterface* CreateCommandBufferSkiaGLBinding() {
   functions->fUnmapBufferSubData = glUnmapBufferSubDataCHROMIUM;
   functions->fUnmapTexSubImage2D = glUnmapTexSubImage2DCHROMIUM;
   functions->fUseProgram = glUseProgram;
+  functions->fVertexAttrib1f = glVertexAttrib1f;
+  functions->fVertexAttrib2fv = glVertexAttrib2fv;
+  functions->fVertexAttrib3fv = glVertexAttrib3fv;
   functions->fVertexAttrib4fv = glVertexAttrib4fv;
   functions->fVertexAttribPointer = glVertexAttribPointer;
   functions->fViewport = glViewport;

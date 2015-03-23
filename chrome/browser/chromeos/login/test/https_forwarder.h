@@ -17,14 +17,13 @@ namespace chromeos {
 class HTTPSForwarder : public net::LocalTestServer {
  public:
   explicit HTTPSForwarder(const GURL& forward_target);
-  virtual ~HTTPSForwarder();
+  ~HTTPSForwarder() override;
 
   // net::LocalTestServer:
-  virtual bool SetPythonPath() const OVERRIDE;
-  virtual bool GetTestServerPath(
-      base::FilePath* testserver_path) const OVERRIDE;
-  virtual bool GenerateAdditionalArguments(
-      base::DictionaryValue* arguments) const OVERRIDE;
+  bool SetPythonPath() const override;
+  bool GetTestServerPath(base::FilePath* testserver_path) const override;
+  bool GenerateAdditionalArguments(
+      base::DictionaryValue* arguments) const override;
 
  private:
   GURL forward_target_;

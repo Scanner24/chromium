@@ -8,8 +8,8 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "gpu/command_buffer/service/in_process_command_buffer.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 class SkCanvas;
 
@@ -31,34 +31,15 @@ namespace content {
 class SynchronousCompositorClient;
 class WebContents;
 
-struct CONTENT_EXPORT SynchronousCompositorMemoryPolicy {
-  // Memory limit for rendering and pre-rendering.
-  size_t bytes_limit;
-
-  // Limit of number of GL resources used for rendering and pre-rendering.
-  size_t num_resources_limit;
-
-  SynchronousCompositorMemoryPolicy();
-
-  bool operator==(const SynchronousCompositorMemoryPolicy& other) const;
-  bool operator!=(const SynchronousCompositorMemoryPolicy& other) const;
-};
-
 // Interface for embedders that wish to direct compositing operations
 // synchronously under their own control. Only meaningful when the
 // kEnableSyncrhonousRendererCompositor flag is specified.
 class CONTENT_EXPORT SynchronousCompositor {
  public:
   // Must be called once per WebContents instance. Will create the compositor
-  // instance as needed, but only if |client| is non-NULL.
+  // instance as needed, but only if |client| is non-nullptr.
   static void SetClientForWebContents(WebContents* contents,
                                       SynchronousCompositorClient* client);
-
-  // Allows changing or resetting the client to NULL (this must be used if
-  // the client is being deleted prior to the DidDestroyCompositor() call
-  // being received by the client). Ownership of |client| remains with
-  // the caller.
-  virtual void SetClient(SynchronousCompositorClient* client) = 0;
 
   static void SetGpuService(
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service);
@@ -99,8 +80,7 @@ class CONTENT_EXPORT SynchronousCompositor {
   virtual bool DemandDrawSw(SkCanvas* canvas) = 0;
 
   // Set the memory limit policy of this compositor.
-  virtual void SetMemoryPolicy(
-      const SynchronousCompositorMemoryPolicy& policy) = 0;
+  virtual void SetMemoryPolicy(size_t bytes_limit) = 0;
 
   // Should be called by the embedder after the embedder had modified the
   // scroll offset of the root layer (as returned by

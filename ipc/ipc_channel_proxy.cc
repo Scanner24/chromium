@@ -50,6 +50,14 @@ void ChannelProxy::Context::ClearIPCTaskRunner() {
   ipc_task_runner_ = NULL;
 }
 
+void ChannelProxy::Context::SetListenerTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  DCHECK(ipc_task_runner_.get() != task_runner.get());
+  DCHECK(listener_task_runner_->BelongsToCurrentThread());
+  DCHECK(task_runner->BelongsToCurrentThread());
+  listener_task_runner_ = task_runner;
+}
+
 void ChannelProxy::Context::CreateChannel(scoped_ptr<ChannelFactory> factory) {
   DCHECK(!channel_);
   channel_id_ = factory->GetName();
@@ -428,13 +436,20 @@ void ChannelProxy::RemoveFilter(MessageFilter* filter) {
                             make_scoped_refptr(filter)));
 }
 
+void ChannelProxy::SetListenerTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  DCHECK(CalledOnValidThread());
+
+  context()->SetListenerTaskRunner(task_runner);
+}
+
 void ChannelProxy::ClearIPCTaskRunner() {
   DCHECK(CalledOnValidThread());
 
   context()->ClearIPCTaskRunner();
 }
 
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#if defined(OS_POSIX) && !defined(OS_NACL_SFI)
 // See the TODO regarding lazy initialization of the channel in
 // ChannelProxy::Init().
 int ChannelProxy::GetClientFileDescriptor() {
@@ -446,7 +461,7 @@ int ChannelProxy::GetClientFileDescriptor() {
   return channel->GetClientFileDescriptor();
 }
 
-int ChannelProxy::TakeClientFileDescriptor() {
+base::ScopedFD ChannelProxy::TakeClientFileDescriptor() {
   DCHECK(CalledOnValidThread());
 
   Channel* channel = context_.get()->channel_.get();

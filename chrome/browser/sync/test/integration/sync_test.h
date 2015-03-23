@@ -12,6 +12,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/process/process.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_status_code.h"
@@ -21,10 +23,10 @@
 #include "sync/test/fake_server/fake_server.h"
 #include "sync/test/local_sync_test_server.h"
 
-class Profile;
 class ProfileSyncService;
 class ProfileSyncServiceHarness;
 class P2PInvalidationForwarder;
+class P2PSyncRefresher;
 
 namespace base {
 class CommandLine;
@@ -37,7 +39,6 @@ class FakeServerInvalidationService;
 
 namespace net {
 class FakeURLFetcherFactory;
-class ProxyConfig;
 class ScopedDefaultHostResolverProc;
 class URLFetcherImplFactory;
 class URLRequestContextGetter;
@@ -95,35 +96,20 @@ class SyncTest : public InProcessBrowserTest {
                             // LOCAL_PYTHON_SERVER.
   };
 
-  // NOTE: IMPORTANT the enum here should match with
-  // the enum defined on the chromiumsync.py test server impl.
-  enum SyncErrorFrequency {
-    // Uninitialized state.
-    ERROR_FREQUENCY_NONE,
-
-    // Server sends the error on all requests.
-    ERROR_FREQUENCY_ALWAYS,
-
-    // Server sends the error on two thirds of the request.
-    // Note this is not random. The server would send the
-    // error on the first 2 requests of every 3 requests.
-    ERROR_FREQUENCY_TWO_THIRDS
-  };
-
   // A SyncTest must be associated with a particular test type.
   explicit SyncTest(TestType test_type);
 
-  virtual ~SyncTest();
+  ~SyncTest() override;
 
   // Validates command line parameters and creates a local python test server if
   // specified.
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   // Brings down local python test server if one was created.
-  virtual void TearDown() OVERRIDE;
+  void TearDown() override;
 
   // Sets up command line flags required for sync tests.
-  virtual void SetUpCommandLine(base::CommandLine* cl) OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* cl) override;
 
   // Used to get the number of sync clients used by a test.
   int num_clients() WARN_UNUSED_RESULT { return num_clients_; }
@@ -169,12 +155,6 @@ class SyncTest : public InProcessBrowserTest {
 
   // Initializes sync clients and profiles if required and syncs each of them.
   virtual bool SetupSync() WARN_UNUSED_RESULT;
-
-  // Enable outgoing network connections for the given profile.
-  virtual void EnableNetwork(Profile* profile);
-
-  // Disable outgoing network connections for the given profile.
-  virtual void DisableNetwork(Profile* profile);
 
   // Sets whether or not the sync clients in this test should respond to
   // notifications of their own commits.  Real sync clients do not do this, but
@@ -228,19 +208,9 @@ class SyncTest : public InProcessBrowserTest {
   // only if ServerSupportsErrorTriggering() returned true.
   void TriggerMigrationDoneError(syncer::ModelTypeSet model_types);
 
-  // Triggers a transient error on the server. Note the server will stay in
-  // this state until shut down.
-  void TriggerTransientError();
-
   // Triggers an XMPP auth error on the server.  Note the server will
   // stay in this state until shut down.
   void TriggerXmppAuthError();
-
-  // Triggers a sync error on the server.
-  //   error: The error the server is expected to return.
-  //   frequency: Frequency with which the error is returned.
-  void TriggerSyncError(const syncer::SyncProtocolError& error,
-                        SyncErrorFrequency frequency);
 
   // Triggers the creation the Synced Bookmarks folder on the server.
   void TriggerCreateSyncedBookmarks();
@@ -259,15 +229,15 @@ class SyncTest : public InProcessBrowserTest {
 
   // BrowserTestBase override. Destroys all the sync clients and sync
   // profiles created by a test.
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void TearDownOnMainThread() override;
 
   // InProcessBrowserTest override. Changes behavior of the default host
   // resolver to avoid DNS lookup errors.
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  void SetUpInProcessBrowserTestFixture() override;
 
   // InProcessBrowserTest override. Resets the host resolver its default
   // behavior.
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
+  void TearDownInProcessBrowserTestFixture() override;
 
   // Creates Profile, Browser and ProfileSyncServiceHarness instances for
   // |index|. Used by SetupClients().
@@ -291,8 +261,19 @@ class SyncTest : public InProcessBrowserTest {
   scoped_ptr<fake_server::FakeServer> fake_server_;
 
  private:
-  // Helper to ProfileManager::CreateProfile that handles path creation.
+  // Helper to Profile::CreateProfile that handles path creation. It creates
+  // a profile then registers it as a testing profile.
   static Profile* MakeProfile(const base::FilePath::StringType name);
+
+  // Helper to ProfileManager::CreateProfileAsync that creates a new profile
+  // used for UI Signin. Blocks until profile is created.
+  static Profile* MakeProfileForUISignin(const base::FilePath::StringType name);
+
+  // Callback for CreateNewProfile() method. It runs the quit_closure once
+  // profile is created successfully.
+  static void CreateProfileCallback(const base::Closure& quit_closure,
+                                    Profile* profile,
+                                    Profile::CreateStatus status);
 
   // Helper method used to read GAIA credentials from a local password file
   // specified via the "--password-file-for-test" command line switch.
@@ -328,11 +309,6 @@ class SyncTest : public InProcessBrowserTest {
 
   // Helper method used to check if the test server is up and running.
   bool IsTestServerRunning();
-
-  // Used to disable and enable network connectivity by providing and
-  // clearing an invalid proxy configuration.
-  void SetProxyConfig(net::URLRequestContextGetter* context,
-                      const net::ProxyConfig& proxy_config);
 
   void SetupNetwork(net::URLRequestContextGetter* context);
 
@@ -390,6 +366,10 @@ class SyncTest : public InProcessBrowserTest {
   // of this activity to its peer sync clients.
   ScopedVector<P2PInvalidationForwarder> invalidation_forwarders_;
 
+  // A set of objects to listen for commit activity and broadcast refresh
+  // notifications of this activity to its peer sync clients.
+  ScopedVector<P2PSyncRefresher> sync_refreshers_;
+
   // Collection of pointers to FakeServerInvalidation objects for each profile.
   std::vector<fake_server::FakeServerInvalidationService*>
       fake_server_invalidation_services_;
@@ -413,7 +393,7 @@ class SyncTest : public InProcessBrowserTest {
   scoped_ptr<net::ScopedDefaultHostResolverProc> mock_host_resolver_override_;
 
   // Used to start and stop the local test server.
-  base::ProcessHandle test_server_handle_;
+  base::Process test_server_;
 
   // Fake URLFetcher factory used to mock out GAIA signin.
   scoped_ptr<net::FakeURLFetcherFactory> fake_factory_;

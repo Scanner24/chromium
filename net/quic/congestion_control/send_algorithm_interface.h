@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "net/base/net_export.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_bandwidth.h"
 #include "net/quic/quic_clock.h"
 #include "net/quic/quic_config.h"
@@ -29,19 +30,21 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   typedef std::vector<std::pair<QuicPacketSequenceNumber, TransmissionInfo>>
       CongestionVector;
 
-  static SendAlgorithmInterface* Create(const QuicClock* clock,
-                                        const RttStats* rtt_stats,
-                                        CongestionControlType type,
-                                        QuicConnectionStats* stats);
+  static SendAlgorithmInterface* Create(
+      const QuicClock* clock,
+      const RttStats* rtt_stats,
+      CongestionControlType type,
+      QuicConnectionStats* stats,
+      QuicPacketCount initial_congestion_window);
 
   virtual ~SendAlgorithmInterface() {}
 
-  virtual void SetFromConfig(const QuicConfig& config, bool is_server) = 0;
+  virtual void SetFromConfig(
+      const QuicConfig& config, bool is_server, bool using_pacing) = 0;
 
-  // Called when we receive congestion feedback from remote peer.
-  virtual void OnIncomingQuicCongestionFeedbackFrame(
-      const QuicCongestionFeedbackFrame& feedback,
-      QuicTime feedback_receive_time) = 0;
+  // Sets the number of connections to emulate when doing congestion control,
+  // particularly for congestion avoidance.  Can be set any time.
+  virtual void SetNumEmulatedConnections(int num_connections) = 0;
 
   // Indicates an update to the congestion state, caused either by an incoming
   // ack or loss event timeout.  |rtt_updated| indicates whether a new
@@ -78,6 +81,9 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
       QuicByteCount bytes_in_flight,
       HasRetransmittableData has_retransmittable_data) const = 0;
 
+  // The pacing rate of the send algorithm.  May be zero if the rate is unknown.
+  virtual QuicBandwidth PacingRate() const = 0;
+
   // What's the current estimated bandwidth in bytes per second.
   // Returns 0 when it does not have an estimate.
   virtual QuicBandwidth BandwidthEstimate() const = 0;
@@ -108,6 +114,11 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   virtual QuicByteCount GetSlowStartThreshold() const = 0;
 
   virtual CongestionControlType GetCongestionControlType() const = 0;
+
+  // Called by the Session when we get a bandwidth estimate from the client.
+  // Returns true if initial connection state is changed as a result.
+  virtual bool ResumeConnectionState(
+      const CachedNetworkParameters& cached_network_params) = 0;
 };
 
 }  // namespace net

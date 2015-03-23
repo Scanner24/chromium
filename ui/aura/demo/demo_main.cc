@@ -7,6 +7,8 @@
 #include "base/i18n/icu_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/power_monitor/power_monitor.h"
+#include "base/power_monitor/power_monitor_device_source.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/window_tree_client.h"
@@ -20,7 +22,7 @@
 #include "ui/compositor/test/in_process_context_factory.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gl/gl_surface.h"
 
 #if defined(USE_X11)
@@ -39,38 +41,35 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   explicit DemoWindowDelegate(SkColor color) : color_(color) {}
 
   // Overridden from WindowDelegate:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE {
-    return gfx::Size();
-  }
+  gfx::Size GetMinimumSize() const override { return gfx::Size(); }
 
-  virtual gfx::Size GetMaximumSize() const OVERRIDE {
-    return gfx::Size();
-  }
+  gfx::Size GetMaximumSize() const override { return gfx::Size(); }
 
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds) OVERRIDE {}
-  virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE {
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override {}
+  ui::TextInputClient* GetFocusedTextInputClient() override { return nullptr; }
+  gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
-  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE {
+  int GetNonClientComponent(const gfx::Point& point) const override {
     return HTCAPTION;
   }
-  virtual bool ShouldDescendIntoChildForEventHandling(
+  bool ShouldDescendIntoChildForEventHandling(
       aura::Window* child,
-      const gfx::Point& location) OVERRIDE {
+      const gfx::Point& location) override {
     return true;
   }
-  virtual bool CanFocus() OVERRIDE { return true; }
-  virtual void OnCaptureLost() OVERRIDE {}
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  bool CanFocus() override { return true; }
+  void OnCaptureLost() override {}
+  void OnPaint(gfx::Canvas* canvas) override {
     canvas->DrawColor(color_, SkXfermode::kSrc_Mode);
   }
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {}
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {}
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {}
-  virtual bool HasHitTestMask() const OVERRIDE { return false; }
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {}
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnWindowDestroying(aura::Window* window) override {}
+  void OnWindowDestroyed(aura::Window* window) override {}
+  void OnWindowTargetVisibilityChanged(bool visible) override {}
+  bool HasHitTestMask() const override { return false; }
+  void GetHitTestMask(gfx::Path* mask) const override {}
 
  private:
   SkColor color_;
@@ -84,14 +83,14 @@ class DemoWindowTreeClient : public aura::client::WindowTreeClient {
     aura::client::SetWindowTreeClient(window_, this);
   }
 
-  virtual ~DemoWindowTreeClient() {
-    aura::client::SetWindowTreeClient(window_, NULL);
+  ~DemoWindowTreeClient() override {
+    aura::client::SetWindowTreeClient(window_, nullptr);
   }
 
   // Overridden from aura::client::WindowTreeClient:
-  virtual aura::Window* GetDefaultParent(aura::Window* context,
-                                         aura::Window* window,
-                                         const gfx::Rect& bounds) OVERRIDE {
+  aura::Window* GetDefaultParent(aura::Window* context,
+                                 aura::Window* window,
+                                 const gfx::Rect& bounds) override {
     if (!capture_client_) {
       capture_client_.reset(
           new aura::client::DefaultCaptureClient(window_->GetRootWindow()));
@@ -121,11 +120,16 @@ int DemoMain() {
 #endif
 
   // The ContextFactory must exist before any Compositors are created.
+  bool context_factory_for_test = false;
   scoped_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory());
+      new ui::InProcessContextFactory(context_factory_for_test, nullptr));
+  context_factory->set_use_test_surface(false);
 
   // Create the message-loop here before creating the root window.
   base::MessageLoopForUI message_loop;
+
+  base::PowerMonitor power_monitor(make_scoped_ptr(
+      new base::PowerMonitorDeviceSource));
 
   aura::Env::CreateInstance(true);
   aura::Env::GetInstance()->set_context_factory(context_factory.get());
@@ -173,7 +177,7 @@ int DemoMain() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
 
   // The exit manager is in charge of calling the dtors of singleton objects.
   base::AtExitManager exit_manager;

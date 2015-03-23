@@ -42,7 +42,7 @@ struct DataPackEntry {
 };
 #pragma pack(pop)
 
-COMPILE_ASSERT(sizeof(DataPackEntry) == 6, size_of_entry_must_be_six);
+static_assert(sizeof(DataPackEntry) == 6, "size of entry must be six");
 
 // We're crashing when trying to load a pak file on Windows.  Add some error
 // codes for logging.
@@ -181,8 +181,8 @@ bool DataPack::GetStringPiece(uint16 resource_id,
   // bothering to do right now.
 #if defined(__BYTE_ORDER)
   // Linux check
-  COMPILE_ASSERT(__BYTE_ORDER == __LITTLE_ENDIAN,
-                 datapack_assumes_little_endian);
+  static_assert(__BYTE_ORDER == __LITTLE_ENDIAN,
+                "datapack assumes little endian");
 #elif defined(__BIG_ENDIAN__)
   // Mac check
   #error DataPack assumes little endian
@@ -262,7 +262,7 @@ bool DataPack::WritePack(const base::FilePath& path,
     return false;
   }
 
-  uint8 write_buffer = textEncodingType;
+  uint8 write_buffer = static_cast<uint8>(textEncodingType);
   if (fwrite(&write_buffer, sizeof(uint8), 1, file) != 1) {
     LOG(ERROR) << "Failed to write file text resources encoding";
     base::CloseFile(file);

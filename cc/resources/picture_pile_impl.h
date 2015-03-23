@@ -5,7 +5,6 @@
 #ifndef CC_RESOURCES_PICTURE_PILE_IMPL_H_
 #define CC_RESOURCES_PICTURE_PILE_IMPL_H_
 
-#include <list>
 #include <map>
 #include <set>
 #include <vector>
@@ -13,69 +12,63 @@
 #include "base/time/time.h"
 #include "cc/base/cc_export.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
-#include "cc/resources/picture_pile_base.h"
+#include "cc/resources/picture_pile.h"
+#include "cc/resources/raster_source.h"
 #include "skia/ext/analysis_canvas.h"
 #include "skia/ext/refptr.h"
-#include "third_party/skia/include/core/SkPicture.h"
+
+class SkCanvas;
+class SkPicture;
+class SkPixelRef;
+
+namespace gfx {
+class Rect;
+}
 
 namespace cc {
 
-class CC_EXPORT PicturePileImpl : public PicturePileBase {
+class CC_EXPORT PicturePileImpl : public RasterSource {
  public:
-  static scoped_refptr<PicturePileImpl> Create();
-  static scoped_refptr<PicturePileImpl> CreateFromOther(
-      const PicturePileBase* other);
+  static scoped_refptr<PicturePileImpl> CreateFromPicturePile(
+      const PicturePile* other,
+      bool can_use_lcd_text);
 
-  // Raster a subrect of this PicturePileImpl into the given canvas. It is
-  // assumed that contents_scale has already been applied to this canvas.
-  // Writes the total number of pixels rasterized and the time spent
-  // rasterizing to the stats if the respective pointer is not NULL. When
-  // slow-down-raster-scale-factor is set to a value greater than 1, the
-  // reported rasterize time is the minimum measured value over all runs.
-  void RasterDirect(
-      SkCanvas* canvas,
-      const gfx::Rect& canvas_rect,
-      float contents_scale,
-      RenderingStatsInstrumentation* rendering_stats_instrumentation);
-
-  // Similar to the above RasterDirect method, but this is a convenience method
-  // for when it is known that the raster is going to an intermediate bitmap
-  // that itself will then be blended and thus that a canvas clear is required.
-  // Note that this function may write outside the canvas_rect.
-  void RasterToBitmap(
-      SkCanvas* canvas,
-      const gfx::Rect& canvas_rect,
-      float contents_scale,
-      RenderingStatsInstrumentation* stats_instrumentation) const;
-
-  // Called when analyzing a tile. We can use AnalysisCanvas as
-  // SkDrawPictureCallback, which allows us to early out from analysis.
-  void RasterForAnalysis(
-      skia::AnalysisCanvas* canvas,
-      const gfx::Rect& canvas_rect,
-      float contents_scale,
-      RenderingStatsInstrumentation* stats_instrumentation) const;
-
-  skia::RefPtr<SkPicture> GetFlattenedPicture();
-
-  struct CC_EXPORT Analysis {
-    Analysis();
-    ~Analysis();
-
-    bool is_solid_color;
-    SkColor solid_color;
-  };
-
-  void AnalyzeInRect(const gfx::Rect& content_rect,
-                     float contents_scale,
-                     Analysis* analysis) const;
-
-  void AnalyzeInRect(
+  // RasterSource overrides. See RasterSource header for full description.
+  // When slow-down-raster-scale-factor is set to a value greater than 1, the
+  // reported rasterize time (in stats_instrumentation) is the minimum measured
+  // value over all runs.
+  void PlaybackToCanvas(SkCanvas* canvas,
+                        const gfx::Rect& canvas_rect,
+                        float contents_scale) const override;
+  void PlaybackToSharedCanvas(SkCanvas* canvas,
+                              const gfx::Rect& canvas_rect,
+                              float contents_scale) const override;
+  void PerformSolidColorAnalysis(
       const gfx::Rect& content_rect,
       float contents_scale,
-      Analysis* analysis,
-      RenderingStatsInstrumentation* stats_instrumentation) const;
+      RasterSource::SolidColorAnalysis* analysis) const override;
+  void GatherPixelRefs(const gfx::Rect& content_rect,
+                       float contents_scale,
+                       std::vector<SkPixelRef*>* pixel_refs) const override;
+  bool CoversRect(const gfx::Rect& content_rect,
+                  float contents_scale) const override;
+  void SetShouldAttemptToUseDistanceFieldText() override;
+  bool ShouldAttemptToUseDistanceFieldText() const override;
+  gfx::Size GetSize() const override;
+  bool IsSolidColor() const override;
+  SkColor GetSolidColor() const override;
+  bool HasRecordings() const override;
+  bool CanUseLCDText() const override;
+  scoped_refptr<RasterSource> CreateCloneWithoutLCDText() const override;
 
+  // Tracing functionality.
+  void DidBeginTracing() override;
+  void AsValueInto(base::trace_event::TracedValue* array) const override;
+  skia::RefPtr<SkPicture> GetFlattenedPicture() override;
+  size_t GetPictureMemoryUsage() const override;
+
+  // Iterator used to return SkPixelRefs from this picture pile.
+  // Public for testing.
   class CC_EXPORT PixelRefIterator {
    public:
     PixelRefIterator(const gfx::Rect& content_rect,
@@ -98,18 +91,48 @@ class CC_EXPORT PicturePileImpl : public PicturePileBase {
     std::set<const void*> processed_pictures_;
   };
 
-  void DidBeginTracing();
-
  protected:
   friend class PicturePile;
   friend class PixelRefIterator;
 
+  // TODO(vmpstr): Change this when pictures are split from invalidation info.
+  using PictureMapKey = PicturePile::PictureMapKey;
+  using PictureMap = PicturePile::PictureMap;
+  using PictureInfo = PicturePile::PictureInfo;
+
   PicturePileImpl();
-  explicit PicturePileImpl(const PicturePileBase* other);
-  virtual ~PicturePileImpl();
+  explicit PicturePileImpl(const PicturePile* other, bool can_use_lcd_text);
+  explicit PicturePileImpl(const PicturePileImpl* other, bool can_use_lcd_text);
+  ~PicturePileImpl() override;
+
+  int buffer_pixels() const { return tiling_.border_texels(); }
+
+  // These members are const as this raster source may be in use on another
+  // thread and so should not be touched after construction.
+  const PictureMap picture_map_;
+  const TilingData tiling_;
+  const SkColor background_color_;
+  const bool requires_clear_;
+  const bool can_use_lcd_text_;
+  const bool is_solid_color_;
+  const SkColor solid_color_;
+  const gfx::Rect recorded_viewport_;
+  const bool has_any_recordings_;
+  const bool clear_canvas_with_debug_color_;
+  const float min_contents_scale_;
+  const int slow_down_raster_scale_factor_for_debug_;
+  // TODO(enne/vmiura): this has a read/write race between raster and compositor
+  // threads with multi-threaded Ganesh.  Make this const or remove it.
+  bool should_attempt_to_use_distance_field_text_;
 
  private:
   typedef std::map<const Picture*, Region> PictureRegionMap;
+
+  // Called when analyzing a tile. We can use AnalysisCanvas as
+  // SkDrawPictureCallback, which allows us to early out from analysis.
+  void RasterForAnalysis(skia::AnalysisCanvas* canvas,
+                         const gfx::Rect& canvas_rect,
+                         float contents_scale) const;
 
   void CoalesceRasters(const gfx::Rect& canvas_rect,
                        const gfx::Rect& content_rect,
@@ -121,8 +144,13 @@ class CC_EXPORT PicturePileImpl : public PicturePileBase {
       SkDrawPictureCallback* callback,
       const gfx::Rect& canvas_rect,
       float contents_scale,
-      RenderingStatsInstrumentation* rendering_stats_instrumentation,
       bool is_analysis) const;
+
+  // An internal CanRaster check that goes to the picture_map rather than
+  // using the recorded_viewport hint.
+  bool CanRasterSlowTileCheck(const gfx::Rect& layer_rect) const;
+
+  gfx::Rect PaddedRect(const PictureMapKey& key) const;
 
   DISALLOW_COPY_AND_ASSIGN(PicturePileImpl);
 };

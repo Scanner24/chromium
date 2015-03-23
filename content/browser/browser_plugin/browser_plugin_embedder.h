@@ -39,7 +39,7 @@ struct NativeWebKeyboardEvent;
 
 class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
  public:
-  virtual ~BrowserPluginEmbedder();
+  ~BrowserPluginEmbedder() override;
 
   static BrowserPluginEmbedder* Create(WebContentsImpl* web_contents);
 
@@ -50,7 +50,9 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   void DidSendScreenRects();
 
   // WebContentsObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  bool OnMessageReceived(const IPC::Message& message,
+                         RenderFrameHost* render_frame_host) override;
 
   void DragSourceEndedAt(int client_x, int client_y, int screen_x,
       int screen_y, blink::WebDragOperation operation);
@@ -70,6 +72,13 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   // Used to handle special keyboard events.
   bool HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
+  // Find the given |search_text| in the page. Returns true if the find request
+  // is handled by this browser plugin embedder.
+  bool Find(int request_id,
+            const base::string16& search_text,
+            const blink::WebFindOptions& options);
+  bool StopFinding(StopFindAction action);
+
  private:
   explicit BrowserPluginEmbedder(WebContentsImpl* web_contents);
 
@@ -77,14 +86,20 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
 
   void ClearGuestDragStateIfApplicable();
 
-  bool DidSendScreenRectsCallback(WebContents* guest_web_contents);
+  static bool DidSendScreenRectsCallback(WebContents* guest_web_contents);
 
-  bool SetZoomLevelCallback(double level, WebContents* guest_web_contents);
+  static bool UnlockMouseIfNecessaryCallback(bool* mouse_unlocked,
+                                             WebContents* guest);
 
-  bool UnlockMouseIfNecessaryCallback(bool* mouse_unlocked, WebContents* guest);
+  static bool FindInGuest(int request_id,
+                          const base::string16& search_text,
+                          const blink::WebFindOptions& options,
+                          WebContents* guest);
+  static bool StopFindingInGuest(StopFindAction action, WebContents* guest);
 
   // Message handlers.
-  void OnAttach(int instance_id,
+  void OnAttach(RenderFrameHost* render_frame_host,
+                int instance_id,
                 const BrowserPluginHostMsg_Attach_Params& params);
   void OnPluginAtPositionResponse(int instance_id,
                                   int request_id,

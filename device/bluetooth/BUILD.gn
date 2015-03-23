@@ -7,6 +7,8 @@ import("//tools/grit/grit_rule.gni")
 config("bluetooth_config") {
   if (is_win) {
     ldflags = [
+      "/DELAYLOAD:BluetoothApis.dll",
+
       # Despite MSDN stating that Bthprops.dll contains the
       # symbols declared by bthprops.lib, they actually reside here:
       "/DELAYLOAD:Bthprops.cpl",
@@ -15,7 +17,7 @@ config("bluetooth_config") {
   }
 }
 
-static_library("bluetooth") {
+component("bluetooth") {
   sources = [
     "bluetooth_adapter.cc",
     "bluetooth_adapter.h",
@@ -25,8 +27,14 @@ static_library("bluetooth") {
     "bluetooth_adapter_factory.h",
     "bluetooth_adapter_mac.h",
     "bluetooth_adapter_mac.mm",
+    "bluetooth_adapter_profile_chromeos.cc",
+    "bluetooth_adapter_profile_chromeos.h",
     "bluetooth_adapter_win.cc",
     "bluetooth_adapter_win.h",
+    "bluetooth_audio_sink.cc",
+    "bluetooth_audio_sink.h",
+    "bluetooth_audio_sink_chromeos.cc",
+    "bluetooth_audio_sink_chromeos.h",
     "bluetooth_channel_mac.mm",
     "bluetooth_channel_mac.h",
     "bluetooth_device.cc",
@@ -59,6 +67,12 @@ static_library("bluetooth") {
     "bluetooth_init_win.h",
     "bluetooth_l2cap_channel_mac.mm",
     "bluetooth_l2cap_channel_mac.h",
+    "bluetooth_low_energy_defs_win.cc",
+    "bluetooth_low_energy_defs_win.h",
+    "bluetooth_low_energy_device_mac.h",
+    "bluetooth_low_energy_device_mac.mm",
+    "bluetooth_low_energy_discovery_manager_mac.h",
+    "bluetooth_low_energy_discovery_manager_mac.mm",
     "bluetooth_low_energy_win.cc",
     "bluetooth_low_energy_win.h",
     "bluetooth_pairing_chromeos.cc",
@@ -91,23 +105,21 @@ static_library("bluetooth") {
     "bluetooth_uuid.h",
   ]
 
+  defines = [ "DEVICE_BLUETOOTH_IMPLEMENTATION" ]
+
   all_dependent_configs = [ ":bluetooth_config" ]
 
   deps = [
     ":strings",
     "//base",
-    "//base/third_party/dynamic_annotations",
     "//net",
-    "//third_party/libxml",
     "//ui/base",
-    "//ui/gfx",
-    "//ui/gfx/geometry",
   ]
 
   if (is_chromeos) {
     deps += [
+      "//chromeos",
       "//dbus",
-      #'../../chromeos/chromeos.gyp:chromeos',  TODO(GYP)
     ]
   }
 
@@ -202,6 +214,8 @@ static_library("mocks") {
 
   deps = [
     ":bluetooth",
+    "//base",
+    "//net",
     "//testing/gmock",
   ]
 }

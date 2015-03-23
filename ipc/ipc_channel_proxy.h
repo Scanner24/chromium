@@ -76,7 +76,7 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
       Listener* listener,
       const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner);
 
-  virtual ~ChannelProxy();
+  ~ChannelProxy() override;
 
   // Initializes the channel proxy. Only call this once to initialize a channel
   // proxy that was not initialized in its constructor. If create_pipe_now is
@@ -98,7 +98,7 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
 
   // Send a message asynchronously.  The message is routed to the background
   // thread where it is passed to the IPC::Channel's Send method.
-  virtual bool Send(Message* message) OVERRIDE;
+  bool Send(Message* message) override;
 
   // Used to intercept messages as they are received on the background thread.
   //
@@ -112,6 +112,12 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
   void AddFilter(MessageFilter* filter);
   void RemoveFilter(MessageFilter* filter);
 
+  // Set the task runner on which dispatched messages are posted. Both the new
+  // task runner and the existing task runner must run on the same thread, and
+  // must belong to the calling thread.
+  void SetListenerTaskRunner(
+    scoped_refptr<base::SingleThreadTaskRunner> listener_task_runner);
+
   // Called to clear the pointer to the IPC task runner when it's going away.
   void ClearIPCTaskRunner();
 
@@ -119,11 +125,11 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
   // Returns base::kNullProcessId if the peer is not connected yet.
   base::ProcessId GetPeerPID() const { return context_->peer_pid_; }
 
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#if defined(OS_POSIX) && !defined(OS_NACL_SFI)
   // Calls through to the underlying channel's methods.
   int GetClientFileDescriptor();
-  int TakeClientFileDescriptor();
-#endif  // defined(OS_POSIX)
+  base::ScopedFD TakeClientFileDescriptor();
+#endif
 
  protected:
   class Context;
@@ -142,6 +148,8 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
     Context(Listener* listener,
             const scoped_refptr<base::SingleThreadTaskRunner>& ipc_thread);
     void ClearIPCTaskRunner();
+    void SetListenerTaskRunner(
+      scoped_refptr<base::SingleThreadTaskRunner> listener_task_runner);
     base::SingleThreadTaskRunner* ipc_task_runner() const {
       return ipc_task_runner_.get();
     }
@@ -152,12 +160,12 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
 
    protected:
     friend class base::RefCountedThreadSafe<Context>;
-    virtual ~Context();
+    ~Context() override;
 
     // IPC::Listener methods:
-    virtual bool OnMessageReceived(const Message& message) OVERRIDE;
-    virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-    virtual void OnChannelError() OVERRIDE;
+    bool OnMessageReceived(const Message& message) override;
+    void OnChannelConnected(int32 peer_pid) override;
+    void OnChannelError() override;
 
     // Like OnMessageReceived but doesn't try the filters.
     bool OnMessageReceivedNoFilter(const Message& message);
@@ -177,7 +185,7 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
 
    private:
     friend class ChannelProxy;
-    friend class SendCallbackHelper;
+    friend class IpcSecurityTestUtil;
 
     // Create the Channel
     void CreateChannel(scoped_ptr<ChannelFactory> factory);
@@ -225,7 +233,7 @@ class IPC_EXPORT ChannelProxy : public Sender, public base::NonThreadSafe {
   Context* context() { return context_.get(); }
 
  private:
-  friend class SendCallbackHelper;
+  friend class IpcSecurityTestUtil;
 
   // By maintaining this indirection (ref-counted) to our internal state, we
   // can safely be destroyed while the background thread continues to do stuff

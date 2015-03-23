@@ -8,11 +8,14 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/bookmarks/browser/bookmark_client.h"
@@ -41,6 +44,11 @@ void CloneBookmarkNodeImpl(BookmarkModel* model,
                            const BookmarkNode* parent,
                            int index_to_add_at,
                            bool reset_node_times) {
+  // Make sure to not copy non clonable keys.
+  BookmarkNode::MetaInfoMap meta_info_map = element.meta_info_map;
+  for (const std::string& key : model->non_cloned_keys())
+    meta_info_map.erase(key);
+
   if (element.is_url) {
     Time date_added = reset_node_times ? Time::Now() : element.date_added;
     DCHECK(!date_added.is_null());
@@ -50,10 +58,10 @@ void CloneBookmarkNodeImpl(BookmarkModel* model,
                                              element.title,
                                              element.url,
                                              date_added,
-                                             &element.meta_info_map);
+                                             &meta_info_map);
   } else {
     const BookmarkNode* cloned_node = model->AddFolderWithMetaInfo(
-        parent, index_to_add_at, element.title, &element.meta_info_map);
+        parent, index_to_add_at, element.title, &meta_info_map);
     if (!reset_node_times) {
       DCHECK(!element.date_folder_modified.is_null());
       model->SetDateFolderModified(cloned_node, element.date_folder_modified);
@@ -201,6 +209,36 @@ void CopyToClipboard(BookmarkModel* model,
   }
 }
 
+// Updates |title| such that |url| and |title| pair are unique among the
+// children of |parent|.
+void MakeTitleUnique(const BookmarkModel* model,
+                     const BookmarkNode* parent,
+                     const GURL& url,
+                     base::string16* title) {
+  base::hash_set<base::string16> titles;
+  for (int i = 0; i < parent->child_count(); i++) {
+    const BookmarkNode* node = parent->GetChild(i);
+    if (node->is_url() && (url == node->url()) &&
+        StartsWith(node->GetTitle(), *title, false)) {
+      titles.insert(node->GetTitle());
+    }
+  }
+
+  if (titles.find(*title) == titles.end())
+    return;
+
+  for (size_t i = 0; i < titles.size(); i++) {
+    const base::string16 new_title(*title +
+                                   base::ASCIIToUTF16(base::StringPrintf(
+                                       " (%lu)", (unsigned long)(i + 1))));
+    if (titles.find(new_title) == titles.end()) {
+      *title = new_title;
+      return;
+    }
+  }
+  NOTREACHED();
+}
+
 void PasteFromClipboard(BookmarkModel* model,
                         const BookmarkNode* parent,
                         int index) {
@@ -219,6 +257,15 @@ void PasteFromClipboard(BookmarkModel* model,
   if (index == -1)
     index = parent->child_count();
   ScopedGroupBookmarkActions group_paste(model);
+
+  if (bookmark_data.size() == 1 &&
+      model->IsBookmarked(bookmark_data.elements[0].url)) {
+    MakeTitleUnique(model,
+                    parent,
+                    bookmark_data.elements[0].url,
+                    &bookmark_data.elements[0].title);
+  }
+
   CloneBookmarkNode(model, bookmark_data.elements, parent, index, true);
 }
 
@@ -308,6 +355,7 @@ void GetBookmarksMatchingProperties(BookmarkModel* model,
   query_parser::QueryParser parser;
   if (query.word_phrase_query) {
     parser.ParseQueryWords(base::i18n::ToLower(*query.word_phrase_query),
+                           query_parser::MatchingAlgorithm::DEFAULT,
                            &query_words);
     if (query_words.empty())
       return;
@@ -460,6 +508,20 @@ bool IsBookmarkedByUser(BookmarkModel* model, const GURL& url) {
 const BookmarkNode* GetBookmarkNodeByID(const BookmarkModel* model, int64 id) {
   // TODO(sky): TreeNode needs a method that visits all nodes using a predicate.
   return GetNodeByID(model->root_node(), id);
+}
+
+bool IsDescendantOf(const bookmarks::BookmarkNode* node,
+                    const bookmarks::BookmarkNode* root) {
+  return node && node->HasAncestor(root);
+}
+
+bool HasDescendantsOf(const std::vector<const bookmarks::BookmarkNode*>& list,
+                      const bookmarks::BookmarkNode* root) {
+  for (const BookmarkNode* node : list) {
+    if (IsDescendantOf(node, root))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace bookmarks

@@ -26,7 +26,6 @@ const char kDisableGpuVsync[]               = "disable-gpu-vsync";
 
 // Turns on GPU logging (debug build only).
 const char kEnableGPUServiceLogging[]       = "enable-gpu-service-logging";
-const char kEnableGPUClientLogging[]        = "enable-gpu-client-logging";
 
 // Turns on calling TRACE for every GL call.
 const char kEnableGPUServiceTracing[]       = "enable-gpu-service-tracing";
@@ -78,7 +77,7 @@ const char* kGLSwitchesCopiedFromGpuProcessHost[] = {
   kGpuNoContextLost,
   kDisableGLDrawingForTests,
   kOverrideUseGLWithOSMesaForTests,
-  kUseWarp
+  kUseWarp,
 };
 const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches =
     arraysize(kGLSwitchesCopiedFromGpuProcessHost);

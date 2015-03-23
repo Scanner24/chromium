@@ -13,8 +13,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
+#include "components/history/core/browser/history_db_task.h"
 
 class HistoryService;
 
@@ -29,19 +29,19 @@ class HistoryModelWorker : public syncer::ModelSafeWorker {
       syncer::WorkerLoopDestructionObserver* observer);
 
   // syncer::ModelSafeWorker implementation. Called on syncapi SyncerThread.
-  virtual void RegisterForLoopDestruction() OVERRIDE;
-  virtual syncer::ModelSafeGroup GetModelSafeGroup() OVERRIDE;
+  void RegisterForLoopDestruction() override;
+  syncer::ModelSafeGroup GetModelSafeGroup() override;
 
   // Called on history DB thread to register HistoryModelWorker to observe
   // destruction of history backend loop.
   void RegisterOnDBThread();
 
  protected:
-  virtual syncer::SyncerError DoWorkAndWaitUntilDoneImpl(
-      const syncer::WorkCallback& work) OVERRIDE;
+  syncer::SyncerError DoWorkAndWaitUntilDoneImpl(
+      const syncer::WorkCallback& work) override;
 
  private:
-  virtual ~HistoryModelWorker();
+  ~HistoryModelWorker() override;
 
   const base::WeakPtr<HistoryService> history_service_;
   // Helper object to make sure we don't leave tasks running on the history

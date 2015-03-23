@@ -15,7 +15,7 @@
 #include "ash/wm/wm_event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/wm/core/window_animations.h"
@@ -45,11 +45,14 @@ void LockWindowState::OnWMEvent(wm::WindowState* window_state,
     case wm::WM_EVENT_TOGGLE_VERTICAL_MAXIMIZE:
     case wm::WM_EVENT_TOGGLE_HORIZONTAL_MAXIMIZE:
     case wm::WM_EVENT_TOGGLE_MAXIMIZE:
+    case wm::WM_EVENT_CYCLE_SNAP_DOCK_LEFT:
+    case wm::WM_EVENT_CYCLE_SNAP_DOCK_RIGHT:
     case wm::WM_EVENT_CENTER:
     case wm::WM_EVENT_SNAP_LEFT:
     case wm::WM_EVENT_SNAP_RIGHT:
     case wm::WM_EVENT_NORMAL:
     case wm::WM_EVENT_MAXIMIZE:
+    case wm::WM_EVENT_DOCK:
       UpdateWindow(window_state,
                    GetMaximizedOrCenteredWindowType(window_state));
       return;

@@ -14,16 +14,13 @@ namespace chromeos {
 class FakePermissionBrokerClient : public PermissionBrokerClient {
  public:
   FakePermissionBrokerClient();
-  virtual ~FakePermissionBrokerClient();
+  ~FakePermissionBrokerClient() override;
 
-  virtual void Init(dbus::Bus* bus) OVERRIDE;
-  virtual void RequestPathAccess(const std::string& path,
-                                 int interface_id,
-                                 const ResultCallback& callback) OVERRIDE;
-  virtual void RequestUsbAccess(const uint16_t vendor_id,
-                                const uint16_t product_id,
-                                int interface_id,
-                                const ResultCallback& callback) OVERRIDE;
+  void Init(dbus::Bus* bus) override;
+  void RequestPathAccess(const std::string& path,
+                         int interface_id,
+                         const ResultCallback& callback) override;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(FakePermissionBrokerClient);
 };

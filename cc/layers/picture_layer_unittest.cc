@@ -20,14 +20,16 @@ namespace {
 
 class MockContentLayerClient : public ContentLayerClient {
  public:
-  virtual void PaintContents(
-      SkCanvas* canvas,
+  void PaintContents(SkCanvas* canvas,
+                     const gfx::Rect& clip,
+                     PaintingControlSetting picture_control) override {}
+  scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       const gfx::Rect& clip,
-      ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE {}
-  virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
-  virtual bool FillsBoundsCompletely() const OVERRIDE {
-    return false;
-  };
+      PaintingControlSetting picture_control) override {
+    NOTIMPLEMENTED();
+    return DisplayItemList::Create();
+  }
+  bool FillsBoundsCompletely() const override { return false; };
 };
 
 TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
@@ -44,6 +46,10 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
   OcclusionTracker<Layer> occlusion(gfx::Rect(0, 0, 1000, 1000));
   scoped_ptr<ResourceUpdateQueue> queue(new ResourceUpdateQueue);
   layer->Update(queue.get(), &occlusion);
+
+  EXPECT_EQ(0, host->source_frame_number());
+  host->CommitComplete();
+  EXPECT_EQ(1, host->source_frame_number());
 
   layer->SetBounds(gfx::Size(0, 0));
   layer->SavePaintProperties();
@@ -64,41 +70,45 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
     layer->PushPropertiesTo(layer_impl.get());
     EXPECT_FALSE(layer_impl->CanHaveTilings());
     EXPECT_TRUE(layer_impl->bounds() == gfx::Size(0, 0));
-    EXPECT_EQ(gfx::Size(), layer_impl->pile()->tiling_size());
-    EXPECT_FALSE(layer_impl->pile()->HasRecordings());
+    EXPECT_EQ(gfx::Size(), layer_impl->raster_source()->GetSize());
+    EXPECT_FALSE(layer_impl->raster_source()->HasRecordings());
   }
 }
 
 TEST(PictureLayerTest, SuitableForGpuRasterization) {
   MockContentLayerClient client;
   scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
-  PicturePile* pile = layer->GetPicturePileForTesting();
+  FakeLayerTreeHostClient host_client(FakeLayerTreeHostClient::DIRECT_3D);
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create(&host_client);
+  host->SetRootLayer(layer);
+  RecordingSource* recording_source = layer->GetRecordingSourceForTesting();
 
   // Layer is suitable for gpu rasterization by default.
-  EXPECT_TRUE(pile->is_suitable_for_gpu_rasterization());
+  EXPECT_TRUE(recording_source->IsSuitableForGpuRasterization());
   EXPECT_TRUE(layer->IsSuitableForGpuRasterization());
 
   // Veto gpu rasterization.
-  pile->SetUnsuitableForGpuRasterizationForTesting();
-  EXPECT_FALSE(pile->is_suitable_for_gpu_rasterization());
+  recording_source->SetUnsuitableForGpuRasterizationForTesting();
+  EXPECT_FALSE(recording_source->IsSuitableForGpuRasterization());
   EXPECT_FALSE(layer->IsSuitableForGpuRasterization());
 }
 
-TEST(PictureLayerTest, RecordingModes) {
+TEST(PictureLayerTest, UseTileGridSize) {
+  LayerTreeSettings settings;
+  settings.default_tile_grid_size = gfx::Size(123, 123);
+
   MockContentLayerClient client;
   scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
-
-  LayerTreeSettings settings;
   FakeLayerTreeHostClient host_client(FakeLayerTreeHostClient::DIRECT_3D);
   scoped_ptr<FakeLayerTreeHost> host =
       FakeLayerTreeHost::Create(&host_client, settings);
   host->SetRootLayer(layer);
-  EXPECT_EQ(Picture::RECORD_NORMALLY, layer->RecordingMode());
 
-  settings.recording_mode = LayerTreeSettings::RecordWithSkRecord;
-  host = FakeLayerTreeHost::Create(&host_client, settings);
-  host->SetRootLayer(layer);
-  EXPECT_EQ(Picture::RECORD_WITH_SKRECORD, layer->RecordingMode());
+  // Tile-grid is set according to its setting.
+  gfx::Size size =
+      layer->GetRecordingSourceForTesting()->GetTileGridSizeForTesting();
+  EXPECT_EQ(size.width(), 123);
+  EXPECT_EQ(size.height(), 123);
 }
 
 }  // namespace

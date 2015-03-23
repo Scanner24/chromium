@@ -57,6 +57,9 @@
 #undef RootWindow
 #endif  // defined(USE_X11)
 
+#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+#include "ui/events/ozone/chromeos/cursor_controller.h"
+#endif
 
 namespace ash {
 namespace {
@@ -78,6 +81,11 @@ const int64 kAfterDisplayChangeThrottleTimeoutMs = 500;
 const int64 kCycleDisplayThrottleTimeoutMs = 4000;
 const int64 kSwapDisplayThrottleTimeoutMs = 500;
 
+#if defined(USE_OZONE) && defined(OS_CHROMEOS)
+// Add 20% more cursor motion on non-integrated displays.
+const float kCursorMultiplierForExternalDisplays = 1.2f;
+#endif
+
 DisplayManager* GetDisplayManager() {
   return Shell::GetInstance()->display_manager();
 }
@@ -86,7 +94,8 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
                                 const gfx::Display& display) {
   DisplayInfo info = GetDisplayManager()->GetDisplayInfo(display.id());
   aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
-#if defined(OS_CHROMEOS) && defined(USE_X11)
+#if defined(OS_CHROMEOS)
+#if defined(USE_X11)
   // Native window property (Atom in X11) that specifies the display's
   // rotation, scale factor and if it's internal display.  They are
   // read and used by touchpad/mouse driver directly on X (contact
@@ -122,6 +131,16 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
                      kScaleFactorProp,
                      kCARDINAL,
                      100 * display.device_scale_factor());
+#elif defined(USE_OZONE)
+  // Scale all motion on High-DPI displays.
+  float scale = display.device_scale_factor();
+
+  if (!display.IsInternal())
+    scale *= kCursorMultiplierForExternalDisplays;
+
+  ui::CursorController::GetInstance()->SetCursorConfigForWindow(
+      host->GetAcceleratedWidget(), info.rotation(), scale);
+#endif
 #endif
   scoped_ptr<RootWindowTransformer> transformer(
       CreateRootWindowTransformerForDisplay(host->window(), display));
@@ -134,6 +153,19 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
         base::TimeDelta::FromMicroseconds(
             base::Time::kMicrosecondsPerSecond / mode.refresh_rate));
   }
+
+  // Just movnig the display requires the full redraw.
+  // chrome-os-partner:33558.
+  host->compositor()->ScheduleFullRedraw();
+}
+
+void ClearDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
+                                  const gfx::Display& display) {
+#if defined(OS_CHROMEOS) && defined(USE_OZONE)
+  aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
+  ui::CursorController::GetInstance()->ClearCursorConfigForWindow(
+      host->GetAcceleratedWidget());
+#endif
 }
 
 aura::Window* GetWindow(AshWindowTreeHost* ash_host) {
@@ -602,10 +634,10 @@ void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
       primary_tree_host_for_replace_ = host_to_delete;
       return;
     }
-    DCHECK_EQ(1U, window_tree_hosts_.size());
-    primary_display_id = ScreenUtil::GetSecondaryDisplay().id();
-    AshWindowTreeHost* primary_host = host_to_delete;
+    primary_display_id = window_tree_hosts_.begin()->first;
+    CHECK_NE(gfx::Display::kInvalidDisplayID, primary_display_id);
 
+    AshWindowTreeHost* primary_host = host_to_delete;
     // Delete the other host instead.
     host_to_delete = window_tree_hosts_[primary_display_id];
     GetRootWindowSettings(GetWindow(host_to_delete))->display_id = display.id();
@@ -619,6 +651,7 @@ void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
         GetDisplayManager()->GetDisplayForId(primary_display_id),
         DISPLAY_METRIC_BOUNDS);
   }
+  ClearDisplayPropertiesOnHost(host_to_delete, display);
   RootWindowController* controller =
       GetRootWindowController(GetWindow(host_to_delete));
   DCHECK(controller);
@@ -653,7 +686,7 @@ void DisplayController::OnHostResized(const aura::WindowTreeHost* host) {
   }
 }
 
-void DisplayController::CreateOrUpdateNonDesktopDisplay(
+void DisplayController::CreateOrUpdateMirroringDisplay(
     const DisplayInfo& info) {
   switch (GetDisplayManager()->second_display_mode()) {
     case DisplayManager::MIRRORING:
@@ -665,7 +698,7 @@ void DisplayController::CreateOrUpdateNonDesktopDisplay(
   }
 }
 
-void DisplayController::CloseNonDesktopDisplay() {
+void DisplayController::CloseMirroringDisplay() {
   mirror_window_controller_->Close();
   // If cursor_compositing is enabled for large cursor, the cursor window is
   // always on the desktop display (the visible cursor on the non-desktop
@@ -746,7 +779,7 @@ AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(
 
 #if defined(OS_CHROMEOS)
   static bool force_constrain_pointer_to_root =
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAshConstrainPointerToRoot);
   if (base::SysInfo::IsRunningOnChromeOS() || force_constrain_pointer_to_root)
     ash_host->ConfineCursorToRootWindow();

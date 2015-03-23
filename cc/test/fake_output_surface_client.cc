@@ -16,8 +16,8 @@ void FakeOutputSurfaceClient::ReleaseGL() {
     output_surface_->ReleaseContextProvider();
 }
 
-void FakeOutputSurfaceClient::BeginFrame(const BeginFrameArgs& args) {
-  begin_frame_count_++;
+void FakeOutputSurfaceClient::DidSwapBuffers() {
+  swap_count_++;
 }
 
 void FakeOutputSurfaceClient::DidLoseOutputSurface() {

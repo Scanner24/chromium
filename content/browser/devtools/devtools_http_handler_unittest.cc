@@ -11,6 +11,7 @@
 #include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/devtools_http_handler_delegate.h"
 #include "content/public/browser/devtools_target.h"
+#include "content/public/test/test_utils.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/socket/server_socket.h"
@@ -19,7 +20,7 @@
 namespace content {
 namespace {
 
-const int kDummyPort = 4321;
+const uint16 kDummyPort = 4321;
 const base::FilePath::CharType kDevToolsActivePortFileName[] =
     FILE_PATH_LITERAL("DevToolsActivePort");
 
@@ -28,47 +29,44 @@ class DummyServerSocket : public net::ServerSocket {
   DummyServerSocket() {}
 
   // net::ServerSocket "implementation"
-  virtual int Listen(const net::IPEndPoint& address, int backlog) OVERRIDE {
+  int Listen(const net::IPEndPoint& address, int backlog) override {
     return net::OK;
   }
 
-  virtual int ListenWithAddressAndPort(const std::string& ip_address,
-                                       int port,
-                                       int backlog) OVERRIDE {
-    return net::OK;
-  }
-
-  virtual int GetLocalAddress(net::IPEndPoint* address) const OVERRIDE {
+  int GetLocalAddress(net::IPEndPoint* address) const override {
     net::IPAddressNumber number;
     EXPECT_TRUE(net::ParseIPLiteralToNumber("127.0.0.1", &number));
     *address = net::IPEndPoint(number, kDummyPort);
     return net::OK;
   }
 
-  virtual int Accept(scoped_ptr<net::StreamSocket>* socket,
-                     const net::CompletionCallback& callback) OVERRIDE {
+  int Accept(scoped_ptr<net::StreamSocket>* socket,
+             const net::CompletionCallback& callback) override {
     return net::ERR_IO_PENDING;
   }
 };
+
+void QuitFromHandlerThread(const base::Closure& quit_closure) {
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, quit_closure);
+}
 
 class DummyServerSocketFactory
     : public DevToolsHttpHandler::ServerSocketFactory {
  public:
   DummyServerSocketFactory(base::Closure quit_closure_1,
                            base::Closure quit_closure_2)
-      : DevToolsHttpHandler::ServerSocketFactory("", 0, 0),
-        quit_closure_1_(quit_closure_1),
+      : quit_closure_1_(quit_closure_1),
         quit_closure_2_(quit_closure_2) {}
 
-  virtual ~DummyServerSocketFactory() {
+  ~DummyServerSocketFactory() override {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE, quit_closure_2_);
   }
 
- private:
-  virtual scoped_ptr<net::ServerSocket> Create() const OVERRIDE {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, quit_closure_1_);
+ protected:
+  scoped_ptr<net::ServerSocket> CreateForHttpServer() override {
+    base::MessageLoopProxy::current()->PostTask(FROM_HERE,
+        base::Bind(&QuitFromHandlerThread, quit_closure_1_));
     return scoped_ptr<net::ServerSocket>(new DummyServerSocket());
   }
 
@@ -76,21 +74,28 @@ class DummyServerSocketFactory
   base::Closure quit_closure_2_;
 };
 
+class FailingServerSocketFactory : public DummyServerSocketFactory {
+ public:
+  FailingServerSocketFactory(const base::Closure& quit_closure_1,
+                             const base::Closure& quit_closure_2)
+      : DummyServerSocketFactory(quit_closure_1, quit_closure_2) {
+  }
+
+ private:
+  scoped_ptr<net::ServerSocket> CreateForHttpServer() override {
+    base::MessageLoopProxy::current()->PostTask(FROM_HERE,
+        base::Bind(&QuitFromHandlerThread, quit_closure_1_));
+    return scoped_ptr<net::ServerSocket>();
+  }
+};
+
 class DummyDelegate : public DevToolsHttpHandlerDelegate {
  public:
-  virtual std::string GetDiscoveryPageHTML() OVERRIDE { return std::string(); }
+  std::string GetDiscoveryPageHTML() override { return std::string(); }
 
-  virtual bool BundlesFrontendResources() OVERRIDE { return true; }
+  bool BundlesFrontendResources() override { return true; }
 
-  virtual base::FilePath GetDebugFrontendDir() OVERRIDE {
-    return base::FilePath();
-  }
-
-  virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
-      net::StreamListenSocket::Delegate* delegate,
-      std::string* name) OVERRIDE {
-    return scoped_ptr<net::StreamListenSocket>();
-  }
+  base::FilePath GetDebugFrontendDir() override { return base::FilePath(); }
 };
 
 }
@@ -102,14 +107,12 @@ class DevToolsHttpHandlerTest : public testing::Test {
   }
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     file_thread_.reset(new BrowserThreadImpl(BrowserThread::FILE));
     file_thread_->Start();
   }
 
-  virtual void TearDown() {
-    file_thread_->Stop();
-  }
+  void TearDown() override { file_thread_->Stop(); }
 
  private:
   base::MessageLoopForIO message_loop_;
@@ -122,18 +125,41 @@ TEST_F(DevToolsHttpHandlerTest, TestStartStop) {
   scoped_ptr<DevToolsHttpHandler::ServerSocketFactory> factory(
       new DummyServerSocketFactory(run_loop.QuitClosure(),
                                    run_loop_2.QuitClosure()));
-  content::DevToolsHttpHandler* devtools_http_handler_ =
+  scoped_ptr<content::DevToolsHttpHandler> devtools_http_handler(
       content::DevToolsHttpHandler::Start(factory.Pass(),
                                           std::string(),
                                           new DummyDelegate(),
-                                          base::FilePath());
+                                          base::FilePath()));
   // Our dummy socket factory will post a quit message once the server will
   // become ready.
   run_loop.Run();
-  devtools_http_handler_->Stop();
+  devtools_http_handler.reset();
   // Make sure the handler actually stops.
   run_loop_2.Run();
 }
+
+TEST_F(DevToolsHttpHandlerTest, TestServerSocketFailed) {
+  base::RunLoop run_loop, run_loop_2;
+  scoped_ptr<DevToolsHttpHandler::ServerSocketFactory> factory(
+      new FailingServerSocketFactory(run_loop.QuitClosure(),
+                                     run_loop_2.QuitClosure()));
+  scoped_ptr<content::DevToolsHttpHandler> devtools_http_handler(
+      content::DevToolsHttpHandler::Start(factory.Pass(),
+                                          std::string(),
+                                          new DummyDelegate(),
+                                          base::FilePath()));
+  // Our dummy socket factory will post a quit message once the server will
+  // become ready.
+  run_loop.Run();
+  for (int i = 0; i < 5; i++) {
+    RunAllPendingInMessageLoop(BrowserThread::UI);
+    RunAllPendingInMessageLoop(BrowserThread::FILE);
+  }
+  devtools_http_handler.reset();
+  // Make sure the handler actually stops.
+  run_loop_2.Run();
+}
+
 
 TEST_F(DevToolsHttpHandlerTest, TestDevToolsActivePort) {
   base::RunLoop run_loop, run_loop_2;
@@ -142,15 +168,15 @@ TEST_F(DevToolsHttpHandlerTest, TestDevToolsActivePort) {
   scoped_ptr<DevToolsHttpHandler::ServerSocketFactory> factory(
       new DummyServerSocketFactory(run_loop.QuitClosure(),
                                    run_loop_2.QuitClosure()));
-  content::DevToolsHttpHandler* devtools_http_handler_ =
+  scoped_ptr<content::DevToolsHttpHandler> devtools_http_handler(
       content::DevToolsHttpHandler::Start(factory.Pass(),
                                           std::string(),
                                           new DummyDelegate(),
-                                          temp_dir.path());
+                                          temp_dir.path()));
   // Our dummy socket factory will post a quit message once the server will
   // become ready.
   run_loop.Run();
-  devtools_http_handler_->Stop();
+  devtools_http_handler.reset();
   // Make sure the handler actually stops.
   run_loop_2.Run();
 
@@ -163,7 +189,7 @@ TEST_F(DevToolsHttpHandlerTest, TestDevToolsActivePort) {
   EXPECT_TRUE(base::ReadFileToString(active_port_file, &file_contents));
   int port = 0;
   EXPECT_TRUE(base::StringToInt(file_contents, &port));
-  EXPECT_EQ(kDummyPort, port);
+  EXPECT_EQ(static_cast<int>(kDummyPort), port);
 }
 
 }  // namespace content

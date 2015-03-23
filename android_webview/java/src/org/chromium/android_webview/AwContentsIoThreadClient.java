@@ -34,13 +34,13 @@ public abstract class AwContentsIoThreadClient {
 
     @CalledByNative
     public abstract void onDownloadStart(String url, String userAgent,
-        String contentDisposition, String mimeType, long contentLength);
+            String contentDisposition, String mimeType, long contentLength);
 
     @CalledByNative
     public abstract void newLoginRequest(String realm, String account, String args);
 
     public abstract AwWebResourceResponse shouldInterceptRequest(
-            AwContentsClient.ShouldInterceptRequestParams params);
+            AwContentsClient.AwWebResourceRequest request);
 
     // Protected methods ---------------------------------------------------------------------------
 
@@ -48,16 +48,16 @@ public abstract class AwContentsIoThreadClient {
     protected AwWebResourceResponse shouldInterceptRequest(String url, boolean isMainFrame,
             boolean hasUserGesture, String method, String[] requestHeaderNames,
             String[] requestHeaderValues) {
-        AwContentsClient.ShouldInterceptRequestParams params =
-            new AwContentsClient.ShouldInterceptRequestParams();
-        params.url = url;
-        params.isMainFrame = isMainFrame;
-        params.hasUserGesture = hasUserGesture;
-        params.method = method;
-        params.requestHeaders = new HashMap<String, String>(requestHeaderNames.length);
+        AwContentsClient.AwWebResourceRequest request =
+                new AwContentsClient.AwWebResourceRequest();
+        request.url = url;
+        request.isMainFrame = isMainFrame;
+        request.hasUserGesture = hasUserGesture;
+        request.method = method;
+        request.requestHeaders = new HashMap<String, String>(requestHeaderNames.length);
         for (int i = 0; i < requestHeaderNames.length; ++i) {
-            params.requestHeaders.put(requestHeaderNames[i], requestHeaderValues[i]);
+            request.requestHeaders.put(requestHeaderNames[i], requestHeaderValues[i]);
         }
-        return shouldInterceptRequest(params);
+        return shouldInterceptRequest(request);
     }
 }

@@ -5,6 +5,8 @@
 # Note that this build file assumes rlz_use_chrome_net which is a condition in
 # the GYP file, but is always true for Chrome builds.
 
+import("//testing/test.gni")
+
 config("rlz_config") {
   defines = [ "RLZ_NETWORK_IMPLEMENTATION_CHROME_NET" ]
 }
@@ -53,12 +55,17 @@ source_set("rlz_lib") {
     "win/lib/rlz_value_store_registry.h",
   ]
 
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+
   public_configs = [ ":rlz_config" ]
 
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
     "//net",
+    "//third_party/zlib",
+    "//url",
   ]
 
   if (is_ios) {
@@ -69,9 +76,6 @@ source_set("rlz_lib") {
       "mac/lib/rlz_value_store_mac.h",
     ]
     set_sources_assignment_filter(sources_assignment_filter)
-  } else if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
   }
 }
 
@@ -101,6 +105,9 @@ test("rlz_unittests") {
     "test/rlz_unittest_main.cc",
     "win/lib/machine_deal_test.cc",
   ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":rlz_lib",

@@ -18,14 +18,12 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/opaque_browser_frame_view_layout.h"
 #include "chrome/browser/ui/views/frame/opaque_browser_frame_view_platform_specific.h"
-#include "chrome/browser/ui/views/profiles/avatar_label.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
@@ -38,10 +36,10 @@
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_list.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/rect_conversions.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
@@ -51,6 +49,10 @@
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/frame_background.h"
 #include "ui/views/window/window_shape.h"
+
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/ui/views/profiles/supervised_user_avatar_label.h"
+#endif
 
 #if defined(OS_LINUX)
 #include "ui/views/controls/menu/menu_runner.h"
@@ -92,12 +94,12 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
                                                BrowserView* browser_view)
     : BrowserNonClientFrameView(frame, browser_view),
       layout_(new OpaqueBrowserFrameViewLayout(this)),
-      minimize_button_(NULL),
-      maximize_button_(NULL),
-      restore_button_(NULL),
-      close_button_(NULL),
-      window_icon_(NULL),
-      window_title_(NULL),
+      minimize_button_(nullptr),
+      maximize_button_(nullptr),
+      restore_button_(nullptr),
+      close_button_(nullptr),
+      window_icon_(nullptr),
+      window_title_(nullptr),
       frame_background_(new views::FrameBackground()) {
   SetLayoutManager(layout_);
 
@@ -204,18 +206,33 @@ gfx::Rect OpaqueBrowserFrameView::GetWindowBoundsForClientBounds(
   return layout_->GetWindowBoundsForClientBounds(client_bounds);
 }
 
+bool OpaqueBrowserFrameView::IsWithinAvatarMenuButtons(
+    const gfx::Point& point) const {
+  if (avatar_button() &&
+     avatar_button()->GetMirroredBounds().Contains(point)) {
+    return true;
+  }
+  if (new_avatar_button() &&
+     new_avatar_button()->GetMirroredBounds().Contains(point)) {
+    return true;
+  }
+
+  return false;
+}
+
 int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (!bounds().Contains(point))
     return HTNOWHERE;
 
-  // See if the point is within the avatar menu button or within the avatar
-  // label.
-  if ((avatar_button() &&
-       avatar_button()->GetMirroredBounds().Contains(point)) ||
-      (avatar_label() && avatar_label()->GetMirroredBounds().Contains(point)) ||
-      (new_avatar_button() &&
-       new_avatar_button()->GetMirroredBounds().Contains(point)))
+  // See if the point is within the avatar menu button.
+  if (IsWithinAvatarMenuButtons(point))
     return HTCLIENT;
+#if defined(ENABLE_SUPERVISED_USERS)
+  // ...or within the avatar label, if it's a supervised user.
+  if ((supervised_user_avatar_label() &&
+       supervised_user_avatar_label()->GetMirroredBounds().Contains(point)))
+    return HTCLIENT;
+#endif
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
 
@@ -249,7 +266,7 @@ int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
 
   views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (!delegate) {
-    LOG(WARNING) << "delegate is NULL, returning safe default.";
+    LOG(WARNING) << "delegate is null, returning safe default.";
     return HTCAPTION;
   }
   int window_component = GetHTComponentForFrame(point, TopResizeHeight(),
@@ -310,8 +327,14 @@ void OpaqueBrowserFrameView::ButtonPressed(views::Button* sender,
   } else if (sender == close_button_) {
     frame()->Close();
   } else if (sender == new_avatar_button()) {
+    BrowserWindow::AvatarBubbleMode mode =
+        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+    if (event.IsMouseEvent() &&
+        static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) {
+      mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
+    }
     browser_view()->ShowAvatarBubbleFromAvatarButton(
-        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT,
+        mode,
         signin::ManageAccountsParams());
   }
 }
@@ -334,7 +357,7 @@ void OpaqueBrowserFrameView::OnMenuButtonClicked(views::View* source,
 
 bool OpaqueBrowserFrameView::ShouldTabIconViewAnimate() const {
   // This function is queried during the creation of the window as the
-  // TabIconView we host is initialized, so we need to NULL check the selected
+  // TabIconView we host is initialized, so we need to null check the selected
   // WebContents because in this condition there is not yet a selected tab.
   WebContents* current_tab = browser_view()->GetActiveWebContents();
   return current_tab ? current_tab->IsLoading() : false;
@@ -343,7 +366,7 @@ bool OpaqueBrowserFrameView::ShouldTabIconViewAnimate() const {
 gfx::ImageSkia OpaqueBrowserFrameView::GetFaviconForTabIconView() {
   views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (!delegate) {
-    LOG(WARNING) << "delegate is NULL, returning safe default.";
+    LOG(WARNING) << "delegate is null, returning safe default.";
     return gfx::ImageSkia();
   }
   return delegate->GetWindowIcon();
@@ -381,7 +404,7 @@ bool OpaqueBrowserFrameView::ShouldShowWindowIcon() const {
 }
 
 bool OpaqueBrowserFrameView::ShouldShowWindowTitle() const {
-  // |delegate| may be NULL if called from callback of InputMethodChanged while
+  // |delegate| may be null if called from callback of InputMethodChanged while
   // a window is being destroyed.
   // See more discussion at http://crosbug.com/8958
   views::WidgetDelegate* delegate = frame()->widget_delegate();
@@ -571,11 +594,9 @@ gfx::Rect OpaqueBrowserFrameView::IconBounds() const {
 }
 
 bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // Do not show the custom title bar if the system title bar option is enabled.
   if (!frame()->UseCustomFrame())
     return false;
-#endif
 
   // Do not show caption buttons if the window manager is forcefully providing a
   // title bar (e.g., in Ubuntu Unity, if the window is maximized).
@@ -902,7 +923,7 @@ gfx::ImageSkia* OpaqueBrowserFrameView::GetFrameOverlayImage() const {
     return tp->GetImageSkiaNamed(ShouldPaintAsActive() ?
         IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE);
   }
-  return NULL;
+  return nullptr;
 }
 
 int OpaqueBrowserFrameView::GetTopAreaHeight() const {

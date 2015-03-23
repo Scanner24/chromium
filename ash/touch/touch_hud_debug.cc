@@ -17,7 +17,7 @@
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
@@ -27,7 +27,7 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/Xlib.h>
 
-#include "ui/events/x/device_data_manager_x11.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
 #endif
 
 namespace ash {
@@ -72,7 +72,7 @@ const char* GetTouchEventLabel(ui::EventType type) {
 int GetTrackingId(const ui::TouchEvent& event) {
   if (!event.HasNativeEvent())
     return 0;
-#if defined(USE_XI2_MT)
+#if defined(USE_X11)
   ui::DeviceDataManagerX11* manager = ui::DeviceDataManagerX11::GetInstance();
   double tracking_id;
   if (manager->GetEventData(*event.native_event(),
@@ -80,16 +80,6 @@ int GetTrackingId(const ui::TouchEvent& event) {
                             &tracking_id)) {
     return static_cast<int>(tracking_id);
   }
-#endif
-  return 0;
-}
-
-int GetSourceDeviceId(const ui::TouchEvent& event) {
-  if (!event.HasNativeEvent())
-    return 0;
-#if defined(USE_X11)
-  XEvent* xev = event.native_event();
-  return static_cast<XIDeviceEvent*>(xev->xcookie.data)->sourceid;
 #endif
   return 0;
 }
@@ -106,7 +96,7 @@ struct TouchPointLog {
         radius_y(touch.radius_y()),
         pressure(touch.force()),
         tracking_id(GetTrackingId(touch)),
-        source_device(GetSourceDeviceId(touch)) {
+        source_device(touch.source_device_id()) {
   }
 
   // Populates a dictionary value with all the information about the touch
@@ -257,7 +247,7 @@ class TouchHudCanvas : public views::View {
     paint_.setStyle(SkPaint::kFill_Style);
   }
 
-  virtual ~TouchHudCanvas() {}
+  ~TouchHudCanvas() override {}
 
   void SetScale(int scale) {
     if (scale_ == scale)
@@ -308,7 +298,7 @@ class TouchHudCanvas : public views::View {
   }
 
   // Overridden from views::View.
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {
     for (int i = 0; i < kMaxPaths; ++i) {
       if (paths_[i].countPoints() == 0)
         continue;

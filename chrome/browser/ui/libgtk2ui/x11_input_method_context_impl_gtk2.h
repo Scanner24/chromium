@@ -14,7 +14,7 @@
 #include "ui/base/glib/glib_integers.h"
 #include "ui/base/glib/glib_signal.h"
 #include "ui/base/ime/linux/linux_input_method_context.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 typedef union _GdkEvent GdkEvent;
 typedef struct _GdkDrawable GdkWindow;
@@ -28,14 +28,13 @@ class X11InputMethodContextImplGtk2 : public ui::LinuxInputMethodContext {
  public:
   explicit X11InputMethodContextImplGtk2(
       ui::LinuxInputMethodContextDelegate* delegate);
-  virtual ~X11InputMethodContextImplGtk2();
+  ~X11InputMethodContextImplGtk2() override;
 
   // Overriden from ui::LinuxInputMethodContext
-  virtual bool DispatchKeyEvent(const ui::KeyEvent& key_event) OVERRIDE;
-  virtual void Reset() OVERRIDE;
-  virtual void OnTextInputTypeChanged(ui::TextInputType text_input_type)
-      OVERRIDE;
-  virtual void OnCaretBoundsChanged(const gfx::Rect& caret_bounds) OVERRIDE;
+  bool DispatchKeyEvent(const ui::KeyEvent& key_event) override;
+  void Reset() override;
+  void OnTextInputTypeChanged(ui::TextInputType text_input_type) override;
+  void OnCaretBoundsChanged(const gfx::Rect& caret_bounds) override;
 
  private:
   // Resets the cache of X modifier keycodes.

@@ -10,8 +10,8 @@
 
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/utils/SkMatrix44.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/gfx_export.h"
-#include "ui/gfx/vector2d_f.h"
 
 namespace gfx {
 
@@ -122,6 +122,11 @@ class GFX_EXPORT Transform {
   // Returns true if the matrix is either identity or pure translation.
   bool IsIdentityOrTranslation() const { return matrix_.isTranslate(); }
 
+  // Returns true if the matrix is either the identity or a 2d translation.
+  bool IsIdentityOr2DTranslation() const {
+    return matrix_.isTranslate() && matrix_.get(2, 3) == 0;
+  }
+
   // Returns true if the matrix is either identity or pure translation,
   // allowing for an amount of inaccuracy as specified by the parameter.
   bool IsApproximatelyIdentityOrTranslation(SkMScalar tolerance) const;
@@ -139,9 +144,7 @@ class GFX_EXPORT Transform {
   bool IsIdentityOrIntegerTranslation() const;
 
   // Returns true if the matrix had only scaling components.
-  bool IsScale2d() const {
-    return !(matrix_.getType() & ~SkMatrix44::kScale_Mask);
-  }
+  bool IsScale2d() const { return matrix_.isScale(); }
 
   // Returns true if the matrix is has only scaling and translation components.
   bool IsScaleOrTranslation() const { return matrix_.isScaleTranslate(); }
@@ -232,6 +235,8 @@ class GFX_EXPORT Transform {
   // decompose once using gfx::DecomposeTransforms and reuse your
   // DecomposedTransform.
   bool Blend(const Transform& from, double progress);
+
+  void RoundTranslationComponents();
 
   // Returns |this| * |other|.
   Transform operator*(const Transform& other) const {

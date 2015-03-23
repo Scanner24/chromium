@@ -13,17 +13,18 @@ source_set("renderer") {
   visibility = [ "//content/public/renderer:renderer_sources" ]
 
   sources = rebase_path(content_renderer_gypi_values.private_renderer_sources,
-                        ".", "//content")
+                        ".",
+                        "//content")
 
   configs += [
     "//content:content_implementation",
+    "//build/config/compiler:no_size_t_to_int_warning",
   ]
 
   deps = [
     # TODO(GYP) bug 376846 remove this. This should be inherited from //net but
     # those don't cross component boundaries.
     "//crypto:platform",
-
     "//base/allocator",
     "//cc",
     "//cc/blink",
@@ -31,21 +32,24 @@ source_set("renderer") {
     "//content/common:mojo_bindings",
     "//content/public/child:child_sources",
     "//content/public/common:common_sources",
+    "//content/public/common:mojo_bindings",
+    "//device/battery:mojo_bindings",
+    "//device/vibration:mojo_bindings",
     "//gin",
     "//gpu",
     "//gpu/command_buffer/client:gles2_interface",
     "//jingle:jingle_glue",
     "//media",
     "//media/blink",
-    "//mojo/bindings/js",
     "//mojo/environment:chromium",
-    "//mojo/public/js/bindings",
-    "//mojo/public/interfaces/application",
     "//net",
     "//skia",
     "//storage/common",
     "//third_party/icu",
     "//third_party/libjingle",
+    "//third_party/mojo/src/mojo/edk/js",
+    "//third_party/mojo/src/mojo/public/js",
+    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//third_party/npapi",
     "//third_party/WebKit/public:blink",
     "//third_party/widevine/cdm:version_h",
@@ -60,13 +64,6 @@ source_set("renderer") {
     "//webkit/common/gpu",
   ]
 
-  if (!enable_notifications) {
-    sources -= [
-      "notification_provider.cc",
-      "active_notification_tracker.cc",
-    ]
-  }
-
   if (is_mac) {
     sources -= [
       "webscrollbarbehavior_impl_gtkoraura.cc",
@@ -79,11 +76,7 @@ source_set("renderer") {
   }
 
   if (is_android) {
-    sources -= [
-      "accessibility/renderer_accessibility_focus_only.cc",
-      "media/audio_decoder.cc",
-      "media/crypto/encrypted_media_player_support_impl.cc",
-    ]
+    sources -= [ "media/audio_decoder.cc" ]
     sources += [
       "external_popup_menu.cc",
       "external_popup_menu.h",
@@ -91,9 +84,7 @@ source_set("renderer") {
 
     # Add back the Linux file which Android shares.
     set_sources_assignment_filter([])
-    sources += [
-      "render_view_linux.cc",
-    ]
+    sources += [ "render_view_linux.cc" ]
 
     deps += [
       "//third_party/android_tools:cpu_features",
@@ -131,8 +122,9 @@ source_set("renderer") {
 
   if (enable_webrtc) {
     sources += rebase_path(
-        content_renderer_gypi_values.private_renderer_webrtc_sources,
-        ".", "//content")
+            content_renderer_gypi_values.private_renderer_webrtc_sources,
+            ".",
+            "//content")
     deps += [
       "//crypto",
       "//third_party/libyuv",
@@ -143,19 +135,20 @@ source_set("renderer") {
     ]
   } else {
     sources += [
-      "media/webrtc_logging_noop.cc",
       "media/webrtc_logging.h",
+      "media/webrtc_logging_noop.cc",
     ]
   }
 
   if (enable_plugins) {
     sources += rebase_path(
-        content_renderer_gypi_values.private_renderer_plugin_sources,
-        ".", "//content")
+            content_renderer_gypi_values.private_renderer_plugin_sources,
+            ".",
+            "//content")
     deps += [
-      "//ppapi:ppapi_host",
-      "//ppapi:ppapi_proxy",
-      "//ppapi:ppapi_shared",
+      "//ppapi/host",
+      "//ppapi/proxy",
+      "//ppapi/shared_impl",
       "//third_party/libyuv",
     ]
   } else {
@@ -170,8 +163,9 @@ source_set("renderer") {
 
   if (enable_plugins && enable_webrtc) {
     sources += rebase_path(
-        content_renderer_gypi_values.private_renderer_plugin_webrtc_sources,
-        ".", "//content")
+            content_renderer_gypi_values.private_renderer_plugin_webrtc_sources,
+            ".",
+            "//content")
   }
 
   if (!enable_pepper_cdms) {
@@ -184,7 +178,7 @@ source_set("renderer") {
     ]
   }
 
-  if (printing_mode == 1) {
+  if (enable_print_preview) {
     deps += [ "//printing" ]
   }
 
@@ -195,5 +189,13 @@ source_set("renderer") {
       "media/crypto/renderer_cdm_manager.cc",
       "media/crypto/renderer_cdm_manager.h",
     ]
+  }
+
+  if (enable_media_mojo_renderer) {
+    sources += [
+      "media/media_renderer_service_provider.cc",
+      "media/media_renderer_service_provider.h",
+    ]
+    deps += [ "//media/mojo/services:renderer_proxy" ]
   }
 }

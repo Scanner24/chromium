@@ -16,18 +16,18 @@
 #include "ash/host/root_window_transformer.h"
 #include "base/basictypes.h"
 #include "base/sys_info.h"
-#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/events/device_data_manager.h"
+#include "ui/events/devices/device_data_manager.h"
+#include "ui/events/devices/x11/device_list_cache_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/null_event_targeter.h"
 #include "ui/events/platform/platform_event_source.h"
-#include "ui/events/x/device_list_cache_x.h"
-#include "ui/events/x/touch_factory_x11.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/screen.h"
 
 namespace ash {
@@ -132,8 +132,18 @@ void AshWindowTreeHostX11::UpdateDisplayID(int64 id1, int64 id2) {
 }
 
 void AshWindowTreeHostX11::PrepareForShutdown() {
-  if (ui::PlatformEventSource::GetInstance())
+  // Block the root window from dispatching events because it is weird for a
+  // ScreenPositionClient not to be attached to the root window and for
+  // ui::EventHandlers to be unable to convert the event's location to screen
+  // coordinates.
+  window()->SetEventTargeter(
+      scoped_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
+
+  if (ui::PlatformEventSource::GetInstance()) {
+    // Block X events which are not turned into ui::Events from getting
+    // processed. (e.g. ConfigureNotify)
     ui::PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
+  }
 }
 
 void AshWindowTreeHostX11::SetBounds(const gfx::Rect& bounds) {
@@ -226,27 +236,7 @@ bool AshWindowTreeHostX11::CanDispatchEvent(const ui::PlatformEvent& event) {
 }
 void AshWindowTreeHostX11::TranslateAndDispatchLocatedEvent(
     ui::LocatedEvent* event) {
-  if (!event->IsTouchEvent()) {
-    aura::Window* root_window = window();
-    aura::client::ScreenPositionClient* screen_position_client =
-        aura::client::GetScreenPositionClient(root_window);
-    gfx::Rect local(bounds().size());
-    local.Inset(transformer_helper_.GetHostInsets());
-
-    if (screen_position_client && !local.Contains(event->location())) {
-      gfx::Point location(event->location());
-      // In order to get the correct point in screen coordinates
-      // during passive grab, we first need to find on which host window
-      // the mouse is on, and find out the screen coordinates on that
-      // host window, then convert it back to this host window's coordinate.
-      screen_position_client->ConvertHostPointToScreen(root_window,
-                                                       &location);
-      screen_position_client->ConvertPointFromScreen(root_window, &location);
-      ConvertPointToHost(&location);
-      event->set_location(location);
-      event->set_root_location(location);
-    }
-  }
+  TranslateLocatedEvent(event);
   SendEventToProcessor(event);
 }
 
@@ -258,7 +248,7 @@ void AshWindowTreeHostX11::SetCrOSTapPaused(bool state) {
   Atom prop = atom_cache()->GetAtom("Tap Paused");
   unsigned char value = state;
   XIDeviceList dev_list =
-      ui::DeviceListCacheX::GetInstance()->GetXI2DeviceList(xdisplay());
+      ui::DeviceListCacheX11::GetInstance()->GetXI2DeviceList(xdisplay());
 
   // Only slave pointer devices could possibly have tap-paused property.
   for (int i = 0; i < dev_list.count; i++) {

@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
-#include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -45,7 +44,7 @@ class FaviconDelegate : public ui::MenuModelDelegate {
  public:
   FaviconDelegate() : was_called_(false) {}
 
-  virtual void OnIconChanged(int model_index) OVERRIDE {
+  void OnIconChanged(int model_index) override {
     was_called_ = true;
     base::MessageLoop::current()->Quit();
   }
@@ -520,13 +519,12 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   NavigateAndCommit(url2);
 
   // Set the desired favicon for url1.
-  HistoryServiceFactory::GetForProfile(
-      profile(), Profile::EXPLICIT_ACCESS)->AddPage(
-          url1, base::Time::Now(), history::SOURCE_BROWSED);
-  FaviconServiceFactory::GetForProfile(profile(), Profile::EXPLICIT_ACCESS)
-      ->SetFavicons(url1,
-                    url1_favicon,
-                    favicon_base::FAVICON,
+  HistoryServiceFactory::GetForProfile(profile(),
+                                       ServiceAccessType::EXPLICIT_ACCESS)
+      ->AddPage(url1, base::Time::Now(), history::SOURCE_BROWSED);
+  FaviconServiceFactory::GetForProfile(profile(),
+                                       ServiceAccessType::EXPLICIT_ACCESS)
+      ->SetFavicons(url1, url1_favicon, favicon_base::FAVICON,
                     gfx::Image::CreateFrom1xBitmap(new_icon_bitmap));
 
   // Will return the current icon (default) but start an anync call

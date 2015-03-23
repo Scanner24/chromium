@@ -183,7 +183,7 @@ class TestCloudPrintProxyService : public CloudPrintProxyService {
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual ServiceProcessControl* GetServiceProcessControl() OVERRIDE {
+  ServiceProcessControl* GetServiceProcessControl() override {
     return &process_control_;
   }
   MockServiceProcessControl* GetMockServiceProcessControl() {
@@ -206,12 +206,11 @@ class CloudPrintProxyPolicyTest : public ::testing::Test {
       : ui_thread_(content::BrowserThread::UI, &message_loop_) {
   }
 
-  bool LaunchBrowser(const CommandLine& command_line, Profile* profile) {
-    int return_code = 0;
+  bool LaunchBrowser(const base::CommandLine& command_line, Profile* profile) {
     StartupBrowserCreator browser_creator;
     return StartupBrowserCreator::ProcessCmdLineImpl(
         command_line, base::FilePath(), false, profile,
-        StartupBrowserCreator::Profiles(), &return_code, &browser_creator);
+        StartupBrowserCreator::Profiles(), &browser_creator);
   }
 
  protected:
@@ -461,7 +460,7 @@ TEST_F(CloudPrintProxyPolicyTest, StartupBrowserCreatorWithCommandLine) {
   CloudPrintProxyServiceFactory::GetInstance()->
       SetTestingFactory(&profile_, TestCloudPrintProxyServiceFactory);
 
-  CommandLine command_line(CommandLine::NO_PROGRAM);
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   command_line.AppendSwitch(switches::kCheckCloudPrintConnectorPolicy);
 
   EXPECT_FALSE(LaunchBrowser(command_line, &profile_));

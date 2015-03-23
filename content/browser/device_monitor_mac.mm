@@ -136,9 +136,10 @@ void DeviceMonitorMacImpl::ConsolidateDevicesListAndNotify(
 class QTKitMonitorImpl : public DeviceMonitorMacImpl {
  public:
   explicit QTKitMonitorImpl(content::DeviceMonitorMac* monitor);
-  virtual ~QTKitMonitorImpl();
+  ~QTKitMonitorImpl() override;
 
-  virtual void OnDeviceChanged() OVERRIDE;
+  void OnDeviceChanged() override;
+
  private:
   void CountDevices();
   void OnAttributeChanged(NSNotification* notification);
@@ -359,7 +360,11 @@ void SuspendObserverDelegate::DoOnDeviceChanged(NSArray* devices) {
     snapshot_devices.push_back(DeviceInfo([[device uniqueID] UTF8String],
                                           device_type));
   }
-
+  // Make sure no references are held to |devices| when
+  // ConsolidateDevicesListAndNotify is called since the VideoCaptureManager
+  // and AudioCaptureManagers also enumerates the available devices but on
+  // another thread.
+  auto_release.reset();
   // |avfoundation_monitor_impl_| might have been NULLed asynchronously before
   // arriving at this line.
   if (avfoundation_monitor_impl_) {
@@ -377,9 +382,9 @@ class AVFoundationMonitorImpl : public DeviceMonitorMacImpl {
   AVFoundationMonitorImpl(
       content::DeviceMonitorMac* monitor,
       const scoped_refptr<base::SingleThreadTaskRunner>& device_task_runner);
-  virtual ~AVFoundationMonitorImpl();
+  ~AVFoundationMonitorImpl() override;
 
-  virtual void OnDeviceChanged() OVERRIDE;
+  void OnDeviceChanged() override;
 
  private:
   // {Video,AudioInput}DeviceManager's "Device" thread task runner used for

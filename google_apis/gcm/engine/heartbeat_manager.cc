@@ -4,6 +4,10 @@
 
 #include "google_apis/gcm/engine/heartbeat_manager.h"
 
+#include "base/callback.h"
+#include "base/metrics/histogram.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "net/base/network_change_notifier.h"
 
@@ -16,14 +20,18 @@ const int64 kCellHeartbeatDefaultMs = 1000 * 60 * 28;  // 28 minutes.
 const int64 kWifiHeartbeatDefaultMs = 1000 * 60 * 15;  // 15 minutes.
 // The default heartbeat ack interval.
 const int64 kHeartbeatAckDefaultMs = 1000 * 60 * 1;  // 1 minute.
+// The period at which to check if the heartbeat time has passed. Used to
+// protect against platforms where the timer is delayed by the system being
+// suspended.
+const int kHeartbeatMissedCheckMs = 1000 * 60 * 5;  // 5 minutes.
 }  // namespace
 
 HeartbeatManager::HeartbeatManager()
     : waiting_for_ack_(false),
       heartbeat_interval_ms_(0),
       server_interval_ms_(0),
-      heartbeat_timer_(true  /* retain user task */,
-                       false  /* not repeating */),
+      heartbeat_timer_(new base::Timer(true /* retain_user_task */,
+                                       false /* is_repeating */)),
       weak_ptr_factory_(this) {}
 
 HeartbeatManager::~HeartbeatManager() {}
@@ -42,12 +50,13 @@ void HeartbeatManager::Start(
 }
 
 void HeartbeatManager::Stop() {
-  heartbeat_timer_.Stop();
+  heartbeat_expected_time_ = base::Time();
+  heartbeat_timer_->Stop();
   waiting_for_ack_ = false;
 }
 
 void HeartbeatManager::OnHeartbeatAcked() {
-  if (!heartbeat_timer_.IsRunning())
+  if (!heartbeat_timer_->IsRunning())
     return;
 
   DCHECK(!send_heartbeat_callback_.is_null());
@@ -68,13 +77,29 @@ void HeartbeatManager::UpdateHeartbeatConfig(
 }
 
 base::TimeTicks HeartbeatManager::GetNextHeartbeatTime() const {
-  if (heartbeat_timer_.IsRunning())
-    return heartbeat_timer_.desired_run_time();
+  if (heartbeat_timer_->IsRunning())
+    return heartbeat_timer_->desired_run_time();
   else
     return base::TimeTicks();
 }
 
+void HeartbeatManager::UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) {
+  bool was_running = heartbeat_timer_->IsRunning();
+  base::TimeDelta remaining_delay =
+      heartbeat_timer_->desired_run_time() - base::TimeTicks::Now();
+  base::Closure timer_task(heartbeat_timer_->user_task());
+
+  heartbeat_timer_->Stop();
+  heartbeat_timer_ = timer.Pass();
+
+  if (was_running)
+    heartbeat_timer_->Start(FROM_HERE, remaining_delay, timer_task);
+}
+
 void HeartbeatManager::OnHeartbeatTriggered() {
+  // Reset the weak pointers used for heartbeat checks.
+  weak_ptr_factory_.InvalidateWeakPtrs();
+
   if (waiting_for_ack_) {
     LOG(WARNING) << "Lost connection to MCS, reconnecting.";
     Stop();
@@ -109,11 +134,45 @@ void HeartbeatManager::RestartTimer() {
     DVLOG(1) << "Resetting timer for ack with "
              << heartbeat_interval_ms_ << " ms interval.";
   }
-  heartbeat_timer_.Start(FROM_HERE,
+
+  heartbeat_expected_time_ =
+      base::Time::Now() +
+      base::TimeDelta::FromMilliseconds(heartbeat_interval_ms_);
+  heartbeat_timer_->Start(FROM_HERE,
                          base::TimeDelta::FromMilliseconds(
                              heartbeat_interval_ms_),
                          base::Bind(&HeartbeatManager::OnHeartbeatTriggered,
                                     weak_ptr_factory_.GetWeakPtr()));
+
+  // TODO(zea): Polling is not a particularly good way to detect the missed
+  // heartbeat. Ideally we should be listening to wake-from-suspend events,
+  // although that would require platform-specific implementations.
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&HeartbeatManager::CheckForMissedHeartbeat,
+                 weak_ptr_factory_.GetWeakPtr()),
+      base::TimeDelta::FromMilliseconds(kHeartbeatMissedCheckMs));
+}
+
+void HeartbeatManager::CheckForMissedHeartbeat() {
+  // If there's no heartbeat pending, return without doing anything.
+  if (heartbeat_expected_time_.is_null())
+    return;
+
+  // If the heartbeat has been missed, manually trigger it.
+  if (base::Time::Now() > heartbeat_expected_time_) {
+    UMA_HISTOGRAM_LONG_TIMES("GCM.HeartbeatMissedDelta",
+                             base::Time::Now() - heartbeat_expected_time_);
+    OnHeartbeatTriggered();
+    return;
+  }
+
+  // Otherwise check again later.
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&HeartbeatManager::CheckForMissedHeartbeat,
+                 weak_ptr_factory_.GetWeakPtr()),
+      base::TimeDelta::FromMilliseconds(kHeartbeatMissedCheckMs));
 }
 
 }  // namespace gcm

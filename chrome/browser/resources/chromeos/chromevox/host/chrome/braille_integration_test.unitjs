@@ -24,19 +24,20 @@ CvoxBrailleIntegrationUnitTest.prototype = {
     'cvox.BrailleBackground',
     'cvox.BrailleInputHandler',
     'cvox.BrailleKeyCommand',
-    'cvox.BrailleUtil',
     'cvox.ChromeBraille',
     'cvox.ExpandingBrailleTranslator',
+    'cvox.ValueSelectionSpan',
+    'cvox.ValueSpan',
   ],
 
   /** @override */
   setUp: function() {
-    cvox.BrailleTable.getAll = function() {}
     this.displayManager = new FakeDisplayManager();
     this.inputHandler = new FakeInputHandler();
+    this.translatorManager = new FakeTranslatorManager();
 
     this.brailleBackground = new cvox.BrailleBackground(
-        this.displayManager, this.inputHandler);
+        this.displayManager, this.inputHandler, this.translatorManager);
 
     cvox.ExtensionBridge = new FakeExtensionBridge(this.brailleBackground);
 
@@ -136,14 +137,18 @@ FakeInputHandler.prototype = {
   }
 };
 
+/** @extends {cvox.BrailleTranslatorManager} */
+function FakeTranslatorManager() {
+}        
+
 TEST_F('CvoxBrailleIntegrationUnitTest', 'Write', function() {
   this.braille.write(this.content1);
   assertEqualsJSON(this.content1, this.displayManager.content);
 });
 
 TEST_F('CvoxBrailleIntegrationUnitTest', 'WriteWithSpans', function() {
-  var selectionSpan = new cvox.BrailleUtil.ValueSelectionSpan();
-  var valueSpan = new cvox.BrailleUtil.ValueSpan(20);
+  var selectionSpan = new cvox.ValueSelectionSpan();
+  var valueSpan = new cvox.ValueSpan(20);
   var toSend = cvox.NavBraille.fromText(
       new cvox.Spannable('Hello', valueSpan));
   toSend.text.setSpan(selectionSpan, 0, 0);

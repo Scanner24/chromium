@@ -16,10 +16,6 @@
 #include "components/captive_portal/captive_portal_types.h"
 #include "content/public/browser/notification_service.h"
 
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#endif
-
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
@@ -151,7 +147,7 @@ class CaptivePortalService::RecheckBackoffEntry : public net::BackoffEntry {
   }
 
  private:
-  virtual base::TimeTicks ImplGetTimeNow() const OVERRIDE {
+  base::TimeTicks ImplGetTimeNow() const override {
     return captive_portal_service_->GetCurrentTimeTicks();
   }
 
@@ -214,6 +210,10 @@ CaptivePortalService::~CaptivePortalService() {
 void CaptivePortalService::DetectCaptivePortal() {
   DCHECK(CalledOnValidThread());
 
+  // Detection should be disabled only in tests.
+  if (testing_state_ == IGNORE_REQUESTS_FOR_TESTING)
+    return;
+
   // If a request is pending or running, do nothing.
   if (state_ == STATE_CHECKING_FOR_PORTAL || state_ == STATE_TIMER_RUNNING)
     return;
@@ -241,7 +241,7 @@ void CaptivePortalService::DetectCaptivePortalInternal() {
     // Count this as a success, so the backoff entry won't apply exponential
     // backoff, but will apply the standard delay.
     backoff_entry_->InformOfRequest(true);
-    OnResult(captive_portal::RESULT_INTERNET_CONNECTED);
+    OnResult(captive_portal::RESULT_INTERNET_CONNECTED, GURL());
     return;
   }
 
@@ -307,7 +307,7 @@ void CaptivePortalService::OnPortalDetectionCompleted(
 
   last_check_time_ = now;
 
-  OnResult(result);
+  OnResult(result, results.landing_url);
 }
 
 void CaptivePortalService::Shutdown() {
@@ -320,13 +320,15 @@ void CaptivePortalService::Shutdown() {
   }
 }
 
-void CaptivePortalService::OnResult(CaptivePortalResult result) {
+void CaptivePortalService::OnResult(CaptivePortalResult result,
+                                    const GURL& landing_url) {
   DCHECK_EQ(STATE_CHECKING_FOR_PORTAL, state_);
   state_ = STATE_IDLE;
 
   Results results;
   results.previous_result = last_detection_result_;
   results.result = result;
+  results.landing_url = landing_url;
   last_detection_result_ = result;
 
   content::NotificationService::current()->Notify(
@@ -356,6 +358,7 @@ void CaptivePortalService::UpdateEnabledState() {
              resolve_errors_with_web_service_.GetValue();
 
   if (testing_state_ != SKIP_OS_CHECK_FOR_TESTING &&
+      testing_state_ != IGNORE_REQUESTS_FOR_TESTING &&
       ShouldDeferToNativeCaptivePortalDetection()) {
     enabled_ = false;
   }

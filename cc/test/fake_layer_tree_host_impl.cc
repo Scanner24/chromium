@@ -16,6 +16,7 @@ FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(Proxy* proxy,
                         proxy,
                         &stats_instrumentation_,
                         manager,
+                        NULL,
                         0) {
   // Explicitly clear all debug settings.
   SetDebugState(LayerTreeDebugState());
@@ -23,7 +24,8 @@ FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(Proxy* proxy,
 
   // Avoid using Now() as the frame time in unit tests.
   base::TimeTicks time_ticks = base::TimeTicks::FromInternalValue(1);
-  SetCurrentBeginFrameArgs(CreateBeginFrameArgsForTesting(time_ticks));
+  SetCurrentBeginFrameArgs(
+      CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE, time_ticks));
 }
 
 FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
@@ -34,13 +36,15 @@ FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
                         proxy,
                         &stats_instrumentation_,
                         manager,
+                        NULL,
                         0) {
   // Explicitly clear all debug settings.
   SetDebugState(LayerTreeDebugState());
 
   // Avoid using Now() as the frame time in unit tests.
   base::TimeTicks time_ticks = base::TimeTicks::FromInternalValue(1);
-  SetCurrentBeginFrameArgs(CreateBeginFrameArgsForTesting(time_ticks));
+  SetCurrentBeginFrameArgs(
+      CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE, time_ticks));
 }
 
 FakeLayerTreeHostImpl::~FakeLayerTreeHostImpl() {}
@@ -48,7 +52,7 @@ FakeLayerTreeHostImpl::~FakeLayerTreeHostImpl() {}
 void FakeLayerTreeHostImpl::CreatePendingTree() {
   LayerTreeHostImpl::CreatePendingTree();
   float arbitrary_large_page_scale = 100000.f;
-  pending_tree()->SetPageScaleFactorAndLimits(
+  pending_tree()->PushPageScaleFromMainThread(
       1.f, 1.f / arbitrary_large_page_scale, arbitrary_large_page_scale);
 }
 
@@ -82,7 +86,8 @@ void FakeLayerTreeHostImpl::UpdateNumChildrenAndDrawPropertiesForActiveTree() {
 void FakeLayerTreeHostImpl::UpdateNumChildrenAndDrawProperties(
     LayerTreeImpl* layerTree) {
   RecursiveUpdateNumChildren(layerTree->root_layer());
-  layerTree->UpdateDrawProperties();
+  bool update_lcd_text = false;
+  layerTree->UpdateDrawProperties(update_lcd_text);
 }
 
 }  // namespace cc

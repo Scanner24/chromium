@@ -134,7 +134,7 @@ class MockVirtualAudioInputStream : public VirtualAudioInputStream {
   MOCK_METHOD0(GetMaxVolume, double());
   MOCK_METHOD1(SetVolume, void(double));
   MOCK_METHOD0(GetVolume, double());
-  MOCK_METHOD1(SetAutomaticGainControl, void(bool));
+  MOCK_METHOD1(SetAutomaticGainControl, bool(bool));
   MOCK_METHOD0(GetAutomaticGainControl, bool());
   MOCK_METHOD2(AddOutputStream, void(VirtualAudioOutputStream*,
                                      const AudioParameters&));
@@ -188,7 +188,7 @@ class WebContentsAudioInputStreamTest : public testing::Test {
     audio_thread_.Start();
   }
 
-  virtual ~WebContentsAudioInputStreamTest() {
+  ~WebContentsAudioInputStreamTest() override {
     audio_thread_.Stop();
     thread_bundle_.reset();
 

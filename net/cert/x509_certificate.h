@@ -20,11 +20,10 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
-#include <wincrypt.h>
+#include "crypto/wincrypt_shim.h"
 #elif defined(OS_MACOSX)
 #include <CoreFoundation/CFArray.h>
 #include <Security/SecBase.h>
-
 #elif defined(USE_OPENSSL_CERTS)
 // Forward declaration; real one in <x509.h>
 typedef struct x509_st X509;
@@ -180,8 +179,7 @@ class NET_EXPORT X509Certificate
   // Returns NULL on failure.
   //
   // The returned pointer must be stored in a scoped_refptr<X509Certificate>.
-  static X509Certificate* CreateFromPickle(const Pickle& pickle,
-                                           PickleIterator* pickle_iter,
+  static X509Certificate* CreateFromPickle(PickleIterator* pickle_iter,
                                            PickleType type);
 
   // Parses all of the certificates possible from |data|. |format| is a
@@ -253,12 +251,12 @@ class NET_EXPORT X509Certificate
   // Does this certificate's usage allow SSL client authentication?
   bool SupportsSSLClientAuth() const;
 
-  // Returns a new CFArrayRef containing this certificate and its intermediate
-  // certificates in the form expected by Security.framework and Keychain
-  // Services, or NULL on failure.
+  // Returns a new CFMutableArrayRef containing this certificate and its
+  // intermediate certificates in the form expected by Security.framework
+  // and Keychain Services, or NULL on failure.
   // The first item in the array will be this certificate, followed by its
   // intermediates, if any.
-  CFArrayRef CreateOSCertChainForCert() const;
+  CFMutableArrayRef CreateOSCertChainForCert() const;
 #endif
 
   // Do any of the given issuer names appear in this cert's chain of trust?
@@ -395,6 +393,10 @@ class NET_EXPORT X509Certificate
   // the same.
   static SHA1HashValue CalculateFingerprint(OSCertHandle cert_handle);
 
+  // Calculates the SHA-256 fingerprint of the certificate.  Returns an empty
+  // (all zero) fingerprint on failure.
+  static SHA256HashValue CalculateFingerprint256(OSCertHandle cert_handle);
+
   // Calculates the SHA-1 fingerprint of the intermediate CA certificates.
   // Returns an empty (all zero) fingerprint on failure.
   //
@@ -420,6 +422,9 @@ class NET_EXPORT X509Certificate
   static SHA256HashValue CalculateChainFingerprint256(
       OSCertHandle leaf,
       const OSCertHandles& intermediates);
+
+  // Returns true if the certificate is self-signed.
+  static bool IsSelfSigned(OSCertHandle cert_handle);
 
  private:
   friend class base::RefCountedThreadSafe<X509Certificate>;

@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
+#include "base/profiler/scoped_tracker.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/resource_context.h"
 #include "extensions/browser/api/dns/host_resolver_wrapper.h"
@@ -49,7 +50,7 @@ const char kMulticastSocketTypeError[] = "Only UDP socket supports multicast.";
 const char kSecureSocketTypeError[] = "Only TCP sockets are supported for TLS.";
 const char kSocketNotConnectedError[] = "Socket not connected";
 const char kWildcardAddress[] = "*";
-const int kWildcardPort = 0;
+const uint16 kWildcardPort = 0;
 
 SocketAsyncApiFunction::SocketAsyncApiFunction() {}
 
@@ -129,6 +130,11 @@ void SocketExtensionWithDnsLookupFunction::StartDnsLookup(
 }
 
 void SocketExtensionWithDnsLookupFunction::OnDnsLookup(int resolve_result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436634 SocketExtensionWithDnsLookupFunction::OnDnsLookup"));
+
   if (resolve_result == net::OK) {
     DCHECK(!addresses_->empty());
     resolved_address_ = addresses_->front().ToStringWithoutPort();
@@ -184,30 +190,34 @@ bool SocketDestroyFunction::Prepare() {
 void SocketDestroyFunction::Work() { RemoveSocket(socket_id_); }
 
 SocketConnectFunction::SocketConnectFunction()
-    : socket_id_(0), hostname_(), port_(0), socket_(NULL) {}
+    : socket_id_(0), hostname_(), port_(0) {
+}
 
 SocketConnectFunction::~SocketConnectFunction() {}
 
 bool SocketConnectFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &hostname_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(2, &port_));
+  int port;
+  EXTENSION_FUNCTION_VALIDATE(
+      args_->GetInteger(2, &port) && port >= 0 && port <= 65535);
+  port_ = static_cast<uint16>(port);
   return true;
 }
 
 void SocketConnectFunction::AsyncWorkStart() {
-  socket_ = GetSocket(socket_id_);
-  if (!socket_) {
+  Socket* socket = GetSocket(socket_id_);
+  if (!socket) {
     error_ = kSocketNotFoundError;
     SetResult(new base::FundamentalValue(-1));
     AsyncWorkCompleted();
     return;
   }
 
-  socket_->set_hostname(hostname_);
+  socket->set_hostname(hostname_);
 
   SocketPermissionRequest::OperationType operation_type;
-  switch (socket_->GetSocketType()) {
+  switch (socket->GetSocketType()) {
     case Socket::TYPE_TCP:
       operation_type = SocketPermissionRequest::TCP_CONNECT;
       break;
@@ -242,9 +252,17 @@ void SocketConnectFunction::AfterDnsLookup(int lookup_result) {
 }
 
 void SocketConnectFunction::StartConnect() {
-  socket_->Connect(resolved_address_,
-                   port_,
-                   base::Bind(&SocketConnectFunction::OnConnect, this));
+  Socket* socket = GetSocket(socket_id_);
+  if (!socket) {
+    error_ = kSocketNotFoundError;
+    SetResult(new base::FundamentalValue(-1));
+    AsyncWorkCompleted();
+    return;
+  }
+
+  socket->Connect(resolved_address_,
+                  port_,
+                  base::Bind(&SocketConnectFunction::OnConnect, this));
 }
 
 void SocketConnectFunction::OnConnect(int result) {
@@ -269,7 +287,10 @@ void SocketDisconnectFunction::Work() {
 bool SocketBindFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &address_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(2, &port_));
+  int port;
+  EXTENSION_FUNCTION_VALIDATE(
+      args_->GetInteger(2, &port) && port >= 0 && port <= 65535);
+  port_ = static_cast<uint16>(port);
   return true;
 }
 
@@ -458,7 +479,7 @@ bool SocketRecvFromFunction::Prepare() {
 
 void SocketRecvFromFunction::AsyncWorkStart() {
   Socket* socket = GetSocket(params_->socket_id);
-  if (!socket) {
+  if (!socket || socket->GetSocketType() != Socket::TYPE_UDP) {
     error_ = kSocketNotFoundError;
     OnCompleted(-1, NULL, std::string(), 0);
     return;
@@ -471,7 +492,7 @@ void SocketRecvFromFunction::AsyncWorkStart() {
 void SocketRecvFromFunction::OnCompleted(int bytes_read,
                                          scoped_refptr<net::IOBuffer> io_buffer,
                                          const std::string& address,
-                                         int port) {
+                                         uint16 port) {
   base::DictionaryValue* result = new base::DictionaryValue();
   result->SetInteger(kResultCodeKey, bytes_read);
   if (bytes_read > 0) {
@@ -489,11 +510,8 @@ void SocketRecvFromFunction::OnCompleted(int bytes_read,
 }
 
 SocketSendToFunction::SocketSendToFunction()
-    : socket_id_(0),
-      io_buffer_(NULL),
-      io_buffer_size_(0),
-      port_(0),
-      socket_(NULL) {}
+    : socket_id_(0), io_buffer_(NULL), io_buffer_size_(0), port_(0) {
+}
 
 SocketSendToFunction::~SocketSendToFunction() {}
 
@@ -502,7 +520,10 @@ bool SocketSendToFunction::Prepare() {
   base::BinaryValue* data = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBinary(1, &data));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &hostname_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(3, &port_));
+  int port;
+  EXTENSION_FUNCTION_VALIDATE(
+      args_->GetInteger(3, &port) && port >= 0 && port <= 65535);
+  port_ = static_cast<uint16>(port);
 
   io_buffer_size_ = data->GetSize();
   io_buffer_ = new net::WrappedIOBuffer(data->GetBuffer());
@@ -510,15 +531,15 @@ bool SocketSendToFunction::Prepare() {
 }
 
 void SocketSendToFunction::AsyncWorkStart() {
-  socket_ = GetSocket(socket_id_);
-  if (!socket_) {
+  Socket* socket = GetSocket(socket_id_);
+  if (!socket) {
     error_ = kSocketNotFoundError;
     SetResult(new base::FundamentalValue(-1));
     AsyncWorkCompleted();
     return;
   }
 
-  if (socket_->GetSocketType() == Socket::TYPE_UDP) {
+  if (socket->GetSocketType() == Socket::TYPE_UDP) {
     SocketPermission::CheckParam param(
         SocketPermissionRequest::UDP_SEND_TO, hostname_, port_);
     if (!extension()->permissions_data()->CheckAPIPermissionWithParam(
@@ -543,11 +564,19 @@ void SocketSendToFunction::AfterDnsLookup(int lookup_result) {
 }
 
 void SocketSendToFunction::StartSendTo() {
-  socket_->SendTo(io_buffer_,
-                  io_buffer_size_,
-                  resolved_address_,
-                  port_,
-                  base::Bind(&SocketSendToFunction::OnCompleted, this));
+  Socket* socket = GetSocket(socket_id_);
+  if (!socket) {
+    error_ = kSocketNotFoundError;
+    SetResult(new base::FundamentalValue(-1));
+    AsyncWorkCompleted();
+    return;
+  }
+
+  socket->SendTo(io_buffer_,
+                 io_buffer_size_,
+                 resolved_address_,
+                 port_,
+                 base::Bind(&SocketSendToFunction::OnCompleted, this));
 }
 
 void SocketSendToFunction::OnCompleted(int bytes_written) {
@@ -697,7 +726,7 @@ void SocketGetNetworkListFunction::SendResponseOnUIThread(
         make_linked_ptr(new core_api::socket::NetworkInterface);
     info->name = i->name;
     info->address = net::IPAddressToString(i->address);
-    info->prefix_length = i->network_prefix;
+    info->prefix_length = i->prefix_length;
     create_arg.push_back(info);
   }
 

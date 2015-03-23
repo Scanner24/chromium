@@ -10,11 +10,13 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/permissions/api_permission_set.h"
 #include "extensions/renderer/module_system.h"
 #include "extensions/renderer/request_sender.h"
 #include "extensions/renderer/safe_builtins.h"
 #include "extensions/renderer/scoped_persistent.h"
 #include "gin/runner.h"
+#include "url/gurl.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -30,7 +32,7 @@ namespace extensions {
 class Extension;
 
 // Extensions wrapper for a v8 context.
-class ScriptContext : public RequestSender::Source, public gin::Runner {
+class ScriptContext : public RequestSender::Source {
  public:
   ScriptContext(const v8::Handle<v8::Context>& context,
                 blink::WebFrame* frame,
@@ -38,7 +40,7 @@ class ScriptContext : public RequestSender::Source, public gin::Runner {
                 Feature::Context context_type,
                 const Extension* effective_extension,
                 Feature::Context effective_context_type);
-  virtual ~ScriptContext();
+  ~ScriptContext() override;
 
   // Clears the WebFrame for this contexts and invalidates the associated
   // ModuleSystem.
@@ -133,27 +135,29 @@ class ScriptContext : public RequestSender::Source, public gin::Runner {
                                       bool match_about_blank);
 
   // RequestSender::Source implementation.
-  virtual ScriptContext* GetContext() OVERRIDE;
-  virtual void OnResponseReceived(const std::string& name,
-                                  int request_id,
-                                  bool success,
-                                  const base::ListValue& response,
-                                  const std::string& error) OVERRIDE;
+  ScriptContext* GetContext() override;
+  void OnResponseReceived(const std::string& name,
+                          int request_id,
+                          bool success,
+                          const base::ListValue& response,
+                          const std::string& error) override;
 
-  // gin::Runner overrides.
-  virtual void Run(const std::string& source,
-                   const std::string& resource_name) OVERRIDE;
-  virtual v8::Handle<v8::Value> Call(v8::Handle<v8::Function> function,
-                                     v8::Handle<v8::Value> receiver,
-                                     int argc,
-                                     v8::Handle<v8::Value> argv[]) OVERRIDE;
-  virtual gin::ContextHolder* GetContextHolder() OVERRIDE;
+  // Grants a set of content capabilities to this context.
+  void SetContentCapabilities(const APIPermissionSet& permissions);
+
+  // Indicates if this context has an effective API permission either by being
+  // a context for an extension which has that permission, or by being a web
+  // context which has been granted the corresponding capability by an
+  // extension.
+  bool HasAPIPermission(APIPermission::ID permission) const;
 
  protected:
   // The v8 context the bindings are accessible to.
   ScopedPersistent<v8::Context> v8_context_;
 
  private:
+  class Runner;
+
   // The WebFrame associated with this context. This can be NULL because this
   // object can outlive is destroyed asynchronously.
   blink::WebFrame* web_frame_;
@@ -179,7 +183,14 @@ class ScriptContext : public RequestSender::Source, public gin::Runner {
   // Contains safe copies of builtin objects like Function.prototype.
   SafeBuiltins safe_builtins_;
 
+  // The set of capabilities granted to this context by extensions.
+  APIPermissionSet content_capabilities_;
+
   v8::Isolate* isolate_;
+
+  GURL url_;
+
+  scoped_ptr<Runner> runner_;
 
   DISALLOW_COPY_AND_ASSIGN(ScriptContext);
 };

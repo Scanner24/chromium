@@ -8,23 +8,24 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/deferred_sequenced_task_runner.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/bookmark_model_loaded_observer.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/profiles/startup_task_runner_service_factory.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -50,7 +52,10 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -69,7 +74,9 @@
 #include "extensions/common/manifest.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #endif
@@ -366,20 +373,14 @@ Profile* ProfileManager::GetActiveUserProfile() {
 }
 
 Profile* ProfileManager::GetProfile(const base::FilePath& profile_dir) {
-  TRACE_EVENT0("browser", "ProfileManager::GetProfile")
+  TRACE_EVENT0("browser", "ProfileManager::GetProfile");
+
   // If the profile is already loaded (e.g., chrome.exe launched twice), just
   // return it.
   Profile* profile = GetProfileByPath(profile_dir);
-  if (NULL != profile)
+  if (profile)
     return profile;
-
-  profile = CreateProfileHelper(profile_dir);
-  DCHECK(profile);
-  if (profile) {
-    bool result = AddProfile(profile);
-    DCHECK(result);
-  }
-  return profile;
+  return CreateAndInitializeProfile(profile_dir);
 }
 
 size_t ProfileManager::GetNumberOfProfiles() {
@@ -393,10 +394,10 @@ void ProfileManager::CreateProfileAsync(
     const base::string16& icon_url,
     const std::string& supervised_user_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  TRACE_EVENT1("startup",
+  TRACE_EVENT1("browser,startup",
                "ProfileManager::CreateProfileAsync",
                "profile_path",
-               profile_path.value().c_str());
+               profile_path.AsUTF8Unsafe());
 
   // Make sure that this profile is not pending deletion.
   if (IsProfileMarkedForDeletion(profile_path)) {
@@ -551,9 +552,18 @@ std::vector<Profile*> ProfileManager::GetLoadedProfiles() const {
   return profiles;
 }
 
-Profile* ProfileManager::GetProfileByPath(const base::FilePath& path) const {
+Profile* ProfileManager::GetProfileByPathInternal(
+    const base::FilePath& path) const {
+  TRACE_EVENT0("browser", "ProfileManager::GetProfileByPathInternal");
   ProfileInfo* profile_info = GetProfileInfoByPath(path);
-  return profile_info ? profile_info->profile.get() : NULL;
+  return profile_info ? profile_info->profile.get() : nullptr;
+}
+
+Profile* ProfileManager::GetProfileByPath(const base::FilePath& path) const {
+  TRACE_EVENT0("browser", "ProfileManager::GetProfileByPath");
+  ProfileInfo* profile_info = GetProfileInfoByPath(path);
+  return (profile_info && profile_info->created) ? profile_info->profile.get()
+                                                 : nullptr;
 }
 
 // static
@@ -586,6 +596,16 @@ base::FilePath ProfileManager::GetGuestProfilePath() {
   return guest_path.Append(chrome::kGuestProfileDir);
 }
 
+// static
+base::FilePath ProfileManager::GetSystemProfilePath() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  base::FilePath system_path = profile_manager->user_data_dir();
+  return system_path.Append(chrome::kSystemProfileDir);
+}
+
 base::FilePath ProfileManager::GenerateNextProfileDirectoryPath() {
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
@@ -607,6 +627,7 @@ base::FilePath ProfileManager::GenerateNextProfileDirectoryPath() {
 }
 
 ProfileInfoCache& ProfileManager::GetProfileInfoCache() {
+  TRACE_EVENT0("browser", "ProfileManager::GetProfileInfoCache");
   if (!profile_info_cache_) {
     profile_info_cache_.reset(new ProfileInfoCache(
         g_browser_process->local_state(), user_data_dir_));
@@ -633,80 +654,73 @@ void ProfileManager::ScheduleProfileForDeletion(
     service->CancelDownloads();
   }
 
-  PrefService* local_state = g_browser_process->local_state();
   ProfileInfoCache& cache = GetProfileInfoCache();
 
-  const std::string last_used_profile =
-      local_state->GetString(prefs::kProfileLastUsed);
-
-  if (last_used_profile == profile_dir.BaseName().MaybeAsASCII() ||
-      last_used_profile == GetGuestProfilePath().BaseName().MaybeAsASCII()) {
-    // Update the last used profile pref before closing browser windows. This
-    // way the correct last used profile is set for any notification observers.
-    base::FilePath last_non_supervised_profile_path;
-    for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-      base::FilePath cur_path = cache.GetPathOfProfileAtIndex(i);
-      // Make sure that this profile is not pending deletion.
-      if (cur_path != profile_dir && !cache.ProfileIsSupervisedAtIndex(i) &&
-          !IsProfileMarkedForDeletion(cur_path)) {
-        last_non_supervised_profile_path = cur_path;
-        break;
-      }
-    }
-
-    // If we're deleting the last (non-supervised) profile, then create a new
-    // profile in its place.
-    const std::string last_non_supervised_profile =
-        last_non_supervised_profile_path.BaseName().MaybeAsASCII();
-    if (last_non_supervised_profile.empty()) {
-      base::FilePath new_path = GenerateNextProfileDirectoryPath();
-      // Make sure the last used profile path is pointing at it. This way the
-      // correct last used profile is set for any notification observers.
-      local_state->SetString(prefs::kProfileLastUsed,
-                             new_path.BaseName().MaybeAsASCII());
-
-      // If we are using --new-avatar-menu, then assign the default
-      // placeholder avatar and name. Otherwise, use random ones.
-      bool is_new_avatar_menu = switches::IsNewAvatarMenu();
-      int avatar_index = profiles::GetPlaceholderAvatarIndex();
-      base::string16 new_avatar_url = is_new_avatar_menu ?
-          base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index)) :
-          base::string16();
-      base::string16 new_profile_name = is_new_avatar_menu ?
-          cache.ChooseNameForNewProfile(avatar_index) : base::string16();
-
-      CreateProfileAsync(new_path,
-                         callback,
-                         new_profile_name,
-                         new_avatar_url,
-                         std::string());
-
-      ProfileMetrics::LogProfileAddNewUser(
-          ProfileMetrics::ADD_NEW_USER_LAST_DELETED);
-    } else {
-      // On the Mac, the browser process is not killed when all browser windows
-      // are closed, so just in case we are deleting the active profile, and no
-      // other profile has been loaded, we must pre-load a next one.
-#if defined(OS_MACOSX)
-      CreateProfileAsync(last_non_supervised_profile_path,
-                         base::Bind(&ProfileManager::OnNewActiveProfileLoaded,
-                                    base::Unretained(this),
-                                    profile_dir,
-                                    last_non_supervised_profile_path,
-                                    callback),
-                         base::string16(),
-                         base::string16(),
-                         std::string());
-      return;
-#else
-      // For OS_MACOSX the pref is updated in the callback to make sure that
-      // it isn't used before the profile is actually loaded.
-      local_state->SetString(prefs::kProfileLastUsed,
-                             last_non_supervised_profile);
-#endif
+  // If we're deleting the last (non-legacy-supervised) profile, then create a
+  // new profile in its place.
+  base::FilePath last_non_supervised_profile_path;
+  for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+    base::FilePath cur_path = cache.GetPathOfProfileAtIndex(i);
+    // Make sure that this profile is not pending deletion, and is not
+    // legacy-supervised.
+    if (cur_path != profile_dir &&
+        !cache.ProfileIsLegacySupervisedAtIndex(i) &&
+        !IsProfileMarkedForDeletion(cur_path)) {
+      last_non_supervised_profile_path = cur_path;
+      break;
     }
   }
-  FinishDeletingProfile(profile_dir);
+
+  base::FilePath new_path;
+  if (last_non_supervised_profile_path.empty()) {
+    // If we are using --new-avatar-menu, then assign the default
+    // placeholder avatar and name. Otherwise, use random ones.
+    bool is_new_avatar_menu = switches::IsNewAvatarMenu();
+    int avatar_index = profiles::GetPlaceholderAvatarIndex();
+    base::string16 new_avatar_url = is_new_avatar_menu ?
+        base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index)) :
+        base::string16();
+    base::string16 new_profile_name = is_new_avatar_menu ?
+        cache.ChooseNameForNewProfile(avatar_index) : base::string16();
+
+    new_path = GenerateNextProfileDirectoryPath();
+    CreateProfileAsync(new_path,
+                       base::Bind(&ProfileManager::OnNewActiveProfileLoaded,
+                                  base::Unretained(this),
+                                  profile_dir,
+                                  new_path,
+                                  callback),
+                       new_profile_name,
+                       new_avatar_url,
+                       std::string());
+
+    ProfileMetrics::LogProfileAddNewUser(
+        ProfileMetrics::ADD_NEW_USER_LAST_DELETED);
+    return;
+  }
+
+#if defined(OS_MACOSX)
+  // On the Mac, the browser process is not killed when all browser windows are
+  // closed, so just in case we are deleting the active profile, and no other
+  // profile has been loaded, we must pre-load a next one.
+  const std::string last_used_profile =
+      g_browser_process->local_state()->GetString(prefs::kProfileLastUsed);
+  if (last_used_profile == profile_dir.BaseName().MaybeAsASCII() ||
+      last_used_profile == GetGuestProfilePath().BaseName().MaybeAsASCII()) {
+    CreateProfileAsync(last_non_supervised_profile_path,
+                       base::Bind(&ProfileManager::OnNewActiveProfileLoaded,
+                                  base::Unretained(this),
+                                  profile_dir,
+                                  last_non_supervised_profile_path,
+                                  callback),
+                       base::string16(),
+                       base::string16(),
+                       std::string());
+    return;
+  }
+#endif  // defined(OS_MACOSX)
+
+  FinishDeletingProfile(profile_dir, last_non_supervised_profile_path);
 }
 
 // static
@@ -742,6 +756,7 @@ void ProfileManager::AutoloadProfiles() {
 }
 
 void ProfileManager::InitProfileUserPrefs(Profile* profile) {
+  TRACE_EVENT0("browser", "ProfileManager::InitProfileUserPrefs");
   ProfileInfoCache& cache = GetProfileInfoCache();
 
   if (profile->GetPath().DirName() != cache.GetUserDataDir())
@@ -785,7 +800,7 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
   if (!profile->GetPrefs()->HasPrefPath(prefs::kProfileName))
     profile->GetPrefs()->SetString(prefs::kProfileName, profile_name);
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   bool force_supervised_user_id =
       command_line->HasSwitch(switches::kSupervisedUserId);
   if (force_supervised_user_id) {
@@ -797,6 +812,12 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
     profile->GetPrefs()->SetString(prefs::kSupervisedUserId,
                                    supervised_user_id);
   }
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS) && !defined(OS_CHROMEOS)
+  // If the lock enabled algorithm changed, update this profile's lock status.
+  if (switches::IsNewProfileManagement())
+    profiles::UpdateIsProfileLockEnabledIfNeeded(profile);
+#endif
 }
 
 void ProfileManager::RegisterTestingProfile(Profile* profile,
@@ -821,7 +842,8 @@ void ProfileManager::Observe(
   if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED) {
     logged_in_ = true;
 
-    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
     if (!command_line.HasSwitch(switches::kTestType)) {
       // If we don't have a mounted profile directory we're in trouble.
       // TODO(davemoore) Once we have better api this check should ensure that
@@ -833,7 +855,7 @@ void ProfileManager::Observe(
       // Confirm that we hadn't loaded the new profile previously.
       base::FilePath default_profile_dir = user_data_dir_.Append(
           GetInitialProfileDir());
-      CHECK(!GetProfileByPath(default_profile_dir))
+      CHECK(!GetProfileByPathInternal(default_profile_dir))
           << "The default profile was loaded before we mounted the cryptohome.";
     }
     return;
@@ -949,6 +971,9 @@ void ProfileManager::OnProfileCreated(Profile* profile,
   } else {
     profile = NULL;
     profiles_info_.erase(iter);
+    // TODO(yiyaoliu): This is temporary, remove it after it's not used.
+    UMA_HISTOGRAM_COUNTS_100("UMA.ProfilesCount.AfterErase",
+                             profiles_info_.size());
   }
 
   if (profile) {
@@ -968,6 +993,7 @@ void ProfileManager::OnProfileCreated(Profile* profile,
 }
 
 void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
+  TRACE_EVENT0("browser", "ProfileManager::DoFinalInit");
   DoFinalInitForServices(profile, go_off_the_record);
   AddProfileToCache(profile);
   DoFinalInitLogging(profile);
@@ -981,7 +1007,9 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
 
 void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
+  TRACE_EVENT0("browser", "ProfileManager::DoFinalInitForServices");
 #if defined(ENABLE_EXTENSIONS)
+  ProfileInfoCache& cache = GetProfileInfoCache();
   extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
       !go_off_the_record);
   // During tests, when |profile| is an instance of TestingProfile,
@@ -990,22 +1018,39 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
     extensions::ExtensionSystem::Get(profile)->extension_service()->
         RegisterContentSettings(profile->GetHostContentSettingsMap());
   }
+  // Set the block extensions bit on the ExtensionService. There likely are no
+  // blockable extensions to block.
+  size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (profile_index != std::string::npos &&
+      cache.ProfileIsSigninRequiredAtIndex(profile_index)) {
+    extensions::ExtensionSystem::Get(profile)
+        ->extension_service()
+        ->BlockAllExtensions();
+  }
+
 #endif
-#if defined(ENABLE_MANAGED_USERS) && !defined(OS_ANDROID)
+#if defined(ENABLE_SUPERVISED_USERS)
   // Initialization needs to happen after extension system initialization (for
   // extension::ManagementPolicy) and InitProfileUserPrefs (for setting the
   // initializing the supervised flag if necessary).
+  ChildAccountServiceFactory::GetForProfile(profile)->Init();
   SupervisedUserServiceFactory::GetForProfile(profile)->Init();
 #endif
   // Start the deferred task runners once the profile is loaded.
   StartupTaskRunnerServiceFactory::GetForProfile(profile)->
       StartDeferredTaskRunners();
 
-  AccountTrackerServiceFactory::GetForProfile(profile);
+  // Activate data reduction proxy. This creates a request context and makes a
+  // URL request to check if the data reduction proxy server is reachable.
+  DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile)->
+      MaybeActivateDataReductionProxy(true);
+
+  AccountTrackerServiceFactory::GetForProfile(profile)->EnableNetworkFetches();
   AccountReconcilorFactory::GetForProfile(profile);
 }
 
 void ProfileManager::DoFinalInitLogging(Profile* profile) {
+  TRACE_EVENT0("browser", "ProfileManager::DoFinalInitLogging");
   // Count number of extensions in this profile.
   int enabled_app_count = -1;
 #if defined(ENABLE_EXTENSIONS)
@@ -1020,6 +1065,9 @@ void ProfileManager::DoFinalInitLogging(Profile* profile) {
 }
 
 Profile* ProfileManager::CreateProfileHelper(const base::FilePath& path) {
+  TRACE_EVENT0("browser", "ProfileManager::CreateProfileHelper");
+  SCOPED_UMA_HISTOGRAM_TIMER("Profile.CreateProfileHelperTime");
+
   return Profile::CreateProfile(path, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
 }
 
@@ -1068,11 +1116,12 @@ Profile* ProfileManager::GetActiveUserOrOffTheRecordProfileFromPath(
 }
 
 bool ProfileManager::AddProfile(Profile* profile) {
+  TRACE_EVENT0("browser", "ProfileManager::AddProfile");
   DCHECK(profile);
 
   // Make sure that we're not loading a profile with the same ID as a profile
   // that's already loaded.
-  if (GetProfileByPath(profile->GetPath())) {
+  if (GetProfileByPathInternal(profile->GetPath())) {
     NOTREACHED() << "Attempted to add profile with the same path (" <<
                     profile->GetPath().value() <<
                     ") as an already-loaded profile.";
@@ -1085,7 +1134,34 @@ bool ProfileManager::AddProfile(Profile* profile) {
   return true;
 }
 
-void ProfileManager::FinishDeletingProfile(const base::FilePath& profile_dir) {
+Profile* ProfileManager::CreateAndInitializeProfile(
+    const base::FilePath& profile_dir) {
+  TRACE_EVENT0("browser", "ProfileManager::CreateAndInitializeProfile");
+  SCOPED_UMA_HISTOGRAM_LONG_TIMER("Profile.CreateAndInitializeProfile");
+
+  // CHECK that we are not trying to load the same profile twice, to prevent
+  // profile corruption. Note that this check also covers the case when we have
+  // already started loading the profile but it is not fully initialized yet,
+  // which would make Bad Things happen if we returned it.
+  CHECK(!GetProfileByPathInternal(profile_dir));
+  Profile* profile = CreateProfileHelper(profile_dir);
+  DCHECK(profile);
+  if (profile) {
+    bool result = AddProfile(profile);
+    DCHECK(result);
+  }
+  return profile;
+}
+
+void ProfileManager::FinishDeletingProfile(
+    const base::FilePath& profile_dir,
+    const base::FilePath& new_active_profile_dir) {
+  // Update the last used profile pref before closing browser windows. This
+  // way the correct last used profile is set for any notification observers.
+  g_browser_process->local_state()->SetString(
+      prefs::kProfileLastUsed,
+      new_active_profile_dir.BaseName().MaybeAsASCII());
+
   ProfileInfoCache& cache = GetProfileInfoCache();
   // TODO(sail): Due to bug 88586 we don't delete the profile instance. Once we
   // start deleting the profile instance we need to close background apps too.
@@ -1117,8 +1193,8 @@ void ProfileManager::FinishDeletingProfile(const base::FilePath& profile_dir) {
     ProfileMetrics::LogProfileDelete(profile_is_signed_in);
     // Some platforms store passwords in keychains. They should be removed.
     scoped_refptr<password_manager::PasswordStore> password_store =
-        PasswordStoreFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS)
-            .get();
+        PasswordStoreFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS).get();
     if (password_store.get()) {
       password_store->RemoveLoginsCreatedBetween(base::Time(),
                                                  base::Time::Max());
@@ -1133,6 +1209,7 @@ void ProfileManager::FinishDeletingProfile(const base::FilePath& profile_dir) {
 ProfileManager::ProfileInfo* ProfileManager::RegisterProfile(
     Profile* profile,
     bool created) {
+  TRACE_EVENT0("browser", "ProfileManager::RegisterProfile");
   ProfileInfo* info = new ProfileInfo(profile, created);
   profiles_info_.insert(
       std::make_pair(profile->GetPath(), linked_ptr<ProfileInfo>(info)));
@@ -1146,17 +1223,24 @@ ProfileManager::ProfileInfo* ProfileManager::GetProfileInfoByPath(
 }
 
 void ProfileManager::AddProfileToCache(Profile* profile) {
-  if (profile->IsGuestSession())
+  TRACE_EVENT0("browser", "ProfileManager::AddProfileToCache");
+  if (profile->IsGuestSession() || profile->IsSystemProfile())
     return;
   ProfileInfoCache& cache = GetProfileInfoCache();
   if (profile->GetPath().DirName() != cache.GetUserDataDir())
     return;
 
-  if (cache.GetIndexOfProfileWithPath(profile->GetPath()) != std::string::npos)
-    return;
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfile(profile);
+  base::string16 username = base::UTF8ToUTF16(
+      signin_manager->GetAuthenticatedUsername());
 
-  base::string16 username = base::UTF8ToUTF16(profile->GetPrefs()->GetString(
-      prefs::kGoogleServicesUsername));
+  size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (profile_index != std::string::npos) {
+    // The ProfileInfoCache's username must match the Signin Manager's username.
+    cache.SetUserNameOfProfileAtIndex(profile_index, username);
+    return;
+  }
 
   // Profile name and avatar are set by InitProfileUserPrefs and stored in the
   // profile. Use those values to setup the cache entry.
@@ -1186,6 +1270,7 @@ void ProfileManager::SetGuestProfilePrefs(Profile* profile) {
   prefs->SetBoolean(prefs::kSigninAllowed, false);
   prefs->SetBoolean(bookmarks::prefs::kEditBookmarksEnabled, false);
   prefs->SetBoolean(bookmarks::prefs::kShowBookmarkBar, false);
+  prefs->ClearPref(DefaultSearchManager::kDefaultSearchProviderDataPrefName);
   // This can be removed in the future but needs to be present through
   // a release (or two) so that any existing installs get switched to
   // the new state and away from the previous "forced" state.
@@ -1288,10 +1373,9 @@ void ProfileManager::BrowserListObserver::OnBrowserSetLastActive(
 }
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
-#if defined(OS_MACOSX)
 void ProfileManager::OnNewActiveProfileLoaded(
     const base::FilePath& profile_to_delete_path,
-    const base::FilePath& last_non_supervised_profile_path,
+    const base::FilePath& new_active_profile_path,
     const CreateCallback& original_callback,
     Profile* loaded_profile,
     Profile::CreateStatus status) {
@@ -1299,22 +1383,21 @@ void ProfileManager::OnNewActiveProfileLoaded(
          status != Profile::CREATE_STATUS_REMOTE_FAIL);
 
   // Only run the code if the profile initialization has finished completely.
-  if (status == Profile::CREATE_STATUS_INITIALIZED) {
-    if (IsProfileMarkedForDeletion(last_non_supervised_profile_path)) {
-      // If the profile we tried to load as the next active profile has been
-      // deleted, then retry deleting this profile to redo the logic to load
-      // the next available profile.
-      ScheduleProfileForDeletion(profile_to_delete_path, original_callback);
-    } else {
-      // Update the local state as promised in the ScheduleProfileForDeletion.
-      g_browser_process->local_state()->SetString(
-          prefs::kProfileLastUsed,
-          last_non_supervised_profile_path.BaseName().MaybeAsASCII());
-      FinishDeletingProfile(profile_to_delete_path);
-    }
+  if (status != Profile::CREATE_STATUS_INITIALIZED)
+    return;
+
+  if (IsProfileMarkedForDeletion(new_active_profile_path)) {
+    // If the profile we tried to load as the next active profile has been
+    // deleted, then retry deleting this profile to redo the logic to load
+    // the next available profile.
+    ScheduleProfileForDeletion(profile_to_delete_path, original_callback);
+    return;
   }
+
+  FinishDeletingProfile(profile_to_delete_path, new_active_profile_path);
+  if (!original_callback.is_null())
+    original_callback.Run(loaded_profile, status);
 }
-#endif
 
 ProfileManagerWithoutInit::ProfileManagerWithoutInit(
     const base::FilePath& user_data_dir) : ProfileManager(user_data_dir) {

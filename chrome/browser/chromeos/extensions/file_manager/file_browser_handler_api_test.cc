@@ -18,6 +18,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/result_catcher.h"
 #include "storage/browser/fileapi/external_mount_points.h"
@@ -79,15 +80,15 @@ class MockFileSelector : public file_manager::FileSelector {
         success_(success),
         selected_path_(selected_path) {
   }
-  virtual ~MockFileSelector() {}
+  ~MockFileSelector() override {}
 
   // file_manager::FileSelector implementation.
   // |browser| is not used.
-  virtual void SelectFile(
+  void SelectFile(
       const base::FilePath& suggested_name,
       const std::vector<std::string>& allowed_extensions,
       Browser* browser,
-      FileBrowserHandlerInternalSelectFileFunction* function) OVERRIDE {
+      FileBrowserHandlerInternalSelectFileFunction* function) override {
     // Confirm that the function suggested us the right name.
     EXPECT_EQ(suggested_name_, suggested_name);
     // Confirm that the function allowed us the right extensions.
@@ -133,10 +134,10 @@ class MockFileSelectorFactory : public file_manager::FileSelectorFactory {
         success_(test_case.success),
         selected_path_(test_case.selected_path) {
   }
-  virtual ~MockFileSelectorFactory() {}
+  ~MockFileSelectorFactory() override {}
 
   // file_manager::FileSelectorFactory implementation.
-  virtual file_manager::FileSelector* CreateFileSelector() const OVERRIDE {
+  file_manager::FileSelector* CreateFileSelector() const override {
     return new MockFileSelector(suggested_name_,
                                 allowed_extensions_,
                                 success_,
@@ -159,7 +160,7 @@ class MockFileSelectorFactory : public file_manager::FileSelectorFactory {
 // Extension api test for the fileBrowserHandler extension API.
 class FileBrowserHandlerExtensionTest : public ExtensionApiTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Create mount point directory that will be used in the test.
     // Mount point will be called "tmp", and it will be located in a tmp
     // directory with an unique name.
@@ -340,7 +341,7 @@ IN_PROC_BROWSER_TEST_F(FileBrowserHandlerExtensionTest, SelectionFailed) {
           "[{\"suggestedName\": \"some_file_name.txt\"}]",
           browser())));
 
-  EXPECT_FALSE(utils::GetBoolean(result.get(), "success"));
+  EXPECT_FALSE(extensions::api_test_utils::GetBoolean(result.get(), "success"));
   base::DictionaryValue* entry_info;
   EXPECT_FALSE(result->GetDictionary("entry", &entry_info));
 }
@@ -369,7 +370,7 @@ IN_PROC_BROWSER_TEST_F(FileBrowserHandlerExtensionTest, SuggestedFullPath) {
           "[{\"suggestedName\": \"/path_to_file/some_file_name.txt\"}]",
           browser())));
 
-  EXPECT_FALSE(utils::GetBoolean(result.get(), "success"));
+  EXPECT_FALSE(extensions::api_test_utils::GetBoolean(result.get(), "success"));
   base::DictionaryValue* entry_info;
   EXPECT_FALSE(result->GetDictionary("entry", &entry_info));
 }

@@ -14,6 +14,7 @@
 #include "gin/interceptor.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
+#include "v8/include/v8-util.h"
 
 namespace blink {
 class WebFrame;
@@ -31,14 +32,14 @@ class GinJavaBridgeObject : public gin::Wrappable<GinJavaBridgeObject>,
   GinJavaBridgeDispatcher::ObjectID object_id() const { return object_id_; }
 
   // gin::Wrappable.
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   // gin::NamedPropertyInterceptor
-  virtual v8::Local<v8::Value> GetNamedProperty(
-      v8::Isolate* isolate, const std::string& property) OVERRIDE;
-  virtual std::vector<std::string> EnumerateNamedProperties(
-      v8::Isolate* isolate) OVERRIDE;
+  v8::Local<v8::Value> GetNamedProperty(v8::Isolate* isolate,
+                                        const std::string& property) override;
+  std::vector<std::string> EnumerateNamedProperties(
+      v8::Isolate* isolate) override;
 
   static GinJavaBridgeObject* InjectNamed(
       blink::WebFrame* frame,
@@ -53,8 +54,10 @@ class GinJavaBridgeObject : public gin::Wrappable<GinJavaBridgeObject>,
   GinJavaBridgeObject(v8::Isolate* isolate,
                       const base::WeakPtr<GinJavaBridgeDispatcher>& dispatcher,
                       GinJavaBridgeDispatcher::ObjectID object_id);
-  virtual ~GinJavaBridgeObject();
+  ~GinJavaBridgeObject() override;
 
+  v8::Local<v8::FunctionTemplate> GetFunctionTemplate(v8::Isolate* isolate,
+                                                      const std::string& name);
   v8::Handle<v8::Value> InvokeMethod(const std::string& name,
                                      gin::Arguments* args);
 
@@ -62,6 +65,7 @@ class GinJavaBridgeObject : public gin::Wrappable<GinJavaBridgeObject>,
   GinJavaBridgeDispatcher::ObjectID object_id_;
   scoped_ptr<GinJavaBridgeValueConverter> converter_;
   std::map<std::string, bool> known_methods_;
+  v8::StdPersistentValueMap<std::string, v8::FunctionTemplate> template_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(GinJavaBridgeObject);
 };

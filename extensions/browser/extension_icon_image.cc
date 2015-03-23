@@ -12,12 +12,12 @@
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/size.h"
-#include "ui/gfx/size_conversions.h"
 
 // The ImageSkia provided by extensions::IconImage contains ImageSkiaReps that
 // are computed and updated using the following algorithm (if no default icon
@@ -55,11 +55,11 @@ class BlankImageSource : public gfx::CanvasImageSource {
   explicit BlankImageSource(const gfx::Size& size_in_dip)
       : CanvasImageSource(size_in_dip, /*is_opaque =*/ false) {
   }
-  virtual ~BlankImageSource() {}
+  ~BlankImageSource() override {}
 
  private:
   // gfx::CanvasImageSource overrides:
-  virtual void Draw(gfx::Canvas* canvas) OVERRIDE {
+  void Draw(gfx::Canvas* canvas) override {
     canvas->DrawColor(SkColorSetARGB(0, 0, 0, 0));
   }
 
@@ -76,13 +76,13 @@ namespace extensions {
 class IconImage::Source : public gfx::ImageSkiaSource {
  public:
   Source(IconImage* host, const gfx::Size& size_in_dip);
-  virtual ~Source();
+  ~Source() override;
 
   void ResetHost();
 
  private:
   // gfx::ImageSkiaSource overrides:
-  virtual gfx::ImageSkiaRep GetImageForScale(float scale) OVERRIDE;
+  gfx::ImageSkiaRep GetImageForScale(float scale) override;
 
   // Used to load images, possibly asynchronously. NULLed out when the IconImage
   // is destroyed.
@@ -134,23 +134,34 @@ IconImage::IconImage(
       extension_(extension),
       icon_set_(icon_set),
       resource_size_in_dip_(resource_size_in_dip),
-      observer_(observer),
       source_(NULL),
       default_icon_(gfx::ImageSkiaOperations::CreateResizedImage(
           default_icon,
           skia::ImageOperations::RESIZE_BEST,
           gfx::Size(resource_size_in_dip, resource_size_in_dip))),
       weak_ptr_factory_(this) {
+  if (observer)
+    AddObserver(observer);
   gfx::Size resource_size(resource_size_in_dip, resource_size_in_dip);
   source_ = new Source(this, resource_size);
   image_skia_ = gfx::ImageSkia(source_, resource_size);
+  image_ = gfx::Image(image_skia_);
 
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_REMOVED,
                  content::NotificationService::AllSources());
 }
 
+void IconImage::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void IconImage::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 IconImage::~IconImage() {
+  FOR_EACH_OBSERVER(Observer, observers_, OnExtensionIconImageDestroyed(this));
   source_->ResetHost();
 }
 
@@ -216,8 +227,13 @@ void IconImage::OnImageLoaded(float scale, const gfx::Image& image_in) {
   image_skia_.RemoveRepresentation(scale);
   image_skia_.AddRepresentation(rep);
 
-  if (observer_)
-    observer_->OnExtensionIconImageChanged(this);
+  // Update the image to use the updated image skia.
+  // It's a shame we have to do this because it means that all the other
+  // representations stored on |image_| will be deleted, but unfortunately
+  // there's no way to combine the storage of two images.
+  image_ = gfx::Image(image_skia_);
+
+  FOR_EACH_OBSERVER(Observer, observers_, OnExtensionIconImageChanged(this));
 }
 
 void IconImage::Observe(int type,

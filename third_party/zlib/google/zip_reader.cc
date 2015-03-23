@@ -331,8 +331,7 @@ bool ZipReader::ExtractCurrentEntryToFd(const int fd) {
       break;
     } else if (num_bytes_read > 0) {
       // Some data is read. Write it to the output file descriptor.
-      if (num_bytes_read !=
-          base::WriteFileDescriptor(fd, buf, num_bytes_read)) {
+      if (!base::WriteFileDescriptor(fd, buf, num_bytes_read)) {
         success = false;
         break;
       }
@@ -365,8 +364,9 @@ bool ZipReader::ExtractCurrentEntryToString(
   // correct. However, we need to assume that the uncompressed size could be
   // incorrect therefore this function needs to read as much data as possible.
   std::string contents;
-  contents.reserve(std::min<size_t>(
-      max_read_bytes, current_entry_info()->original_size()));
+  contents.reserve(static_cast<size_t>(std::min(
+      static_cast<int64>(max_read_bytes),
+      current_entry_info()->original_size())));
 
   bool success = true;  // This becomes false when something bad happens.
   char buf[internal::kZipBufSize];

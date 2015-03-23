@@ -47,22 +47,22 @@ class TransportClientSocketTest
   }
 
   // Implement StreamListenSocket::Delegate methods
-  virtual void DidAccept(StreamListenSocket* server,
-                         scoped_ptr<StreamListenSocket> connection) OVERRIDE {
+  void DidAccept(StreamListenSocket* server,
+                 scoped_ptr<StreamListenSocket> connection) override {
     connected_sock_.reset(
         static_cast<TCPListenSocket*>(connection.release()));
   }
-  virtual void DidRead(StreamListenSocket*, const char* str, int len) OVERRIDE {
+  void DidRead(StreamListenSocket*, const char* str, int len) override {
     // TODO(dkegel): this might not be long enough to tickle some bugs.
     connected_sock_->Send(kServerReply, arraysize(kServerReply) - 1,
                           false /* Don't append line feed */);
     if (close_server_socket_on_next_send_)
       CloseServerSocket();
   }
-  virtual void DidClose(StreamListenSocket* sock) OVERRIDE {}
+  void DidClose(StreamListenSocket* sock) override {}
 
   // Testcase hooks
-  virtual void SetUp();
+  void SetUp() override;
 
   void CloseServerSocket() {
     // delete the connected_sock_, which will close it.
@@ -89,7 +89,7 @@ class TransportClientSocketTest
   }
 
  protected:
-  int listen_port_;
+  uint16 listen_port_;
   CapturingNetLog net_log_;
   ClientSocketFactory* const socket_factory_;
   scoped_ptr<StreamSocket> sock_;
@@ -105,10 +105,10 @@ void TransportClientSocketTest::SetUp() {
 
   // Find a free port to listen on
   scoped_ptr<TCPListenSocket> sock;
-  int port;
+  uint16 port;
   // Range of ports to listen on.  Shouldn't need to try many.
-  const int kMinPort = 10100;
-  const int kMaxPort = 10200;
+  const uint16 kMinPort = 10100;
+  const uint16 kMaxPort = 10200;
 #if defined(OS_WIN)
   EnsureWinsockInit();
 #endif

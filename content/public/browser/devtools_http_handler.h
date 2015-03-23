@@ -29,28 +29,20 @@ class DevToolsHttpHandler {
  public:
 
   // Factory of net::ServerSocket. This is to separate instantiating dev tools
-  // and instantiating server socket.
+  // and instantiating server sockets.
+  // All methods including destructor are called on a separate thread
+  // different from any BrowserThread instance.
   class CONTENT_EXPORT ServerSocketFactory {
    public:
-    ServerSocketFactory(const std::string& address, int port, int backlog);
-    virtual ~ServerSocketFactory();
+    virtual ~ServerSocketFactory() {}
 
-    // Returns a new instance of ServerSocket or NULL if an error occurred.
-    // It calls ServerSocket::ListenWithAddressAndPort() with address, port and
-    // backlog passed to constructor.
-    virtual scoped_ptr<net::ServerSocket> CreateAndListen() const;
+    // Returns a new instance of ServerSocket or nullptr if an error occurred.
+    virtual scoped_ptr<net::ServerSocket> CreateForHttpServer();
 
-   protected:
-    // Creates a server socket. ServerSocket::Listen() will be called soon
-    // unless it returns NULL.
-    virtual scoped_ptr<net::ServerSocket> Create() const = 0;
-
-    const std::string address_;
-    const int port_;
-    const int backlog_;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(ServerSocketFactory);
+    // Creates a named socket for reversed tethering implementation (used with
+    // remote debugging, primarily for mobile).
+    virtual scoped_ptr<net::ServerSocket> CreateForTethering(
+        std::string* out_name);
   };
 
   // Returns true if the given protocol version is supported.
@@ -72,14 +64,9 @@ class DevToolsHttpHandler {
       DevToolsHttpHandlerDelegate* delegate,
       const base::FilePath& active_port_output_directory);
 
-  // Called from the main thread in order to stop protocol handler.
-  // Automatically destroys the handler instance.
-  virtual void Stop() = 0;
+  // Returns the URL for the file at |path| in frontend.
+  virtual GURL GetFrontendURL(const std::string& path) = 0;
 
-  // Returns the URL for the address to debug |agent_host|.
-  virtual GURL GetFrontendURL() = 0;
-
- protected:
   virtual ~DevToolsHttpHandler() {}
 };
 

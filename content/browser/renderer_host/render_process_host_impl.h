@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_BROWSER_RENDERER_HOST_BROWSER_RENDER_PROCESS_HOST_IMPL_H_
-#define CONTENT_BROWSER_RENDERER_HOST_BROWSER_RENDER_PROCESS_HOST_IMPL_H_
+#ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_PROCESS_HOST_IMPL_H_
+#define CONTENT_BROWSER_RENDERER_HOST_RENDER_PROCESS_HOST_IMPL_H_
 
 #include <map>
 #include <queue>
@@ -12,18 +12,17 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/process/process.h"
-#include "base/timer/timer.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/power_monitor_message_broadcaster.h"
 #include "content/common/content_export.h"
 #include "content/common/mojo/service_registry_impl.h"
-#include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/browser/render_process_host.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
-#include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_ptr.h"
 #include "ui/gfx/gpu_memory_buffer.h"
+#include "ui/gl/gpu_switching_observer.h"
 
 namespace base {
 class CommandLine;
@@ -32,6 +31,10 @@ class MessageLoop;
 
 namespace gfx {
 class Size;
+}
+
+namespace gpu {
+class ValueStateMap;
 }
 
 namespace IPC {
@@ -45,9 +48,11 @@ class BrowserDemuxerAndroid;
 class GpuMessageFilter;
 class MessagePortMessageFilter;
 class MojoApplicationHost;
+class NotificationMessageFilter;
 #if defined(ENABLE_WEBRTC)
 class P2PSocketDispatcherHost;
 #endif
+class PermissionServiceContext;
 class PeerConnectionTrackerHost;
 class RendererMainThread;
 class RenderWidgetHelper;
@@ -82,75 +87,84 @@ typedef base::Thread* (*RendererMainThreadFactoryFunction)(
 class CONTENT_EXPORT RenderProcessHostImpl
     : public RenderProcessHost,
       public ChildProcessLauncher::Client,
-      public GpuDataManagerObserver {
+      public ui::GpuSwitchingObserver {
  public:
   RenderProcessHostImpl(BrowserContext* browser_context,
                         StoragePartitionImpl* storage_partition_impl,
                         bool is_isolated_guest);
-  virtual ~RenderProcessHostImpl();
+  ~RenderProcessHostImpl() override;
 
   // RenderProcessHost implementation (public portion).
-  virtual void EnableSendQueue() OVERRIDE;
-  virtual bool Init() OVERRIDE;
-  virtual int GetNextRoutingID() OVERRIDE;
-  virtual void AddRoute(int32 routing_id, IPC::Listener* listener) OVERRIDE;
-  virtual void RemoveRoute(int32 routing_id) OVERRIDE;
-  virtual void AddObserver(RenderProcessHostObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(RenderProcessHostObserver* observer) OVERRIDE;
-  virtual void ReceivedBadMessage() OVERRIDE;
-  virtual void WidgetRestored() OVERRIDE;
-  virtual void WidgetHidden() OVERRIDE;
-  virtual int VisibleWidgetCount() const OVERRIDE;
-  virtual bool IsIsolatedGuest() const OVERRIDE;
-  virtual StoragePartition* GetStoragePartition() const OVERRIDE;
-  virtual bool FastShutdownIfPossible() OVERRIDE;
-  virtual void DumpHandles() OVERRIDE;
-  virtual base::ProcessHandle GetHandle() const OVERRIDE;
-  virtual BrowserContext* GetBrowserContext() const OVERRIDE;
-  virtual bool InSameStoragePartition(
-      StoragePartition* partition) const OVERRIDE;
-  virtual int GetID() const OVERRIDE;
-  virtual bool HasConnection() const OVERRIDE;
-  virtual void SetIgnoreInputEvents(bool ignore_input_events) OVERRIDE;
-  virtual bool IgnoreInputEvents() const OVERRIDE;
-  virtual void Cleanup() OVERRIDE;
-  virtual void AddPendingView() OVERRIDE;
-  virtual void RemovePendingView() OVERRIDE;
-  virtual void SetSuddenTerminationAllowed(bool enabled) OVERRIDE;
-  virtual bool SuddenTerminationAllowed() const OVERRIDE;
-  virtual IPC::ChannelProxy* GetChannel() OVERRIDE;
-  virtual void AddFilter(BrowserMessageFilter* filter) OVERRIDE;
-  virtual bool FastShutdownForPageCount(size_t count) OVERRIDE;
-  virtual bool FastShutdownStarted() const OVERRIDE;
-  virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
-  virtual void ResumeRequestsForView(int route_id) OVERRIDE;
-  virtual void FilterURL(bool empty_allowed, GURL* url) OVERRIDE;
+  void EnableSendQueue() override;
+  bool Init() override;
+  int GetNextRoutingID() override;
+  void AddRoute(int32 routing_id, IPC::Listener* listener) override;
+  void RemoveRoute(int32 routing_id) override;
+  void AddObserver(RenderProcessHostObserver* observer) override;
+  void RemoveObserver(RenderProcessHostObserver* observer) override;
+  void ReceivedBadMessage() override;
+  void WidgetRestored() override;
+  void WidgetHidden() override;
+  int VisibleWidgetCount() const override;
+  bool IsIsolatedGuest() const override;
+  StoragePartition* GetStoragePartition() const override;
+  bool Shutdown(int exit_code, bool wait) override;
+  bool FastShutdownIfPossible() override;
+  void DumpHandles() override;
+  base::ProcessHandle GetHandle() const override;
+  BrowserContext* GetBrowserContext() const override;
+  bool InSameStoragePartition(StoragePartition* partition) const override;
+  int GetID() const override;
+  bool HasConnection() const override;
+  void SetIgnoreInputEvents(bool ignore_input_events) override;
+  bool IgnoreInputEvents() const override;
+  void Cleanup() override;
+  void AddPendingView() override;
+  void RemovePendingView() override;
+  bool SuddenTerminationAllowed() const override;
+  IPC::ChannelProxy* GetChannel() override;
+  void AddFilter(BrowserMessageFilter* filter) override;
+  bool FastShutdownForPageCount(size_t count) override;
+  bool FastShutdownStarted() const override;
+  base::TimeDelta GetChildProcessIdleTime() const override;
+  void ResumeRequestsForView(int route_id) override;
+  void FilterURL(bool empty_allowed, GURL* url) override;
 #if defined(ENABLE_WEBRTC)
-  virtual void EnableAecDump(const base::FilePath& file) OVERRIDE;
-  virtual void DisableAecDump() OVERRIDE;
-  virtual void SetWebRtcLogMessageCallback(
-      base::Callback<void(const std::string&)> callback) OVERRIDE;
-  virtual WebRtcStopRtpDumpCallback StartRtpDump(
+  void EnableAecDump(const base::FilePath& file) override;
+  void DisableAecDump() override;
+  void SetWebRtcLogMessageCallback(
+      base::Callback<void(const std::string&)> callback) override;
+  WebRtcStopRtpDumpCallback StartRtpDump(
       bool incoming,
       bool outgoing,
-      const WebRtcRtpPacketCallback& packet_callback) OVERRIDE;
+      const WebRtcRtpPacketCallback& packet_callback) override;
 #endif
-  virtual void ResumeDeferredNavigation(const GlobalRequestID& request_id)
-      OVERRIDE;
-  virtual void NotifyTimezoneChange() OVERRIDE;
-  virtual ServiceRegistry* GetServiceRegistry() OVERRIDE;
+  void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
+  void NotifyTimezoneChange() override;
+  ServiceRegistry* GetServiceRegistry() override;
+  const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
+  bool SubscribeUniformEnabled() const override;
+  void OnAddSubscription(unsigned int target) override;
+  void OnRemoveSubscription(unsigned int target) override;
+  void SendUpdateValueState(
+      unsigned int target, const gpu::ValueState& state) override;
+#if defined(ENABLE_BROWSER_CDMS)
+  media::BrowserCdm* GetBrowserCdm(int render_frame_id,
+                                   int cdm_id) const override;
+#endif
 
   // IPC::Sender via RenderProcessHost.
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   // IPC::Listener via RenderProcessHost.
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
-  virtual void OnBadMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
+  void OnChannelConnected(int32 peer_pid) override;
+  void OnChannelError() override;
+  void OnBadMessageReceived(const IPC::Message& message) override;
 
   // ChildProcessLauncher::Client implementation.
-  virtual void OnProcessLaunched() OVERRIDE;
+  void OnProcessLaunched() override;
+  void OnProcessLaunchFailed() override;
 
   scoped_refptr<AudioRendererHost> audio_renderer_host() const;
 
@@ -159,10 +173,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void mark_child_process_activity_time() {
     child_process_activity_time_ = base::TimeTicks::Now();
   }
-
-  // Returns the current number of active views in this process.  Excludes
-  // any RenderViewHosts that are swapped out.
-  int GetActiveViewCount();
 
   // Start and end frame subscription for a specific renderer.
   // This API only supports subscription to accelerated composited frames.
@@ -242,6 +252,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
     return message_port_message_filter_.get();
   }
 
+  NotificationMessageFilter* notification_message_filter() const {
+    return notification_message_filter_.get();
+  }
+
   void set_is_isolated_guest_for_testing(bool is_isolated_guest) {
     is_isolated_guest_ = is_isolated_guest;
   }
@@ -256,8 +270,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // immediately after receiving response headers.
   void ResumeResponseDeferredAtStart(const GlobalRequestID& request_id);
 
-  // Activates Mojo for this process. Does nothing if Mojo is already activated.
-  void EnsureMojoActivated();
+  void GetAudioOutputControllers(
+      const GetAudioOutputControllersCallback& callback) const override;
 
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread (see
@@ -287,18 +301,19 @@ class CONTENT_EXPORT RenderProcessHostImpl
  private:
   friend class VisitRelayingRenderProcessHost;
 
-  void MaybeActivateMojo();
-  bool ShouldUseMojoChannel() const;
   scoped_ptr<IPC::ChannelProxy> CreateChannelProxy(
       const std::string& channel_id);
 
   // Creates and adds the IO thread message filters.
   void CreateMessageFilters();
 
+  // Registers Mojo services to be exposed to the renderer.
+  void RegisterMojoServices();
+
   // Control message handlers.
   void OnShutdownRequest();
   void OnDumpHandlesDone();
-  void SuddenTerminationChanged(bool enabled);
+  void OnSuddenTerminationChanged(bool enabled);
   void OnUserMetricsRecordAction(const std::string& action);
   void OnSavedPageAsMHTML(int job_id, int64 mhtml_file_size);
   void OnCloseACK(int old_route_id);
@@ -318,9 +333,10 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void SetBackgrounded(bool backgrounded);
 
   // Handle termination of our process.
-  void ProcessDied(bool already_dead);
+  void ProcessDied(bool already_dead, RendererClosedDetails* known_details);
 
-  virtual void OnGpuSwitching() OVERRIDE;
+  // GpuSwitchingObserver implementation.
+  void OnGpuSwitched() override;
 
 #if defined(ENABLE_WEBRTC)
   void OnRegisterAecDumpConsumer(int id);
@@ -335,7 +351,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
 #endif
 
   scoped_ptr<MojoApplicationHost> mojo_application_host_;
-  bool mojo_activation_required_;
 
   // The registered IPC listener objects. When this list is empty, we should
   // delete ourselves.
@@ -364,12 +379,20 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // The filter for MessagePort messages coming from the renderer.
   scoped_refptr<MessagePortMessageFilter> message_port_message_filter_;
 
+  // The filter for Web Notification messages coming from the renderer. Holds a
+  // closure per notification that must be freed when the notification closes.
+  scoped_refptr<NotificationMessageFilter> notification_message_filter_;
+
   // Used in single-process mode.
   scoped_ptr<base::Thread> in_process_renderer_;
 
   // True after Init() has been called. We can't just check channel_ because we
   // also reset that in the case of process termination.
   bool is_initialized_;
+
+  // PlzNavigate
+  // Stores the time at which the first call to Init happened.
+  base::TimeTicks init_time_;
 
   // Used to launch and terminate the process without blocking the UI thread.
   scoped_ptr<ChildProcessLauncher> child_process_launcher_;
@@ -391,12 +414,12 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // The observers watching our lifetime.
   ObserverList<RenderProcessHostObserver> observers_;
 
-  // True if the process can be shut down suddenly.  If this is true, then we're
-  // sure that all the RenderViews in the process can be shutdown suddenly.  If
-  // it's false, then specific RenderViews might still be allowed to be shutdown
-  // suddenly by checking their SuddenTerminationAllowed() flag.  This can occur
-  // if one WebContents has an unload event listener but another WebContents in
-  // the same process doesn't.
+  // True if the process can be shut down suddenly. If this is true, then it's
+  // sure that all the RenderFrames in the process can be shutdown suddenly. If
+  // it's false, then specific RenderFrames might still be allowed to be
+  // shutdown suddenly by checking their SuddenTerminationAllowed() flag. This
+  // can occur when a RenderFrame has an unload/beforeUnload event listener
+  // registered but another RenderFrame in the same process doesn't.
   bool sudden_termination_allowed_;
 
   // Set to true if we shouldn't send input events.  We actually do the
@@ -455,6 +478,27 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // Records the time when the process starts surviving for workers for UMA.
   base::TimeTicks survive_for_worker_start_time_;
 
+  // Records the maximum # of workers simultaneously hosted in this process
+  // for UMA.
+  int max_worker_count_;
+
+  // Context shared for each PermissionService instance created for this RPH.
+  scoped_ptr<PermissionServiceContext> permission_service_context_;
+
+  // This is a set of all subscription targets valuebuffers in the GPU process
+  // are currently subscribed too. Used to prevent sending unnecessary
+  // ValueState updates.
+  typedef base::hash_set<unsigned int> SubscriptionSet;
+  SubscriptionSet subscription_set_;
+
+  // Maintains ValueStates which are not currently subscribed too so we can
+  // pass them to the GpuService if a Valuebuffer ever subscribes to the
+  // respective subscription target
+  scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state_;
+
+  // Whether or not the CHROMIUM_subscribe_uniform WebGL extension is enabled
+  bool subscribe_uniform_enabled_;
+
   base::WeakPtrFactory<RenderProcessHostImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderProcessHostImpl);
@@ -462,4 +506,4 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_RENDERER_HOST_BROWSER_RENDER_PROCESS_HOST_IMPL_H_
+#endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_PROCESS_HOST_IMPL_H_

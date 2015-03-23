@@ -150,6 +150,9 @@ cr.define('options.autofillOptions', function() {
       }
 
       this.addEventListener('commitedit', this.onEditCommitted_);
+      this.closeButtonFocusAllowed = true;
+      this.setFocusableColumnIndex(this.input, 0);
+      this.setFocusableColumnIndex(this.closeButtonElement, 1);
     },
 
     /**
@@ -207,17 +210,23 @@ cr.define('options.autofillOptions', function() {
         if (this.isPlaceholder) {
           // It is important that updateIndex is done before validateAndSave.
           // Otherwise we can not be sure about AddRow index.
-          this.list.dataModel.updateIndex(i);
+          this.list.ignoreChangeEvents(function() {
+            this.list.dataModel.updateIndex(i);
+          }.bind(this));
           this.list.validateAndSave(i, 0, value);
         } else {
           this.list.validateAndSave(i, 1, value);
         }
       } else {
         // Reject empty values and duplicates.
-        if (!this.isPlaceholder)
-          this.list.dataModel.splice(i, 1);
-        else
+        if (!this.isPlaceholder) {
+          this.list.ignoreChangeEvents(function() {
+            this.list.dataModel.splice(i, 1);
+          }.bind(this));
+          this.list.selectIndexWithoutFocusing(i);
+        } else {
           this.clearValue_();
+        }
       }
     },
   };
@@ -226,7 +235,7 @@ cr.define('options.autofillOptions', function() {
    * Creates a new name value list item.
    * @param {options.autofillOptions.AutofillNameValuesList} list The parent
    *     list of this item.
-   * @param {Array.<string>} entry An array of [first, middle, last] names.
+   * @param {Array<string>} entry An array of [first, middle, last] names.
    * @constructor
    * @extends {options.autofillOptions.ValuesListItem}
    */
@@ -366,7 +375,8 @@ cr.define('options.autofillOptions', function() {
 
     /** @override */
     deleteItemAtIndex: function(index) {
-      AutofillOptions.removeData(this.dataModel.item(index)[0]);
+      AutofillOptions.removeData(this.dataModel.item(index)[0],
+                                 'Options_AutofillAddressDeleted');
     },
   };
 
@@ -399,7 +409,8 @@ cr.define('options.autofillOptions', function() {
 
     /** @override */
     deleteItemAtIndex: function(index) {
-      AutofillOptions.removeData(this.dataModel.item(index)[0]);
+      AutofillOptions.removeData(this.dataModel.item(index)[0],
+                                 'Options_AutofillCreditCardDeleted');
     },
   };
 
@@ -427,36 +438,8 @@ cr.define('options.autofillOptions', function() {
     },
 
     /** @override */
-    shouldFocusPlaceholder: function() {
+    shouldFocusPlaceholderOnEditCommit: function() {
       return false;
-    },
-
-    /**
-     * Called when the list hierarchy as a whole loses or gains focus.
-     * If the list was focused in response to a mouse click, call into the
-     * superclass's implementation.  If the list was focused in response to a
-     * keyboard navigation, focus the first item.
-     * If the list loses focus, unselect all the elements.
-     * @param {Event} e The change event.
-     * @private
-     */
-    handleListFocusChange_: function(e) {
-      // We check to see whether there is a selected item as a proxy for
-      // distinguishing between mouse- and keyboard-originated focus events.
-      var selectedItem = this.selectedItem;
-      if (selectedItem)
-        InlineEditableItemList.prototype.handleListFocusChange_.call(this, e);
-
-      if (!e.newValue) {
-        // When the list loses focus, unselect all the elements.
-        this.selectionModel.unselectAll();
-      } else {
-        // When the list gains focus, select the first item if nothing else is
-        // selected.
-        var firstItem = this.getListItemByIndex(0);
-        if (!selectedItem && firstItem && e.newValue)
-          firstItem.handleFocus_();
-      }
     },
 
     /**
@@ -467,7 +450,10 @@ cr.define('options.autofillOptions', function() {
      * @param {string} value The value of the item to insert.
      */
     validateAndSave: function(index, remove, value) {
-      this.dataModel.splice(index, remove, value);
+      this.ignoreChangeEvents(function() {
+        this.dataModel.splice(index, remove, value);
+      }.bind(this));
+      this.selectIndexWithoutFocusing(index);
     },
   };
 
@@ -483,7 +469,7 @@ cr.define('options.autofillOptions', function() {
 
     /**
      * @override
-     * @param {Array.<string>} entry
+     * @param {Array<string>} entry
      */
     createItem: function(entry) {
       return new NameListItem(this, entry);
@@ -522,7 +508,7 @@ cr.define('options.autofillOptions', function() {
 
     /**
      * Pending Promise resolver functions.
-     * @type {Array.<!Function>}
+     * @type {Array<!Function>}
      * @private
      */
     validationPromiseResolvers_: [],

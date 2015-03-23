@@ -71,7 +71,10 @@ const FieldTranslationEntry openvpn_fields[] = {
       shill::kOpenVPNIgnoreDefaultRouteProperty},
     { ::onc::openvpn::kKeyDirection, shill::kOpenVPNKeyDirectionProperty},
     { ::onc::openvpn::kNsCertType, shill::kOpenVPNNsCertTypeProperty},
-    { ::onc::vpn::kPassword, shill::kOpenVPNPasswordProperty},
+    // This field is converted during translation, see onc_translator_*.
+    // { ::onc::vpn::kOTP, shill::kOpenVPNTokenProperty or kOpenVPNOTPProperty},
+    // This field is converted during translation, see onc_translator_*.
+    // { ::onc::vpn::kPassword, shill::kOpenVPNPasswordProperty},
     { ::onc::openvpn::kPort, shill::kOpenVPNPortProperty},
     { ::onc::openvpn::kProto, shill::kOpenVPNProtoProperty},
     { ::onc::openvpn::kPushPeerInfo, shill::kOpenVPNPushPeerInfoProperty},
@@ -112,12 +115,11 @@ const FieldTranslationEntry wifi_fields[] = {
     // { ::onc::wifi::kEAP, shill::kEap*},
     { ::onc::wifi::kFrequency, shill::kWifiFrequency},
     { ::onc::wifi::kFrequencyList, shill::kWifiFrequencyListProperty},
+    { ::onc::wifi::kHexSSID, shill::kWifiHexSsid},
     { ::onc::wifi::kHiddenSSID, shill::kWifiHiddenSsid},
     { ::onc::wifi::kPassphrase, shill::kPassphraseProperty},
     // This field is converted during translation, see onc_translator_*.
-    // { ::onc::wifi::kSSID, shill::kWifiHexSsid},
-    // This field is converted during translation, see onc_translator_*.
-    // { ::onc::wifi::kSecurity, shill::kSecurityProperty },
+    // { ::onc::wifi::kSecurity, shill::kSecurityClassProperty },
     { ::onc::wifi::kSignalStrength, shill::kSignalStrengthProperty},
     {NULL}};
 
@@ -167,6 +169,7 @@ const FieldTranslationEntry cellular_fields[] = {
     { ::onc::cellular::kNetworkTechnology, shill::kNetworkTechnologyProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::cellular::kRoamingState, shill::kRoamingStateProperty},
+    { ::onc::cellular::kSignalStrength, shill::kSignalStrengthProperty},
     {NULL}};
 
 const FieldTranslationEntry network_fields[] = {
@@ -204,20 +207,11 @@ const FieldTranslationEntry ipconfig_fields[] = {
       shill::kWebProxyAutoDiscoveryUrlProperty},
     {NULL}};
 
-const FieldTranslationEntry saved_ipconfig_fields[] = {
-    { ::onc::ipconfig::kIPAddress, shill::kSavedIPAddressProperty},
-    { ::onc::ipconfig::kGateway, shill::kSavedIPGatewayProperty},
-    { ::onc::ipconfig::kRoutingPrefix, shill::kSavedIPPrefixlenProperty},
-    // NameServers are converted during translation, see onc_translator_*.
-    // { ::onc::ipconfig::kNameServers, shill::kSavedIPNameServersProperty},
-    {NULL}};
-
-const FieldTranslationEntry static_ipconfig_fields[] = {
-    { ::onc::ipconfig::kIPAddress, shill::kStaticIPAddressProperty},
-    { ::onc::ipconfig::kGateway, shill::kStaticIPGatewayProperty},
-    { ::onc::ipconfig::kRoutingPrefix, shill::kStaticIPPrefixlenProperty},
-    // NameServers are converted during translation, see onc_translator_*.
-    // { ::onc::ipconfig::kNameServers, shill::kStaticIPNameServersProperty},
+const FieldTranslationEntry static_or_saved_ipconfig_fields[] = {
+    { ::onc::ipconfig::kIPAddress, shill::kAddressProperty},
+    { ::onc::ipconfig::kGateway, shill::kGatewayProperty},
+    { ::onc::ipconfig::kRoutingPrefix, shill::kPrefixlenProperty},
+    { ::onc::ipconfig::kNameServers, shill::kNameServersProperty},
     {NULL}};
 
 struct OncValueTranslationEntry {
@@ -246,8 +240,8 @@ const OncValueTranslationEntry onc_value_translation_table[] = {
   { &kNetworkWithStateSignature, network_fields },
   { &kNetworkConfigurationSignature, network_fields },
   { &kIPConfigSignature, ipconfig_fields },
-  { &kSavedIPConfigSignature, saved_ipconfig_fields },
-  { &kStaticIPConfigSignature, static_ipconfig_fields },
+  { &kSavedIPConfigSignature, static_or_saved_ipconfig_fields },
+  { &kStaticIPConfigSignature, static_or_saved_ipconfig_fields },
   { NULL }
 };
 
@@ -257,13 +251,19 @@ struct NestedShillDictionaryEntry {
   const char* const* shill_property_path;
 };
 
-const char* cellular_apn_property_path_entries[] = {
+const char* cellular_apn_path_entries[] = {
   shill::kCellularApnProperty,
   NULL
 };
 
+const char* static_ip_config_path_entries[] = {
+  shill::kStaticIPConfigProperty,
+  NULL
+};
+
 const NestedShillDictionaryEntry nested_shill_dictionaries[] = {
-  { &kCellularApnSignature, cellular_apn_property_path_entries },
+  { &kCellularApnSignature, cellular_apn_path_entries },
+  { &kStaticIPConfigSignature, static_ip_config_path_entries },
   { NULL }
 };
 
@@ -281,16 +281,15 @@ const StringTranslationEntry kNetworkTypeTable[] = {
 
 const StringTranslationEntry kVPNTypeTable[] = {
     { ::onc::vpn::kTypeL2TP_IPsec, shill::kProviderL2tpIpsec},
-    { ::onc::vpn::kOpenVPN, shill::kProviderOpenVpn}, {NULL}};
+    { ::onc::vpn::kOpenVPN, shill::kProviderOpenVpn},
+    { ::onc::vpn::kThirdPartyVpn, shill::kProviderThirdPartyVpn},
+    {NULL}};
 
-// The first matching line is chosen.
 const StringTranslationEntry kWiFiSecurityTable[] = {
     { ::onc::wifi::kSecurityNone, shill::kSecurityNone},
     { ::onc::wifi::kWEP_PSK, shill::kSecurityWep},
     { ::onc::wifi::kWPA_PSK, shill::kSecurityPsk},
     { ::onc::wifi::kWPA_EAP, shill::kSecurity8021x},
-    { ::onc::wifi::kWPA_PSK, shill::kSecurityRsn},
-    { ::onc::wifi::kWPA_PSK, shill::kSecurityWpa},
     {NULL}};
 
 const StringTranslationEntry kEAPOuterTable[] = {
@@ -338,7 +337,8 @@ const FieldTranslationEntry kCellularDeviceTable[] = {
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::cellular::kFoundNetworks, shill::kFoundNetworksProperty},
     { ::onc::cellular::kHardwareRevision, shill::kHardwareRevisionProperty},
-    { ::onc::cellular::kHomeProvider, shill::kHomeProviderProperty},
+    // This field is converted during translation, see onc_translator_*.
+    // { ::onc::cellular::kHomeProvider, shill::kHomeProviderProperty},
     { ::onc::cellular::kICCID, shill::kIccidProperty},
     { ::onc::cellular::kIMEI, shill::kImeiProperty},
     { ::onc::cellular::kIMSI, shill::kImsiProperty},

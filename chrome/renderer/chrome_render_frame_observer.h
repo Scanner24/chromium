@@ -17,11 +17,12 @@ class Size;
 class ChromeRenderFrameObserver : public content::RenderFrameObserver {
  public:
   explicit ChromeRenderFrameObserver(content::RenderFrame* render_frame);
-  virtual ~ChromeRenderFrameObserver();
+  ~ChromeRenderFrameObserver() override;
 
  private:
   // RenderFrameObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void DidFinishDocumentLoad() override;
 
   // IPC handlers
   void OnSetIsPrerendering(bool is_prerendering);

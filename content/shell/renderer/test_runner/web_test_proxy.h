@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/shell/renderer/test_runner/web_task.h"
+#include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -44,16 +45,13 @@ class WebDataSource;
 class WebDragData;
 class WebFileChooserCompletion;
 class WebFrame;
-class WebImage;
 class WebLocalFrame;
 class WebMIDIAccessor;
 class WebMIDIAccessorClient;
 class WebMIDIClient;
 class WebMIDIClientMock;
 class WebNode;
-class WebNotificationPresenter;
 class WebPlugin;
-class WebPushClient;
 class WebRange;
 class WebSerializedScriptValue;
 class WebSpeechRecognizer;
@@ -78,8 +76,8 @@ typedef unsigned WebColor;
 namespace content {
 
 class MockCredentialManagerClient;
+class MockPresentationService;
 class MockScreenOrientationClient;
-class MockWebPushClient;
 class MockWebSpeechRecognizer;
 class MockWebUserMediaClient;
 class RenderFrame;
@@ -134,6 +132,7 @@ class WebTestProxyBase {
   blink::WebMIDIClientMock* GetMIDIClientMock();
   MockWebSpeechRecognizer* GetSpeechRecognizerMock();
   MockCredentialManagerClient* GetCredentialManagerClientMock();
+  MockPresentationService* GetPresentationServiceMock();
 
   WebTaskList* mutable_task_list() { return &task_list_; }
 
@@ -142,8 +141,6 @@ class WebTestProxyBase {
   void PostSpellCheckEvent(const blink::WebString& event_name);
 
   void SetAcceptLanguages(const std::string& accept_languages);
-
-  MockWebPushClient* GetPushClientMock();
 
  protected:
   WebTestProxyBase();
@@ -173,7 +170,6 @@ class WebTestProxyBase {
                        const blink::WebContextMenuData& data);
   blink::WebUserMediaClient* GetUserMediaClient();
   void PrintPage(blink::WebLocalFrame* frame);
-  blink::WebNotificationPresenter* GetNotificationPresenter();
   blink::WebMIDIClient* GetWebMIDIClient();
   blink::WebSpeechRecognizer* GetSpeechRecognizer();
   bool RequestPointerLock();
@@ -236,7 +232,6 @@ class WebTestProxyBase {
   void ResetInputMethod();
 
   blink::WebString acceptLanguages();
-  blink::WebPushClient* GetWebPushClient();
 
  private:
   template <class, typename, typename>
@@ -261,6 +256,8 @@ class WebTestProxyBase {
 
   WebTaskList task_list_;
 
+  blink::WebImage drag_image_;
+
   scoped_ptr<SpellCheckClient> spellcheck_;
   scoped_ptr<MockWebUserMediaClient> user_media_client_;
 
@@ -273,8 +270,8 @@ class WebTestProxyBase {
   scoped_ptr<MockCredentialManagerClient> credential_manager_client_;
   scoped_ptr<blink::WebMIDIClientMock> midi_client_;
   scoped_ptr<MockWebSpeechRecognizer> speech_recognizer_;
-  scoped_ptr<MockWebPushClient> push_client_;
   scoped_ptr<MockScreenOrientationClient> screen_orientation_client_;
+  scoped_ptr<MockPresentationService> presentation_service_;
 
   std::string accept_languages_;
 
@@ -302,8 +299,6 @@ template <class Base, typename T>
 class WebTestProxy : public Base, public WebTestProxyBase {
  public:
   explicit WebTestProxy(T t) : Base(t) {}
-
-  virtual ~WebTestProxy() {}
 
   // WebWidgetClient implementation.
   virtual blink::WebScreenInfo screenInfo() {
@@ -399,11 +394,10 @@ class WebTestProxy : public Base, public WebTestProxyBase {
   virtual blink::WebString acceptLanguages() {
     return WebTestProxyBase::acceptLanguages();
   }
-  virtual blink::WebPushClient* webPushClient() {
-    return WebTestProxyBase::GetWebPushClient();
-  }
 
  private:
+  virtual ~WebTestProxy() {}
+
   DISALLOW_COPY_AND_ASSIGN(WebTestProxy);
 };
 

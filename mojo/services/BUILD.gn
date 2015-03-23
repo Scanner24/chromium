@@ -6,30 +6,26 @@ import("//build/config/ui.gni")
 
 group("services") {
   deps = [
-    "//mojo/services/clipboard",
-    "//mojo/services/gles2:bindings",
-    "//mojo/services/html_viewer",
-    "//mojo/services/network",
-    "//mojo/services/public/interfaces/clipboard",
-    "//mojo/services/public/interfaces/content_handler",
-    "//mojo/services/public/interfaces/geometry",
-    "//mojo/services/public/interfaces/input_events",
-    "//mojo/services/public/interfaces/native_viewport",
-    "//mojo/services/public/interfaces/navigation",
-    "//mojo/services/public/interfaces/network",
-    "//mojo/services/public/interfaces/surfaces",
-    "//mojo/services/surfaces",
-    "//mojo/services/test_service:bindings",
+    "//mojo/services/network/public/interfaces",
+    "//third_party/mojo_services/src/clipboard/public/interfaces",
+    "//third_party/mojo_services/src/content_handler/public/interfaces",
+    "//third_party/mojo_services/src/geometry/public/interfaces",
+    "//third_party/mojo_services/src/input_events/public/interfaces",
+    "//third_party/mojo_services/src/native_viewport/public/interfaces",
+    "//third_party/mojo_services/src/navigation/public/interfaces",
+    "//third_party/mojo_services/src/surfaces/public/interfaces",
+    "//third_party/mojo_services/src/view_manager/public/interfaces",
   ]
-  if (!is_android) {
-    deps += ["//mojo/services/native_viewport"]
-  }
-  if (use_aura) {
+
+  if (!is_component_build) {
     deps += [
-      "//mojo/services/public/interfaces/view_manager",
-      "//mojo/services/public/interfaces/window_manager",
-      "//mojo/services/view_manager",
-      "//mojo/services/window_manager",
+      "//mojo/services/html_viewer",
+      "//mojo/services/network",
     ]
+
+    # TODO(GYP): Make this work.
+    if (is_mac) {
+      deps -= [ "//mojo/services/html_viewer" ]
+    }
   }
 }

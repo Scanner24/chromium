@@ -15,7 +15,7 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/event_switches.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/gestures/gesture_types.h"
 
 namespace ui {
@@ -83,20 +83,24 @@ GestureConsumer* GestureRecognizerImpl::GetTouchLockedTarget(
 
 GestureConsumer* GestureRecognizerImpl::GetTargetForGestureEvent(
     const GestureEvent& event) {
-  GestureConsumer* target = NULL;
   int touch_id = event.details().oldest_touch_id();
-  target = touch_id_target_for_gestures_[touch_id];
-  return target;
+  if (!touch_id_target_for_gestures_.count(touch_id)) {
+    NOTREACHED() << "Touch ID does not map to a valid GestureConsumer.";
+    return nullptr;
+  }
+
+  return touch_id_target_for_gestures_.at(touch_id);
 }
 
 GestureConsumer* GestureRecognizerImpl::GetTargetForLocation(
     const gfx::PointF& location, int source_device_id) {
-  const int max_distance =
-      GestureConfiguration::max_separation_for_gesture_touches_in_pixels();
+  const float max_distance =
+      GestureConfiguration::GetInstance()
+          ->max_separation_for_gesture_touches_in_pixels();
 
   gfx::PointF closest_point;
-  int closest_touch_id;
-  float closest_distance_squared = std::numeric_limits<float>::infinity();
+  int closest_touch_id = 0;
+  double closest_distance_squared = std::numeric_limits<double>::infinity();
 
   std::map<GestureConsumer*, GestureProviderAura*>::iterator i;
   for (i = consumer_gesture_provider_.begin();
@@ -109,7 +113,7 @@ GestureConsumer* GestureRecognizerImpl::GetTargetForLocation(
       gfx::PointF point(pointer_state.GetX(j), pointer_state.GetY(j));
       // Relative distance is all we need here, so LengthSquared() is
       // appropriate, and cheaper than Length().
-      float distance_squared = (point - location).LengthSquared();
+      double distance_squared = (point - location).LengthSquared();
       if (distance_squared < closest_distance_squared) {
         closest_point = point;
         closest_touch_id = pointer_state.GetPointerId(j);
@@ -235,11 +239,11 @@ void GestureRecognizerImpl::DispatchGestureEvent(GestureEvent* event) {
 }
 
 bool GestureRecognizerImpl::ProcessTouchEventPreDispatch(
-    const TouchEvent& event,
+    TouchEvent* event,
     GestureConsumer* consumer) {
-  SetupTargets(event, consumer);
+  SetupTargets(*event, consumer);
 
-  if (event.result() & ER_CONSUMED)
+  if (event->result() & ER_CONSUMED)
     return false;
 
   GestureProviderAura* gesture_provider =
@@ -247,26 +251,27 @@ bool GestureRecognizerImpl::ProcessTouchEventPreDispatch(
   return gesture_provider->OnTouchEvent(event);
 }
 
+// TODO(tdresser): we should take a unique_event_id here, and validate
+// that the correct event is being acked. See crbug.com/457669 for
+// details.
 GestureRecognizer::Gestures*
-GestureRecognizerImpl::ProcessTouchEventPostDispatch(
-    const TouchEvent& event,
+GestureRecognizerImpl::AckAsyncTouchEvent(
     ui::EventResult result,
     GestureConsumer* consumer) {
   GestureProviderAura* gesture_provider =
       GetGestureProviderForConsumer(consumer);
-  gesture_provider->OnTouchEventAck(result != ER_UNHANDLED);
+  gesture_provider->OnAsyncTouchEventAck(result != ER_UNHANDLED);
   return gesture_provider->GetAndResetPendingGestures();
 }
 
-GestureRecognizer::Gestures* GestureRecognizerImpl::ProcessTouchEventOnAsyncAck(
-    const TouchEvent& event,
+GestureRecognizer::Gestures* GestureRecognizerImpl::AckSyncTouchEvent(
+    const uint64 unique_event_id,
     ui::EventResult result,
     GestureConsumer* consumer) {
-  if (result & ui::ER_CONSUMED)
-    return NULL;
   GestureProviderAura* gesture_provider =
       GetGestureProviderForConsumer(consumer);
-  gesture_provider->OnTouchEventAck(result != ER_UNHANDLED);
+  gesture_provider->OnSyncTouchEventAck(unique_event_id,
+                                        result != ER_UNHANDLED);
   return gesture_provider->GetAndResetPendingGestures();
 }
 

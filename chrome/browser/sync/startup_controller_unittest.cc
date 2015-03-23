@@ -36,13 +36,9 @@ class FakeSupervisedUserSigninManagerWrapper
  public:
   FakeSupervisedUserSigninManagerWrapper()
       : SupervisedUserSigninManagerWrapper(NULL, NULL) {}
-  virtual std::string GetEffectiveUsername() const OVERRIDE {
-    return account_;
-  }
+  std::string GetEffectiveUsername() const override { return account_; }
 
-  virtual std::string GetAccountIdToUse() const OVERRIDE {
-    return account_;
-  }
+  std::string GetAccountIdToUse() const override { return account_; }
 
   void set_account(const std::string& account) { account_ = account; }
 
@@ -54,7 +50,7 @@ class StartupControllerTest : public testing::Test {
  public:
   StartupControllerTest() : started_(false) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     profile_.reset(new TestingProfile());
     sync_prefs_.reset(new sync_driver::SyncPrefs(profile_->GetPrefs()));
     token_service_.reset(static_cast<FakeProfileOAuth2TokenService*>(
@@ -73,7 +69,7 @@ class StartupControllerTest : public testing::Test {
         base::TimeDelta::FromSeconds(0));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     controller_.reset();
     signin_.reset();
     token_service_->Shutdown();
@@ -117,8 +113,9 @@ TEST_F(StartupControllerTest, Basic) {
   controller()->TryStart();
   EXPECT_FALSE(started());
   token_service()->IssueRefreshTokenForUser(kTestUser, kTestToken);
-  const bool deferred_start = !CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kSyncDisableDeferredStartup);
+  const bool deferred_start =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSyncDisableDeferredStartup);
   controller()->TryStart();
   EXPECT_EQ(!deferred_start, started());
   std::string state(controller()->GetBackendInitializationStateString());
@@ -232,8 +229,9 @@ TEST_F(StartupControllerTest, Reset) {
   signin()->set_account(kTestUser);
   token_service()->IssueRefreshTokenForUser(kTestUser, kTestToken);
   controller()->TryStart();
-  const bool deferred_start = !CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kSyncDisableDeferredStartup);
+  const bool deferred_start =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSyncDisableDeferredStartup);
   EXPECT_EQ(!deferred_start, started());
   controller()->OnDataTypeRequestsSyncStartup(syncer::SESSIONS);
   EXPECT_TRUE(started());

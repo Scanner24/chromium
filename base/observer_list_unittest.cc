@@ -26,10 +26,8 @@ class Foo {
 class Adder : public Foo {
  public:
   explicit Adder(int scaler) : total(0), scaler_(scaler) {}
-  virtual void Observe(int x) OVERRIDE {
-    total += x * scaler_;
-  }
-  virtual ~Adder() {}
+  void Observe(int x) override { total += x * scaler_; }
+  ~Adder() override {}
   int total;
 
  private:
@@ -42,10 +40,8 @@ class Disrupter : public Foo {
       : list_(list),
         doomed_(doomed) {
   }
-  virtual ~Disrupter() {}
-  virtual void Observe(int x) OVERRIDE {
-    list_->RemoveObserver(doomed_);
-  }
+  ~Disrupter() override {}
+  void Observe(int x) override { list_->RemoveObserver(doomed_); }
 
  private:
   ObserverList<Foo>* list_;
@@ -58,10 +54,8 @@ class ThreadSafeDisrupter : public Foo {
       : list_(list),
         doomed_(doomed) {
   }
-  virtual ~ThreadSafeDisrupter() {}
-  virtual void Observe(int x) OVERRIDE {
-    list_->RemoveObserver(doomed_);
-  }
+  ~ThreadSafeDisrupter() override {}
+  void Observe(int x) override { list_->RemoveObserver(doomed_); }
 
  private:
   ObserverListThreadSafe<Foo>* list_;
@@ -77,7 +71,7 @@ class AddInObserve : public Foo {
         adder(1) {
   }
 
-  virtual void Observe(int x) OVERRIDE {
+  virtual void Observe(int x) override {
     if (!added) {
       added = true;
       observer_list->AddObserver(&adder);
@@ -109,10 +103,9 @@ class AddRemoveThread : public PlatformThread::Delegate,
         weak_factory_(this) {
   }
 
-  virtual ~AddRemoveThread() {
-  }
+  ~AddRemoveThread() override {}
 
-  virtual void ThreadMain() OVERRIDE {
+  void ThreadMain() override {
     loop_ = new MessageLoop();  // Fire up a message loop.
     loop_->PostTask(
         FROM_HERE,
@@ -141,7 +134,7 @@ class AddRemoveThread : public PlatformThread::Delegate,
     }
 
     if (do_notifies_) {
-      list_->Notify(&Foo::Observe, 10);
+      list_->Notify(FROM_HERE, &Foo::Observe, 10);
     }
 
     loop_->PostTask(
@@ -153,7 +146,7 @@ class AddRemoveThread : public PlatformThread::Delegate,
     loop_->PostTask(FROM_HERE, MessageLoop::QuitWhenIdleClosure());
   }
 
-  virtual void Observe(int x) OVERRIDE {
+  void Observe(int x) override {
     count_observes_++;
 
     // If we're getting called after we removed ourselves from
@@ -189,6 +182,9 @@ TEST(ObserverListTest, BasicTest) {
   observer_list.AddObserver(&a);
   observer_list.AddObserver(&b);
 
+  EXPECT_TRUE(observer_list.HasObserver(&a));
+  EXPECT_FALSE(observer_list.HasObserver(&c));
+
   FOR_EACH_OBSERVER(Foo, observer_list, Observe(10));
 
   observer_list.AddObserver(&evil);
@@ -221,14 +217,14 @@ TEST(ObserverListThreadSafeTest, BasicTest) {
   observer_list->AddObserver(&a);
   observer_list->AddObserver(&b);
 
-  observer_list->Notify(&Foo::Observe, 10);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 10);
   RunLoop().RunUntilIdle();
 
   observer_list->AddObserver(&evil);
   observer_list->AddObserver(&c);
   observer_list->AddObserver(&d);
 
-  observer_list->Notify(&Foo::Observe, 10);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 10);
   RunLoop().RunUntilIdle();
 
   EXPECT_EQ(20, a.total);
@@ -251,7 +247,7 @@ TEST(ObserverListThreadSafeTest, RemoveObserver) {
   observer_list->RemoveObserver(&a);
   observer_list->RemoveObserver(&b);
 
-  observer_list->Notify(&Foo::Observe, 10);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 10);
   RunLoop().RunUntilIdle();
 
   EXPECT_EQ(0, a.total);
@@ -262,7 +258,7 @@ TEST(ObserverListThreadSafeTest, RemoveObserver) {
   // Should also do nothing.
   observer_list->RemoveObserver(&b);
 
-  observer_list->Notify(&Foo::Observe, 10);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 10);
   RunLoop().RunUntilIdle();
 
   EXPECT_EQ(10, a.total);
@@ -284,7 +280,7 @@ TEST(ObserverListThreadSafeTest, WithoutMessageLoop) {
     MessageLoop loop;
     observer_list->AddObserver(&c);
 
-    observer_list->Notify(&Foo::Observe, 10);
+    observer_list->Notify(FROM_HERE, &Foo::Observe, 10);
     RunLoop().RunUntilIdle();
 
     EXPECT_EQ(0, a.total);
@@ -298,7 +294,7 @@ TEST(ObserverListThreadSafeTest, WithoutMessageLoop) {
     observer_list->RemoveObserver(&c);
 
     // Notify again.
-    observer_list->Notify(&Foo::Observe, 20);
+    observer_list->Notify(FROM_HERE, &Foo::Observe, 20);
     RunLoop().RunUntilIdle();
 
     EXPECT_EQ(20, a.total);
@@ -312,7 +308,7 @@ TEST(ObserverListThreadSafeTest, WithoutMessageLoop) {
   // Notifying should not fail but should also be a no-op.
   MessageLoop loop;
   observer_list->AddObserver(&b);
-  observer_list->Notify(&Foo::Observe, 30);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 30);
   RunLoop().RunUntilIdle();
 
   EXPECT_EQ(20, a.total);
@@ -323,13 +319,13 @@ TEST(ObserverListThreadSafeTest, WithoutMessageLoop) {
 class FooRemover : public Foo {
  public:
   explicit FooRemover(ObserverListThreadSafe<Foo>* list) : list_(list) {}
-  virtual ~FooRemover() {}
+  ~FooRemover() override {}
 
   void AddFooToRemove(Foo* foo) {
     foos_.push_back(foo);
   }
 
-  virtual void Observe(int x) OVERRIDE {
+  void Observe(int x) override {
     std::vector<Foo*> tmp;
     tmp.swap(foos_);
     for (std::vector<Foo*>::iterator it = tmp.begin();
@@ -357,7 +353,7 @@ TEST(ObserverListThreadSafeTest, RemoveMultipleObservers) {
   a.AddFooToRemove(&a);
   a.AddFooToRemove(&b);
 
-  observer_list->Notify(&Foo::Observe, 1);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 1);
   RunLoop().RunUntilIdle();
 }
 
@@ -396,7 +392,7 @@ static void ThreadSafeObserverHarness(int num_threads,
     if ((Time::Now() - start).InMilliseconds() > kThreadRunTime)
       break;
 
-    observer_list->Notify(&Foo::Observe, 10);
+    observer_list->Notify(FROM_HERE, &Foo::Observe, 10);
 
     RunLoop().RunUntilIdle();
   }
@@ -428,7 +424,7 @@ TEST(ObserverListThreadSafeTest, OutlivesMessageLoop) {
   observer_list->AddObserver(&a);
   delete loop;
   // Test passes if we don't crash here.
-  observer_list->Notify(&Foo::Observe, 1);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 1);
 }
 
 TEST(ObserverListTest, Existing) {
@@ -462,7 +458,7 @@ TEST(ObserverListThreadSafeTest, Existing) {
   observer_list->AddObserver(&a);
   observer_list->AddObserver(&b);
 
-  observer_list->Notify(&Foo::Observe, 1);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 1);
   RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(b.added);
@@ -471,7 +467,7 @@ TEST(ObserverListThreadSafeTest, Existing) {
   EXPECT_EQ(0, b.adder.total);
 
   // Notify again to make sure b's adder is notified.
-  observer_list->Notify(&Foo::Observe, 1);
+  observer_list->Notify(FROM_HERE, &Foo::Observe, 1);
   RunLoop().RunUntilIdle();
   EXPECT_EQ(1, b.adder.total);
 }
@@ -481,7 +477,7 @@ class AddInClearObserve : public Foo {
   explicit AddInClearObserve(ObserverList<Foo>* list)
       : list_(list), added_(false), adder_(1) {}
 
-  virtual void Observe(int /* x */) OVERRIDE {
+  void Observe(int /* x */) override {
     list_->Clear();
     list_->AddObserver(&adder_);
     added_ = true;
@@ -524,11 +520,9 @@ TEST(ObserverListTest, ClearNotifyExistingOnly) {
 class ListDestructor : public Foo {
  public:
   explicit ListDestructor(ObserverList<Foo>* list) : list_(list) {}
-  virtual ~ListDestructor() {}
+  ~ListDestructor() override {}
 
-  virtual void Observe(int x) OVERRIDE {
-    delete list_;
-  }
+  void Observe(int x) override { delete list_; }
 
  private:
   ObserverList<Foo>* list_;

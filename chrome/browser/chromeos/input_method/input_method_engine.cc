@@ -9,8 +9,6 @@
 #undef RootWindow
 #include <map>
 
-#include "ash/ime/input_method_menu_item.h"
-#include "ash/ime/input_method_menu_manager.h"
 #include "ash/shell.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,26 +17,32 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/composition_text.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/candidate_window.h"
+#include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/composition_text.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/ime_keymap.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/text_input_flags.h"
+#include "ui/chromeos/ime/input_method_menu_item.h"
+#include "ui/chromeos/ime/input_method_menu_manager.h"
 #include "ui/events/event.h"
 #include "ui/events/event_processor.h"
+#include "ui/events/event_utils.h"
+#include "ui/events/keycodes/dom3/dom_code.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 
 namespace chromeos {
-const char* kErrorNotActive = "IME is not active";
-const char* kErrorWrongContext = "Context is not active";
-const char* kCandidateNotFound = "Candidate not found";
 
 namespace {
+
+const char kErrorNotActive[] = "IME is not active";
+const char kErrorWrongContext[] = "Context is not active";
+const char kCandidateNotFound[] = "Candidate not found";
 
 // Notifies InputContextHandler that the composition is changed.
 void UpdateComposition(const CompositionText& composition_text,
@@ -65,7 +69,7 @@ size_t GetUtf8StringLength(const char* s) {
 }
 
 std::string GetKeyFromEvent(const ui::KeyEvent& event) {
-  const std::string& code = event.code();
+  const std::string code = event.GetCodeString();
   if (StartsWithASCII(code, "Control", true))
     return "Ctrl";
   if (StartsWithASCII(code, "Shift", true))
@@ -136,10 +140,10 @@ void GetExtensionKeyboardEventFromKeyEvent(
   DCHECK(ext_event);
   ext_event->type = (event.type() == ui::ET_KEY_RELEASED) ? "keyup" : "keydown";
 
-  std::string dom_code = event.code();
-  if (dom_code == ui::KeycodeConverter::InvalidKeyboardEventCode())
-    dom_code = ui::KeyboardCodeToDomKeycode(event.key_code());
-  ext_event->code = dom_code;
+  if (event.code() == ui::DomCode::NONE)
+    ext_event->code = ui::KeyboardCodeToDomKeycode(event.key_code());
+  else
+    ext_event->code = event.GetCodeString();
   ext_event->key_code = static_cast<int>(event.key_code());
   ext_event->alt_key = event.IsAltDown();
   ext_event->ctrl_key = event.IsControlDown();
@@ -213,6 +217,9 @@ bool InputMethodEngine::SetComposition(
         break;
       case SEGMENT_STYLE_DOUBLE_UNDERLINE:
         underline.type = CompositionText::COMPOSITION_TEXT_UNDERLINE_DOUBLE;
+        break;
+      case SEGMENT_STYLE_NO_UNDERLINE:
+        underline.type = CompositionText::COMPOSITION_TEXT_UNDERLINE_NONE;
         break;
       default:
         continue;
@@ -297,17 +304,19 @@ bool InputMethodEngine::SendKeyEvents(
     flags |= event.shift_key ? ui::EF_SHIFT_DOWN     : ui::EF_NONE;
     flags |= event.caps_lock ? ui::EF_CAPS_LOCK_DOWN : ui::EF_NONE;
 
-    ui::KeyEvent ui_event(type,
-                          key_code,
-                          event.code,
-                          flags);
+    base::char16 ch = 0;
     // 4-bytes UTF-8 string is at least 2-characters UTF-16 string.
     // And Key char can only be single UTF-16 character.
     if (!event.key.empty() && event.key.size() < 4) {
       base::string16 key_char = base::UTF8ToUTF16(event.key);
       if (key_char.size() == 1)
-        ui_event.set_character(key_char[0]);
+        ch = key_char[0];
     }
+    ui::KeyEvent ui_event(
+        type, key_code,
+        ui::KeycodeConverter::CodeStringToDomCode(event.code.c_str()), flags,
+        ui::KeycodeConverter::KeyStringToDomKey(event.key.c_str()), ch,
+        ui::EventTimeForNow());
     base::AutoReset<const ui::KeyEvent*> reset_sent_key(&sent_key_event_,
                                                         &ui_event);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&ui_event);
@@ -440,15 +449,15 @@ bool InputMethodEngine::UpdateMenuItems(
   if (!IsActive())
     return false;
 
-  ash::ime::InputMethodMenuItemList menu_item_list;
+  ui::ime::InputMethodMenuItemList menu_item_list;
   for (std::vector<MenuItem>::const_iterator item = items.begin();
        item != items.end(); ++item) {
-    ash::ime::InputMethodMenuItem property;
+    ui::ime::InputMethodMenuItem property;
     MenuItemToProperty(*item, &property);
     menu_item_list.push_back(property);
   }
 
-  ash::ime::InputMethodMenuManager::GetInstance()->
+  ui::ime::InputMethodMenuManager::GetInstance()->
       SetCurrentInputMethodMenuItemList(
           menu_item_list);
   return true;
@@ -471,9 +480,6 @@ bool InputMethodEngine::DeleteSurroundingText(int context_id,
     return false;
   }
 
-  if (offset < 0 && static_cast<size_t>(-1 * offset) != size_t(number_of_chars))
-    return false;  // Currently we can only support preceding text.
-
   // TODO(nona): Return false if there is ongoing composition.
 
   IMEInputContextHandlerInterface* input_context =
@@ -491,6 +497,11 @@ void InputMethodEngine::HideInputView() {
     keyboard_controller->HideKeyboard(
         keyboard::KeyboardController::HIDE_REASON_MANUAL);
   }
+}
+
+void InputMethodEngine::SetCompositionBounds(
+    const std::vector<gfx::Rect>& bounds) {
+  observer_->OnCompositionBoundsChanged(bounds);
 }
 
 void InputMethodEngine::EnableInputView() {
@@ -540,6 +551,13 @@ void InputMethodEngine::FocusIn(
       break;
   }
 
+  context.auto_correct =
+      !(input_context.flags & ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF);
+  context.auto_complete =
+      !(input_context.flags & ui::TEXT_INPUT_FLAG_AUTOCOMPLETE_OFF);
+  context.spell_check =
+      !(input_context.flags & ui::TEXT_INPUT_FLAG_SPELLCHECK_OFF);
+
   observer_->OnFocus(context);
 }
 
@@ -559,8 +577,9 @@ void InputMethodEngine::Enable(const std::string& component_id) {
   active_component_id_ = component_id;
   observer_->OnActivate(component_id);
   current_input_type_ = IMEBridge::Get()->GetCurrentTextInputType();
-  FocusIn(IMEEngineHandlerInterface::InputContext(
-      current_input_type_, ui::TEXT_INPUT_MODE_DEFAULT));
+  FocusIn(IMEEngineHandlerInterface::InputContext(current_input_type_,
+                                                  ui::TEXT_INPUT_MODE_DEFAULT,
+                                                  ui::TEXT_INPUT_FLAG_NONE));
   EnableInputView();
 }
 
@@ -581,7 +600,7 @@ void InputMethodEngine::ProcessKeyEvent(
     const ui::KeyEvent& key_event,
     const KeyEventDoneCallback& callback) {
 
-  KeyEventDoneCallback *handler = new KeyEventDoneCallback();
+  KeyEventDoneCallback* handler = new KeyEventDoneCallback();
   *handler = callback;
 
   KeyboardEvent ext_event;
@@ -622,7 +641,7 @@ void InputMethodEngine::SetSurroundingText(const std::string& text,
 // TODO(uekawa): rename this method to a more reasonable name.
 void InputMethodEngine::MenuItemToProperty(
     const MenuItem& item,
-    ash::ime::InputMethodMenuItem* property) {
+    ui::ime::InputMethodMenuItem* property) {
   property->key = item.id;
 
   if (item.modified & MENU_ITEM_MODIFIED_LABEL) {

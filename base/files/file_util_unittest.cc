@@ -30,6 +30,7 @@
 #include "base/files/scoped_file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_file_util.h"
 #include "base/threading/platform_thread.h"
@@ -184,7 +185,7 @@ const int FILES_AND_DIRECTORIES =
 // to be a PlatformTest
 class FileUtilTest : public PlatformTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     PlatformTest::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   }
@@ -326,6 +327,13 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
   //     |-> to_sub_long (reparse point to temp_dir\sub_a\long_name_\sub_long)
 
   FilePath base_a = temp_dir_.path().Append(FPL("base_a"));
+#if defined(OS_WIN)
+  // TEMP can have a lower case drive letter.
+  string16 temp_base_a = base_a.value();
+  ASSERT_FALSE(temp_base_a.empty());
+  *temp_base_a.begin() = base::ToUpperASCII(*temp_base_a.begin());
+  base_a = FilePath(temp_base_a);
+#endif
   ASSERT_TRUE(CreateDirectory(base_a));
 
   FilePath sub_a = base_a.Append(FPL("sub_a"));
@@ -428,6 +436,7 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
 TEST_F(FileUtilTest, DevicePathToDriveLetter) {
   // Get a drive letter.
   std::wstring real_drive_letter = temp_dir_.path().value().substr(0, 2);
+  StringToUpperASCII(&real_drive_letter);
   if (!isalpha(real_drive_letter[0]) || ':' != real_drive_letter[1]) {
     LOG(ERROR) << "Can't get a drive letter to test with.";
     return;
@@ -1379,24 +1388,30 @@ TEST_F(FileUtilTest, CopyDirectoryWithTrailingSeparators) {
 }
 
 // Sets the source file to read-only.
-void SetReadOnly(const FilePath& path) {
+void SetReadOnly(const FilePath& path, bool read_only) {
 #if defined(OS_WIN)
-  // On Windows, it involves setting a bit.
+  // On Windows, it involves setting/removing the 'readonly' bit.
   DWORD attrs = GetFileAttributes(path.value().c_str());
   ASSERT_NE(INVALID_FILE_ATTRIBUTES, attrs);
   ASSERT_TRUE(SetFileAttributes(
-      path.value().c_str(), attrs | FILE_ATTRIBUTE_READONLY));
-  attrs = GetFileAttributes(path.value().c_str());
-  // Files in the temporary directory should not be indexed ever. If this
-  // assumption change, fix this unit test accordingly.
-  // FILE_ATTRIBUTE_NOT_CONTENT_INDEXED doesn't exist on XP.
-  DWORD expected = FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_READONLY;
-  if (win::GetVersion() >= win::VERSION_VISTA)
-    expected |= FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+      path.value().c_str(),
+      read_only ? (attrs | FILE_ATTRIBUTE_READONLY) :
+          (attrs & ~FILE_ATTRIBUTE_READONLY)));
+
+  DWORD expected = read_only ?
+      ((attrs & (FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_DIRECTORY)) |
+          FILE_ATTRIBUTE_READONLY) :
+      (attrs & (FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_DIRECTORY));
+
+  // Ignore FILE_ATTRIBUTE_NOT_CONTENT_INDEXED if present.
+  attrs = GetFileAttributes(path.value().c_str()) &
+          ~FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
   ASSERT_EQ(expected, attrs);
 #else
-  // On all other platforms, it involves removing the write bit.
-  EXPECT_TRUE(SetPosixFilePermissions(path, S_IRUSR));
+  // On all other platforms, it involves removing/setting the write bit.
+  mode_t mode = read_only ? S_IRUSR : (S_IRUSR | S_IWUSR);
+  EXPECT_TRUE(SetPosixFilePermissions(
+      path, DirectoryExists(path) ? (mode | S_IXUSR) : mode));
 #endif
 }
 
@@ -1413,23 +1428,34 @@ bool IsReadOnly(const FilePath& path) {
 }
 
 TEST_F(FileUtilTest, CopyDirectoryACL) {
-  // Create a directory.
+  // Create source directories.
   FilePath src = temp_dir_.path().Append(FILE_PATH_LITERAL("src"));
-  CreateDirectory(src);
-  ASSERT_TRUE(PathExists(src));
+  FilePath src_subdir = src.Append(FILE_PATH_LITERAL("subdir"));
+  CreateDirectory(src_subdir);
+  ASSERT_TRUE(PathExists(src_subdir));
 
   // Create a file under the directory.
   FilePath src_file = src.Append(FILE_PATH_LITERAL("src.txt"));
   CreateTextFile(src_file, L"Gooooooooooooooooooooogle");
-  SetReadOnly(src_file);
+  SetReadOnly(src_file, true);
   ASSERT_TRUE(IsReadOnly(src_file));
+
+  // Make directory read-only.
+  SetReadOnly(src_subdir, true);
+  ASSERT_TRUE(IsReadOnly(src_subdir));
 
   // Copy the directory recursively.
   FilePath dst = temp_dir_.path().Append(FILE_PATH_LITERAL("dst"));
   FilePath dst_file = dst.Append(FILE_PATH_LITERAL("src.txt"));
   EXPECT_TRUE(CopyDirectory(src, dst, true));
 
+  FilePath dst_subdir = dst.Append(FILE_PATH_LITERAL("subdir"));
+  ASSERT_FALSE(IsReadOnly(dst_subdir));
   ASSERT_FALSE(IsReadOnly(dst_file));
+
+  // Give write permissions to allow deletion.
+  SetReadOnly(src_subdir, false);
+  ASSERT_FALSE(IsReadOnly(src_subdir));
 }
 
 TEST_F(FileUtilTest, CopyFile) {
@@ -1450,37 +1476,36 @@ TEST_F(FileUtilTest, CopyFile) {
   FilePath dest_file = dir_name_from.Append(FILE_PATH_LITERAL("DestFile.txt"));
   ASSERT_TRUE(CopyFile(file_name_from, dest_file));
 
-  // Copy the file to another location using '..' in the path.
+  // Try to copy the file to another location using '..' in the path.
   FilePath dest_file2(dir_name_from);
   dest_file2 = dest_file2.AppendASCII("..");
   dest_file2 = dest_file2.AppendASCII("DestFile.txt");
   ASSERT_FALSE(CopyFile(file_name_from, dest_file2));
-  ASSERT_TRUE(internal::CopyFileUnsafe(file_name_from, dest_file2));
 
   FilePath dest_file2_test(dir_name_from);
   dest_file2_test = dest_file2_test.DirName();
   dest_file2_test = dest_file2_test.AppendASCII("DestFile.txt");
 
-  // Check everything has been copied.
+  // Check expected copy results.
   EXPECT_TRUE(PathExists(file_name_from));
   EXPECT_TRUE(PathExists(dest_file));
   const std::wstring read_contents = ReadTextFile(dest_file);
   EXPECT_EQ(file_contents, read_contents);
-  EXPECT_TRUE(PathExists(dest_file2_test));
-  EXPECT_TRUE(PathExists(dest_file2));
+  EXPECT_FALSE(PathExists(dest_file2_test));
+  EXPECT_FALSE(PathExists(dest_file2));
 }
 
 TEST_F(FileUtilTest, CopyFileACL) {
   // While FileUtilTest.CopyFile asserts the content is correctly copied over,
   // this test case asserts the access control bits are meeting expectations in
-  // CopyFileUnsafe().
+  // CopyFile().
   FilePath src = temp_dir_.path().Append(FILE_PATH_LITERAL("src.txt"));
   const std::wstring file_contents(L"Gooooooooooooooooooooogle");
   CreateTextFile(src, file_contents);
 
   // Set the source file to read-only.
   ASSERT_FALSE(IsReadOnly(src));
-  SetReadOnly(src);
+  SetReadOnly(src, true);
   ASSERT_TRUE(IsReadOnly(src));
 
   // Copy the file.
@@ -1977,11 +2002,10 @@ TEST_F(FileUtilTest, AppendToFile) {
   FilePath foobar(data_dir.Append(FILE_PATH_LITERAL("foobar.txt")));
 
   std::string data("hello");
-  EXPECT_EQ(-1, AppendToFile(foobar, data.c_str(), data.length()));
+  EXPECT_FALSE(AppendToFile(foobar, data.c_str(), data.size()));
   EXPECT_EQ(static_cast<int>(data.length()),
             WriteFile(foobar, data.c_str(), data.length()));
-  EXPECT_EQ(static_cast<int>(data.length()),
-            AppendToFile(foobar, data.c_str(), data.length()));
+  EXPECT_TRUE(AppendToFile(foobar, data.c_str(), data.size()));
 
   const std::wstring read_content = ReadTextFile(foobar);
   EXPECT_EQ(L"hellohello", read_content);
@@ -2151,7 +2175,7 @@ TEST_F(FileUtilTest, IsDirectoryEmpty) {
 // with a common SetUp() method.
 class VerifyPathControlledByUserTest : public FileUtilTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     FileUtilTest::SetUp();
 
     // Create a basic structure used by each test.

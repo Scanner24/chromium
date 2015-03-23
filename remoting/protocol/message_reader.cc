@@ -22,23 +22,27 @@ namespace protocol {
 static const int kReadBufferSize = 4096;
 
 MessageReader::MessageReader()
-    : socket_(NULL),
+    : socket_(nullptr),
       read_pending_(false),
       pending_messages_(0),
       closed_(false),
       weak_factory_(this) {
 }
 
-void MessageReader::Init(net::Socket* socket,
-                         const MessageReceivedCallback& callback) {
+MessageReader::~MessageReader() {
+}
+
+void MessageReader::SetMessageReceivedCallback(
+    const MessageReceivedCallback& callback) {
   DCHECK(CalledOnValidThread());
   message_received_callback_ = callback;
+}
+
+void MessageReader::StartReading(net::Socket* socket) {
+  DCHECK(CalledOnValidThread());
   DCHECK(socket);
   socket_ = socket;
   DoRead();
-}
-
-MessageReader::~MessageReader() {
 }
 
 void MessageReader::DoRead() {
@@ -99,14 +103,16 @@ void MessageReader::OnDataReceived(net::IOBuffer* data, int data_size) {
         FROM_HERE,
         base::Bind(&MessageReader::RunCallback,
                    weak_factory_.GetWeakPtr(),
-                   base::Passed(scoped_ptr<CompoundBuffer>(buffer))));
+                   base::Passed(make_scoped_ptr(buffer))));
   }
 }
 
 void MessageReader::RunCallback(scoped_ptr<CompoundBuffer> message) {
-  message_received_callback_.Run(
-      message.Pass(), base::Bind(&MessageReader::OnMessageDone,
-                                 weak_factory_.GetWeakPtr()));
+  if (!message_received_callback_.is_null()){
+    message_received_callback_.Run(
+        message.Pass(),
+        base::Bind(&MessageReader::OnMessageDone, weak_factory_.GetWeakPtr()));
+  }
 }
 
 void MessageReader::OnMessageDone() {

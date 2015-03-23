@@ -3,13 +3,22 @@
 // found in the LICENSE file.
 
 function toggleHelpBox() {
-  var helpBoxOuter = document.getElementById('help-box-outer');
+  var helpBoxOuter = document.getElementById('details');
   helpBoxOuter.classList.toggle('hidden');
   var detailsButton = document.getElementById('details-button');
   if (helpBoxOuter.classList.contains('hidden'))
     detailsButton.innerText = detailsButton.detailsText;
   else
     detailsButton.innerText = detailsButton.hideDetailsText;
+
+  // Details appears over the main content on small screens.
+  if (mobileNav) {
+    document.getElementById('main-content').classList.toggle('hidden');
+    var runnerContainer = document.querySelector('.runner-container');
+    if (runnerContainer) {
+      runnerContainer.classList.toggle('hidden');
+    }
+  }
 }
 
 function diagnoseErrors() {
@@ -29,7 +38,6 @@ if (window.top.location != window.location)
 // Re-renders the error page using |strings| as the dictionary of values.
 // Used by NetErrorTabHelper to update DNS error pages with probe results.
 function updateForDnsProbe(strings) {
-  i18nTemplate.process(document, strings);
   var context = new JsEvalContext(strings);
   jstProcess(context, document.getElementById('t'));
 }
@@ -54,6 +62,8 @@ function updateIconClass(classList, newClass) {
   if (newClass == 'icon-offline') {
     document.body.classList.add('offline');
     new Runner('.interstitial-wrapper');
+  } else {
+    document.body.classList.add('neterror');
   }
 }
 
@@ -108,8 +118,7 @@ var primaryControlOnLeft = true;
 primaryControlOnLeft = false;
 </if>
 
-// Sets up the proper button layout for the current platform.
-function setButtonLayout() {
+function onDocumentLoad() {
   var buttonsDiv = document.getElementById('buttons');
   var controlButtonDiv = document.getElementById('control-buttons');
   var reloadButton = document.getElementById('reload-button');
@@ -119,6 +128,7 @@ function setButtonLayout() {
   var primaryButton = reloadButton;
   var secondaryButton = staleLoadButton;
 
+  // Sets up the proper button layout for the current platform.
   if (primaryControlOnLeft) {
     buttons.classList.add('suggested-left');
     controlButtonDiv.insertBefore(primaryButton, secondaryButton);
@@ -132,19 +142,35 @@ function setButtonLayout() {
     detailsButton.classList.add('singular');
   }
 
-  if (templateData) {
-    // Hide the details button if there are no details to show.
-    if (templateData.summary && !templateData.summary.msg) {
-      detailsButton.style.display = 'none';
-      document.getElementById('help-box-outer').style.display = 'block';
-    }
+<if expr="not chromeos">
+  // Hide the details button if there are no details to show.
+  if (loadTimeData.valueExists('summary') &&
+          !loadTimeData.getValue('summary').msg) {
+    detailsButton.style.display = 'none';
+  }
+</if>
 
-    // Show control buttons.
-    if (templateData.reloadButton && templateData.reloadButton.msg ||
-        templateData.staleLoadButton && templateData.staleLoadButton.msg) {
-      controlButtonDiv.hidden = false;
+  // Show control buttons.
+  if (loadTimeData.valueExists('reloadButton') &&
+          loadTimeData.getValue('reloadButton').msg ||
+      loadTimeData.valueExists('staleLoadButton') &&
+          loadTimeData.getValue('staleLoadButton').msg) {
+    controlButtonDiv.hidden = false;
+
+    // Set the secondary button state in the cases of two call to actions.
+    // Reload is secondary to stale load.
+    if (loadTimeData.valueExists('staleLoadButton') &&
+            loadTimeData.getValue('staleLoadButton').msg) {
+      reloadButton.classList.add('secondary-button');
     }
+  }
+
+  // Add a main message paragraph.
+  if (loadTimeData.valueExists('primaryParagraph')) {
+    var p = document.querySelector('#main-message p');
+    p.innerHTML = loadTimeData.getString('primaryParagraph');
+    p.hidden = false;
   }
 }
 
-document.addEventListener('DOMContentLoaded', setButtonLayout);
+document.addEventListener('DOMContentLoaded', onDocumentLoad);

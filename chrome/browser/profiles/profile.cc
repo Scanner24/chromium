@@ -14,11 +14,13 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/sync_driver/sync_prefs.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 
@@ -28,10 +30,6 @@
 #include "chromeos/chromeos_switches.h"
 #endif
 
-#if defined(OS_ANDROID) && defined(FULL_SAFE_BROWSING)
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#endif
-
 #if defined(ENABLE_EXTENSIONS)
 #include "extensions/browser/pref_names.h"
 #endif
@@ -39,7 +37,9 @@
 Profile::Profile()
     : restored_last_session_(false),
       sent_destroyed_notification_(false),
-      accessibility_pause_level_(0) {
+      accessibility_pause_level_(0),
+      is_guest_profile_(false),
+      is_system_profile_(false) {
 }
 
 Profile::~Profile() {
@@ -60,11 +60,17 @@ TestingProfile* Profile::AsTestingProfile() {
   return NULL;
 }
 
+chrome::ChromeZoomLevelPrefs* Profile::GetZoomLevelPrefs() {
+  return NULL;
+}
+
 Profile::Delegate::~Delegate() {
 }
 
 // static
 const char Profile::kProfileKey[] = "__PROFILE__";
+// This must be a string which can never be a valid domain.
+const char Profile::kNoHostedDomainFound[] = "NO_HOSTED_DOMAIN";
 
 // static
 void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -86,31 +92,16 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kSessionExitType,
       std::string(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-#if defined(OS_ANDROID) && defined(FULL_SAFE_BROWSING)
-  // During Finch trail, safe browsing should be turned off
-  // by default, and not sync'ed with desktop.
-  // If we want to enable safe browsing on Android, we will
-  // need to remove this Android-specific code.
-  registry->RegisterBooleanPref(
-      prefs::kSafeBrowsingEnabled,
-      SafeBrowsingService::IsEnabledByFieldTrial(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-#else
   registry->RegisterBooleanPref(
       prefs::kSafeBrowsingEnabled,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-#endif
   registry->RegisterBooleanPref(
       prefs::kSafeBrowsingExtendedReportingEnabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kSafeBrowsingProceedAnywayDisabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSafeBrowsingIncidentReportSent,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDictionaryPref(
@@ -122,6 +113,13 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
+  // This pref is intentionally outside the above #if. That flag corresponds
+  // to the Notifier extension and does not gate the launcher page.
+  // TODO(skare): Remove or rename ENABLE_GOOGLE_NOW: http://crbug.com/459827.
+  registry->RegisterBooleanPref(
+      prefs::kGoogleNowLauncherEnabled,
+      true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kDisableExtensions,
       false,
@@ -136,12 +134,21 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kSelectFileLastDirectory,
       std::string(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  // TODO(wjmaclean): remove the following two prefs once migration to per-
+  // partition zoom is complete.
   registry->RegisterDoublePref(
-      prefs::kDefaultZoomLevel,
+      prefs::kDefaultZoomLevelDeprecated,
       0.0,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDictionaryPref(
-      prefs::kPerHostZoomLevels,
+      prefs::kPerHostZoomLevelsDeprecated,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  registry->RegisterDictionaryPref(
+      prefs::kPartitionDefaultZoomLevel,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(
+      prefs::kPartitionPerHostZoomLevels,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterStringPref(
       prefs::kDefaultApps,
@@ -207,12 +214,17 @@ std::string Profile::GetDebugName() {
 
 bool Profile::IsGuestSession() const {
 #if defined(OS_CHROMEOS)
-  static bool is_guest_session = CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kGuestSession);
+  static bool is_guest_session =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kGuestSession);
   return is_guest_session;
 #else
-  return GetPath() == ProfileManager::GetGuestProfilePath();
+  return is_guest_profile_;
 #endif
+}
+
+bool Profile::IsSystemProfile() const {
+  return is_system_profile_;
 }
 
 bool Profile::IsNewProfile() {
@@ -237,6 +249,8 @@ bool Profile::IsSyncAccessible() {
 void Profile::MaybeSendDestroyedNotification() {
   if (!sent_destroyed_notification_) {
     sent_destroyed_notification_ = true;
+
+    NotifyWillBeDestroyed(this);
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_PROFILE_DESTROYED,
         content::Source<Profile>(this),
@@ -249,4 +263,10 @@ bool ProfileCompare::operator()(Profile* a, Profile* b) const {
   if (a->IsSameProfile(b))
     return false;
   return a->GetOriginalProfile() < b->GetOriginalProfile();
+}
+
+double Profile::GetDefaultZoomLevelForProfile() {
+  return GetDefaultStoragePartition(this)
+      ->GetHostZoomMap()
+      ->GetDefaultZoomLevel();
 }

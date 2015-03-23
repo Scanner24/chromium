@@ -14,6 +14,7 @@
 #include "components/history/core/browser/history_types.h"
 
 using base::ASCIIToUTF16;
+using bookmarks::BookmarkNode;
 using sync_integration_test_util::AwaitCommitActivityCompletion;
 using typed_urls_helper::AddUrlToHistory;
 using typed_urls_helper::AddUrlToHistoryWithTimestamp;
@@ -31,7 +32,7 @@ using typed_urls_helper::RemoveVisitsFromClient;
 class TwoClientTypedUrlsSyncTest : public SyncTest {
  public:
   TwoClientTypedUrlsSyncTest() : SyncTest(TWO_CLIENT) {}
-  virtual ~TwoClientTypedUrlsSyncTest() {}
+  ~TwoClientTypedUrlsSyncTest() override {}
 
   ::testing::AssertionResult CheckClientsEqual() {
     history::URLRows urls = GetTypedUrlsFromClient(0);

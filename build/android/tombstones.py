@@ -63,7 +63,8 @@ def _GetTombstoneData(device, tombstone_file):
   Returns:
     A list of lines
   """
-  return device.ReadFile('/data/tombstones/' + tombstone_file, as_root=True)
+  return device.ReadFile(
+      '/data/tombstones/' + tombstone_file, as_root=True).splitlines()
 
 
 def _EraseTombstone(device, tombstone_file):
@@ -173,7 +174,7 @@ def _GetTombstonesForDevice(device, options):
   device_now = _GetDeviceDateTime(device)
   for tombstone_file, tombstone_time in tombstones:
     ret += [{'serial': str(device),
-             'device_abi': device.GetProp('ro.product.cpu.abi'),
+             'device_abi': device.product_cpu_abi,
              'device_now': device_now,
              'time': tombstone_time,
              'file': tombstone_file,

@@ -15,11 +15,13 @@
 #include "content/common/content_param_traits.h"
 #include "content/common/cookie_data.h"
 #include "content/common/date_time_suggestion.h"
+#include "content/common/frame_replication_state.h"
 #include "content/common/navigation_gesture.h"
 #include "content/common/view_message_enums.h"
 #include "content/common/webplugin_geometry.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/favicon_url.h"
+#include "content/public/common/file_chooser_file_info.h"
 #include "content/public/common/file_chooser_params.h"
 #include "content/public/common/menu_item.h"
 #include "content/public/common/page_state.h"
@@ -48,14 +50,13 @@
 #include "ui/base/ime/text_input_mode.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
-#include "ui/gfx/vector2d.h"
-#include "ui/gfx/vector2d_f.h"
-#include "ui/shell_dialogs/selected_file_info.h"
 
 #if defined(OS_MACOSX)
 #include "content/common/mac/font_descriptor.h"
@@ -83,8 +84,11 @@ IPC_ENUM_TRAITS(WindowContainerType)
 IPC_ENUM_TRAITS(content::FaviconURL::IconType)
 IPC_ENUM_TRAITS(content::FileChooserParams::Mode)
 IPC_ENUM_TRAITS(content::MenuItem::Type)
-IPC_ENUM_TRAITS(content::NavigationGesture)
-IPC_ENUM_TRAITS(content::PageZoom)
+IPC_ENUM_TRAITS_MAX_VALUE(content::NavigationGesture,
+                          content::NavigationGestureLast)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(content::PageZoom,
+                              content::PageZoom::PAGE_ZOOM_OUT,
+                              content::PageZoom::PAGE_ZOOM_IN)
 IPC_ENUM_TRAITS(gfx::FontRenderParams::Hinting)
 IPC_ENUM_TRAITS(gfx::FontRenderParams::SubpixelRendering)
 IPC_ENUM_TRAITS_MAX_VALUE(content::TapMultipleTargetsStrategy,
@@ -169,11 +173,21 @@ IPC_STRUCT_TRAITS_BEGIN(content::FaviconURL)
   IPC_STRUCT_TRAITS_MEMBER(icon_sizes)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(content::FileChooserFileInfo)
+  IPC_STRUCT_TRAITS_MEMBER(file_path)
+  IPC_STRUCT_TRAITS_MEMBER(display_name)
+  IPC_STRUCT_TRAITS_MEMBER(file_system_url)
+  IPC_STRUCT_TRAITS_MEMBER(modification_time)
+  IPC_STRUCT_TRAITS_MEMBER(length)
+  IPC_STRUCT_TRAITS_MEMBER(is_directory)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(content::FileChooserParams)
   IPC_STRUCT_TRAITS_MEMBER(mode)
   IPC_STRUCT_TRAITS_MEMBER(title)
   IPC_STRUCT_TRAITS_MEMBER(default_file_name)
   IPC_STRUCT_TRAITS_MEMBER(accept_types)
+  IPC_STRUCT_TRAITS_MEMBER(need_local_path)
 #if defined(OS_ANDROID)
   IPC_STRUCT_TRAITS_MEMBER(capture)
 #endif
@@ -210,6 +224,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(use_custom_colors)
   IPC_STRUCT_TRAITS_MEMBER(enable_referrers)
   IPC_STRUCT_TRAITS_MEMBER(enable_do_not_track)
+  IPC_STRUCT_TRAITS_MEMBER(enable_webrtc_multiple_routes)
   IPC_STRUCT_TRAITS_MEMBER(default_zoom_level)
   IPC_STRUCT_TRAITS_MEMBER(user_agent_override)
   IPC_STRUCT_TRAITS_MEMBER(accept_languages)
@@ -218,6 +233,16 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(disable_client_blocked_error_page)
   IPC_STRUCT_TRAITS_MEMBER(plugin_fullscreen_allowed)
   IPC_STRUCT_TRAITS_MEMBER(use_video_overlay_for_embedded_encrypted_video)
+  IPC_STRUCT_TRAITS_MEMBER(caption_font_family_name)
+  IPC_STRUCT_TRAITS_MEMBER(caption_font_height)
+  IPC_STRUCT_TRAITS_MEMBER(small_caption_font_family_name)
+  IPC_STRUCT_TRAITS_MEMBER(small_caption_font_height)
+  IPC_STRUCT_TRAITS_MEMBER(menu_font_family_name)
+  IPC_STRUCT_TRAITS_MEMBER(menu_font_height)
+  IPC_STRUCT_TRAITS_MEMBER(status_font_family_name)
+  IPC_STRUCT_TRAITS_MEMBER(status_font_height)
+  IPC_STRUCT_TRAITS_MEMBER(message_font_family_name)
+  IPC_STRUCT_TRAITS_MEMBER(message_font_height)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::CookieData)
@@ -245,12 +270,6 @@ IPC_STRUCT_TRAITS_BEGIN(media::MediaLogEvent)
   IPC_STRUCT_TRAITS_MEMBER(type)
   IPC_STRUCT_TRAITS_MEMBER(params)
   IPC_STRUCT_TRAITS_MEMBER(time)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(ui::SelectedFileInfo)
-  IPC_STRUCT_TRAITS_MEMBER(file_path)
-  IPC_STRUCT_TRAITS_MEMBER(local_path)
-  IPC_STRUCT_TRAITS_MEMBER(display_name)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
@@ -406,6 +425,29 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   IPC_STRUCT_MEMBER(int, flags)
 IPC_STRUCT_END()
 
+IPC_STRUCT_BEGIN(ViewMsg_Resize_Params)
+  // Information about the screen (dpi, depth, etc..).
+  IPC_STRUCT_MEMBER(blink::WebScreenInfo, screen_info)
+  // The size of the renderer.
+  IPC_STRUCT_MEMBER(gfx::Size, new_size)
+  // The size of the view's backing surface in non-DPI-adjusted pixels.
+  IPC_STRUCT_MEMBER(gfx::Size, physical_backing_size)
+  // Whether or not Blink's viewport size should be shrunk by the height of the
+  // URL-bar (always false on platforms where URL-bar hiding isn't supported).
+  IPC_STRUCT_MEMBER(bool, top_controls_shrink_blink_size)
+  // The height of the top controls (always 0 on platforms where URL-bar hiding
+  // isn't supported).
+  IPC_STRUCT_MEMBER(float, top_controls_height)
+  // The size of the visible viewport, which may be smaller than the view if the
+  // view is partially occluded (e.g. by a virtual keyboard).  The size is in
+  // DPI-adjusted pixels.
+  IPC_STRUCT_MEMBER(gfx::Size, visible_viewport_size)
+  // The resizer rect.
+  IPC_STRUCT_MEMBER(gfx::Rect, resizer_rect)
+  // Indicates whether a page is fullscreen or not.
+  IPC_STRUCT_MEMBER(bool, is_fullscreen)
+IPC_STRUCT_END()
+
 IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // Renderer-wide preferences.
   IPC_STRUCT_MEMBER(content::RendererPreferences, renderer_preferences)
@@ -435,6 +477,11 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // Whether the RenderView should initially be swapped out.
   IPC_STRUCT_MEMBER(bool, swapped_out)
 
+  // In --site-per-process mode, if this view is |swapped_out|, its main frame
+  // will become a RenderFrameProxy.  |replicated_frame_state| is used to
+  // replicate information such as security origin to that RenderFrameProxy.
+  IPC_STRUCT_MEMBER(content::FrameReplicationState, replicated_frame_state)
+
   // The ID of the proxy object for the main frame in this view. It is only
   // used if |swapped_out| is true.
   IPC_STRUCT_MEMBER(int32, proxy_routing_id)
@@ -453,8 +500,17 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // to a view and are only updated by the renderer after this initial value.
   IPC_STRUCT_MEMBER(int32, next_page_id)
 
-  // The properties of the screen associated with the view.
-  IPC_STRUCT_MEMBER(blink::WebScreenInfo, screen_info)
+  // The initial renderer size.
+  IPC_STRUCT_MEMBER(ViewMsg_Resize_Params, initial_size)
+
+  // Whether to enable auto-resize.
+  IPC_STRUCT_MEMBER(bool, enable_auto_resize)
+
+  // The minimum size to layout the page if auto-resize is enabled.
+  IPC_STRUCT_MEMBER(gfx::Size, min_size)
+
+  // The maximum size to layout the page if auto-resize is enabled.
+  IPC_STRUCT_MEMBER(gfx::Size, max_size)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewMsg_PostMessage_Params)
@@ -517,18 +573,12 @@ IPC_MESSAGE_ROUTED2(ViewMsg_UpdateVSyncParameters,
                     base::TimeTicks /* timebase */,
                     base::TimeDelta /* interval */)
 
-// Sent to the RenderView when a new tab is swapped into an existing
-// tab and the histories need to be merged. The existing tab has a history of
-// |merged_history_length| which precedes the history of the new tab. All
-// page_ids >= |minimum_page_id| in the new tab are appended to the history.
-//
-// For example, suppose the history of page_ids in the new tab's RenderView
-// is [4 7 8]. This is merged into an existing tab with 3 history items, and
-// all pages in the new tab with page_id >= 7 are to be preserved.
-// The resulting page history is [-1 -1 -1 7 8].
-IPC_MESSAGE_ROUTED2(ViewMsg_SetHistoryLengthAndPrune,
-                    int, /* merge_history_length */
-                    int32 /* minimum_page_id */)
+// Sent when the history is altered outside of navigation. The history list was
+// reset to |history_length| length, and the offset was reset to be
+// |history_offset|.
+IPC_MESSAGE_ROUTED2(ViewMsg_SetHistoryOffsetAndLength,
+                    int /* history_offset */,
+                    int /* history_length */)
 
 // Tells the renderer to create a new view.
 // This message is slightly different, the view it takes (via
@@ -557,16 +607,6 @@ IPC_MESSAGE_CONTROL0(ViewMsg_TimezoneChange)
 // Expects a Close_ACK message when finished.
 IPC_MESSAGE_ROUTED0(ViewMsg_Close)
 
-IPC_STRUCT_BEGIN(ViewMsg_Resize_Params)
-  IPC_STRUCT_MEMBER(blink::WebScreenInfo, screen_info)
-  IPC_STRUCT_MEMBER(gfx::Size, new_size)
-  IPC_STRUCT_MEMBER(gfx::Size, physical_backing_size)
-  IPC_STRUCT_MEMBER(float, top_controls_layout_height)
-  IPC_STRUCT_MEMBER(gfx::Size, visible_viewport_size)
-  IPC_STRUCT_MEMBER(gfx::Rect, resizer_rect)
-  IPC_STRUCT_MEMBER(bool, is_fullscreen)
-IPC_STRUCT_END()
-
 // Tells the render view to change its size.  A ViewHostMsg_UpdateRect message
 // is generated in response provided new_size is not empty and not equal to
 // the view's current size.  The generated ViewHostMsg_UpdateRect message will
@@ -574,6 +614,11 @@ IPC_STRUCT_END()
 // we don't have to fetch it every time WebKit asks for it.
 IPC_MESSAGE_ROUTED1(ViewMsg_Resize,
                     ViewMsg_Resize_Params /* params */)
+
+// Sent to inform the renderer of its screen device color profile. An empty
+// profile tells the renderer use the default sRGB color profile.
+IPC_MESSAGE_ROUTED1(ViewMsg_ColorProfile,
+                    std::vector<char> /* color profile */)
 
 // Tells the render view that the resize rect has changed.
 IPC_MESSAGE_ROUTED1(ViewMsg_ChangeResizeRect,
@@ -710,7 +755,7 @@ IPC_MESSAGE_ROUTED0(ViewMsg_CandidateWindowHidden)
 IPC_MESSAGE_ROUTED0(ViewMsg_UpdateTargetURL_ACK)
 
 IPC_MESSAGE_ROUTED1(ViewMsg_RunFileChooserResponse,
-                    std::vector<ui::SelectedFileInfo>)
+                    std::vector<content::FileChooserFileInfo>)
 
 // Provides the results of directory enumeration.
 IPC_MESSAGE_ROUTED2(ViewMsg_EnumerateDirectoryResponse,
@@ -893,10 +938,6 @@ IPC_MESSAGE_ROUTED3(ViewMsg_UpdateTopControlsState,
 
 IPC_MESSAGE_ROUTED0(ViewMsg_ShowImeIfNeeded)
 
-// Sent by the browser when the renderer should generate a new frame.
-IPC_MESSAGE_ROUTED1(ViewMsg_BeginFrame,
-                    cc::BeginFrameArgs /* args */)
-
 // Sent by the browser when an IME update that requires acknowledgement has been
 // processed on the browser side.
 IPC_MESSAGE_ROUTED0(ViewMsg_ImeEventAck)
@@ -946,8 +987,18 @@ IPC_MESSAGE_ROUTED0(ViewMsg_SelectWordAroundCaret)
 IPC_MESSAGE_ROUTED1(ViewMsg_ForceRedraw,
                     int /* request_id */)
 
+// Sent by the browser when the renderer should generate a new frame.
+IPC_MESSAGE_ROUTED1(ViewMsg_BeginFrame,
+                    cc::BeginFrameArgs /* args */)
+
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
+
+// Sent by renderer to request a ViewMsg_BeginFrame message for upcoming
+// display events. If |enabled| is true, the BeginFrame message will continue
+// to be be delivered until the notification is disabled.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_SetNeedsBeginFrames,
+                    bool /* enabled */)
 
 // Sent by the renderer when it is creating a new window.  The browser creates
 // a tab for it and responds with a ViewMsg_CreatingNew_ACK.  If route_id is
@@ -993,19 +1044,19 @@ IPC_SYNC_MESSAGE_CONTROL0_2(ViewHostMsg_GetProcessMemorySizes,
 // page/widget that was created by
 // CreateWindow/CreateWidget/CreateFullscreenWidget. routing_id
 // refers to the id that was returned from the Create message above.
-// The initial_position parameter is a rectangle in screen coordinates.
+// The initial_rect parameter is in screen coordinates.
 //
 // FUTURE: there will probably be flags here to control if the result is
 // in a new window.
 IPC_MESSAGE_ROUTED4(ViewHostMsg_ShowView,
                     int /* route_id */,
                     WindowOpenDisposition /* disposition */,
-                    gfx::Rect /* initial_pos */,
+                    gfx::Rect /* initial_rect */,
                     bool /* opened_by_user_gesture */)
 
 IPC_MESSAGE_ROUTED2(ViewHostMsg_ShowWidget,
                     int /* route_id */,
-                    gfx::Rect /* initial_pos */)
+                    gfx::Rect /* initial_rect */)
 
 // Message to show a full screen widget.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_ShowFullscreenWidget,
@@ -1019,12 +1070,6 @@ IPC_SYNC_MESSAGE_ROUTED1_0(ViewHostMsg_RunModal,
 // Indicates the renderer is ready in response to a ViewMsg_New or
 // a ViewMsg_CreatingNew_ACK.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_RenderViewReady)
-
-// Indicates the renderer process is gone.  This actually is sent by the
-// browser process to itself, but keeps the interface cleaner.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_RenderProcessGone,
-                    int, /* this really is base::TerminationStatus */
-                    int /* exit_code */)
 
 // Sent by the renderer process to request that the browser close the view.
 // This corresponds to the window.close() API, and the browser may ignore
@@ -1109,10 +1154,12 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_Focus)
 IPC_MESSAGE_ROUTED0(ViewHostMsg_Blur)
 
 // Message sent from renderer to the browser when focus changes inside the
-// webpage. The parameter says whether the newly focused element needs
+// webpage. The first parameter says whether the newly focused element needs
 // keyboard input (true for textfields, text areas and content editable divs).
-IPC_MESSAGE_ROUTED1(ViewHostMsg_FocusedNodeChanged,
-    bool /* is_editable_node */)
+// The second parameter is the node bounds relative to RenderWidgetHostView.
+IPC_MESSAGE_ROUTED2(ViewHostMsg_FocusedNodeChanged,
+                    bool /* is_editable_node */,
+                    gfx::Rect /* node_bounds */)
 
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SetCursor, content::WebCursor)
 
@@ -1311,15 +1358,19 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_RequestPpapiBrokerPermission,
                     int /* routing_id */,
                     GURL /* document_url */,
                     base::FilePath /* plugin_path */)
+
+// A renderer sends this to the browser process when it throttles or unthrottles
+// a plugin instance for the Plugin Power Saver feature.
+IPC_MESSAGE_CONTROL3(ViewHostMsg_PluginInstanceThrottleStateChange,
+                     int /* plugin_child_id */,
+                     int32 /* pp_instance */,
+                     bool /* is_throttled */)
 #endif  // defined(ENABLE_PLUGINS)
 
 // Send the tooltip text for the current mouse position to the browser.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_SetTooltipText,
                     base::string16 /* tooltip text string */,
                     blink::WebTextDirection /* text direction hint */)
-
-IPC_MESSAGE_ROUTED0(ViewHostMsg_SelectRange_ACK)
-IPC_MESSAGE_ROUTED0(ViewHostMsg_MoveCaret_ACK)
 
 // Notification that the text selection has changed.
 // Note: The secound parameter is the character based offset of the
@@ -1363,10 +1414,11 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_TakeFocus,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_OpenDateTimeDialog,
                     ViewHostMsg_DateTimeDialogValue_Params /* value */)
 
-IPC_MESSAGE_ROUTED3(ViewHostMsg_TextInputTypeChanged,
+IPC_MESSAGE_ROUTED4(ViewHostMsg_TextInputTypeChanged,
                     ui::TextInputType /* TextInputType of the focused node */,
                     ui::TextInputMode /* TextInputMode of the focused node */,
-                    bool /* can_compose_inline in the focused node */)
+                    bool /* can_compose_inline in the focused node */,
+                    int /* flags in the focused node */)
 
 // Required for updating text input state.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_TextInputStateChanged,
@@ -1417,10 +1469,10 @@ IPC_SYNC_MESSAGE_CONTROL3_1(ViewHostMsg_Keygen,
                             std::string /* signed public key and challenge */)
 
 // Message sent from the renderer to the browser to request that the browser
-// cache |data| associated with |url|.
+// cache |data| associated with |url| and |expected_response_time|.
 IPC_MESSAGE_CONTROL3(ViewHostMsg_DidGenerateCacheableMetadata,
                      GURL /* url */,
-                     double /* expected_response_time */,
+                     base::Time /* expected_response_time */,
                      std::vector<char> /* data */)
 
 // Register a new handler for URL requests with the given scheme.
@@ -1435,11 +1487,6 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_UnregisterProtocolHandler,
                     std::string /* scheme */,
                     GURL /* url */,
                     bool /* user_gesture */)
-
-// Puts the browser into "tab fullscreen" mode for the sending renderer.
-// See the comment in chrome/browser/ui/browser.h for more details.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_ToggleFullscreen,
-                    bool /* enter_fullscreen */)
 
 // Send back a string to be recorded by UserMetrics.
 IPC_MESSAGE_CONTROL1(ViewHostMsg_UserMetricsRecordAction,
@@ -1511,15 +1558,6 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_WillInsertBody)
 IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateFaviconURL,
                     std::vector<content::FaviconURL> /* candidates */)
 
-// Sent by the renderer to the browser to start a vibration with the given
-// duration.
-IPC_MESSAGE_CONTROL1(ViewHostMsg_Vibrate,
-                     int64 /* milliseconds */)
-
-// Sent by the renderer to the browser to cancel the currently running
-// vibration, if there is one.
-IPC_MESSAGE_CONTROL0(ViewHostMsg_CancelVibration)
-
 // Message sent from renderer to the browser when the element that is focused
 // has been touched. A bool is passed in this message which indicates if the
 // node is editable.
@@ -1577,17 +1615,17 @@ IPC_MESSAGE_CONTROL3(ViewHostMsg_RunWebAudioMediaCodec,
                      base::FileDescriptor /* pcm_output */,
                      uint32_t /* data_size*/)
 
-// Sent by renderer to request a ViewMsg_BeginFrame message for upcoming
-// display events. If |enabled| is true, the BeginFrame message will continue
-// to be be delivered until the notification is disabled.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_SetNeedsBeginFrame,
-                    bool /* enabled */)
-
 // Reply to the ViewMsg_ExtractSmartClipData message.
 IPC_MESSAGE_ROUTED3(ViewHostMsg_SmartClipDataExtracted,
                     base::string16 /* text */,
                     base::string16 /* html */,
                     gfx::Rect /* rect */)
+
+// Notifies that an unhandled tap has occurred at the specified x,y position
+// and that the UI may need to be triggered.
+IPC_MESSAGE_ROUTED2(ViewHostMsg_ShowUnhandledTapUIIfNeeded,
+                    int /* x */,
+                    int /* y */)
 
 #elif defined(OS_MACOSX)
 // Request that the browser load a font into shared memory for us.
@@ -1615,27 +1653,6 @@ IPC_MESSAGE_ROUTED1(ViewMsg_GetRenderedTextCompleted, std::string);
 IPC_SYNC_MESSAGE_CONTROL2_0(ViewHostMsg_PreCacheFontCharacters,
                             LOGFONT /* font_data */,
                             base::string16 /* characters */)
-#endif
-
-#if defined(OS_POSIX)
-// On POSIX, we cannot allocated shared memory from within the sandbox, so
-// this call exists for the renderer to ask the browser to allocate memory
-// on its behalf. We return a file descriptor to the POSIX shared memory.
-// If the |cache_in_browser| flag is |true|, then a copy of the shmem is kept
-// by the browser, and it is the caller's repsonsibility to send a
-// ViewHostMsg_FreeTransportDIB message in order to release the cached shmem.
-// In all cases, the caller is responsible for deleting the resulting
-// TransportDIB.
-IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_AllocTransportDIB,
-                            uint32_t, /* bytes requested */
-                            bool, /* cache in the browser */
-                            TransportDIB::Handle /* DIB */)
-
-// Since the browser keeps handles to the allocated transport DIBs, this
-// message is sent to tell the browser that it may release them when the
-// renderer is finished with them.
-IPC_MESSAGE_CONTROL1(ViewHostMsg_FreeTransportDIB,
-                     TransportDIB::Id /* DIB id */)
 #endif
 
 // Adding a new message? Stick to the sort order above: first platform

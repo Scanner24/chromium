@@ -64,6 +64,7 @@ class CONTENT_EXPORT NavigatorDelegate {
   // not provided since it may be invalid/changed after being committed. The
   // NavigationController's last committed entry is for this navigation.
   virtual void DidNavigateMainFramePostCommit(
+      RenderFrameHostImpl* render_frame_host,
       const LoadCommittedDetails& details,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params) {}
   virtual void DidNavigateAnyFramePostCommit(
@@ -81,7 +82,8 @@ class CONTENT_EXPORT NavigatorDelegate {
 
   // Notifies the Navigator embedder that it is beginning to navigate a frame.
   virtual void AboutToNavigateRenderFrame(
-      RenderFrameHostImpl* render_frame_host) {}
+      RenderFrameHostImpl* old_host,
+      RenderFrameHostImpl* new_host) {}
 
   // Notifies the Navigator embedder that a navigation to pending
   // NavigationEntry has started in the browser process.

@@ -25,11 +25,11 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/scoped_observer.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/keyword_id.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
-class Profile;
+class HistoryService;
 
 namespace base {
 class FilePath;
@@ -38,17 +38,13 @@ class FilePath;
 namespace history {
 
 class InMemoryDatabase;
-struct KeywordSearchUpdatedDetails;
-struct KeywordSearchDeletedDetails;
 class URLDatabase;
 class URLRow;
-struct URLsDeletedDetails;
-struct URLsModifiedDetails;
 
-class InMemoryHistoryBackend : public content::NotificationObserver {
+class InMemoryHistoryBackend : public HistoryServiceObserver {
  public:
   InMemoryHistoryBackend();
-  virtual ~InMemoryHistoryBackend();
+  ~InMemoryHistoryBackend() override;
 
   // Initializes the backend from the history database pointed to by the
   // full path in |history_filename|.
@@ -57,7 +53,7 @@ class InMemoryHistoryBackend : public content::NotificationObserver {
   // Does initialization work when this object is attached to the history
   // system on the main thread. The argument is the profile with which the
   // attached history service is under.
-  void AttachToHistoryService(Profile* profile);
+  void AttachToHistoryService(HistoryService* history_service);
 
   // Deletes all search terms for the specified keyword.
   void DeleteAllSearchTermsForKeyword(KeywordID keyword_id);
@@ -69,33 +65,39 @@ class InMemoryHistoryBackend : public content::NotificationObserver {
     return db_.get();
   }
 
-  // Notification callback.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
  private:
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
+  FRIEND_TEST_ALL_PREFIXES(InMemoryHistoryBackendTest, OnURLsDeletedEnMasse);
+  friend class HistoryBackendTestBase;
+  friend class InMemoryHistoryBackendTest;
+
+  // HistoryServiceObserver:
+  void OnURLVisited(HistoryService* history_service,
+                    ui::PageTransition transition,
+                    const URLRow& row,
+                    const RedirectList& redirects,
+                    base::Time visit_time) override;
+  void OnURLsModified(HistoryService* history_service,
+                      const URLRows& changed_urls) override;
+  void OnURLsDeleted(HistoryService* history_service,
+                     bool all_history,
+                     bool expired,
+                     const URLRows& deleted_rows,
+                     const std::set<GURL>& favicon_urls) override;
+  void OnKeywordSearchTermUpdated(HistoryService* history_service,
+                                  const URLRow& row,
+                                  KeywordID keyword_id,
+                                  const base::string16& term) override;
+  void OnKeywordSearchTermDeleted(HistoryService* history_service,
+                                  URLID url_id) override;
 
   // Handler for HISTORY_URL_VISITED and HISTORY_URLS_MODIFIED.
   void OnURLVisitedOrModified(const URLRow& url_row);
 
-  // Handler for HISTORY_URLS_DELETED.
-  void OnURLsDeleted(const URLsDeletedDetails& details);
-
-  // Handler for HISTORY_KEYWORD_SEARCH_TERM_UPDATED.
-  void OnKeywordSearchTermUpdated(const KeywordSearchUpdatedDetails& details);
-
-  // Handler for HISTORY_KEYWORD_SEARCH_TERM_DELETED.
-  void OnKeywordSearchTermDeleted(const KeywordSearchDeletedDetails& details);
-
-  content::NotificationRegistrar registrar_;
-
   scoped_ptr<InMemoryDatabase> db_;
 
-  // The profile that this object is attached. May be NULL before
-  // initialization.
-  Profile* profile_;
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryHistoryBackend);
 };

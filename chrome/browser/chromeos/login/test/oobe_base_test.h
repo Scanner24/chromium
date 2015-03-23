@@ -19,27 +19,25 @@
 
 namespace content {
 class WebUI;
-}  // namespace content
+}
 
 namespace chromeos {
 
-class FakeUserManager;
 class NetworkPortalDetectorTestImpl;
-class SigninScreenHandler;
 
 // Base class for OOBE and Kiosk tests.
 class OobeBaseTest : public ExtensionApiTest {
  public:
   OobeBaseTest();
-  virtual ~OobeBaseTest();
+  ~OobeBaseTest() override;
 
  protected:
   // InProcessBrowserTest overrides.
-  virtual void SetUp() OVERRIDE;
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
+  void SetUp() override;
+  void SetUpInProcessBrowserTestFixture() override;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
 
   // Network status control functions.
   void SimulateNetworkOffline();
@@ -55,9 +53,6 @@ class OobeBaseTest : public ExtensionApiTest {
 
   // Returns chrome://oobe WebUI.
   content::WebUI* GetLoginUI();
-
-  // Returns SigninScreenHandler for login screen.
-  SigninScreenHandler* GetSigninScreenHandler();
 
   // Returns login display.
   WebUILoginDisplay* GetLoginDisplay();

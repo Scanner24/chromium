@@ -16,7 +16,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/omnibox/omnibox_log.h"
@@ -44,9 +43,9 @@ const float kConfidenceCutoff[] = {
   0.5f
 };
 
-COMPILE_ASSERT(arraysize(kConfidenceCutoff) ==
-               predictors::AutocompleteActionPredictor::LAST_PREDICT_ACTION,
-               ConfidenceCutoff_count_mismatch);
+static_assert(arraysize(kConfidenceCutoff) ==
+              predictors::AutocompleteActionPredictor::LAST_PREDICT_ACTION,
+              "kConfidenceCutoff count should match LAST_PREDICT_ACTION");
 
 const size_t kMinimumUserTextLength = 1;
 const int kMinimumNumberOfHits = 3;
@@ -69,7 +68,8 @@ AutocompleteActionPredictor::AutocompleteActionPredictor(Profile* profile)
     : profile_(profile),
       main_profile_predictor_(NULL),
       incognito_predictor_(NULL),
-      initialized_(false) {
+      initialized_(false),
+      history_service_observer_(this) {
   if (profile_->IsOffTheRecord()) {
     main_profile_predictor_ = AutocompleteActionPredictorFactory::GetForProfile(
         profile_->GetOriginalProfile());
@@ -81,7 +81,7 @@ AutocompleteActionPredictor::AutocompleteActionPredictor(Profile* profile)
     // Request the in-memory database from the history to force it to load so
     // it's available as soon as possible.
     HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS);
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
     if (history_service)
       history_service->InMemoryDatabase();
 
@@ -124,11 +124,10 @@ void AutocompleteActionPredictor::RegisterTransitionalMatches(
                                             transitional_match);
   }
 
-  for (AutocompleteResult::const_iterator i(result.begin()); i != result.end();
-       ++i) {
+  for (const auto& i : result) {
     if (std::find(match_it->urls.begin(), match_it->urls.end(),
-                  i->destination_url) == match_it->urls.end()) {
-      match_it->urls.push_back(i->destination_url);
+                  i.destination_url) == match_it->urls.end()) {
+      match_it->urls.push_back(i.destination_url);
     }
   }
 }
@@ -148,7 +147,7 @@ void AutocompleteActionPredictor::CancelPrerender() {
 
 void AutocompleteActionPredictor::StartPrerendering(
     const GURL& url,
-    const content::SessionStorageNamespaceMap& session_storage_namespace_map,
+    content::SessionStorageNamespace* session_storage_namespace,
     const gfx::Size& size) {
   // Only cancel the old prerender after starting the new one, so if the URLs
   // are the same, the underlying prerender will be reused.
@@ -156,11 +155,6 @@ void AutocompleteActionPredictor::StartPrerendering(
       prerender_handle_.release());
   if (prerender::PrerenderManager* prerender_manager =
           prerender::PrerenderManagerFactory::GetForProfile(profile_)) {
-    content::SessionStorageNamespace* session_storage_namespace = NULL;
-    content::SessionStorageNamespaceMap::const_iterator it =
-        session_storage_namespace_map.find(std::string());
-    if (it != session_storage_namespace_map.end())
-      session_storage_namespace = it->second.get();
     prerender_handle_.reset(prerender_manager->AddPrerenderFromOmnibox(
         url, session_storage_namespace, size));
   }
@@ -235,34 +229,12 @@ void AutocompleteActionPredictor::Observe(
           content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
           content::NotificationService::AllSources());
       break;
-
-    case chrome::NOTIFICATION_HISTORY_URLS_DELETED: {
-      DCHECK(initialized_);
-      const content::Details<const history::URLsDeletedDetails>
-          urls_deleted_details =
-              content::Details<const history::URLsDeletedDetails>(details);
-      if (urls_deleted_details->all_history)
-        DeleteAllRows();
-      else
-        DeleteRowsWithURLs(urls_deleted_details->rows);
-      break;
-    }
-
     case chrome::NOTIFICATION_OMNIBOX_OPENED_URL: {
       DCHECK(initialized_);
 
       // TODO(dominich): This doesn't need to be synchronous. Investigate
       // posting it as a task to be run later.
       OnOmniboxOpenedUrl(*content::Details<OmniboxLog>(details).ptr());
-      break;
-    }
-
-    case chrome::NOTIFICATION_HISTORY_LOADED: {
-      TryDeleteOldEntries(content::Details<HistoryService>(details).ptr());
-
-      notification_registrar_.Remove(this,
-                                     chrome::NOTIFICATION_HISTORY_LOADED,
-                                     content::Source<Profile>(profile_));
       break;
     }
 
@@ -476,13 +448,13 @@ void AutocompleteActionPredictor::CreateCaches(
   }
 
   // If the history service is ready, delete any old or invalid entries.
-  HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
   if (!TryDeleteOldEntries(history_service)) {
     // Wait for the notification that the history service is ready and the URL
     // DB is loaded.
-    notification_registrar_.Add(this, chrome::NOTIFICATION_HISTORY_LOADED,
-                                content::Source<Profile>(profile_));
+    if (history_service)
+      history_service_observer_.Add(history_service);
   }
 }
 
@@ -570,8 +542,6 @@ void AutocompleteActionPredictor::FinishInitialization() {
   // opens the non-incognito history (and lets users delete from there).
   notification_registrar_.Add(this, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
                               content::Source<Profile>(profile_));
-  notification_registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-      content::Source<Profile>(profile_->GetOriginalProfile()));
   initialized_ = true;
 }
 
@@ -601,6 +571,31 @@ double AutocompleteActionPredictor::CalculateConfidenceForDbEntry(
 
   const double number_of_hits = static_cast<double>(value.number_of_hits);
   return number_of_hits / (number_of_hits + value.number_of_misses);
+}
+
+void AutocompleteActionPredictor::Shutdown() {
+  history_service_observer_.RemoveAll();
+}
+
+void AutocompleteActionPredictor::OnURLsDeleted(
+    HistoryService* history_service,
+    bool all_history,
+    bool expired,
+    const history::URLRows& deleted_rows,
+    const std::set<GURL>& favicon_urls) {
+  if (!initialized_)
+    return;
+
+  if (all_history)
+    DeleteAllRows();
+  else
+    DeleteRowsWithURLs(deleted_rows);
+}
+
+void AutocompleteActionPredictor::OnHistoryServiceLoaded(
+    HistoryService* history_service) {
+  TryDeleteOldEntries(history_service);
+  history_service_observer_.Remove(history_service);
 }
 
 AutocompleteActionPredictor::TransitionalMatch::TransitionalMatch() {

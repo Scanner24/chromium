@@ -71,7 +71,7 @@ void VerifyGetDaemonConfigResponse(scoped_ptr<base::DictionaryValue> response) {
   std::string value;
   EXPECT_TRUE(response->GetString("type", &value));
   EXPECT_EQ("getDaemonConfigResponse", value);
-  const base::DictionaryValue* config = NULL;
+  const base::DictionaryValue* config = nullptr;
   EXPECT_TRUE(response->GetDictionary("config", &config));
   EXPECT_TRUE(base::DictionaryValue().Equals(config));
 }
@@ -135,24 +135,19 @@ namespace remoting {
 class MockDaemonControllerDelegate : public DaemonController::Delegate {
  public:
   MockDaemonControllerDelegate();
-  virtual ~MockDaemonControllerDelegate();
+  ~MockDaemonControllerDelegate() override;
 
   // DaemonController::Delegate interface.
-  virtual DaemonController::State GetState() OVERRIDE;
-  virtual scoped_ptr<base::DictionaryValue> GetConfig() OVERRIDE;
-  virtual void InstallHost(
-      const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void SetConfigAndStart(
+  DaemonController::State GetState() override;
+  scoped_ptr<base::DictionaryValue> GetConfig() override;
+  void SetConfigAndStart(
       scoped_ptr<base::DictionaryValue> config,
       bool consent,
-      const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void UpdateConfig(
-      scoped_ptr<base::DictionaryValue> config,
-      const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void Stop(const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void SetWindow(void* window_handle) OVERRIDE;
-  virtual std::string GetVersion() OVERRIDE;
-  virtual DaemonController::UsageStatsConsent GetUsageStatsConsent() OVERRIDE;
+      const DaemonController::CompletionCallback& done) override;
+  void UpdateConfig(scoped_ptr<base::DictionaryValue> config,
+                    const DaemonController::CompletionCallback& done) override;
+  void Stop(const DaemonController::CompletionCallback& done) override;
+  DaemonController::UsageStatsConsent GetUsageStatsConsent() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDaemonControllerDelegate);
@@ -167,12 +162,7 @@ DaemonController::State MockDaemonControllerDelegate::GetState() {
 }
 
 scoped_ptr<base::DictionaryValue> MockDaemonControllerDelegate::GetConfig() {
-  return scoped_ptr<base::DictionaryValue>(new base::DictionaryValue());
-}
-
-void MockDaemonControllerDelegate::InstallHost(
-    const DaemonController::CompletionCallback& done) {
-  done.Run(DaemonController::RESULT_OK);
+  return make_scoped_ptr(new base::DictionaryValue());
 }
 
 void MockDaemonControllerDelegate::SetConfigAndStart(
@@ -203,15 +193,6 @@ void MockDaemonControllerDelegate::Stop(
   done.Run(DaemonController::RESULT_OK);
 }
 
-void MockDaemonControllerDelegate::SetWindow(void* window_handle) {}
-
-std::string MockDaemonControllerDelegate::GetVersion() {
-  // Unused - Me2MeNativeMessagingHost returns the compiled-in version string
-  // instead of calling this method.
-  NOTREACHED();
-  return std::string();
-}
-
 DaemonController::UsageStatsConsent
 MockDaemonControllerDelegate::GetUsageStatsConsent() {
   DaemonController::UsageStatsConsent consent;
@@ -224,10 +205,10 @@ MockDaemonControllerDelegate::GetUsageStatsConsent() {
 class Me2MeNativeMessagingHostTest : public testing::Test {
  public:
   Me2MeNativeMessagingHostTest();
-  virtual ~Me2MeNativeMessagingHostTest();
+  ~Me2MeNativeMessagingHostTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   scoped_ptr<base::DictionaryValue> ReadMessageFromOutputPipe();
 
@@ -316,24 +297,18 @@ void Me2MeNativeMessagingHostTest::StartHost() {
 
   daemon_controller_delegate_ = new MockDaemonControllerDelegate();
   scoped_refptr<DaemonController> daemon_controller(
-      new DaemonController(
-          scoped_ptr<DaemonController::Delegate>(daemon_controller_delegate_)));
+      new DaemonController(make_scoped_ptr(daemon_controller_delegate_)));
 
   scoped_refptr<PairingRegistry> pairing_registry =
-      new SynchronousPairingRegistry(scoped_ptr<PairingRegistry::Delegate>(
-          new MockPairingRegistryDelegate()));
+      new SynchronousPairingRegistry(
+          make_scoped_ptr(new MockPairingRegistryDelegate()));
 
   scoped_ptr<extensions::NativeMessagingChannel> channel(
       new PipeMessagingChannel(input_read_file.Pass(),
                                output_write_file.Pass()));
 
   host_.reset(new Me2MeNativeMessagingHost(
-        false,
-        0,
-        channel.Pass(),
-        daemon_controller,
-        pairing_registry,
-        scoped_ptr<remoting::OAuthClient>()));
+      false, 0, channel.Pass(), daemon_controller, pairing_registry, nullptr));
   host_->Start(base::Bind(&Me2MeNativeMessagingHostTest::StopHost,
                           base::Unretained(this)));
 
@@ -351,7 +326,7 @@ void Me2MeNativeMessagingHostTest::StopHost() {
   base::RunLoop().RunUntilIdle();
 
   // Trigger a test shutdown via ExitTest().
-  host_task_runner_ = NULL;
+  host_task_runner_ = nullptr;
 }
 
 void Me2MeNativeMessagingHostTest::ExitTest() {
@@ -389,22 +364,22 @@ Me2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
   int read_result = output_read_file_.ReadAtCurrentPos(
       reinterpret_cast<char*>(&length), sizeof(length));
   if (read_result != sizeof(length)) {
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
   std::string message_json(length, '\0');
   read_result = output_read_file_.ReadAtCurrentPos(
       string_as_array(&message_json), length);
   if (read_result != static_cast<int>(length)) {
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
   scoped_ptr<base::Value> message(base::JSONReader::Read(message_json));
   if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
-  return scoped_ptr<base::DictionaryValue>(
+  return make_scoped_ptr(
       static_cast<base::DictionaryValue*>(message.release()));
 }
 
@@ -430,8 +405,7 @@ void Me2MeNativeMessagingHostTest::TestBadRequest(const base::Value& message) {
   WriteMessageToInputPipe(good_message);
 
   // Read from output pipe, and verify responses.
-  scoped_ptr<base::DictionaryValue> response =
-      ReadMessageFromOutputPipe();
+  scoped_ptr<base::DictionaryValue> response = ReadMessageFromOutputPipe();
   VerifyHelloResponse(response.Pass());
 
   response = ReadMessageFromOutputPipe();
@@ -522,7 +496,7 @@ TEST_F(Me2MeNativeMessagingHostTest, All) {
     verify_routines[id](response.Pass());
 
     // Clear the pointer so that the routine cannot be called the second time.
-    verify_routines[id] = NULL;
+    verify_routines[id] = nullptr;
   }
 }
 
@@ -534,8 +508,7 @@ TEST_F(Me2MeNativeMessagingHostTest, Id) {
   message.SetString("id", "42");
   WriteMessageToInputPipe(message);
 
-  scoped_ptr<base::DictionaryValue> response =
-      ReadMessageFromOutputPipe();
+  scoped_ptr<base::DictionaryValue> response = ReadMessageFromOutputPipe();
   EXPECT_TRUE(response);
   std::string value;
   EXPECT_FALSE(response->GetString("id", &value));

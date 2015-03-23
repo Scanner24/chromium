@@ -86,42 +86,6 @@ void LoginPromptBrowserTest::SetAuthFor(LoginHandler* handler) {
   }
 }
 
-class InterstitialObserver : public content::WebContentsObserver {
- public:
-  InterstitialObserver(content::WebContents* web_contents,
-                       const base::Closure& attach_callback,
-                       const base::Closure& detach_callback)
-      : WebContentsObserver(web_contents),
-        attach_callback_(attach_callback),
-        detach_callback_(detach_callback) {
-  }
-
-  virtual void DidAttachInterstitialPage() OVERRIDE {
-    attach_callback_.Run();
-  }
-
-  virtual void DidDetachInterstitialPage() OVERRIDE {
-    detach_callback_.Run();
-  }
-
- private:
-  base::Closure attach_callback_;
-  base::Closure detach_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
-};
-
-void WaitForInterstitialAttach(content::WebContents* web_contents) {
-  scoped_refptr<content::MessageLoopRunner> interstitial_attach_loop_runner(
-      new content::MessageLoopRunner);
-  InterstitialObserver observer(
-      web_contents,
-      interstitial_attach_loop_runner->QuitClosure(),
-      base::Closure());
-  if (!content::InterstitialPage::GetInterstitialPage(web_contents))
-    interstitial_attach_loop_runner->Run();
-}
-
 const char kPrefetchAuthPage[] = "files/login/prefetch.html";
 
 const char kMultiRealmTestPage[] = "files/login/multi_realm.html";
@@ -697,9 +661,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 
     // Change the host from 127.0.0.1 to www.a.com so that when the
     // page tries to load from b, it will be cross-origin.
-    std::string new_host("www.a.com");
     GURL::Replacements replacements;
-    replacements.SetHostStr(new_host);
+    replacements.SetHostStr("www.a.com");
     test_page = test_page.ReplaceComponents(replacements);
 
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
@@ -719,9 +682,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 
     // Change the host from 127.0.0.1 to www.b.com so that when the
     // page tries to load from b, it will be same-origin.
-    std::string new_host("www.b.com");
     GURL::Replacements replacements;
-    replacements.SetHostStr(new_host);
+    replacements.SetHostStr("www.b.com");
     test_page = test_page.ReplaceComponents(replacements);
 
     WindowedAuthNeededObserver auth_needed_waiter(controller);
@@ -767,9 +729,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
 
     // Change the host from 127.0.0.1 to www.a.com so that when the
     // page tries to load from b, it will be cross-origin.
-    std::string new_host("www.a.com");
+    static const char kNewHost[] = "www.a.com";
     GURL::Replacements replacements;
-    replacements.SetHostStr(new_host);
+    replacements.SetHostStr(kNewHost);
     test_page = test_page.ReplaceComponents(replacements);
 
     WindowedAuthNeededObserver auth_needed_waiter(controller);
@@ -787,7 +749,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
       // When a cross origin iframe displays a login prompt, the blank
       // interstitial shouldn't be displayed and the omnibox should show the
       // main frame's url, not the iframe's.
-      EXPECT_EQ(new_host, contents->GetVisibleURL().host());
+      EXPECT_EQ(kNewHost, contents->GetVisibleURL().host());
 
       handler->CancelAuth();
       auth_cancelled_waiter.Wait();
@@ -1202,7 +1164,7 @@ void LoginPromptBrowserTest::TestCrossOriginPrompt(
     ASSERT_EQ(visit_url.host(), contents->GetVisibleURL().host());
     auth_needed_waiter.Wait();
     ASSERT_EQ(1u, observer.handlers().size());
-    WaitForInterstitialAttach(contents);
+    content::WaitForInterstitialAttach(contents);
 
     // The omnibox should show the correct origin for the new page when the
     // login prompt is shown.
@@ -1211,14 +1173,9 @@ void LoginPromptBrowserTest::TestCrossOriginPrompt(
 
     // Cancel and wait for the interstitial to detach.
     LoginHandler* handler = *observer.handlers().begin();
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-    InterstitialObserver interstitial_observer(contents,
-                                               base::Closure(),
-                                               loop_runner->QuitClosure());
-    handler->CancelAuth();
-    if (content::InterstitialPage::GetInterstitialPage(contents))
-      loop_runner->Run();
+    content::RunTaskAndWaitForInterstitialDetach(
+        contents, base::Bind(&LoginHandler::CancelAuth, handler));
+
     EXPECT_EQ(auth_host, contents->GetVisibleURL().host());
     EXPECT_FALSE(contents->ShowingInterstitialPage());
   }
@@ -1250,8 +1207,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   TestCrossOriginPrompt(test_page, auth_host);
 }
 
-IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
-                       LoginInterstitialShouldReplaceExistingInterstitial) {
+IN_PROC_BROWSER_TEST_F(
+    LoginPromptBrowserTest,
+    DISABLED_LoginInterstitialShouldReplaceExistingInterstitial) {
   net::SpawnedTestServer https_server(
       net::SpawnedTestServer::TYPE_HTTPS,
       net::SpawnedTestServer::SSLOptions(
@@ -1277,14 +1235,14 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
         test_page, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED,
         false));
     ASSERT_EQ("127.0.0.1", contents->GetURL().host());
-    WaitForInterstitialAttach(contents);
+    content::WaitForInterstitialAttach(contents);
 
     // An overrideable SSL interstitial is now being displayed. Proceed through
     // the interstitial to see the login prompt.
     contents->GetInterstitialPage()->Proceed();
     auth_needed_waiter.Wait();
     ASSERT_EQ(1u, observer.handlers().size());
-    WaitForInterstitialAttach(contents);
+    content::WaitForInterstitialAttach(contents);
 
     // The omnibox should show the correct origin while the login prompt is
     // being displayed.
@@ -1294,14 +1252,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
     // Cancelling the login prompt should detach the interstitial while keeping
     // the correct origin.
     LoginHandler* handler = *observer.handlers().begin();
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-    InterstitialObserver interstitial_observer(contents,
-                                               base::Closure(),
-                                               loop_runner->QuitClosure());
-    handler->CancelAuth();
-    if (content::InterstitialPage::GetInterstitialPage(contents))
-      loop_runner->Run();
+    content::RunTaskAndWaitForInterstitialDetach(
+        contents, base::Bind(&LoginHandler::CancelAuth, handler));
+
     EXPECT_EQ("127.0.0.1", contents->GetVisibleURL().host());
     EXPECT_FALSE(contents->ShowingInterstitialPage());
   }

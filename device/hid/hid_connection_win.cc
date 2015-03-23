@@ -9,6 +9,8 @@
 #include "base/bind.h"
 #include "base/files/file.h"
 #include "base/message_loop/message_loop.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/win/object_watcher.h"
 
 #define INITGUID
@@ -38,10 +40,10 @@ struct PendingHidTransfer : public base::RefCounted<PendingHidTransfer>,
   OVERLAPPED* GetOverlapped() { return &overlapped_; }
 
   // Implements base::win::ObjectWatcher::Delegate.
-  virtual void OnObjectSignaled(HANDLE object) OVERRIDE;
+  virtual void OnObjectSignaled(HANDLE object) override;
 
   // Implements base::MessageLoop::DestructionObserver
-  virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
+  virtual void WillDestroyCurrentMessageLoop() override;
 
   // The buffer isn't used by this object but it's important that a reference
   // to it is held until the transfer completes.
@@ -87,6 +89,11 @@ void PendingHidTransfer::TakeResultFromWindowsAPI(BOOL result) {
 }
 
 void PendingHidTransfer::OnObjectSignaled(HANDLE event_handle) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "418183 PendingHidTransfer::OnObjectSignaled"));
+
   callback_.Run(this, true);
   Release();
 }
@@ -96,26 +103,10 @@ void PendingHidTransfer::WillDestroyCurrentMessageLoop() {
   callback_.Run(this, false);
 }
 
-HidConnectionWin::HidConnectionWin(const HidDeviceInfo& device_info)
+HidConnectionWin::HidConnectionWin(scoped_refptr<HidDeviceInfo> device_info,
+                                   base::win::ScopedHandle file)
     : HidConnection(device_info) {
-  file_.Set(CreateFileA(device_info.device_id.c_str(),
-                        GENERIC_WRITE | GENERIC_READ,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        NULL,
-                        OPEN_EXISTING,
-                        FILE_FLAG_OVERLAPPED,
-                        NULL));
-
-  if (!file_.IsValid() &&
-      GetLastError() == base::File::FILE_ERROR_ACCESS_DENIED) {
-    file_.Set(CreateFileA(device_info.device_id.c_str(),
-                          GENERIC_READ,
-                          FILE_SHARE_READ,
-                          NULL,
-                          OPEN_EXISTING,
-                          FILE_FLAG_OVERLAPPED,
-                          NULL));
-  }
+  file_ = file.Pass();
 }
 
 HidConnectionWin::~HidConnectionWin() {
@@ -129,8 +120,8 @@ void HidConnectionWin::PlatformRead(
     const HidConnection::ReadCallback& callback) {
   // Windows will always include the report ID (including zero if report IDs
   // are not in use) in the buffer.
-  scoped_refptr<net::IOBufferWithSize> buffer =
-      new net::IOBufferWithSize(device_info().max_input_report_size + 1);
+  scoped_refptr<net::IOBufferWithSize> buffer = new net::IOBufferWithSize(
+      base::checked_cast<int>(device_info()->max_input_report_size() + 1));
   scoped_refptr<PendingHidTransfer> transfer(new PendingHidTransfer(
       buffer,
       base::Bind(&HidConnectionWin::OnReadComplete, this, buffer, callback)));
@@ -146,8 +137,19 @@ void HidConnectionWin::PlatformRead(
 void HidConnectionWin::PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
                                      size_t size,
                                      const WriteCallback& callback) {
-  // The Windows API always wants either a report ID (if supported) or
-  // zero at the front of every output report.
+  size_t expected_size = device_info()->max_output_report_size() + 1;
+  DCHECK(size <= expected_size);
+  // The Windows API always wants either a report ID (if supported) or zero at
+  // the front of every output report and requires that the buffer size be equal
+  // to the maximum output report size supported by this collection.
+  if (size < expected_size) {
+    scoped_refptr<net::IOBuffer> tmp_buffer = new net::IOBuffer(
+        base::checked_cast<int>(expected_size));
+    memcpy(tmp_buffer->data(), buffer->data(), size);
+    memset(tmp_buffer->data() + size, 0, expected_size - size);
+    buffer = tmp_buffer;
+    size = expected_size;
+  }
   scoped_refptr<PendingHidTransfer> transfer(new PendingHidTransfer(
       buffer, base::Bind(&HidConnectionWin::OnWriteComplete, this, callback)));
   transfers_.insert(transfer);
@@ -161,8 +163,8 @@ void HidConnectionWin::PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
 void HidConnectionWin::PlatformGetFeatureReport(uint8_t report_id,
                                                 const ReadCallback& callback) {
   // The first byte of the destination buffer is the report ID being requested.
-  scoped_refptr<net::IOBufferWithSize> buffer =
-      new net::IOBufferWithSize(device_info().max_feature_report_size + 1);
+  scoped_refptr<net::IOBufferWithSize> buffer = new net::IOBufferWithSize(
+      base::checked_cast<int>(device_info()->max_feature_report_size() + 1));
   buffer->data()[0] = report_id;
 
   scoped_refptr<PendingHidTransfer> transfer(new PendingHidTransfer(
@@ -211,7 +213,7 @@ void HidConnectionWin::OnReadComplete(scoped_refptr<net::IOBuffer> buffer,
 
   DWORD bytes_transferred;
   if (GetOverlappedResult(
-          file_, transfer->GetOverlapped(), &bytes_transferred, FALSE)) {
+          file_.Get(), transfer->GetOverlapped(), &bytes_transferred, FALSE)) {
     CompleteRead(buffer, bytes_transferred, callback);
   } else {
     VPLOG(1) << "HID read failed";
@@ -231,11 +233,8 @@ void HidConnectionWin::OnReadFeatureComplete(
 
   DWORD bytes_transferred;
   if (GetOverlappedResult(
-          file_, transfer->GetOverlapped(), &bytes_transferred, FALSE)) {
-    scoped_refptr<net::IOBuffer> new_buffer(
-        new net::IOBuffer(bytes_transferred - 1));
-    memcpy(new_buffer->data(), buffer->data() + 1, bytes_transferred - 1);
-    CompleteRead(new_buffer, bytes_transferred, callback);
+          file_.Get(), transfer->GetOverlapped(), &bytes_transferred, FALSE)) {
+    callback.Run(true, buffer, bytes_transferred);
   } else {
     VPLOG(1) << "HID read failed";
     callback.Run(false, NULL, 0);
@@ -252,7 +251,7 @@ void HidConnectionWin::OnWriteComplete(const WriteCallback& callback,
 
   DWORD bytes_transferred;
   if (GetOverlappedResult(
-          file_, transfer->GetOverlapped(), &bytes_transferred, FALSE)) {
+          file_.Get(), transfer->GetOverlapped(), &bytes_transferred, FALSE)) {
     callback.Run(true);
   } else {
     VPLOG(1) << "HID write failed";

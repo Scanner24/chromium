@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -31,29 +32,16 @@ namespace content {
 
 class FrameSwapMessageQueue;
 class SynchronousCompositorClient;
+class SynchronousCompositorExternalBeginFrameSource;
 class SynchronousCompositorOutputSurface;
 class WebGraphicsContext3DCommandBufferImpl;
-
-class SynchronousCompositorOutputSurfaceDelegate {
- public:
-   virtual void DidBindOutputSurface(
-      SynchronousCompositorOutputSurface* output_surface) = 0;
-  virtual void DidDestroySynchronousOutputSurface(
-      SynchronousCompositorOutputSurface* output_surface) = 0;
-  virtual void SetContinuousInvalidate(bool enable) = 0;
-  virtual void DidActivatePendingTree() = 0;
-
- protected:
-  SynchronousCompositorOutputSurfaceDelegate() {}
-  virtual ~SynchronousCompositorOutputSurfaceDelegate() {}
-};
 
 // Specialization of the output surface that adapts it to implement the
 // content::SynchronousCompositor public API. This class effects an "inversion
 // of control" - enabling drawing to be  orchestrated by the embedding
 // layer, instead of driven by the compositor internals - hence it holds two
 // 'client' pointers (|client_| in the OutputSurface baseclass and
-// GetDelegate()) which represent the consumers of the two roles in plays.
+// |delegate_|) which represent the consumers of the two roles in plays.
 // This class can be created only on the main thread, but then becomes pinned
 // to a fixed thread when BindToClient is called.
 class SynchronousCompositorOutputSurface
@@ -62,17 +50,20 @@ class SynchronousCompositorOutputSurface
   explicit SynchronousCompositorOutputSurface(
       int routing_id,
       scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue);
-  virtual ~SynchronousCompositorOutputSurface();
+  ~SynchronousCompositorOutputSurface() override;
 
   // OutputSurface.
-  virtual bool BindToClient(cc::OutputSurfaceClient* surface_client) OVERRIDE;
-  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE;
-  virtual void SetNeedsBeginFrame(bool enable) OVERRIDE;
-  virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE;
+  bool BindToClient(cc::OutputSurfaceClient* surface_client) override;
+  void Reshape(const gfx::Size& size, float scale_factor) override;
+  void SwapBuffers(cc::CompositorFrame* frame) override;
+
+  void SetBeginFrameSource(
+      SynchronousCompositorExternalBeginFrameSource* begin_frame_source);
 
   // Partial SynchronousCompositor API implementation.
   bool InitializeHwDraw(
-      scoped_refptr<cc::ContextProvider> onscreen_context_provider);
+      scoped_refptr<cc::ContextProvider> onscreen_context_provider,
+      scoped_refptr<cc::ContextProvider> worker_context_provider);
   void ReleaseHwDraw();
   scoped_ptr<cc::CompositorFrame> DemandDrawHw(
       gfx::Size surface_size,
@@ -83,7 +74,8 @@ class SynchronousCompositorOutputSurface
       const gfx::Transform& transform_for_tile_priority);
   void ReturnResources(const cc::CompositorFrameAck& frame_ack);
   scoped_ptr<cc::CompositorFrame> DemandDrawSw(SkCanvas* canvas);
-  void SetMemoryPolicy(const SynchronousCompositorMemoryPolicy& policy);
+  void SetMemoryPolicy(size_t bytes_limit);
+  void SetTreeActivationCallback(const base::Closure& callback);
   void GetMessagesToDeliver(ScopedVector<IPC::Message>* messages);
 
  private:
@@ -97,11 +89,9 @@ class SynchronousCompositorOutputSurface
                        gfx::Transform transform_for_tile_priority,
                        bool hardware_draw);
   bool CalledOnValidThread() const;
-  SynchronousCompositorOutputSurfaceDelegate* GetDelegate();
 
-  int routing_id_;
-  bool needs_begin_frame_;
-  bool invoking_composite_;
+  const int routing_id_;
+  bool registered_;
 
   gfx::Transform cached_hw_transform_;
   gfx::Rect cached_hw_viewport_;
@@ -118,6 +108,8 @@ class SynchronousCompositorOutputSurface
   scoped_ptr<cc::CompositorFrame> frame_holder_;
 
   scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue_;
+
+  SynchronousCompositorExternalBeginFrameSource* begin_frame_source_;
 
   DISALLOW_COPY_AND_ASSIGN(SynchronousCompositorOutputSurface);
 };

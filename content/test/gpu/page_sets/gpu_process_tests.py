@@ -12,8 +12,6 @@ class GpuProcessTestsPage(page_module.Page):
                                               name=name)
     self.user_agent_type = 'desktop'
 
-  def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
 
 class FunctionalVideoPage(GpuProcessTestsPage):
 
@@ -24,7 +22,7 @@ class FunctionalVideoPage(GpuProcessTestsPage):
       page_set=page_set)
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(FunctionalVideoPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
         'domAutomationController._finished', timeout_in_seconds=30)
 
@@ -48,6 +46,6 @@ class GpuProcessTestsPageSet(page_set_module.PageSet):
     ]
 
     for url, name in urls_and_names_list:
-      self.AddPage(GpuProcessTestsPage(url, name, self))
+      self.AddUserStory(GpuProcessTestsPage(url, name, self))
 
-    self.AddPage(FunctionalVideoPage(self))
+    self.AddUserStory(FunctionalVideoPage(self))

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(jhawkins): Use hidden instead of showInline* and display:none.
+// TODO(hcarmona): This file is big: it may be good to split it up.
 
 /**
  * The type of the download object. The definition is based on
@@ -29,38 +29,18 @@
  *            total: number,
  *            url: string}}
  */
-var BackendDownloadObject;
-
-/**
- * Sets the display style of a node.
- * @param {!Element} node The target element to show or hide.
- * @param {boolean} isShow Should the target element be visible.
- */
-function showInline(node, isShow) {
-  node.style.display = isShow ? 'inline' : 'none';
-}
-
-/**
- * Sets the display style of a node.
- * @param {!Element} node The target element to show or hide.
- * @param {boolean} isShow Should the target element be visible.
- */
-function showInlineBlock(node, isShow) {
-  node.style.display = isShow ? 'inline-block' : 'none';
-}
+var DownloadItem;
 
 /**
  * Creates a link with a specified onclick handler and content.
  * @param {function()} onclick The onclick handler.
- * @param {string} value The link text.
+ * @param {string=} opt_text The link text.
  * @return {!Element} The created link element.
  */
-function createLink(onclick, value) {
-  var link = document.createElement('a');
+function createActionLink(onclick, opt_text) {
+  var link = new ActionLink;
   link.onclick = onclick;
-  link.href = '#';
-  link.textContent = value;
-  link.oncontextmenu = function() { return false; };
+  if (opt_text) link.textContent = opt_text;
   return link;
 }
 
@@ -79,6 +59,103 @@ function createButton(onclick, value) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// DownloadFocusRow:
+
+/**
+ * Provides an implementation for a single column grid.
+ * @constructor
+ * @extends {cr.ui.FocusRow}
+ */
+function DownloadFocusRow() {}
+
+/**
+ * Decorates |focusRow| so that it can be treated as a DownloadFocusRow.
+ * @param {Element} focusRow The element that has all the columns represented
+ *     by |download|.
+ * @param {Download} download The Download representing this row.
+ * @param {Node} boundary Focus events are ignored outside of this node.
+ */
+DownloadFocusRow.decorate = function(focusRow, download, boundary) {
+  focusRow.__proto__ = DownloadFocusRow.prototype;
+  focusRow.decorate(boundary);
+
+  // Add all clickable elements as a row into the grid.
+  focusRow.addElementIfFocusable_(download.nodeFileLink_, 'name');
+  focusRow.addElementIfFocusable_(download.nodeURL_, 'url');
+  focusRow.addElementIfFocusable_(download.controlShow_, 'show');
+  focusRow.addElementIfFocusable_(download.controlRetry_, 'retry');
+  focusRow.addElementIfFocusable_(download.controlPause_, 'pause');
+  focusRow.addElementIfFocusable_(download.controlResume_, 'resume');
+  focusRow.addElementIfFocusable_(download.controlRemove_, 'remove');
+  focusRow.addElementIfFocusable_(download.controlCancel_, 'cancel');
+  focusRow.addElementIfFocusable_(download.malwareSave_, 'save');
+  focusRow.addElementIfFocusable_(download.dangerSave_, 'save');
+  focusRow.addElementIfFocusable_(download.malwareDiscard_, 'discard');
+  focusRow.addElementIfFocusable_(download.dangerDiscard_, 'discard');
+  focusRow.addElementIfFocusable_(download.controlByExtensionLink_,
+                                  'extension');
+};
+
+DownloadFocusRow.prototype = {
+  __proto__: cr.ui.FocusRow.prototype,
+
+  /** @override */
+  getEquivalentElement: function(element) {
+    if (this.focusableElements.indexOf(element) > -1)
+      return element;
+
+    // All elements default to another element with the same type.
+    var columnType = element.getAttribute('column-type');
+    var equivalent = this.querySelector('[column-type=' + columnType + ']');
+
+    if (this.focusableElements.indexOf(equivalent) < 0) {
+      var equivalentTypes =
+          ['show', 'retry', 'pause', 'resume', 'remove', 'cancel'];
+      if (equivalentTypes.indexOf(columnType) != -1) {
+        var allTypes = equivalentTypes.map(function(type) {
+          return '[column-type=' + type + ']:not([hidden])';
+        }).join(', ');
+        equivalent = this.querySelector(allTypes);
+      }
+    }
+
+    // Return the first focusable element if no equivalent element is found.
+    return equivalent || this.focusableElements[0];
+  },
+
+  /**
+   * @param {Element} element The element that should be added.
+   * @param {string} type The column type to use for the element.
+   * @private
+   */
+  addElementIfFocusable_: function(element, type) {
+    if (this.shouldFocus_(element)) {
+      this.addFocusableElement(element);
+      element.setAttribute('column-type', type);
+    }
+  },
+
+  /**
+   * Determines if element should be focusable.
+   * @param {Element} element
+   * @return {boolean}
+   * @private
+   */
+  shouldFocus_: function(element) {
+    if (!element)
+      return false;
+
+    // Hidden elements are not focusable.
+    var style = window.getComputedStyle(element);
+    if (style.visibility == 'hidden' || style.display == 'none')
+      return false;
+
+    // Verify all ancestors are focusable.
+    return !element.parentElement || this.shouldFocus_(element.parentElement);
+  },
+};
+
+///////////////////////////////////////////////////////////////////////////////
 // Downloads
 /**
  * Class to hold all the information about the visible downloads.
@@ -86,13 +163,14 @@ function createButton(onclick, value) {
  */
 function Downloads() {
   /**
-   * @type {!Object.<string, Download>}
+   * @type {!Object<string, Download>}
    * @private
    */
   this.downloads_ = {};
   this.node_ = $('downloads-display');
   this.summary_ = $('downloads-summary-text');
   this.searchText_ = '';
+  this.focusGrid_ = new cr.ui.FocusGrid();
 
   // Keep track of the dates of the newest and oldest downloads so that we
   // know where to insert them.
@@ -109,16 +187,18 @@ function Downloads() {
   this.progressForeground2_.src =
     'chrome://theme/IDR_DOWNLOAD_PROGRESS_FOREGROUND_32@2x';
 
-  window.addEventListener('keydown', this.onKeyDown_.bind(this));
+  cr.ui.decorate('command', cr.ui.Command);
+  document.addEventListener('canExecute', this.onCanExecute_.bind(this));
+  document.addEventListener('command', this.onCommand_.bind(this));
 }
 
 /**
  * Called when a download has been updated or added.
- * @param {BackendDownloadObject} download A backend download object
+ * @param {DownloadItem} download Information about a download.
  */
 Downloads.prototype.updated = function(download) {
   var id = download.id;
-  if (!!this.downloads_[id]) {
+  if (this.downloads_[id]) {
     this.downloads_[id].update(download);
   } else {
     this.downloads_[id] = new Download(download);
@@ -138,7 +218,7 @@ Downloads.prototype.updated = function(download) {
   // TODO(benjhayden) Only do this if its nodeSince_ or nodeDate_ actually did
   // change since this may touch 150 elements and Downloads.prototype.updated
   // may be called 150 times.
-  this.updateDateDisplay_();
+  this.onDownloadListChanged_();
 };
 
 /**
@@ -149,9 +229,7 @@ Downloads.prototype.setSearchText = function(searchText) {
   this.searchText_ = searchText;
 };
 
-/**
- * Update the summary block above the results
- */
+/** Update the summary block above the results. */
 Downloads.prototype.updateSummary = function() {
   if (this.searchText_) {
     this.summary_.textContent = loadTimeData.getStringF('searchresultsfor',
@@ -159,11 +237,52 @@ Downloads.prototype.updateSummary = function() {
   } else {
     this.summary_.textContent = '';
   }
+};
 
-  var hasDownloads = false;
-  for (var i in this.downloads_) {
-    hasDownloads = true;
-    break;
+/**
+ * Called when either a search or load completes to update whether there are
+ * results or not.
+ */
+Downloads.prototype.updateResults = function() {
+  var noDownloadsOrResults = $('no-downloads-or-results');
+  noDownloadsOrResults.textContent = loadTimeData.getString(
+      this.searchText_ ? 'no_search_results' : 'no_downloads');
+
+  var hasDownloads = this.size() > 0;
+  this.node_.hidden = !hasDownloads;
+  noDownloadsOrResults.hidden = hasDownloads;
+
+  if (loadTimeData.getBoolean('allow_deleting_history'))
+    $('clear-all').hidden = !hasDownloads || this.searchText_.length > 0;
+
+  this.rebuildFocusGrid_();
+};
+
+/**
+ * Rebuild the focusGrid_ using the elements that each download will have.
+ * @private
+ */
+Downloads.prototype.rebuildFocusGrid_ = function() {
+  var activeElement = document.activeElement;
+  this.focusGrid_.destroy();
+
+  var keys = Object.keys(this.downloads_);
+  for (var i = 0; i < keys.length; ++i) {
+    var download = this.downloads_[keys[i]];
+    DownloadFocusRow.decorate(download.node, download, this.node_);
+  }
+
+  // The ordering of the keys is not guaranteed, and downloads should be added
+  // to the FocusGrid in the order they will be in the UI.
+  var downloads = document.querySelectorAll('.download');
+  for (var i = 0; i < downloads.length; ++i) {
+    var focusRow = downloads[i];
+    this.focusGrid_.addRow(focusRow);
+
+    // Focus the equivalent element in the focusRow because the active element
+    // may no longer be visible.
+    if (focusRow.contains(activeElement))
+      focusRow.getEquivalentElement(activeElement).focus();
   }
 };
 
@@ -176,22 +295,25 @@ Downloads.prototype.size = function() {
 };
 
 /**
- * Update the date visibility in our nodes so that no date is
- * repeated.
+ * Called whenever the downloads lists items have changed (either by being
+ * updated, added, or removed).
  * @private
  */
-Downloads.prototype.updateDateDisplay_ = function() {
+Downloads.prototype.onDownloadListChanged_ = function() {
+  // Update the date visibility in our nodes so that no date is repeated.
   var dateContainers = document.getElementsByClassName('date-container');
   var displayed = {};
   for (var i = 0, container; container = dateContainers[i]; i++) {
     var dateString = container.getElementsByClassName('date')[0].innerHTML;
-    if (!!displayed[dateString]) {
+    if (displayed[dateString]) {
       container.style.display = 'none';
     } else {
       displayed[dateString] = true;
       container.style.display = 'block';
     }
   }
+
+  this.updateResults();
 };
 
 /**
@@ -201,12 +323,10 @@ Downloads.prototype.updateDateDisplay_ = function() {
 Downloads.prototype.remove = function(id) {
   this.node_.removeChild(this.downloads_[id].node);
   delete this.downloads_[id];
-  this.updateDateDisplay_();
+  this.onDownloadListChanged_();
 };
 
-/**
- * Clear all downloads and reset us back to a null state.
- */
+/** Clear all downloads and reset us back to a null state. */
 Downloads.prototype.clear = function() {
   for (var id in this.downloads_) {
     this.downloads_[id].clear();
@@ -270,23 +390,30 @@ Downloads.prototype.isUpdateNeeded = function(downloads) {
 };
 
 /**
- * Handles shortcut keys.
- * @param {Event} evt The keyboard event.
+ * @param {Event} e
  * @private
  */
-Downloads.prototype.onKeyDown_ = function(evt) {
-  var keyEvt = /** @type {KeyboardEvent} */(evt);
-  if (keyEvt.keyCode == 67 && keyEvt.altKey) {  // alt + c.
+Downloads.prototype.onCanExecute_ = function(e) {
+  e = /** @type {cr.ui.CanExecuteEvent} */(e);
+  e.canExecute = document.activeElement != $('term');
+};
+
+/**
+ * @param {Event} e
+ * @private
+ */
+Downloads.prototype.onCommand_ = function(e) {
+  if (e.command.id == 'undo-command')
+    chrome.send('undo');
+  else if (e.command.id == 'clear-all-command')
     clearAll();
-    keyEvt.preventDefault();
-  }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Download
 /**
  * A download and the DOM representation for that download.
- * @param {BackendDownloadObject} download A backend download object
+ * @param {DownloadItem} download Info about the download.
  * @constructor
  */
 function Download(download) {
@@ -330,13 +457,11 @@ function Download(download) {
   this.nodeTitleArea_ = createElementWithClassName('div', 'title-area');
   this.safe_.appendChild(this.nodeTitleArea_);
 
-  this.nodeFileLink_ = createLink(this.openFile_.bind(this), '');
+  this.nodeFileLink_ = createActionLink(this.openFile_.bind(this));
   this.nodeFileLink_.className = 'name';
-  this.nodeFileLink_.style.display = 'none';
   this.nodeTitleArea_.appendChild(this.nodeFileLink_);
 
   this.nodeFileName_ = createElementWithClassName('span', 'name');
-  this.nodeFileName_.style.display = 'none';
   this.nodeTitleArea_.appendChild(this.nodeFileName_);
 
   this.nodeStatus_ = createElementWithClassName('span', 'status');
@@ -356,7 +481,7 @@ function Download(download) {
   // We don't need 'show in folder' in chromium os. See download_ui.cc and
   // http://code.google.com/p/chromium-os/issues/detail?id=916.
   if (loadTimeData.valueExists('control_showinfolder')) {
-    this.controlShow_ = createLink(this.show_.bind(this),
+    this.controlShow_ = createActionLink(this.show_.bind(this),
         loadTimeData.getString('control_showinfolder'));
     this.nodeControls_.appendChild(this.controlShow_);
   } else {
@@ -369,32 +494,22 @@ function Download(download) {
   this.nodeControls_.appendChild(this.controlRetry_);
 
   // Pause/Resume are a toggle.
-  this.controlPause_ = createLink(this.pause_.bind(this),
+  this.controlPause_ = createActionLink(this.pause_.bind(this),
       loadTimeData.getString('control_pause'));
   this.nodeControls_.appendChild(this.controlPause_);
 
-  this.controlResume_ = createLink(this.resume_.bind(this),
+  this.controlResume_ = createActionLink(this.resume_.bind(this),
       loadTimeData.getString('control_resume'));
   this.nodeControls_.appendChild(this.controlResume_);
 
-  // Anchors <a> don't support the "disabled" property.
   if (loadTimeData.getBoolean('allow_deleting_history')) {
-    this.controlRemove_ = createLink(this.remove_.bind(this),
+    this.controlRemove_ = createActionLink(this.remove_.bind(this),
         loadTimeData.getString('control_removefromlist'));
     this.controlRemove_.classList.add('control-remove-link');
-  } else {
-    this.controlRemove_ = document.createElement('span');
-    this.controlRemove_.classList.add('disabled-link');
-    var text = document.createTextNode(
-        loadTimeData.getString('control_removefromlist'));
-    this.controlRemove_.appendChild(text);
+    this.nodeControls_.appendChild(this.controlRemove_);
   }
-  if (!loadTimeData.getBoolean('show_delete_history'))
-    this.controlRemove_.hidden = true;
 
-  this.nodeControls_.appendChild(this.controlRemove_);
-
-  this.controlCancel_ = createLink(this.cancel_.bind(this),
+  this.controlCancel_ = createActionLink(this.cancel_.bind(this),
       loadTimeData.getString('control_cancel'));
   this.nodeControls_.appendChild(this.controlCancel_);
 
@@ -414,11 +529,11 @@ function Download(download) {
 
   // Buttons for the malicious case.
   this.malwareNodeControls_ = createElementWithClassName('div', 'controls');
-  this.malwareSave_ = createLink(
+  this.malwareSave_ = createActionLink(
       this.saveDangerous_.bind(this),
       loadTimeData.getString('danger_restore'));
   this.malwareNodeControls_.appendChild(this.malwareSave_);
-  this.malwareDiscard_ = createLink(
+  this.malwareDiscard_ = createActionLink(
       this.discardDangerous_.bind(this),
       loadTimeData.getString('control_removefromlist'));
   this.malwareNodeControls_.appendChild(this.malwareDiscard_);
@@ -477,9 +592,7 @@ function floatEq(a, b, opt_pct) {
   return Math.abs(a - b) < (Math.min(a, b) * (opt_pct || 1.0) / 100.0);
 }
 
-/**
- * Constants and "constants" for the progress meter.
- */
+/** Constants and "constants" for the progress meter. */
 Download.Progress = {
   START_ANGLE: -0.5 * Math.PI,
   SIDE: 48,
@@ -512,7 +625,7 @@ computeDownloadProgress();
 
 /**
  * Updates the download to reflect new data.
- * @param {BackendDownloadObject} download A backend download object
+ * @param {DownloadItem} download Updated info about this download.
  */
 Download.prototype.update = function(download) {
   this.id_ = download.id;
@@ -557,16 +670,10 @@ Download.prototype.update = function(download) {
       this.nodeFileName_.classList.remove('interrupted');
     }
 
-    showInline(this.nodeFileLink_,
-               this.state_ == Download.States.COMPLETE &&
-                   !this.fileExternallyRemoved_);
-    // nodeFileName_ has to be inline-block to avoid the 'interaction' with
-    // nodeStatus_. If both are inline, it appears that their text contents
-    // are merged before the bidi algorithm is applied leading to an
-    // undesirable reordering. http://crbug.com/13216
-    showInlineBlock(this.nodeFileName_,
-                    this.state_ != Download.States.COMPLETE ||
-                        this.fileExternallyRemoved_);
+    var completelyOnDisk = this.state_ == Download.States.COMPLETE &&
+                           !this.fileExternallyRemoved_;
+    this.nodeFileName_.hidden = completelyOnDisk;
+    this.nodeFileLink_.hidden = !completelyOnDisk;
 
     if (this.state_ == Download.States.IN_PROGRESS) {
       this.nodeProgressForeground_.style.display = 'block';
@@ -609,19 +716,17 @@ Download.prototype.update = function(download) {
       this.nodeProgressBackground_.style.display = 'none';
     }
 
-    if (this.controlShow_) {
-      showInline(this.controlShow_,
-                 this.state_ == Download.States.COMPLETE &&
-                     !this.fileExternallyRemoved_);
-    }
-    showInline(this.controlRetry_, download.retry);
+    if (this.controlShow_)
+      this.controlShow_.hidden = !completelyOnDisk;
+    this.controlRetry_.hidden = !download.retry;
     this.controlRetry_.href = this.url_;
-    showInline(this.controlPause_, this.state_ == Download.States.IN_PROGRESS);
-    showInline(this.controlResume_, download.resume);
+    this.controlPause_.hidden = this.state_ != Download.States.IN_PROGRESS;
+    this.controlResume_.hidden = !download.resume;
     var showCancel = this.state_ == Download.States.IN_PROGRESS ||
                      this.state_ == Download.States.PAUSED;
-    showInline(this.controlCancel_, showCancel);
-    showInline(this.controlRemove_, !showCancel);
+    this.controlCancel_.hidden = !showCancel;
+    if (this.controlRemove_)
+      this.controlRemove_.hidden = showCancel;
 
     if (this.byExtensionId_ && this.byExtensionName_) {
       // Format 'control_by_extension' with a link instead of plain text by
@@ -717,9 +822,7 @@ Download.prototype.updateDangerousFile = function() {
   this.safe_.style.display = 'none';
 };
 
-/**
- * Removes applicable bits from the DOM in preparation for deletion.
- */
+/** Removes applicable bits from the DOM in preparation for deletion. */
 Download.prototype.clear = function() {
   this.safe_.ondragstart = null;
   this.nodeFileLink_.onclick = null;
@@ -772,7 +875,7 @@ Download.prototype.getStatusText_ = function() {
  * @private
  */
 Download.prototype.drag_ = function() {
-  chrome.send('drag', [this.id_.toString()]);
+  chrome.send('drag', [this.id_]);
   return false;
 };
 
@@ -782,7 +885,7 @@ Download.prototype.drag_ = function() {
  * @private
  */
 Download.prototype.openFile_ = function() {
-  chrome.send('openFile', [this.id_.toString()]);
+  chrome.send('openFile', [this.id_]);
   return false;
 };
 
@@ -792,7 +895,7 @@ Download.prototype.openFile_ = function() {
  * @private
  */
 Download.prototype.saveDangerous_ = function() {
-  chrome.send('saveDangerous', [this.id_.toString()]);
+  chrome.send('saveDangerous', [this.id_]);
   return false;
 };
 
@@ -802,7 +905,7 @@ Download.prototype.saveDangerous_ = function() {
  * @private
  */
 Download.prototype.discardDangerous_ = function() {
-  chrome.send('discardDangerous', [this.id_.toString()]);
+  chrome.send('discardDangerous', [this.id_]);
   downloads.remove(this.id_);
   return false;
 };
@@ -813,7 +916,7 @@ Download.prototype.discardDangerous_ = function() {
  * @private
  */
 Download.prototype.show_ = function() {
-  chrome.send('show', [this.id_.toString()]);
+  chrome.send('show', [this.id_]);
   return false;
 };
 
@@ -823,7 +926,7 @@ Download.prototype.show_ = function() {
  * @private
  */
 Download.prototype.pause_ = function() {
-  chrome.send('pause', [this.id_.toString()]);
+  chrome.send('pause', [this.id_]);
   return false;
 };
 
@@ -833,7 +936,7 @@ Download.prototype.pause_ = function() {
  * @private
  */
 Download.prototype.resume_ = function() {
-  chrome.send('resume', [this.id_.toString()]);
+  chrome.send('resume', [this.id_]);
   return false;
 };
 
@@ -842,10 +945,9 @@ Download.prototype.resume_ = function() {
  * @return {boolean} Returns false to prevent the default action.
  * @private
  */
- Download.prototype.remove_ = function() {
-   if (loadTimeData.getBoolean('allow_deleting_history')) {
-    chrome.send('remove', [this.id_.toString()]);
-  }
+Download.prototype.remove_ = function() {
+  assert(loadTimeData.getBoolean('allow_deleting_history'));
+  chrome.send('remove', [this.id_]);
   return false;
 };
 
@@ -855,7 +957,7 @@ Download.prototype.resume_ = function() {
  * @private
  */
 Download.prototype.cancel_ = function() {
-  chrome.send('cancel', [this.id_.toString()]);
+  chrome.send('cancel', [this.id_]);
   return false;
 };
 
@@ -881,29 +983,13 @@ function load() {
   $('term').focus();
   setSearch('');
 
-  var clearAllHolder = $('clear-all-holder');
-  var clearAllElement;
-  if (loadTimeData.getBoolean('allow_deleting_history')) {
-    clearAllElement = createLink(clearAll, loadTimeData.getString('clear_all'));
-    clearAllElement.classList.add('clear-all-link');
-    clearAllHolder.classList.remove('disabled-link');
-  } else {
-    clearAllElement = document.createTextNode(
-        loadTimeData.getString('clear_all'));
-    clearAllHolder.classList.add('disabled-link');
-  }
-  if (!loadTimeData.getBoolean('show_delete_history'))
-    clearAllHolder.hidden = true;
+  $('clear-all').onclick = function() {
+    chrome.send('clearAll');
+  };
 
-  clearAllHolder.appendChild(clearAllElement);
-  clearAllElement.oncontextmenu = function() { return false; };
-
-  // TODO(jhawkins): Use a link-button here.
-  var openDownloadsFolderLink = $('open-downloads-folder');
-  openDownloadsFolderLink.onclick = function() {
+  $('open-downloads-folder').onclick = function() {
     chrome.send('openDownloadsFolder');
   };
-  openDownloadsFolderLink.oncontextmenu = function() { return false; };
 
   $('term').onsearch = function(e) {
     setSearch($('term').value);
@@ -943,7 +1029,7 @@ function clearAll() {
 /**
  * Our history system calls this function with results from searches or when
  * downloads are added or removed.
- * @param {Array.<Object>} results List of updates.
+ * @param {Array<Object>} results List of updates.
  */
 function downloadsList(results) {
   if (downloads && downloads.isUpdateNeeded(results)) {
@@ -953,12 +1039,13 @@ function downloadsList(results) {
     downloads.clear();
     downloadUpdated(results);
   }
+  downloads.updateResults();
   downloads.updateSummary();
 }
 
 /**
  * When a download is updated (progress, state change), this is called.
- * @param {Array.<Object>} results List of updates for the download process.
+ * @param {Array<Object>} results List of updates for the download process.
  */
 function downloadUpdated(results) {
   // Sometimes this can get called too early.
@@ -989,5 +1076,3 @@ function tryDownloadUpdatedPeriodically() {
 
 // Add handlers to HTML elements.
 window.addEventListener('DOMContentLoaded', load);
-
-preventDefaultOnPoundLinkClicks();  // From util.js.

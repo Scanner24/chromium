@@ -11,6 +11,7 @@ import android.os.Build;
 import android.provider.MediaStore;
 import android.test.suitebuilder.annotation.MediumTest;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.shell.ChromeShellActivity;
@@ -20,7 +21,6 @@ import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.UiUtils;
 import org.chromium.ui.base.ActivityWindowAndroid;
 
 /**
@@ -28,15 +28,15 @@ import org.chromium.ui.base.ActivityWindowAndroid;
  */
 public class SelectFileDialogTest extends ChromeShellTestBase {
     private static final String DATA_URL = UrlUtils.encodeHtmlDataUri(
-            "<html><head><meta name=\"viewport\"" +
-            "content=\"width=device-width, initial-scale=2.0, maximum-scale=2.0\" /></head>" +
-            "<body><form action=\"about:blank\">" +
-            "<input id=\"input_file\" type=\"file\" /><br/>" +
-            "<input id=\"input_file_multiple\" type=\"file\" multiple /><br />" +
-            "<input id=\"input_image\" type=\"file\" accept=\"image/*\" capture /><br/>" +
-            "<input id=\"input_audio\" type=\"file\" accept=\"audio/*\" capture />" +
-            "</form>" +
-            "</body></html>");
+            "<html><head><meta name=\"viewport\""
+            + "content=\"width=device-width, initial-scale=2.0, maximum-scale=2.0\" /></head>"
+            + "<body><form action=\"about:blank\">"
+            + "<input id=\"input_file\" type=\"file\" /><br/>"
+            + "<input id=\"input_file_multiple\" type=\"file\" multiple /><br />"
+            + "<input id=\"input_image\" type=\"file\" accept=\"image/*\" capture /><br/>"
+            + "<input id=\"input_audio\" type=\"file\" accept=\"audio/*\" capture />"
+            + "</form>"
+            + "</body></html>");
 
     private ContentViewCore mContentViewCore;
     private ActivityWindowAndroidForTest mActivityWindowAndroidForTest;
@@ -52,7 +52,7 @@ public class SelectFileDialogTest extends ChromeShellTestBase {
         }
 
         @Override
-        public int showCancelableIntent(Intent intent, IntentCallback callback, int errorId) {
+        public int showCancelableIntent(Intent intent, IntentCallback callback, Integer errorId) {
             lastIntent = intent;
             lastCallback = callback;
             return 1;
@@ -84,7 +84,7 @@ public class SelectFileDialogTest extends ChromeShellTestBase {
         // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
         assertWaitForPageScaleFactorMatch(2);
         assertTrue(
-                DOMUtils.waitForNonZeroNodeBounds(mContentViewCore, "input_file"));
+                DOMUtils.waitForNonZeroNodeBounds(mContentViewCore.getWebContents(), "input_file"));
     }
 
     /**
@@ -128,7 +128,7 @@ public class SelectFileDialogTest extends ChromeShellTestBase {
     }
 
     private void resetActivityWindowAndroidForTest() {
-        UiUtils.runOnUiThread(getActivity(), new Runnable() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
                 mActivityWindowAndroidForTest.lastCallback.onIntentCompleted(

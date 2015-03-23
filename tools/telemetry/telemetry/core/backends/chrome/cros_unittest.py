@@ -4,14 +4,15 @@
 
 import logging
 
-from telemetry import benchmark
+from telemetry import decorators
 from telemetry.core import exceptions
 from telemetry.core import util
 from telemetry.core.backends.chrome import cros_test_case
+from telemetry.core.backends.chrome_inspector import devtools_http
 
 
 class CrOSCryptohomeTest(cros_test_case.CrOSTestCase):
-  @benchmark.Enabled('chromeos')
+  @decorators.Enabled('chromeos')
   def testCryptohome(self):
     """Verifies cryptohome mount status for regular and guest user and when
     logged out"""
@@ -36,7 +37,7 @@ class CrOSCryptohomeTest(cros_test_case.CrOSTestCase):
 
 
 class CrOSLoginTest(cros_test_case.CrOSTestCase):
-  @benchmark.Enabled('chromeos')
+  @decorators.Enabled('chromeos')
   def testLoginStatus(self):
     """Tests autotestPrivate.loginStatus"""
     if self._is_guest:
@@ -50,7 +51,7 @@ class CrOSLoginTest(cros_test_case.CrOSTestCase):
       self.assertEquals(login_status['email'], self._username)
       self.assertFalse(login_status['isScreenLocked'])
 
-  @benchmark.Enabled('chromeos')
+  @decorators.Enabled('chromeos')
   def testLogout(self):
     """Tests autotestPrivate.logout"""
     if self._is_guest:
@@ -59,12 +60,14 @@ class CrOSLoginTest(cros_test_case.CrOSTestCase):
       extension = self._GetAutotestExtension(b)
       try:
         extension.ExecuteJavaScript('chrome.autotestPrivate.logout();')
-      except (exceptions.BrowserConnectionGoneException,
-              exceptions.BrowserGoneException):
+      # TODO(chrishenry): crbug.com/450278. DevToolsClientConnectionError
+      # should probably be caught at a lower-level.
+      except (exceptions.AppCrashException,
+              devtools_http.DevToolsClientConnectionError):
         pass
       util.WaitFor(lambda: not self._IsCryptohomeMounted(), 20)
 
-  @benchmark.Enabled('chromeos')
+  @decorators.Enabled('chromeos')
   def testGaiaLogin(self):
     """Tests gaia login. Credentials are expected to be found in a
     credentials.txt file, with a single line of format username:password."""
@@ -121,7 +124,7 @@ class CrOSScreenLockerTest(cros_test_case.CrOSTestCase):
     util.WaitFor(lambda: not browser.oobe_exists, 10)
     self.assertFalse(self._IsScreenLocked(browser))
 
-  @benchmark.Disabled
+  @decorators.Disabled
   def testScreenLock(self):
     """Tests autotestPrivate.screenLock"""
     if self._is_guest:

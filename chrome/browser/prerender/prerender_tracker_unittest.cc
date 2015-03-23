@@ -46,18 +46,18 @@ class TestPrerenderContents : public PrerenderContents {
     PrerenderResourceThrottle::OverridePrerenderContentsForTesting(this);
   }
 
-  virtual ~TestPrerenderContents() {
+  ~TestPrerenderContents() override {
     if (final_status() == FINAL_STATUS_MAX)
       SetFinalStatus(FINAL_STATUS_USED);
     PrerenderResourceThrottle::OverridePrerenderContentsForTesting(NULL);
   }
 
-  virtual bool GetChildId(int* child_id) const OVERRIDE {
+  bool GetChildId(int* child_id) const override {
     *child_id = child_id_;
     return true;
   }
 
-  virtual bool GetRouteId(int* route_id) const OVERRIDE {
+  bool GetRouteId(int* route_id) const override {
     *route_id = route_id_;
     return true;
   }
@@ -89,9 +89,8 @@ class TestPrerenderManager : public PrerenderManager {
 
   // We never allocate our PrerenderContents in PrerenderManager, so we don't
   // ever want the default pending delete behaviour.
-  virtual void MoveEntryToPendingDelete(PrerenderContents* entry,
-                                        FinalStatus final_status) OVERRIDE {
-  }
+  void MoveEntryToPendingDelete(PrerenderContents* entry,
+                                FinalStatus final_status) override {}
 };
 
 class DeferredRedirectDelegate : public net::URLRequest::Delegate,
@@ -119,32 +118,30 @@ class DeferredRedirectDelegate : public net::URLRequest::Delegate,
   bool resume_called() const { return resume_called_; }
 
   // net::URLRequest::Delegate implementation:
-  virtual void OnReceivedRedirect(net::URLRequest* request,
-                                  const net::RedirectInfo& redirect_info,
-                                  bool* defer_redirect) OVERRIDE {
+  void OnReceivedRedirect(net::URLRequest* request,
+                          const net::RedirectInfo& redirect_info,
+                          bool* defer_redirect) override {
     // Defer the redirect either way.
     *defer_redirect = true;
 
     // Find out what the throttle would have done.
-    throttle_->WillRedirectRequest(redirect_info.new_url, &was_deferred_);
+    throttle_->WillRedirectRequest(redirect_info, &was_deferred_);
     run_loop_->Quit();
   }
-  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE { }
-  virtual void OnReadCompleted(net::URLRequest* request,
-                               int bytes_read) OVERRIDE {
-  }
+  void OnResponseStarted(net::URLRequest* request) override {}
+  void OnReadCompleted(net::URLRequest* request, int bytes_read) override {}
 
   // content::ResourceController implementation:
-  virtual void Cancel() OVERRIDE {
+  void Cancel() override {
     EXPECT_FALSE(cancel_called_);
     EXPECT_FALSE(resume_called_);
 
     cancel_called_ = true;
     run_loop_->Quit();
   }
-  virtual void CancelAndIgnore() OVERRIDE { Cancel(); }
-  virtual void CancelWithError(int error_code) OVERRIDE { Cancel(); }
-  virtual void Resume() OVERRIDE {
+  void CancelAndIgnore() override { Cancel(); }
+  void CancelWithError(int error_code) override { Cancel(); }
+  void Resume() override {
     EXPECT_TRUE(was_deferred_);
     EXPECT_FALSE(cancel_called_);
     EXPECT_FALSE(resume_called_);
@@ -178,7 +175,7 @@ class PrerenderTrackerTest : public testing::Test {
     chrome_browser_net::SetUrlRequestMocksEnabled(true);
   }
 
-  virtual ~PrerenderTrackerTest() {
+  ~PrerenderTrackerTest() override {
     chrome_browser_net::SetUrlRequestMocksEnabled(false);
 
     // Cleanup work so the file IO tasks from URLRequestMockHTTPJob
@@ -229,13 +226,17 @@ TEST_F(PrerenderTrackerTest, PrerenderThrottledRedirectResume) {
       net::DEFAULT_PRIORITY,
       &delegate,
       NULL));
-  content::ResourceRequestInfo::AllocateForTesting(request.get(),
-                                                   content::RESOURCE_TYPE_IMAGE,
-                                                   NULL,
-                                                   kDefaultChildId,
-                                                   kDefaultRouteId,
-                                                   MSG_ROUTING_NONE,
-                                                   true);
+  content::ResourceRequestInfo::AllocateForTesting(
+      request.get(),
+      content::RESOURCE_TYPE_IMAGE,
+      NULL,
+      kDefaultChildId,
+      kDefaultRouteId,
+      MSG_ROUTING_NONE,
+      false,  // is_main_frame
+      false,  // parent_is_main_frame
+      true,   // allow_download
+      true);  // is_async
 
   // Install a prerender throttle.
   PrerenderResourceThrottle throttle(request.get());
@@ -279,7 +280,10 @@ TEST_F(PrerenderTrackerTest, PrerenderThrottledRedirectMainFrame) {
       kDefaultChildId,
       kDefaultRouteId,
       MSG_ROUTING_NONE,
-      true);
+      true,   // is_main_frame
+      false,  // parent_is_main_frame
+      true,   // allow_download
+      true);  // is_async
 
   // Install a prerender throttle.
   PrerenderResourceThrottle throttle(request.get());
@@ -314,13 +318,17 @@ TEST_F(PrerenderTrackerTest, PrerenderThrottledRedirectSyncXHR) {
       net::DEFAULT_PRIORITY,
       &delegate,
       NULL));
-  content::ResourceRequestInfo::AllocateForTesting(request.get(),
-                                                   content::RESOURCE_TYPE_XHR,
-                                                   NULL,
-                                                   kDefaultChildId,
-                                                   kDefaultRouteId,
-                                                   MSG_ROUTING_NONE,
-                                                   false);
+  content::ResourceRequestInfo::AllocateForTesting(
+      request.get(),
+      content::RESOURCE_TYPE_XHR,
+      NULL,
+      kDefaultChildId,
+      kDefaultRouteId,
+      MSG_ROUTING_NONE,
+      false,   // is_main_frame
+      false,   // parent_is_main_frame
+      true,   // allow_download
+      false);  // is_async
 
   // Install a prerender throttle.
   PrerenderResourceThrottle throttle(request.get());

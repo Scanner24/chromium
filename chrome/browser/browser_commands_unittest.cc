@@ -4,26 +4,28 @@
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/ui/zoom/page_zoom.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 
 typedef BrowserWithTestWindowTest BrowserCommandsTest;
 
+using bookmarks::BookmarkModel;
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
+using ui_zoom::ZoomController;
 
 // Tests IDC_SELECT_TAB_0, IDC_SELECT_NEXT_TAB, IDC_SELECT_PREVIOUS_TAB and
 // IDC_SELECT_LAST_TAB.
@@ -140,7 +142,7 @@ TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
   profile()->CreateBookmarkModel(true);
 
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  test::WaitForBookmarkModelToLoad(model);
+  bookmarks::test::WaitForBookmarkModelToLoad(model);
 
   // Navigate to a url.
   GURL url1("http://foo/1");
@@ -148,7 +150,7 @@ TEST_F(BrowserCommandsTest, BookmarkCurrentPage) {
   browser()->OpenURL(OpenURLParams(
       url1, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
 
-  chrome::BookmarkCurrentPage(browser());
+  chrome::BookmarkCurrentPageAllowingExtensionOverrides(browser());
 
   // It should now be bookmarked in the bookmark model.
   EXPECT_EQ(profile(), browser()->profile());
@@ -239,7 +241,7 @@ TEST_F(BrowserCommandsTest, OnMaxZoomIn) {
 
   // Continue to zoom in until zoom percent reaches 500.
   for (int i = 0; i < 9; ++i) {
-    chrome_page_zoom::Zoom(contents1, content::PAGE_ZOOM_IN);
+    ui_zoom::PageZoom::Zoom(contents1, content::PAGE_ZOOM_IN);
   }
 
   // TODO(a.sarkar.arun@gmail.com): Figure out why Zoom-In menu item is not
@@ -264,7 +266,7 @@ TEST_F(BrowserCommandsTest, OnMaxZoomOut) {
 
   // Continue to zoom out until zoom percent reaches 25.
   for (int i = 0; i < 7; ++i) {
-    chrome_page_zoom::Zoom(contents1, content::PAGE_ZOOM_OUT);
+    ui_zoom::PageZoom::Zoom(contents1, content::PAGE_ZOOM_OUT);
   }
 
   ZoomController* zoom_controller = ZoomController::FromWebContents(contents1);
@@ -282,7 +284,7 @@ TEST_F(BrowserCommandsTest, OnZoomReset) {
   content::WebContents* contents1 = tab_strip_model->GetWebContentsAt(0);
 
   // Change the zoom percentage to 100.
-  chrome_page_zoom::Zoom(contents1, content::PAGE_ZOOM_RESET);
+  ui_zoom::PageZoom::Zoom(contents1, content::PAGE_ZOOM_RESET);
 
   ZoomController* zoom_controller = ZoomController::FromWebContents(contents1);
   EXPECT_EQ(zoom_controller->GetZoomPercent(), 100.0f);
@@ -300,7 +302,7 @@ TEST_F(BrowserCommandsTest, OnZoomLevelChanged) {
 
   // Changing zoom percentage from default should enable all the zoom
   // NSMenuItems.
-  chrome_page_zoom::Zoom(contents1, content::PAGE_ZOOM_IN);
+  ui_zoom::PageZoom::Zoom(contents1, content::PAGE_ZOOM_IN);
 
   ZoomController* zoom_controller = ZoomController::FromWebContents(contents1);
   EXPECT_EQ(zoom_controller->GetZoomPercent(), 110.0f);
@@ -331,7 +333,7 @@ TEST_F(BrowserCommandsTest, OnZoomChangedForActiveTab) {
 
   tab_strip_model->ActivateTabAt(1, true);
   EXPECT_TRUE(tab_strip_model->IsTabSelected(1));
-  chrome_page_zoom::Zoom(contents2, content::PAGE_ZOOM_OUT);
+  ui_zoom::PageZoom::Zoom(contents2, content::PAGE_ZOOM_OUT);
 
   zoom_controller = ZoomController::FromWebContents(contents2);
   EXPECT_EQ(zoom_controller->GetZoomPercent(), 90.0f);

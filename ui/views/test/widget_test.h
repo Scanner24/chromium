@@ -49,11 +49,11 @@ namespace test {
 class NativeWidgetCapture : public PlatformNativeWidget {
  public:
   explicit NativeWidgetCapture(internal::NativeWidgetDelegate* delegate);
-  virtual ~NativeWidgetCapture();
+  ~NativeWidgetCapture() override;
 
-  virtual void SetCapture() OVERRIDE;
-  virtual void ReleaseCapture() OVERRIDE;
-  virtual bool HasCapture() const OVERRIDE;
+  void SetCapture() override;
+  void ReleaseCapture() override;
+  bool HasCapture() const override;
 
  private:
   bool mouse_capture_;
@@ -63,8 +63,23 @@ class NativeWidgetCapture : public PlatformNativeWidget {
 
 class WidgetTest : public ViewsTestBase {
  public:
+  // Scoped handle that fakes all widgets into claiming they are active. This
+  // allows a test to assume active status does not get stolen by a test that
+  // may be running in parallel. It shouldn't be used in tests that create
+  // multiple widgets.
+  class FakeActivation {
+   public:
+    virtual ~FakeActivation() {}
+
+   protected:
+    FakeActivation() {}
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(FakeActivation);
+  };
+
   WidgetTest();
-  virtual ~WidgetTest();
+  ~WidgetTest() override;
 
   NativeWidget* CreatePlatformNativeWidget(
       internal::NativeWidgetDelegate* delegate);
@@ -93,10 +108,18 @@ class WidgetTest : public ViewsTestBase {
   // Return true if |window| is visible according to the native platform.
   static bool IsNativeWindowVisible(gfx::NativeWindow window);
 
+  // Return true if |above| is higher than |below| in the native window Z-order.
+  // Both windows must be visible.
+  static bool IsWindowStackedAbove(Widget* above, Widget* below);
+
   // Return the event processor for |widget|. On aura platforms, this is an
   // aura::WindowEventDispatcher. Otherwise, it is a bridge to the OS event
   // processor.
   static ui::EventProcessor* GetEventProcessor(Widget* widget);
+
+#if defined(OS_MACOSX)
+  static scoped_ptr<FakeActivation> FakeWidgetIsActiveAlways();
+#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WidgetTest);

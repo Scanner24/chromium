@@ -100,7 +100,7 @@ struct OmniboxViewMacState : public base::SupportsUserData::Data {
         has_focus(has_focus),
         selection(selection) {
   }
-  virtual ~OmniboxViewMacState() {}
+  ~OmniboxViewMacState() override {}
 
   const OmniboxEditModel::State model_state;
   const bool has_focus;
@@ -209,6 +209,10 @@ void OmniboxViewMac::OnTabChanged(const WebContents* web_contents) {
   }
 }
 
+void OmniboxViewMac::ResetTabState(WebContents* web_contents) {
+  StoreStateToTab(web_contents, nullptr);
+}
+
 void OmniboxViewMac::Update() {
   UpdatePlaceholderText();
 
@@ -234,16 +238,15 @@ void OmniboxViewMac::Update() {
 }
 
 void OmniboxViewMac::UpdatePlaceholderText() {
-  if (chrome::ShouldDisplayOriginChip() ||
-      OmniboxFieldTrial::DisplayHintTextWhenPossible()) {
+  if (OmniboxFieldTrial::DisplayHintTextWhenPossible()) {
     NSDictionary* placeholder_attributes = @{
-      NSFontAttributeName : GetFieldFont(gfx::Font::NORMAL),
       NSForegroundColorAttributeName : [NSColor disabledControlTextColor]
     };
     base::scoped_nsobject<NSMutableAttributedString> placeholder_text(
         [[NSMutableAttributedString alloc]
             initWithString:base::SysUTF16ToNSString(GetHintText())
                 attributes:placeholder_attributes]);
+    ApplyTextStyle(placeholder_text);
     [[field_ cell] setPlaceholderAttributedString:placeholder_text];
   }
 }
@@ -477,18 +480,9 @@ void OmniboxViewMac::EmphasizeURLComponents() {
   }
 }
 
-void OmniboxViewMac::ApplyTextAttributes(const base::string16& display_text,
-                                         NSMutableAttributedString* as) {
-  NSUInteger as_length = [as length];
-  NSRange as_entire_string = NSMakeRange(0, as_length);
-
+void OmniboxViewMac::ApplyTextStyle(NSMutableAttributedString* as) {
   [as addAttribute:NSFontAttributeName value:GetFieldFont(gfx::Font::NORMAL)
-             range:as_entire_string];
-
-  // A kinda hacky way to add breaking at periods. This is what Safari does.
-  // This works for IDNs too, despite the "en_US".
-  [as addAttribute:@"NSLanguage" value:@"en_US_POSIX"
-             range:as_entire_string];
+             range:NSMakeRange(0, [as length])];
 
   // Make a paragraph style locking in the standard line height as the maximum,
   // otherwise the baseline may shift "downwards".
@@ -499,6 +493,19 @@ void OmniboxViewMac::ApplyTextAttributes(const base::string16& display_text,
   [paragraph_style setMinimumLineHeight:line_height];
   [paragraph_style setLineBreakMode:NSLineBreakByTruncatingTail];
   [as addAttribute:NSParagraphStyleAttributeName value:paragraph_style
+             range:NSMakeRange(0, [as length])];
+}
+
+void OmniboxViewMac::ApplyTextAttributes(const base::string16& display_text,
+                                         NSMutableAttributedString* as) {
+  NSUInteger as_length = [as length];
+  NSRange as_entire_string = NSMakeRange(0, as_length);
+
+  ApplyTextStyle(as);
+
+  // A kinda hacky way to add breaking at periods. This is what Safari does.
+  // This works for IDNs too, despite the "en_US".
+  [as addAttribute:@"NSLanguage" value:@"en_US_POSIX"
              range:as_entire_string];
 
   url::Component scheme, host;
@@ -832,16 +839,12 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
 void OmniboxViewMac::OnSetFocus(bool control_down) {
   model()->OnSetFocus(control_down);
   controller()->OnSetFocus();
-
-  HandleOriginChipMouseRelease();
 }
 
 void OmniboxViewMac::OnKillFocus() {
   // Tell the model to reset itself.
-  model()->OnWillKillFocus(NULL);
+  model()->OnWillKillFocus();
   model()->OnKillFocus();
-
-  OnDidKillFocus();
 }
 
 void OmniboxViewMac::OnMouseDown(NSInteger button_number) {

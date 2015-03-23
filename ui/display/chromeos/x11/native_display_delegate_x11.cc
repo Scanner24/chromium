@@ -79,18 +79,16 @@ class NativeDisplayDelegateX11::HelperDelegateX11
     : public NativeDisplayDelegateX11::HelperDelegate {
  public:
   HelperDelegateX11(NativeDisplayDelegateX11* delegate) : delegate_(delegate) {}
-  virtual ~HelperDelegateX11() {}
+  ~HelperDelegateX11() override {}
 
   // NativeDisplayDelegateX11::HelperDelegate overrides:
-  virtual void UpdateXRandRConfiguration(const base::NativeEvent& event)
-      OVERRIDE {
+  void UpdateXRandRConfiguration(const base::NativeEvent& event) override {
     XRRUpdateConfiguration(event);
   }
-  virtual const std::vector<DisplaySnapshot*>& GetCachedDisplays() const
-      OVERRIDE {
+  const std::vector<DisplaySnapshot*>& GetCachedDisplays() const override {
     return delegate_->cached_outputs_.get();
   }
-  virtual void NotifyDisplayObservers() OVERRIDE {
+  void NotifyDisplayObservers() override {
     FOR_EACH_OBSERVER(
         NativeDisplayObserver, delegate_->observers_, OnConfigurationChanged());
   }
@@ -150,6 +148,16 @@ void NativeDisplayDelegateX11::UngrabServer() {
   XFlush(display_);
 }
 
+bool NativeDisplayDelegateX11::TakeDisplayControl() {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool NativeDisplayDelegateX11::RelinquishDisplayControl() {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 void NativeDisplayDelegateX11::SyncWithServer() { XSync(display_, 0); }
 
 void NativeDisplayDelegateX11::SetBackgroundColor(uint32_t color_argb) {
@@ -161,25 +169,26 @@ void NativeDisplayDelegateX11::ForceDPMSOn() {
   CHECK(DPMSForceLevel(display_, DPMSModeOn));
 }
 
-std::vector<DisplaySnapshot*> NativeDisplayDelegateX11::GetDisplays() {
+void NativeDisplayDelegateX11::GetDisplays(
+    const GetDisplaysCallback& callback) {
   CHECK(screen_) << "Server not grabbed";
 
   cached_outputs_.clear();
-  RRCrtc last_used_crtc = None;
+  std::set<RRCrtc> last_used_crtcs;
 
   InitModes();
-  for (int i = 0; i < screen_->noutput && cached_outputs_.size() < 2; ++i) {
+  for (int i = 0; i < screen_->noutput; ++i) {
     RROutput output_id = screen_->outputs[i];
     XRROutputInfo* output_info = XRRGetOutputInfo(display_, screen_, output_id);
     if (output_info->connection == RR_Connected) {
       DisplaySnapshotX11* output =
-          InitDisplaySnapshot(output_id, output_info, &last_used_crtc, i);
+          InitDisplaySnapshot(output_id, output_info, &last_used_crtcs, i);
       cached_outputs_.push_back(output);
     }
     XRRFreeOutputInfo(output_info);
   }
 
-  return cached_outputs_.get();
+  callback.Run(cached_outputs_.get());
 }
 
 void NativeDisplayDelegateX11::AddMode(const DisplaySnapshot& output,
@@ -196,17 +205,18 @@ void NativeDisplayDelegateX11::AddMode(const DisplaySnapshot& output,
   XRRAddOutputMode(display_, x11_output.output(), mode_id);
 }
 
-bool NativeDisplayDelegateX11::Configure(const DisplaySnapshot& output,
+void NativeDisplayDelegateX11::Configure(const DisplaySnapshot& output,
                                          const DisplayMode* mode,
-                                         const gfx::Point& origin) {
+                                         const gfx::Point& origin,
+                                         const ConfigureCallback& callback) {
   const DisplaySnapshotX11& x11_output =
       static_cast<const DisplaySnapshotX11&>(output);
   RRMode mode_id = None;
   if (mode)
     mode_id = static_cast<const DisplayModeX11*>(mode)->mode_id();
 
-  return ConfigureCrtc(
-      x11_output.crtc(), mode_id, x11_output.output(), origin.x(), origin.y());
+  callback.Run(ConfigureCrtc(x11_output.crtc(), mode_id, x11_output.output(),
+                             origin.x(), origin.y()));
 }
 
 bool NativeDisplayDelegateX11::ConfigureCrtc(RRCrtc crtc,
@@ -305,11 +315,11 @@ void NativeDisplayDelegateX11::InitModes() {
 DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
     RROutput output,
     XRROutputInfo* info,
-    RRCrtc* last_used_crtc,
+    std::set<RRCrtc>* last_used_crtcs,
     int index) {
   int64_t display_id = 0;
-  bool has_display_id = GetDisplayId(
-      output, static_cast<uint8_t>(index), &display_id);
+  if (!GetDisplayId(output, static_cast<uint8_t>(index), &display_id))
+    display_id = index;
 
   bool has_overscan = false;
   GetOutputOverscanFlag(output, &has_overscan);
@@ -317,17 +327,6 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
   DisplayConnectionType type = GetDisplayConnectionTypeFromName(info->name);
   if (type == DISPLAY_CONNECTION_TYPE_UNKNOWN)
     LOG(ERROR) << "Unknown link type: " << info->name;
-
-  // Use the index as a valid display ID even if the internal
-  // display doesn't have valid EDID because the index
-  // will never change.
-  if (!has_display_id) {
-    if (type == DISPLAY_CONNECTION_TYPE_INTERNAL)
-      has_display_id = true;
-
-    // Fallback to output index.
-    display_id = index;
-  }
 
   RRMode native_mode_id = GetOutputNativeMode(info);
   RRMode current_mode_id = None;
@@ -342,9 +341,9 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
   RRCrtc crtc = None;
   // Assign a CRTC that isn't already in use.
   for (int i = 0; i < info->ncrtc; ++i) {
-    if (info->crtcs[i] != *last_used_crtc) {
+    if (last_used_crtcs->find(info->crtcs[i]) == last_used_crtcs->end()) {
       crtc = info->crtcs[i];
-      *last_used_crtc = crtc;
+      last_used_crtcs->insert(crtc);
       break;
     }
   }
@@ -369,7 +368,6 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
 
   DisplaySnapshotX11* display_snapshot =
       new DisplaySnapshotX11(display_id,
-                             has_display_id,
                              origin,
                              gfx::Size(info->mm_width, info->mm_height),
                              type,

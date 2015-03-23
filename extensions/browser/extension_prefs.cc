@@ -76,10 +76,6 @@ const char kPrefAcknowledgePromptCount[] = "ack_prompt_count";
 // Indicates whether the user has acknowledged various types of extensions.
 const char kPrefExternalAcknowledged[] = "ack_external";
 const char kPrefBlacklistAcknowledged[] = "ack_blacklist";
-const char kPrefWipeoutAcknowledged[] = "ack_wiped";
-const char kPrefSettingsBubbleAcknowledged[] = "ack_settings_bubble";
-const char kPrefNtpBubbleAcknowledged[] = "ack_ntp_bubble";
-const char kPrefProxyBubbleAcknowledged[] = "ack_proxy_bubble";
 
 // Indicates whether the external extension was installed during the first
 // run of this profile.
@@ -205,11 +201,10 @@ class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
     DictionaryPrefUpdate(service, pref_names::kExtensions),
     extension_id_(extension_id) {}
 
-  virtual ~ScopedExtensionPrefUpdate() {
-  }
+  ~ScopedExtensionPrefUpdate() override {}
 
   // DictionaryPrefUpdate overrides:
-  virtual base::DictionaryValue* Get() OVERRIDE {
+  base::DictionaryValue* Get() override {
     base::DictionaryValue* dict = DictionaryPrefUpdate::Get();
     base::DictionaryValue* extension = NULL;
     if (!dict->GetDictionary(extension_id_, &extension)) {
@@ -714,59 +709,6 @@ void ExtensionPrefs::SetExternalInstallFirstRun(
                       new base::FundamentalValue(true));
 }
 
-bool ExtensionPrefs::HasWipeoutBeenAcknowledged(
-    const std::string& extension_id) {
-  return ReadPrefAsBooleanAndReturn(extension_id, kPrefWipeoutAcknowledged);
-}
-
-void ExtensionPrefs::SetWipeoutAcknowledged(
-    const std::string& extension_id,
-    bool value) {
-  UpdateExtensionPref(extension_id,
-                      kPrefWipeoutAcknowledged,
-                      value ? new base::FundamentalValue(value) : NULL);
-}
-
-bool ExtensionPrefs::HasSettingsApiBubbleBeenAcknowledged(
-    const std::string& extension_id) {
-  return ReadPrefAsBooleanAndReturn(extension_id,
-                                    kPrefSettingsBubbleAcknowledged);
-}
-
-void ExtensionPrefs::SetSettingsApiBubbleBeenAcknowledged(
-    const std::string& extension_id,
-    bool value) {
-  UpdateExtensionPref(extension_id,
-                      kPrefSettingsBubbleAcknowledged,
-                      value ? new base::FundamentalValue(value) : NULL);
-}
-
-bool ExtensionPrefs::HasNtpOverriddenBubbleBeenAcknowledged(
-    const std::string& extension_id) {
-  return ReadPrefAsBooleanAndReturn(extension_id, kPrefNtpBubbleAcknowledged);
-}
-
-void ExtensionPrefs::SetNtpOverriddenBubbleBeenAcknowledged(
-    const std::string& extension_id,
-    bool value) {
-  UpdateExtensionPref(extension_id,
-                      kPrefNtpBubbleAcknowledged,
-                      value ? new base::FundamentalValue(value) : NULL);
-}
-
-bool ExtensionPrefs::HasProxyOverriddenBubbleBeenAcknowledged(
-    const std::string& extension_id) {
-  return ReadPrefAsBooleanAndReturn(extension_id, kPrefProxyBubbleAcknowledged);
-}
-
-void ExtensionPrefs::SetProxyOverriddenBubbleBeenAcknowledged(
-    const std::string& extension_id,
-    bool value) {
-  UpdateExtensionPref(extension_id,
-                      kPrefProxyBubbleAcknowledged,
-                      value ? new base::FundamentalValue(value) : NULL);
-}
-
 bool ExtensionPrefs::SetAlertSystemFirstRun() {
   if (prefs_->GetBoolean(pref_names::kAlertsInitialized)) {
     return true;
@@ -804,31 +746,36 @@ bool ExtensionPrefs::HasDisableReason(
 
 void ExtensionPrefs::AddDisableReason(const std::string& extension_id,
                                       Extension::DisableReason disable_reason) {
-  ModifyDisableReason(extension_id, disable_reason, DISABLE_REASON_ADD);
+  ModifyDisableReasons(extension_id, disable_reason, DISABLE_REASON_ADD);
+}
+
+void ExtensionPrefs::AddDisableReasons(const std::string& extension_id,
+                                       int disable_reasons) {
+  ModifyDisableReasons(extension_id, disable_reasons, DISABLE_REASON_ADD);
 }
 
 void ExtensionPrefs::RemoveDisableReason(
     const std::string& extension_id,
     Extension::DisableReason disable_reason) {
-  ModifyDisableReason(extension_id, disable_reason, DISABLE_REASON_REMOVE);
+  ModifyDisableReasons(extension_id, disable_reason, DISABLE_REASON_REMOVE);
 }
 
 void ExtensionPrefs::ClearDisableReasons(const std::string& extension_id) {
-  ModifyDisableReason(
-      extension_id, Extension::DISABLE_NONE, DISABLE_REASON_CLEAR);
+  ModifyDisableReasons(extension_id, Extension::DISABLE_NONE,
+                       DISABLE_REASON_CLEAR);
 }
 
-void ExtensionPrefs::ModifyDisableReason(const std::string& extension_id,
-                                         Extension::DisableReason reason,
-                                         DisableReasonChange change) {
+void ExtensionPrefs::ModifyDisableReasons(const std::string& extension_id,
+                                          int reasons,
+                                          DisableReasonChange change) {
   int old_value = GetDisableReasons(extension_id);
   int new_value = old_value;
   switch (change) {
     case DISABLE_REASON_ADD:
-      new_value |= static_cast<int>(reason);
+      new_value |= reasons;
       break;
     case DISABLE_REASON_REMOVE:
-      new_value &= ~static_cast<int>(reason);
+      new_value &= ~reasons;
       break;
     case DISABLE_REASON_CLEAR:
       new_value = Extension::DISABLE_NONE;

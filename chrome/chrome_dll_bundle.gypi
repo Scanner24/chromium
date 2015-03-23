@@ -76,7 +76,6 @@
     # Bring in pdfsqueeze and run it on all pdfs
     '../build/temp_gyp/pdfsqueeze.gyp:pdfsqueeze',
     '../crypto/crypto.gyp:crypto',
-    '../pdf/pdf.gyp:pdf',
     # On Mac, Flash gets put into the framework, so we need this
     # dependency here. flash_player.gyp will copy the Flash bundle
     # into PRODUCT_DIR.
@@ -147,9 +146,7 @@
     },
     {
       'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Internet Plug-Ins',
-      'files': [
-        '<(PRODUCT_DIR)/PDF.plugin',
-      ],
+      'files': [],
       'conditions': [
         ['disable_nacl!=1', {
           'conditions': [
@@ -300,6 +297,12 @@
     ['icu_use_data_file_flag==1', {
       'mac_bundle_resources': [
         '<(PRODUCT_DIR)/icudtl.dat',
+      ],
+    }],
+    ['v8_use_external_startup_data==1', {
+      'mac_bundle_resources': [
+        '<(PRODUCT_DIR)/natives_blob.bin',
+        '<(PRODUCT_DIR)/snapshot_blob.bin',
       ],
     }],
   ],  # conditions

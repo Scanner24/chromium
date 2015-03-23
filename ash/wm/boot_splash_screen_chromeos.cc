@@ -23,10 +23,10 @@ class BootSplashScreen::CopyHostContentLayerDelegate
       : host_(host) {
   }
 
-  virtual ~CopyHostContentLayerDelegate() {}
+  ~CopyHostContentLayerDelegate() override {}
 
   // ui::LayerDelegate overrides:
-  virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaintLayer(gfx::Canvas* canvas) override {
     // It'd be safer to copy the area to a canvas in the constructor and then
     // copy from that canvas to this one here, but this appears to work (i.e. we
     // only call this before we draw our first frame) and it saves us an extra
@@ -43,12 +43,11 @@ class BootSplashScreen::CopyHostContentLayerDelegate
 #endif
   }
 
-  virtual void OnDelegatedFrameDamage(
-      const gfx::Rect& damage_rect_in_dip) OVERRIDE {}
+  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
 
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
 
-  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+  base::Closure PrepareForLayerBoundsChange() override {
     return base::Closure();
   }
 

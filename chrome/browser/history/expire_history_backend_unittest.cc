@@ -12,20 +12,19 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/expire_history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_notifications.h"
-#include "chrome/browser/history/thumbnail_database.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "chrome/tools/profiles/thumbnail-inl.h"
+#include "components/history/core/browser/expire_history_backend.h"
+#include "components/history/core/browser/history_backend_notifier.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/thumbnail_database.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/history/core/test/history_client_fake_bookmarks.h"
+#include "components/history/core/test/test_history_database.h"
+#include "components/history/core/test/thumbnail-inl.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -49,7 +48,7 @@ namespace history {
 // ExpireHistoryTest -----------------------------------------------------------
 
 class ExpireHistoryTest : public testing::Test,
-                          public BroadcastNotificationDelegate {
+                          public HistoryBackendNotifier {
  public:
   ExpireHistoryTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
@@ -63,7 +62,7 @@ class ExpireHistoryTest : public testing::Test,
   // Add visits with source information.
   void AddExampleSourceData(const GURL& url, URLID* id);
 
-  // Returns true if the given favicon/thumanil has an entry in the DB.
+  // Returns true if the given favicon/thumbnail has an entry in the DB.
   bool HasFavicon(favicon_base::FaviconID favicon_id);
   bool HasThumbnail(URLID url_id);
 
@@ -75,12 +74,14 @@ class ExpireHistoryTest : public testing::Test,
   // |expired|, or manually deleted.
   void EnsureURLInfoGone(const URLRow& row, bool expired);
 
-  // Returns whether a NOTIFICATION_HISTORY_URLS_MODIFIED was sent for |url|.
+  // Returns whether HistoryBackendNotifier::NotifyURLsModified was
+  // called for |url|.
   bool ModifiedNotificationSent(const GURL& url);
 
   // Clears the list of notifications received.
   void ClearLastNotifications() {
-    STLDeleteValues(&notifications_);
+    urls_modified_notifications_.clear();
+    urls_deleted_notifications_.clear();
   }
 
   void StarURL(const GURL& url) { history_client_.AddBookmark(url); }
@@ -104,24 +105,22 @@ class ExpireHistoryTest : public testing::Test,
   scoped_ptr<HistoryDatabase> main_db_;
   scoped_ptr<ThumbnailDatabase> thumb_db_;
   TestingProfile profile_;
-  scoped_refptr<TopSites> top_sites_;
 
   // Time at the beginning of the test, so everybody agrees what "now" is.
   const Time now_;
 
-  // Notifications intended to be broadcast, we can check these values to make
-  // sure that the deletor is doing the correct broadcasts. We own the details
-  // pointers.
-  typedef std::vector< std::pair<int, HistoryDetails*> >
-      NotificationList;
-  NotificationList notifications_;
+  typedef std::vector<URLRows> URLsModifiedNotificationList;
+  URLsModifiedNotificationList urls_modified_notifications_;
+
+  typedef std::vector<std::pair<bool, URLRows>> URLsDeletedNotificationList;
+  URLsDeletedNotificationList urls_deleted_notifications_;
 
  private:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(tmp_dir_.CreateUniqueTempDir());
 
     base::FilePath history_name = path().Append(kHistoryFile);
-    main_db_.reset(new HistoryDatabase);
+    main_db_.reset(new TestHistoryDatabase);
     if (main_db_->Init(history_name) != sql::INIT_OK)
       main_db_.reset();
 
@@ -133,11 +132,9 @@ class ExpireHistoryTest : public testing::Test,
     expirer_.SetDatabases(main_db_.get(), thumb_db_.get());
     profile_.CreateTopSites();
     profile_.BlockUntilTopSitesLoaded();
-    top_sites_ = profile_.GetTopSites();
   }
 
-  virtual void TearDown() {
-    top_sites_ = NULL;
+  void TearDown() override {
 
     ClearLastNotifications();
 
@@ -147,18 +144,21 @@ class ExpireHistoryTest : public testing::Test,
     thumb_db_.reset();
   }
 
-  // BroadcastNotificationDelegate:
-  virtual void BroadcastNotifications(
-      int type,
-      scoped_ptr<HistoryDetails> details) OVERRIDE {
-    // This gets called when there are notifications to broadcast. Instead, we
-    // store them so we can tell that the correct notifications were sent.
-    notifications_.push_back(std::make_pair(type, details.release()));
+  // HistoryBackendNotifier:
+  void NotifyFaviconChanged(const std::set<GURL>& urls) override {}
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const URLRow& row,
+                        const RedirectList& redirects,
+                        base::Time visit_time) override {}
+  void NotifyURLsModified(const URLRows& rows) override {
+    urls_modified_notifications_.push_back(rows);
   }
-  virtual void NotifySyncURLsModified(URLRows* rows) OVERRIDE {}
-  virtual void NotifySyncURLsDeleted(bool all_history,
-                                     bool expired,
-                                     URLRows* rows) OVERRIDE {}
+  void NotifyURLsDeleted(bool all_history,
+                         bool expired,
+                         const URLRows& rows,
+                         const std::set<GURL>& favicon_urls) override {
+    urls_deleted_notifications_.push_back(std::make_pair(expired, rows));
+  }
 };
 
 // The example data consists of 4 visits. The middle two visits are to the
@@ -218,9 +218,11 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
 
   Time time;
   GURL gurl;
-  top_sites_->SetPageThumbnail(url_row1.url(), thumbnail, score);
-  top_sites_->SetPageThumbnail(url_row2.url(), thumbnail, score);
-  top_sites_->SetPageThumbnail(url_row3.url(), thumbnail, score);
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(&profile_);
+  top_sites->SetPageThumbnail(url_row1.url(), thumbnail, score);
+  top_sites->SetPageThumbnail(url_row2.url(), thumbnail, score);
+  top_sites->SetPageThumbnail(url_row3.url(), thumbnail, score);
 
   // Four visits.
   VisitRow visit_row1;
@@ -300,7 +302,9 @@ bool ExpireHistoryTest::HasThumbnail(URLID url_id) {
     return false;
   GURL url = info.url();
   scoped_refptr<base::RefCountedMemory> data;
-  return top_sites_->GetPageThumbnail(url, false, &data);
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(&profile_);
+  return top_sites->GetPageThumbnail(url, false, &data);
 }
 
 void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row, bool expired) {
@@ -322,45 +326,34 @@ void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row, bool expired) {
   // EXPECT_FALSE(HasThumbnail(row.id()));
 
   bool found_delete_notification = false;
-  for (size_t i = 0; i < notifications_.size(); i++) {
-    if (notifications_[i].first == chrome::NOTIFICATION_HISTORY_URLS_DELETED) {
-      URLsDeletedDetails* details = reinterpret_cast<URLsDeletedDetails*>(
-          notifications_[i].second);
-      EXPECT_EQ(expired, details->expired);
-      const history::URLRows& rows(details->rows);
-      history::URLRows::const_iterator it_row = std::find_if(
-          rows.begin(), rows.end(), history::URLRow::URLRowHasURL(row.url()));
-      if (it_row != rows.end()) {
-        // Further verify that the ID is set to what had been in effect in the
-        // main database before the deletion. The InMemoryHistoryBackend relies
-        // on this to delete its cached copy of the row.
-        EXPECT_EQ(row.id(), it_row->id());
-        found_delete_notification = true;
-      }
-    } else if (notifications_[i].first ==
-        chrome::NOTIFICATION_HISTORY_URLS_MODIFIED) {
-      const history::URLRows& rows =
-          static_cast<URLsModifiedDetails*>(notifications_[i].second)->
-              changed_urls;
-      EXPECT_TRUE(
-          std::find_if(rows.begin(), rows.end(),
-                        history::URLRow::URLRowHasURL(row.url())) ==
-              rows.end());
+  for (const auto& pair : urls_deleted_notifications_) {
+    EXPECT_EQ(expired, pair.first);
+    const history::URLRows& rows(pair.second);
+    history::URLRows::const_iterator it_row = std::find_if(
+        rows.begin(), rows.end(), history::URLRow::URLRowHasURL(row.url()));
+    if (it_row != rows.end()) {
+      // Further verify that the ID is set to what had been in effect in the
+      // main database before the deletion. The InMemoryHistoryBackend relies
+      // on this to delete its cached copy of the row.
+      EXPECT_EQ(row.id(), it_row->id());
+      found_delete_notification = true;
     }
+  }
+  for (const auto& rows : urls_modified_notifications_) {
+    EXPECT_TRUE(std::find_if(rows.begin(),
+                             rows.end(),
+                             history::URLRow::URLRowHasURL(row.url())) ==
+                rows.end());
   }
   EXPECT_TRUE(found_delete_notification);
 }
 
 bool ExpireHistoryTest::ModifiedNotificationSent(const GURL& url) {
-  for (size_t i = 0; i < notifications_.size(); i++) {
-    if (notifications_[i].first == chrome::NOTIFICATION_HISTORY_URLS_MODIFIED) {
-      const history::URLRows& rows =
-          static_cast<URLsModifiedDetails*>(notifications_[i].second)->
-              changed_urls;
-      if (std::find_if(rows.begin(), rows.end(),
-                       history::URLRow::URLRowHasURL(url)) != rows.end())
-        return true;
-    }
+  for (const auto& rows : urls_modified_notifications_) {
+    if (std::find_if(rows.begin(),
+                     rows.end(),
+                     history::URLRow::URLRowHasURL(url)) != rows.end())
+      return true;
   }
   return false;
 }

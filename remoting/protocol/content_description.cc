@@ -123,7 +123,7 @@ ContentDescription::~ContentDescription() { }
 
 ContentDescription* ContentDescription::Copy() const {
   if (!candidate_config_.get() || !authenticator_message_.get()) {
-    return NULL;
+    return nullptr;
   }
   scoped_ptr<XmlElement> message(new XmlElement(*authenticator_message_));
   return new ContentDescription(candidate_config_->Clone(), message.Pass());
@@ -214,7 +214,7 @@ scoped_ptr<ContentDescription> ContentDescription::ParseXml(
     const XmlElement* element) {
   if (element->Name() != QName(kChromotingXmlNamespace, kDescriptionTag)) {
     LOG(ERROR) << "Invalid description: " << element->Str();
-    return scoped_ptr<ContentDescription>();
+    return nullptr;
   }
   scoped_ptr<CandidateSessionConfig> config(
       CandidateSessionConfig::CreateEmpty());
@@ -226,7 +226,7 @@ scoped_ptr<ContentDescription> ContentDescription::ParseXml(
                            config->mutable_video_configs()) ||
       !ParseChannelConfigs(element, kAudioTag, true, true,
                            config->mutable_audio_configs())) {
-    return scoped_ptr<ContentDescription>();
+    return nullptr;
   }
 
   scoped_ptr<XmlElement> authenticator_message;
@@ -234,7 +234,7 @@ scoped_ptr<ContentDescription> ContentDescription::ParseXml(
   if (child)
     authenticator_message.reset(new XmlElement(*child));
 
-  return scoped_ptr<ContentDescription>(
+  return make_scoped_ptr(
       new ContentDescription(config.Pass(), authenticator_message.Pass()));
 }
 

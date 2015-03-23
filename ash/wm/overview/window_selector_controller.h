@@ -30,7 +30,7 @@ class ASH_EXPORT WindowSelectorController
     : public WindowSelectorDelegate {
  public:
   WindowSelectorController();
-  virtual ~WindowSelectorController();
+  ~WindowSelectorController() override;
 
   // Returns true if selecting windows in an overview is enabled. This is false
   // at certain times, such as when the lock screen is visible.
@@ -44,8 +44,14 @@ class ASH_EXPORT WindowSelectorController
   // Returns true if window selection mode is active.
   bool IsSelecting();
 
+  // Returns true if overview mode is restoring minimized windows so that they
+  // are visible during overview mode.
+  bool IsRestoringMinimizedWindows() const;
+
+  bool swipe_to_close_enabled() const { return swipe_to_close_enabled_; }
+
   // WindowSelectorDelegate:
-  virtual void OnSelectionEnded() OVERRIDE;
+  void OnSelectionEnded() override;
 
  private:
   friend class WindowSelectorTest;
@@ -55,6 +61,9 @@ class ASH_EXPORT WindowSelectorController
 
   scoped_ptr<WindowSelector> window_selector_;
   base::Time last_selection_time_;
+
+  // Tracks whether the "Swipe-to-close" feature is enabled.
+  bool swipe_to_close_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelectorController);
 };

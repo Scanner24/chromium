@@ -17,6 +17,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -33,15 +34,16 @@
 #include "storage/browser/blob/file_stream_reader.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
+#include "storage/common/data_element.h"
 
 namespace storage {
 
 namespace {
 
-bool IsFileType(BlobData::Item::Type type) {
+bool IsFileType(DataElement::Type type) {
   switch (type) {
-    case BlobData::Item::TYPE_FILE:
-    case BlobData::Item::TYPE_FILE_FILESYSTEM:
+    case DataElement::TYPE_FILE:
+    case DataElement::TYPE_FILE_FILESYSTEM:
       return true;
     default:
       return false;
@@ -53,11 +55,11 @@ bool IsFileType(BlobData::Item::Type type) {
 BlobURLRequestJob::BlobURLRequestJob(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate,
-    const scoped_refptr<BlobData>& blob_data,
+    scoped_ptr<BlobDataSnapshot> blob_data,
     storage::FileSystemContext* file_system_context,
     base::MessageLoopProxy* file_thread_proxy)
     : net::URLRequestJob(request, network_delegate),
-      blob_data_(blob_data),
+      blob_data_(blob_data.Pass()),
       file_system_context_(file_system_context),
       file_thread_proxy_(file_thread_proxy),
       total_size_(0),
@@ -88,6 +90,11 @@ void BlobURLRequestJob::Kill() {
 bool BlobURLRequestJob::ReadRawData(net::IOBuffer* dest,
                                     int dest_size,
                                     int* bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 BlobURLRequestJob::ReadRawData"));
+
   DCHECK_NE(dest_size, 0);
   DCHECK(bytes_read);
   DCHECK_GE(remaining_bytes_, 0);
@@ -168,7 +175,7 @@ void BlobURLRequestJob::DidStart() {
   }
 
   // If the blob data is not present, bail out.
-  if (!blob_data_.get()) {
+  if (!blob_data_) {
     NotifyFailure(net::ERR_FILE_NOT_FOUND);
     return;
   }
@@ -192,10 +199,11 @@ bool BlobURLRequestJob::AddItemLength(size_t index, int64 item_length) {
 void BlobURLRequestJob::CountSize() {
   pending_get_file_info_count_ = 0;
   total_size_ = 0;
-  item_length_list_.resize(blob_data_->items().size());
+  const auto& items = blob_data_->items();
+  item_length_list_.resize(items.size());
 
-  for (size_t i = 0; i < blob_data_->items().size(); ++i) {
-    const BlobData::Item& item = blob_data_->items().at(i);
+  for (size_t i = 0; i < items.size(); ++i) {
+    const BlobDataItem& item = *items.at(i);
     if (IsFileType(item.type())) {
       ++pending_get_file_info_count_;
       GetFileStreamReader(i)->GetLength(
@@ -251,8 +259,9 @@ void BlobURLRequestJob::DidGetFileItemLength(size_t index, int64 result) {
     return;
   }
 
-  DCHECK_LT(index, blob_data_->items().size());
-  const BlobData::Item& item = blob_data_->items().at(index);
+  const auto& items = blob_data_->items();
+  DCHECK_LT(index, items.size());
+  const BlobDataItem& item = *items.at(index);
   DCHECK(IsFileType(item.type()));
 
   uint64 file_length = result;
@@ -284,8 +293,9 @@ void BlobURLRequestJob::DidGetFileItemLength(size_t index, int64 result) {
 
 void BlobURLRequestJob::Seek(int64 offset) {
   // Skip the initial items that are not in the range.
+  const auto& items = blob_data_->items();
   for (current_item_index_ = 0;
-       current_item_index_ < blob_data_->items().size() &&
+       current_item_index_ < items.size() &&
            offset >= item_length_list_[current_item_index_];
        ++current_item_index_) {
     offset -= item_length_list_[current_item_index_];
@@ -298,7 +308,7 @@ void BlobURLRequestJob::Seek(int64 offset) {
     return;
 
   // Adjust the offset of the first stream if it is of file type.
-  const BlobData::Item& item = blob_data_->items().at(current_item_index_);
+  const BlobDataItem& item = *items.at(current_item_index_);
   if (IsFileType(item.type())) {
     DeleteCurrentFileReader();
     CreateFileStreamReader(current_item_index_, offset);
@@ -310,9 +320,10 @@ bool BlobURLRequestJob::ReadItem() {
   if (remaining_bytes_ == 0)
     return true;
 
+  const auto& items = blob_data_->items();
   // If we get to the last item but still expect something to read, bail out
   // since something is wrong.
-  if (current_item_index_ >= blob_data_->items().size()) {
+  if (current_item_index_ >= items.size()) {
     NotifyFailure(net::ERR_FAILED);
     return false;
   }
@@ -327,8 +338,8 @@ bool BlobURLRequestJob::ReadItem() {
   }
 
   // Do the reading.
-  const BlobData::Item& item = blob_data_->items().at(current_item_index_);
-  if (item.type() == BlobData::Item::TYPE_BYTES)
+  const BlobDataItem& item = *items.at(current_item_index_);
+  if (item.type() == DataElement::TYPE_BYTES)
     return ReadBytesItem(item, bytes_to_read);
   if (IsFileType(item.type())) {
     return ReadFileItem(GetFileStreamReader(current_item_index_),
@@ -364,7 +375,7 @@ void BlobURLRequestJob::AdvanceBytesRead(int result) {
   DCHECK_GE(read_buf_->BytesRemaining(), 0);
 }
 
-bool BlobURLRequestJob::ReadBytesItem(const BlobData::Item& item,
+bool BlobURLRequestJob::ReadBytesItem(const BlobDataItem& item,
                                       int bytes_to_read) {
   DCHECK_GE(read_buf_->BytesRemaining(), bytes_to_read);
 
@@ -549,8 +560,9 @@ void BlobURLRequestJob::HeadersCompleted(net::HttpStatusCode status_code) {
 }
 
 FileStreamReader* BlobURLRequestJob::GetFileStreamReader(size_t index) {
-  DCHECK_LT(index, blob_data_->items().size());
-  const BlobData::Item& item = blob_data_->items().at(index);
+  const auto& items = blob_data_->items();
+  DCHECK_LT(index, items.size());
+  const BlobDataItem& item = *items.at(index);
   if (!IsFileType(item.type()))
     return NULL;
   if (index_to_reader_.find(index) == index_to_reader_.end())
@@ -561,21 +573,22 @@ FileStreamReader* BlobURLRequestJob::GetFileStreamReader(size_t index) {
 
 void BlobURLRequestJob::CreateFileStreamReader(size_t index,
                                                int64 additional_offset) {
-  DCHECK_LT(index, blob_data_->items().size());
-  const BlobData::Item& item = blob_data_->items().at(index);
+  const auto& items = blob_data_->items();
+  DCHECK_LT(index, items.size());
+  const BlobDataItem& item = *items.at(index);
   DCHECK(IsFileType(item.type()));
   DCHECK_EQ(0U, index_to_reader_.count(index));
 
   FileStreamReader* reader = NULL;
   switch (item.type()) {
-    case BlobData::Item::TYPE_FILE:
+    case DataElement::TYPE_FILE:
       reader = FileStreamReader::CreateForLocalFile(
           file_thread_proxy_.get(),
           item.path(),
           item.offset() + additional_offset,
           item.expected_modification_time());
       break;
-    case BlobData::Item::TYPE_FILE_FILESYSTEM:
+    case DataElement::TYPE_FILE_FILESYSTEM:
       reader = file_system_context_
                    ->CreateFileStreamReader(
                          storage::FileSystemURL(file_system_context_->CrackURL(

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/dbus/cros_dbus_service.h"
+#include "chromeos/dbus/services/cros_dbus_service.h"
 #include "dbus/exported_object.h"
 
 namespace dbus {
@@ -47,11 +47,10 @@ class PrinterServiceProvider
     : public CrosDBusService::ServiceProviderInterface {
  public:
   PrinterServiceProvider();
-  virtual ~PrinterServiceProvider();
+  ~PrinterServiceProvider() override;
 
   // CrosDBusService::ServiceProviderInterface override.
-  virtual void Start(
-      scoped_refptr<dbus::ExportedObject> exported_object) OVERRIDE;
+  void Start(scoped_refptr<dbus::ExportedObject> exported_object) override;
 
  protected:
   virtual void ShowCloudPrintHelp(const std::string& vendor,

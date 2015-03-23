@@ -25,6 +25,8 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 
+using bookmarks::BookmarkModel;
+
 // static
 BookmarkModel* BookmarkModelFactory::GetForProfile(Profile* profile) {
   return static_cast<BookmarkModel*>(
@@ -70,7 +72,7 @@ KeyedService* BookmarkModelFactory::BuildServiceInstanceFor(
   bool register_bookmark_undo_service_as_observer = true;
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
   register_bookmark_undo_service_as_observer =
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBookmarkUndo);
 #endif  // !defined(OS_IOS)
   if (register_bookmark_undo_service_as_observer) {
@@ -91,6 +93,9 @@ void BookmarkModelFactory::RegisterProfilePrefs(
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterListPref(
       bookmarks::prefs::kManagedBookmarks,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(
+      bookmarks::prefs::kSupervisedBookmarks,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
